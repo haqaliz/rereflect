@@ -1,0 +1,42 @@
+feedback_text,source
+"URGENT: System is completely down! Cannot access anything. Critical production issue!",web
+"The checkout process is broken and we're losing sales every minute. Fix this NOW!",email
+"Critical bug: Payment gateway failing with error 500. Customers can't complete purchases!",support
+"App crashes immediately on startup. Unusable! This is blocking our entire team.",mobile
+"CRITICAL: Data loss after update! All our records are gone. Need immediate help!",web
+"Terrible performance. Pages take 30+ seconds to load. Completely unacceptable.",web
+"Cannot export reports - getting timeout errors. This is breaking our workflow.",email
+"Login system is broken. Getting authentication errors constantly. Very frustrated.",support
+"The new update destroyed everything. Crashes, errors, data corruption. Awful!",mobile
+"Search functionality doesn't work at all. Returns no results. Major usability issue.",web
+"Love the new dark mode! Makes it so much easier on the eyes.",mobile
+"Excellent customer support team. Resolved my issue within minutes!",email
+"The reporting dashboard is fantastic. Exactly what we needed!",web
+"Great integration with our existing tools. Seamless workflow now.",support
+"Amazing features in the latest update. Keep up the great work!",mobile
+"The mobile app is incredibly smooth and responsive. Well done!",mobile
+"Export to PDF works perfectly. Thank you for adding this feature!",web
+"Really appreciate the detailed analytics. Very helpful for decision making.",email
+"The UI redesign is beautiful and intuitive. Much better than before.",web
+"Fast and reliable. No issues whatsoever. Highly recommended!",support
+"Would love to see bulk edit functionality for feedback items.",web
+"Please add keyboard shortcuts for common actions. Would save so much time.",email
+"Integration with Slack would be incredibly useful for our team.",support
+"Custom fields for feedback categorization would be a game changer.",mobile
+"Would be great to have scheduled reports sent via email.",web
+"API access would allow us to build custom integrations. Please consider!",email
+"Multi-language support would help us serve international customers.",web
+"The loading spinner sometimes gets stuck. Minor annoyance but noticeable.",mobile
+"Some text is hard to read in light mode. Contrast could be improved.",web
+"Occasional lag when switching between pages. Not a big deal though.",email
+"The tutorial could be more detailed for new users. Just a suggestion.",support
+"Table headers don't align properly with columns on smaller screens.",mobile
+"Would prefer if the sidebar was collapsible to save screen space.",web
+"The color scheme is nice overall but could use some refinement.",email
+"Navigation is good but could be more intuitive for first-time users.",web
+"Performance is decent but could be faster on slower connections.",support
+"Filter options are helpful but could be more granular for power users.",web
+"The app works well but notifications could be more customizable.",mobile
+"Overall solid experience with minor room for improvement here and there.",web
+"Good product with potential for some UX enhancements down the line.",email
+"Meets our basic needs but advanced features would make it excellent.",support

@@ -1,0 +1,184 @@
+{
+  "feedback": [
+    {
+      "id": "12345",
+      "text": "The app keeps crashing when I try to upload a file. Very frustrating experience and happens every single time.",
+      "date": "2025-11-10",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12346",
+      "text": "Love the new interface! But I wish there was a dark mode option. Would use it every night.",
+      "date": "2025-11-11",
+      "source": "app_review"
+    },
+    {
+      "id": "12347",
+      "text": "Terrible performance on mobile. Takes forever to load and constantly lags. This is unacceptable for a paid app.",
+      "date": "2025-11-12",
+      "source": "app_review"
+    },
+    {
+      "id": "12348",
+      "text": "Great customer support team! They helped me solve my issue within minutes.",
+      "date": "2025-11-12",
+      "source": "survey"
+    },
+    {
+      "id": "12349",
+      "text": "I'm going to cancel my subscription if you don't fix the login issues. Can't access my account for the third time this week.",
+      "date": "2025-11-13",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12350",
+      "text": "Please add integration with Slack. We need this for our team workflow.",
+      "date": "2025-11-13",
+      "source": "feature_request"
+    },
+    {
+      "id": "12351",
+      "text": "The app crashes whenever I try to upload images. Same issue as others reported.",
+      "date": "2025-11-14",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12352",
+      "text": "Pricing is confusing. Not sure which plan I need and the website doesn't explain the differences clearly.",
+      "date": "2025-11-14",
+      "source": "survey"
+    },
+    {
+      "id": "12353",
+      "text": "Would love to see a dark mode feature. Using the app at night is hard on the eyes.",
+      "date": "2025-11-15",
+      "source": "feature_request"
+    },
+    {
+      "id": "12354",
+      "text": "Export functionality would be amazing! Need to download our data in CSV format.",
+      "date": "2025-11-15",
+      "source": "feature_request"
+    },
+    {
+      "id": "12355",
+      "text": "App is way too slow. Loading times are ridiculous and it's affecting my work.",
+      "date": "2025-11-16",
+      "source": "app_review"
+    },
+    {
+      "id": "12356",
+      "text": "Login not working again! This keeps happening every few days. I'm done with this product.",
+      "date": "2025-11-16",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12357",
+      "text": "Can you add Slack integration? It would make collaboration so much easier for our team.",
+      "date": "2025-11-17",
+      "source": "feature_request"
+    },
+    {
+      "id": "12358",
+      "text": "Upload feature is completely broken. Tried multiple times and the app crashes instantly.",
+      "date": "2025-11-17",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12359",
+      "text": "Nice features overall, but would be great to have offline mode for when traveling.",
+      "date": "2025-11-18",
+      "source": "app_review"
+    },
+    {
+      "id": "12360",
+      "text": "The UI is confusing. Took me 20 minutes to figure out how to do a basic task.",
+      "date": "2025-11-18",
+      "source": "survey"
+    },
+    {
+      "id": "12361",
+      "text": "PAYMENT PROCESSING FAILED AND I GOT CHARGED TWICE! This is completely unacceptable!",
+      "date": "2025-11-19",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12362",
+      "text": "Could you please add a search function in the dashboard? It's hard to find things without it.",
+      "date": "2025-11-19",
+      "source": "feature_request"
+    },
+    {
+      "id": "12363",
+      "text": "App performance is awful. Loading screens everywhere and constant freezing.",
+      "date": "2025-11-20",
+      "source": "app_review"
+    },
+    {
+      "id": "12364",
+      "text": "Love most of the features but really need dark mode. Please add this!",
+      "date": "2025-11-20",
+      "source": "feature_request"
+    },
+    {
+      "id": "12365",
+      "text": "Login issue still not fixed. I've been asking for help for weeks and I'm done with this product. Looking for alternatives.",
+      "date": "2025-11-21",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12366",
+      "text": "The mobile app is incredibly slow. Takes 30+ seconds just to open.",
+      "date": "2025-11-21",
+      "source": "app_review"
+    },
+    {
+      "id": "12367",
+      "text": "Please add export to PDF functionality. We need this for our reports.",
+      "date": "2025-11-22",
+      "source": "feature_request"
+    },
+    {
+      "id": "12368",
+      "text": "Great product! The analytics dashboard is exactly what we needed.",
+      "date": "2025-11-22",
+      "source": "app_review"
+    },
+    {
+      "id": "12369",
+      "text": "File upload keeps crashing the app. This bug needs to be fixed ASAP!",
+      "date": "2025-11-23",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12370",
+      "text": "The pricing page is really confusing. Can't figure out which tier includes what features.",
+      "date": "2025-11-23",
+      "source": "survey"
+    },
+    {
+      "id": "12371",
+      "text": "Would love Slack integration for notifications and updates.",
+      "date": "2025-11-24",
+      "source": "feature_request"
+    },
+    {
+      "id": "12372",
+      "text": "Login authentication is broken. Can't access my account at all. This is a critical issue!",
+      "date": "2025-11-24",
+      "source": "support_ticket"
+    },
+    {
+      "id": "12373",
+      "text": "Solid app but could use better documentation. Some features are hard to discover.",
+      "date": "2025-11-25",
+      "source": "survey"
+    },
+    {
+      "id": "12374",
+      "text": "The app is laggy and slow. Performance is terrible compared to competitors.",
+      "date": "2025-11-25",
+      "source": "app_review"
+    }
+  ]
+}

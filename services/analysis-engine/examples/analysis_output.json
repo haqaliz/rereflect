@@ -1,0 +1,244 @@
+{
+  "common_pain_points": [
+    {
+      "issue": "I'm going to cancel my subscription if you don't fix the ...",
+      "count": 2,
+      "examples": [
+        "I'm going to cancel my subscription if you don't fix the login issues. Can't access my account for t",
+        "Login authentication is broken. Can't access my account at all. This is a critical issue!"
+      ]
+    },
+    {
+      "issue": "The app keeps crashing when I try to upload a file. Very ...",
+      "count": 1,
+      "examples": [
+        "The app keeps crashing when I try to upload a file. Very frustrating experience and happens every si"
+      ]
+    },
+    {
+      "issue": "Terrible performance on mobile. Takes forever to load and...",
+      "count": 1,
+      "examples": [
+        "Terrible performance on mobile. Takes forever to load and constantly lags. This is unacceptable for "
+      ]
+    },
+    {
+      "issue": "Great customer support team! They helped me solve my issu...",
+      "count": 1,
+      "examples": [
+        "Great customer support team! They helped me solve my issue within minutes."
+      ]
+    },
+    {
+      "issue": "The app crashes whenever I try to upload images. Same iss...",
+      "count": 1,
+      "examples": [
+        "The app crashes whenever I try to upload images. Same issue as others reported."
+      ]
+    },
+    {
+      "issue": "Pricing is confusing. Not sure which plan I need and the ...",
+      "count": 1,
+      "examples": [
+        "Pricing is confusing. Not sure which plan I need and the website doesn't explain the differences cle"
+      ]
+    },
+    {
+      "issue": "Would love to see a dark mode feature. Using the app at n...",
+      "count": 1,
+      "examples": [
+        "Would love to see a dark mode feature. Using the app at night is hard on the eyes."
+      ]
+    },
+    {
+      "issue": "App is way too slow. Loading times are ridiculous and it'...",
+      "count": 1,
+      "examples": [
+        "App is way too slow. Loading times are ridiculous and it's affecting my work."
+      ]
+    },
+    {
+      "issue": "Login not working again! This keeps happening every few d...",
+      "count": 1,
+      "examples": [
+        "Login not working again! This keeps happening every few days. I'm done with this product."
+      ]
+    },
+    {
+      "issue": "Upload feature is completely broken. Tried multiple times...",
+      "count": 1,
+      "examples": [
+        "Upload feature is completely broken. Tried multiple times and the app crashes instantly."
+      ]
+    }
+  ],
+  "feature_requests": [
+    {
+      "feature": "Love Interface There",
+      "count": 1,
+      "examples": [
+        "Love the new interface! But I wish there was a dark mode option. Would use it every night."
+      ]
+    },
+    {
+      "feature": "Integration Slack",
+      "count": 1,
+      "examples": [
+        "Please add integration with Slack. We need this for our team workflow."
+      ]
+    },
+    {
+      "feature": "Pricing Confusing Sure",
+      "count": 1,
+      "examples": [
+        "Pricing is confusing. Not sure which plan I need and the website doesn't explain the differences cle"
+      ]
+    },
+    {
+      "feature": "Love Dark Mode",
+      "count": 1,
+      "examples": [
+        "Would love to see a dark mode feature. Using the app at night is hard on the eyes."
+      ]
+    },
+    {
+      "feature": "Export Functionality Amazing",
+      "count": 1,
+      "examples": [
+        "Export functionality would be amazing! Need to download our data in CSV format."
+      ]
+    },
+    {
+      "feature": "Slack Integration Make",
+      "count": 1,
+      "examples": [
+        "Can you add Slack integration? It would make collaboration so much easier for our team."
+      ]
+    },
+    {
+      "feature": "Search Function",
+      "count": 1,
+      "examples": [
+        "Could you please add a search function in the dashboard? It's hard to find things without it."
+      ]
+    },
+    {
+      "feature": "Love Most Features",
+      "count": 1,
+      "examples": [
+        "Love most of the features but really need dark mode. Please add this!"
+      ]
+    },
+    {
+      "feature": "Export Functionality",
+      "count": 1,
+      "examples": [
+        "Please add export to PDF functionality. We need this for our reports."
+      ]
+    },
+    {
+      "feature": "File Upload Keeps",
+      "count": 1,
+      "examples": [
+        "File upload keeps crashing the app. This bug needs to be fixed ASAP!"
+      ]
+    }
+  ],
+  "sentiment_summary": {
+    "positive_percent": 46.67,
+    "neutral_percent": 16.67,
+    "negative_percent": 36.67,
+    "trend_by_month": {
+      "2025-11": {
+        "avg_score": 0.076,
+        "negative_percent": 36.67,
+        "positive_percent": 46.67,
+        "neutral_percent": 16.67
+      }
+    },
+    "by_category": {
+      "support_ticket": {
+        "positive": 11.11,
+        "neutral": 33.33,
+        "negative": 55.56
+      },
+      "app_review": {
+        "positive": 37.5,
+        "neutral": 12.5,
+        "negative": 50.0
+      },
+      "survey": {
+        "positive": 40.0,
+        "neutral": 20.0,
+        "negative": 40.0
+      },
+      "feature_request": {
+        "positive": 100.0,
+        "neutral": 0.0,
+        "negative": 0.0
+      }
+    }
+  },
+  "urgent_feedback": [
+    {
+      "id": "12347",
+      "issue": "Terrible performance on mobile",
+      "reason": "Extreme negative sentiment detected; Very low sentiment score",
+      "sentiment": "very negative",
+      "text_excerpt": "Terrible performance on mobile. Takes forever to load and constantly lags. This is unacceptable for a paid app."
+    },
+    {
+      "id": "12358",
+      "issue": "Upload feature is completely broken",
+      "reason": "Critical functionality issue",
+      "sentiment": "very negative",
+      "text_excerpt": "Upload feature is completely broken. Tried multiple times and the app crashes instantly."
+    },
+    {
+      "id": "12361",
+      "issue": "PAYMENT PROCESSING FAILED AND I GOT CHARGED TWICE",
+      "reason": "Extreme negative sentiment detected; Very low sentiment score",
+      "sentiment": "very negative",
+      "text_excerpt": "PAYMENT PROCESSING FAILED AND I GOT CHARGED TWICE! This is completely unacceptable!"
+    },
+    {
+      "id": "12363",
+      "issue": "App performance is awful",
+      "reason": "Extreme negative sentiment detected",
+      "sentiment": "very negative",
+      "text_excerpt": "App performance is awful. Loading screens everywhere and constant freezing."
+    },
+    {
+      "id": "12349",
+      "issue": "I'm going to cancel my subscription if you don't fix the login issues",
+      "reason": "Extreme negative sentiment detected; Customer churn risk",
+      "sentiment": "negative",
+      "text_excerpt": "I'm going to cancel my subscription if you don't fix the login issues. Can't access my account for the third time this week."
+    },
+    {
+      "id": "12356",
+      "issue": "Login not working again",
+      "reason": "Customer churn risk; Critical functionality issue",
+      "sentiment": "neutral",
+      "text_excerpt": "Login not working again! This keeps happening every few days. I'm done with this product."
+    },
+    {
+      "id": "12365",
+      "issue": "Login issue still not fixed",
+      "reason": "Customer churn risk",
+      "sentiment": "positive",
+      "text_excerpt": "Login issue still not fixed. I've been asking for help for weeks and I'm done with this product. Looking for alternatives."
+    },
+    {
+      "id": "12374",
+      "issue": "The app is laggy and slow",
+      "reason": "Extreme negative sentiment detected",
+      "sentiment": "negative",
+      "text_excerpt": "The app is laggy and slow. Performance is terrible compared to competitors."
+    }
+  ],
+  "topic_clusters": null,
+  "analysis_notes": null,
+  "total_feedback_count": 30,
+  "analysis_timestamp": "2025-12-26T23:31:29.499642"
+}

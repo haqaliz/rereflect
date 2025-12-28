@@ -1,0 +1,28 @@
+# Core dependencies
+fastapi==0.115.0
+uvicorn[standard]==0.31.0
+pydantic==2.9.2
+python-dotenv==1.0.1
+
+# NLP and ML
+transformers==4.46.0
+torch==2.5.0
+sentence-transformers==3.2.0
+scikit-learn==1.5.2
+nltk==3.9.1
+
+# Sentiment Analysis
+vaderSentiment==3.3.2
+
+# Topic Modeling (optional)
+bertopic==0.16.4
+umap-learn==0.5.7
+
+# Data handling
+pandas==2.2.3
+numpy==1.26.4
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+httpx==0.27.2
