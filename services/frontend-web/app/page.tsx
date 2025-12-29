@@ -1,5 +1,6 @@
 import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield } from 'lucide-react';
 import Link from 'next/link';
+import { Logo } from '@/components/Logo';
 
 export default function Home() {
   return (
@@ -11,10 +12,8 @@ export default function Home() {
         <nav className="relative z-10 px-6 py-4">
           <div className="max-w-7xl mx-auto flex justify-between items-center">
             <div className="flex items-center space-x-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-                <Brain className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <Logo size="lg" />
+              <span className="text-xl font-bold text-gray-900">
                 Rereflect
               </span>
             </div>
@@ -25,7 +24,7 @@ export default function Home() {
                 </button>
               </Link>
               <Link href="/signup">
-                <button className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:shadow-lg hover:scale-105 transition-all duration-200 font-medium">
+                <button className="px-6 py-2.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600 hover:shadow-lg hover:scale-105 transition-all duration-200 font-medium">
                   Get Started
                 </button>
               </Link>
@@ -35,7 +34,7 @@ export default function Home() {
 
         <div className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32">
           <div className="text-center">
-            <div className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-full mb-6">
+            <div className="inline-flex items-center space-x-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-full mb-6">
               <Zap className="w-4 h-4" />
               <span className="text-sm font-semibold">AI-Powered Feedback Analysis</span>
             </div>
@@ -43,7 +42,7 @@ export default function Home() {
             <h1 className="text-6xl md:text-7xl font-bold text-gray-900 mb-6 leading-tight">
               Transform Customer
               <br />
-              <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <span className="text-amber-500">
                 Feedback into Insights
               </span>
             </h1>
@@ -55,7 +54,7 @@ export default function Home() {
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link href="/signup">
-                <button className="px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 font-semibold text-lg">
+                <button className="px-8 py-4 bg-amber-500 text-white rounded-xl hover:bg-amber-600 hover:shadow-2xl hover:scale-105 transition-all duration-200 font-semibold text-lg">
                   Start Free Trial
                 </button>
               </Link>
@@ -72,7 +71,7 @@ export default function Home() {
                 <span>Secure & Private</span>
               </div>
               <div className="flex items-center space-x-2">
-                <Zap className="w-5 h-5 text-yellow-600" />
+                <Zap className="w-5 h-5 text-amber-500" />
                 <span>Real-time Analysis</span>
               </div>
               <div className="flex items-center space-x-2">
@@ -97,7 +96,7 @@ export default function Home() {
 
         <div className="grid md:grid-cols-3 gap-8">
           <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4">
+            <div className="w-12 h-12 bg-amber-500 rounded-xl flex items-center justify-center mb-4">
               <MessageSquare className="w-6 h-6 text-white" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-3">Sentiment Analysis</h3>
@@ -108,7 +107,7 @@ export default function Home() {
           </div>
 
           <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100">
-            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center mb-4">
+            <div className="w-12 h-12 bg-amber-600 rounded-xl flex items-center justify-center mb-4">
               <Brain className="w-6 h-6 text-white" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-3">Smart Extraction</h3>
@@ -119,7 +118,7 @@ export default function Home() {
           </div>
 
           <div className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition-shadow border border-gray-100">
-            <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center mb-4">
+            <div className="w-12 h-12 bg-amber-400 rounded-xl flex items-center justify-center mb-4">
               <BarChart3 className="w-6 h-6 text-white" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-3">Visual Analytics</h3>
@@ -132,16 +131,16 @@ export default function Home() {
       </div>
 
       {/* CTA Section */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 py-20">
+      <div className="bg-amber-500 py-20">
         <div className="max-w-4xl mx-auto text-center px-6">
           <h2 className="text-4xl font-bold text-white mb-6">
             Ready to transform your feedback?
           </h2>
-          <p className="text-xl text-blue-100 mb-8">
+          <p className="text-xl text-amber-100 mb-8">
             Join companies that are already making better decisions with AI-powered insights.
           </p>
           <Link href="/signup">
-            <button className="px-8 py-4 bg-white text-blue-600 rounded-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 font-semibold text-lg">
+            <button className="px-8 py-4 bg-white text-amber-600 rounded-xl hover:shadow-2xl hover:scale-105 transition-all duration-200 font-semibold text-lg">
               Start Your Free Trial
             </button>
           </Link>
@@ -152,13 +151,11 @@ export default function Home() {
       <footer className="bg-gray-900 text-gray-400 py-12">
         <div className="max-w-7xl mx-auto px-6 text-center">
           <div className="flex items-center justify-center space-x-2 mb-4">
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <Brain className="w-5 h-5 text-white" />
-            </div>
+            <Logo size="md" />
             <span className="text-lg font-bold text-white">Rereflect</span>
           </div>
           <p className="text-sm">
-            © 2025 Rereflect. All rights reserved. Built with ❤️ for better customer understanding.
+            © 2025 Rereflect. All rights reserved. Built with care for better customer understanding.
           </p>
         </div>
       </footer>

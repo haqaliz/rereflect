@@ -17,6 +17,7 @@ from .models import (
 )
 from .sentiment import SentimentAnalyzer
 from .extractors import PainPointExtractor, FeatureRequestExtractor
+from .categorizer import PainPointCategorizer, FeatureRequestCategorizer, UrgentCategorizer
 
 
 class FeedbackAnalyzer:
@@ -39,6 +40,9 @@ class FeedbackAnalyzer:
         self.sentiment_analyzer = SentimentAnalyzer()
         self.pain_point_extractor = PainPointExtractor()
         self.feature_request_extractor = FeatureRequestExtractor()
+        self.pain_point_categorizer = PainPointCategorizer()
+        self.feature_request_categorizer = FeatureRequestCategorizer()
+        self.urgent_categorizer = UrgentCategorizer()
         self.enable_clustering = enable_clustering
         self.urgent_threshold = urgent_threshold
         self.very_negative_threshold = very_negative_threshold
@@ -111,31 +115,44 @@ class FeedbackAnalyzer:
         return enriched
 
     def _analyze_pain_points(self, enriched_feedback: List[Dict]) -> List[PainPoint]:
-        """Extract and cluster pain points."""
+        """Extract and cluster pain points with categorization."""
         pain_points_data = self.pain_point_extractor.extract(enriched_feedback)
 
-        # Convert to PainPoint models
+        # Convert to PainPoint models with categorization
         pain_points = []
         for pp in pain_points_data[:10]:  # Top 10
+            # Categorize the pain point
+            categorization = self.pain_point_categorizer.categorize(pp['issue'])
+
             pain_points.append(PainPoint(
                 issue=pp['issue'],
                 count=pp['count'],
-                examples=pp['examples']
+                examples=pp['examples'],
+                category=categorization.category,
+                severity=categorization.level
             ))
 
         return pain_points
 
     def _analyze_feature_requests(self, enriched_feedback: List[Dict]) -> List[FeatureRequest]:
-        """Extract and cluster feature requests."""
+        """Extract and cluster feature requests with categorization."""
         feature_requests_data = self.feature_request_extractor.extract(enriched_feedback)
 
-        # Convert to FeatureRequest models
+        # Convert to FeatureRequest models with categorization
         feature_requests = []
         for fr in feature_requests_data[:10]:  # Top 10
+            # Categorize the feature request
+            categorization = self.feature_request_categorizer.categorize(
+                fr['feature'],
+                occurrence_count=fr['count']
+            )
+
             feature_requests.append(FeatureRequest(
                 feature=fr['feature'],
                 count=fr['count'],
-                examples=fr['examples']
+                examples=fr['examples'],
+                category=categorization.category,
+                priority=categorization.level
             ))
 
         return feature_requests
@@ -274,16 +291,30 @@ class FeedbackAnalyzer:
 
             # If any reasons flagged, add to urgent list
             if reasons:
+                # Categorize the urgent feedback
+                categorization = self.urgent_categorizer.categorize(
+                    text,
+                    sentiment_score=sentiment['compound']
+                )
+
                 urgent_items.append(UrgentFeedback(
                     id=item['id'],
                     issue=self._extract_issue_summary(text),
                     reason='; '.join(reasons),
                     sentiment=self.sentiment_analyzer.classify_intensity(sentiment['compound']),
-                    text_excerpt=text[:150] + '...' if len(text) > 150 else text
+                    text_excerpt=text[:150] + '...' if len(text) > 150 else text,
+                    category=categorization.category,
+                    response_time=categorization.level
                 ))
 
-        # Sort by sentiment (most negative first)
-        urgent_items.sort(key=lambda x: x.sentiment == 'very negative', reverse=True)
+        # Sort by response_time urgency (immediate first) then by sentiment
+        response_time_priority = {'immediate': 0, '1_hour': 1, '4_hours': 2, '24_hours': 3}
+        urgent_items.sort(
+            key=lambda x: (
+                response_time_priority.get(x.response_time, 4),
+                0 if x.sentiment == 'very negative' else 1
+            )
+        )
 
         return urgent_items[:20]  # Return top 20 urgent items
 

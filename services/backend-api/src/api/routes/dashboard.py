@@ -24,11 +24,23 @@ class SentimentStats(BaseModel):
 class PainPoint(BaseModel):
     issue: str
     count: int
+    category: str | None = None
+    severity: str | None = None
 
 
 class FeatureRequest(BaseModel):
     feature: str
     count: int
+    category: str | None = None
+    priority: str | None = None
+
+
+class CategoryCount(BaseModel):
+    category: str
+    count: int
+    severity: str | None = None  # For pain points
+    priority: str | None = None  # For feature requests
+    response_time: str | None = None  # For urgent items
 
 
 class TopCategory(BaseModel):
@@ -41,6 +53,8 @@ class UrgentFeedback(BaseModel):
     text: str
     sentiment_label: str | None
     created_at: datetime
+    category: str | None = None
+    response_time: str | None = None
 
 
 class DashboardResponse(BaseModel):
@@ -49,6 +63,9 @@ class DashboardResponse(BaseModel):
     feature_requests: List[FeatureRequest]
     top_categories: List[TopCategory]
     urgent_items: List[UrgentFeedback]
+    pain_point_categories: List[CategoryCount]
+    feature_request_categories: List[CategoryCount]
+    urgent_categories: List[CategoryCount]
     total_feedback: int
     date_range: str
 
@@ -89,42 +106,86 @@ def get_dashboard(
     negative_count = int(sentiment_stats.negative or 0)
     avg_score = float(sentiment_stats.avg_score) if sentiment_stats.avg_score else None
 
-    # Pain points (group by extracted_issue)
+    # Pain points (group by extracted_issue) - include category info
     pain_points_query = base_query.filter(
         FeedbackItem.extracted_issue.isnot(None),
         FeedbackItem.sentiment_label == "negative"
+    ).order_by(
+        FeedbackItem.created_at.desc()
+    ).limit(10)
+
+    pain_points = [
+        PainPoint(
+            issue=item.extracted_issue,
+            count=1,
+            category=item.pain_point_category,
+            severity=item.pain_point_severity
+        )
+        for item in pain_points_query.all()
+    ]
+
+    # Pain point categories aggregation
+    pain_point_cat_query = base_query.filter(
+        FeedbackItem.pain_point_category.isnot(None)
     ).with_entities(
-        FeedbackItem.extracted_issue,
+        FeedbackItem.pain_point_category,
+        FeedbackItem.pain_point_severity,
         func.count(FeedbackItem.id).label("count")
     ).group_by(
-        FeedbackItem.extracted_issue
+        FeedbackItem.pain_point_category,
+        FeedbackItem.pain_point_severity
+    ).order_by(
+        func.count(FeedbackItem.id).desc()
+    ).limit(12)
+
+    pain_point_categories = [
+        CategoryCount(
+            category=row.pain_point_category,
+            count=row.count,
+            severity=row.pain_point_severity
+        )
+        for row in pain_point_cat_query.all()
+    ]
+
+    # Feature requests - positive feedback with feature_request_category or tags
+    feature_request_items = base_query.filter(
+        FeedbackItem.sentiment_label == "positive",
+        FeedbackItem.tags.isnot(None)
+    ).order_by(
+        FeedbackItem.created_at.desc()
+    ).limit(10).all()
+
+    feature_requests = [
+        FeatureRequest(
+            feature=item.text[:100] + "..." if len(item.text) > 100 else item.text,
+            count=1,
+            category=item.feature_request_category,
+            priority=item.feature_request_priority
+        )
+        for item in feature_request_items
+    ]
+
+    # Feature request categories aggregation
+    feature_cat_query = base_query.filter(
+        FeedbackItem.feature_request_category.isnot(None)
+    ).with_entities(
+        FeedbackItem.feature_request_category,
+        FeedbackItem.feature_request_priority,
+        func.count(FeedbackItem.id).label("count")
+    ).group_by(
+        FeedbackItem.feature_request_category,
+        FeedbackItem.feature_request_priority
     ).order_by(
         func.count(FeedbackItem.id).desc()
     ).limit(10)
 
-    pain_points = [
-        PainPoint(issue=row.extracted_issue, count=row.count)
-        for row in pain_points_query.all()
-    ]
-
-    # Feature requests - positive feedback with tags
-    positive_with_tags = base_query.filter(
-        FeedbackItem.sentiment_label == "positive",
-        FeedbackItem.tags.isnot(None)
-    ).all()
-
-    # Count unique combinations of feedback text for feature requests
-    from collections import Counter
-    feature_counter = Counter()
-    for item in positive_with_tags:
-        if item.tags:
-            # Use the first 100 chars of text as the feature description
-            feature_text = item.text[:100] + "..." if len(item.text) > 100 else item.text
-            feature_counter[feature_text] += 1
-
-    feature_requests = [
-        FeatureRequest(feature=feature, count=count)
-        for feature, count in feature_counter.most_common(10)
+    feature_request_categories = [
+        CategoryCount(
+            category=row.feature_request_category,
+            count=row.count,
+            priority=row.feature_request_priority
+        )
+        for row in feature_cat_query.all()
     ]
 
     # Top categories (count tags across all feedback)
@@ -143,7 +204,7 @@ def get_dashboard(
         for tag, count in tag_counter.most_common(10)
     ]
 
-    # Urgent items (show only last 5)
+    # Urgent items (show only last 5) - include category info
     urgent_query = base_query.filter(
         FeedbackItem.is_urgent == True
     ).order_by(
@@ -155,9 +216,34 @@ def get_dashboard(
             id=item.id,
             text=item.text,
             sentiment_label=item.sentiment_label,
-            created_at=item.created_at
+            created_at=item.created_at,
+            category=item.urgent_category,
+            response_time=item.urgent_response_time
         )
         for item in urgent_query.all()
+    ]
+
+    # Urgent categories aggregation
+    urgent_cat_query = base_query.filter(
+        FeedbackItem.urgent_category.isnot(None)
+    ).with_entities(
+        FeedbackItem.urgent_category,
+        FeedbackItem.urgent_response_time,
+        func.count(FeedbackItem.id).label("count")
+    ).group_by(
+        FeedbackItem.urgent_category,
+        FeedbackItem.urgent_response_time
+    ).order_by(
+        func.count(FeedbackItem.id).desc()
+    ).limit(10)
+
+    urgent_categories = [
+        CategoryCount(
+            category=row.urgent_category,
+            count=row.count,
+            response_time=row.urgent_response_time
+        )
+        for row in urgent_cat_query.all()
     ]
 
     return DashboardResponse(
@@ -172,6 +258,9 @@ def get_dashboard(
         feature_requests=feature_requests,
         top_categories=top_categories,
         urgent_items=urgent_items,
+        pain_point_categories=pain_point_categories,
+        feature_request_categories=feature_request_categories,
+        urgent_categories=urgent_categories,
         total_feedback=total_feedback,
         date_range=f"Last {days} days"
     )

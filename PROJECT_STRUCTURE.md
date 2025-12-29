@@ -200,11 +200,31 @@ customer-feedback-analyzer/                 (Root - Organization only)
 - Feedback items table
 - Integrations table
 
-**Redis**:
-- Cache (API responses)
-- Session storage
-- Celery broker (task queue)
-- Rate limiting
+**Redis** (Single instance with logical databases):
+- DB 0: Celery broker (task queue via Redis Streams)
+- DB 1: Session storage
+- DB 2: API response cache
+- DB 3: Rate limiting
+
+### Redis Scaling Strategy
+
+**Current MVP Phase (10 customers, ~10K items)**:
+- Single Redis instance handles both cache and queue
+- Uses <1% of Redis capacity (Redis handles 100K+ ops/sec)
+- Logical database separation provides isolation
+
+**When to Split Redis Instances** (triggers for separation):
+| Trigger | Threshold | Action |
+|---------|-----------|--------|
+| Memory pressure | Cache evictions affecting queue | Separate instances |
+| Latency spikes | p99 > 10ms on cache reads | Separate instances |
+| Scale | 500+ customers, 1M+ items | Redis Cluster or separate |
+| Compliance | Different backup/persistence policies | Separate by concern |
+
+**Growth Path**:
+1. **Month 2-6**: Single Redis instance (handles 50 customers easily)
+2. **Month 6+**: If advanced routing needed → consider RabbitMQ
+3. **Month 12+**: If event streaming needed → add Kafka for analytics
 
 ---
 

@@ -22,6 +22,8 @@ class PainPoint(BaseModel):
     issue: str
     count: int
     examples: List[str] = Field(default_factory=list)
+    category: Optional[str] = None  # security_breach, data_loss, payment_issue, etc.
+    severity: Optional[str] = None  # critical, major, moderate, minor, trivial
 
 
 class FeatureRequest(BaseModel):
@@ -29,6 +31,8 @@ class FeatureRequest(BaseModel):
     feature: str
     count: int
     examples: List[str] = Field(default_factory=list)
+    category: Optional[str] = None  # core_functionality, automation, integration, etc.
+    priority: Optional[str] = None  # high, medium, low
 
 
 class SentimentByPeriod(BaseModel):
@@ -62,6 +66,8 @@ class UrgentFeedback(BaseModel):
     reason: str
     sentiment: str
     text_excerpt: Optional[str] = None
+    category: Optional[str] = None  # service_outage, data_breach, payment_failure, etc.
+    response_time: Optional[str] = None  # immediate, 1_hour, 4_hours, 24_hours
 
 
 class TopicCluster(BaseModel):

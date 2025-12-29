@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, cast, func
+from sqlalchemy import desc, asc, cast, func
 from sqlalchemy.dialects.postgresql import JSONB
 from src.database.session import get_db
 from src.models.feedback import FeedbackItem
@@ -26,9 +26,18 @@ def get_sentiment_analyzer():
     return SentimentAnalyzer()
 
 
+def get_categorizers():
+    """Get categorizers with lazy import."""
+    analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../analysis-engine"))
+    if analysis_engine_path not in sys.path:
+        sys.path.insert(0, analysis_engine_path)
+    from analyzer.categorizer import PainPointCategorizer, FeatureRequestCategorizer, UrgentCategorizer
+    return PainPointCategorizer(), FeatureRequestCategorizer(), UrgentCategorizer()
+
+
 # Helper function for automatic analysis
 def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
-    """Automatically analyze a single feedback item."""
+    """Automatically analyze a single feedback item with categorization."""
     try:
         sentiment_analyzer = get_sentiment_analyzer()
         sentiment = sentiment_analyzer.analyze(feedback.text)
@@ -49,6 +58,35 @@ def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
         if any(keyword in text_lower for keyword in pain_keywords) or sentiment['compound'] < -0.3:
             # Extract a short issue description from the text
             feedback.extracted_issue = feedback.text[:100] + ('...' if len(feedback.text) > 100 else '')
+
+        # Get categorizers and categorize
+        pain_point_categorizer, feature_request_categorizer, urgent_categorizer = get_categorizers()
+
+        # Categorize based on sentiment
+        if feedback.sentiment_label == 'negative':
+            # Categorize as pain point
+            pain_result = pain_point_categorizer.categorize(feedback.text)
+            feedback.pain_point_category = pain_result.category
+            feedback.pain_point_severity = pain_result.level
+            feedback.pain_point_text = pain_result.text
+            feedback.categorization_confidence = pain_result.confidence
+
+        elif feedback.sentiment_label == 'positive':
+            # Categorize as feature request
+            feature_result = feature_request_categorizer.categorize(feedback.text)
+            feedback.feature_request_category = feature_result.category
+            feedback.feature_request_priority = feature_result.level
+            feedback.feature_request_text = feature_result.text
+            feedback.categorization_confidence = feature_result.confidence
+
+        # If urgent, also categorize urgent type
+        if feedback.is_urgent:
+            urgent_result = urgent_categorizer.categorize(feedback.text, feedback.sentiment_score or 0.0)
+            feedback.urgent_category = urgent_result.category
+            feedback.urgent_response_time = urgent_result.level
+            # Update confidence to be the higher of the two
+            if feedback.categorization_confidence is None or urgent_result.confidence > feedback.categorization_confidence:
+                feedback.categorization_confidence = urgent_result.confidence
 
         db.commit()
     except Exception as e:
@@ -74,6 +112,19 @@ class FeedbackResponse(BaseModel):
     tags: list[str] | None
     is_urgent: bool
     created_at: datetime
+    # Pain point categorization
+    pain_point_category: str | None
+    pain_point_severity: str | None
+    pain_point_text: str | None
+    # Feature request categorization
+    feature_request_category: str | None
+    feature_request_priority: str | None
+    feature_request_text: str | None
+    # Urgent categorization
+    urgent_category: str | None
+    urgent_response_time: str | None
+    # Confidence score
+    categorization_confidence: float | None
 
     class Config:
         from_attributes = True
@@ -101,7 +152,8 @@ def create_feedback(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
-    """Create a new feedback item. Background job will analyze it automatically."""
+    """Create a new feedback item. Celery worker will analyze it automatically."""
+    from src.background import queue_analyze_feedback
 
     feedback = FeedbackItem(
         organization_id=current_org.id,
@@ -113,18 +165,29 @@ def create_feedback(
     db.commit()
     db.refresh(feedback)
 
-    # Note: Analysis will be done by background scheduler within 30 seconds
+    # Queue for analysis via Celery worker
+    queue_analyze_feedback(feedback.id)
+
     return feedback
 
 
 @router.get("/", response_model=FeedbackListResponse)
 def list_feedback(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
+    search: str | None = Query(None, description="Search in feedback text and extracted issue"),
     sentiment: str | None = Query(None, description="Filter by sentiment: positive, neutral, negative"),
     source: str | None = Query(None, description="Filter by source"),
     is_urgent: bool | None = Query(None, description="Filter by urgent status"),
     tag: str | None = Query(None, description="Filter by tag"),
+    pain_point_category: str | None = Query(None, description="Filter by pain point category"),
+    pain_point_severity: str | None = Query(None, description="Filter by pain point severity"),
+    feature_request_category: str | None = Query(None, description="Filter by feature request category"),
+    feature_request_priority: str | None = Query(None, description="Filter by feature request priority"),
+    urgent_category: str | None = Query(None, description="Filter by urgent category"),
+    urgent_response_time: str | None = Query(None, description="Filter by urgent response time"),
+    sort_by: str | None = Query(None, description="Sort by field: created_at, sentiment_score, text"),
+    sort_order: str | None = Query("desc", description="Sort order: asc or desc"),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
@@ -134,6 +197,14 @@ def list_feedback(
     query = db.query(FeedbackItem).filter(
         FeedbackItem.organization_id == current_org.id
     )
+
+    # Apply search filter (case-insensitive search in text and extracted_issue)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (FeedbackItem.text.ilike(search_term)) |
+            (FeedbackItem.extracted_issue.ilike(search_term))
+        )
 
     # Apply filters
     if sentiment:
@@ -152,6 +223,25 @@ def list_feedback(
             cast(FeedbackItem.tags, JSONB).op('@>')(cast([tag], JSONB))
         )
 
+    # Category filters
+    if pain_point_category:
+        query = query.filter(FeedbackItem.pain_point_category == pain_point_category)
+
+    if pain_point_severity:
+        query = query.filter(FeedbackItem.pain_point_severity == pain_point_severity)
+
+    if feature_request_category:
+        query = query.filter(FeedbackItem.feature_request_category == feature_request_category)
+
+    if feature_request_priority:
+        query = query.filter(FeedbackItem.feature_request_priority == feature_request_priority)
+
+    if urgent_category:
+        query = query.filter(FeedbackItem.urgent_category == urgent_category)
+
+    if urgent_response_time:
+        query = query.filter(FeedbackItem.urgent_response_time == urgent_response_time)
+
     # Get total count
     total = query.count()
 
@@ -159,8 +249,19 @@ def list_feedback(
     total_pages = (total + page_size - 1) // page_size
     offset = (page - 1) * page_size
 
+    # Apply sorting
+    sort_column_map = {
+        'created_at': FeedbackItem.created_at,
+        'sentiment_score': FeedbackItem.sentiment_score,
+        'text': FeedbackItem.text,
+        'source': FeedbackItem.source,
+        'id': FeedbackItem.id,
+    }
+    sort_column = sort_column_map.get(sort_by, FeedbackItem.created_at)
+    order_func = asc if sort_order == 'asc' else desc
+
     # Get items
-    items = query.order_by(desc(FeedbackItem.created_at)).offset(offset).limit(page_size).all()
+    items = query.order_by(order_func(sort_column)).offset(offset).limit(page_size).all()
 
     return FeedbackListResponse(
         items=items,
@@ -276,6 +377,16 @@ def update_feedback(
     feedback.sentiment_label = None
     feedback.extracted_issue = None
     feedback.is_urgent = False
+    # Clear categorization fields
+    feedback.pain_point_category = None
+    feedback.pain_point_severity = None
+    feedback.pain_point_text = None
+    feedback.feature_request_category = None
+    feedback.feature_request_priority = None
+    feedback.feature_request_text = None
+    feedback.urgent_category = None
+    feedback.urgent_response_time = None
+    feedback.categorization_confidence = None
 
     db.commit()
 
@@ -384,6 +495,21 @@ async def import_csv(
             errors.append(f"Row {row_num}: {str(e)}")
             db.rollback()
             continue
+
+    # Queue batch analysis via Celery worker
+    from src.background import queue_analyze_batch
+
+    if imported_count > 0:
+        # Get IDs of newly imported feedback items
+        recent_feedback = db.query(FeedbackItem.id).filter(
+            FeedbackItem.organization_id == current_org.id,
+            FeedbackItem.sentiment_label == None,
+            FeedbackItem.source == 'csv_import'
+        ).order_by(FeedbackItem.created_at.desc()).limit(imported_count).all()
+
+        feedback_ids = [f.id for f in recent_feedback]
+        if feedback_ids:
+            queue_analyze_batch(current_org.id, feedback_ids)
 
     return CSVImportResponse(
         total_rows=total_rows,

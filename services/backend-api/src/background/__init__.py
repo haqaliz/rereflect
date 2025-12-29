@@ -1,5 +1,15 @@
-"""Background jobs and schedulers."""
+"""Background jobs via Celery + Redis."""
 
-from .scheduler import start_scheduler, stop_scheduler, get_scheduler_status
+from .celery_client import (
+    queue_analyze_feedback,
+    queue_analyze_batch,
+    get_task_status,
+    get_celery_status,
+)
 
-__all__ = ['start_scheduler', 'stop_scheduler', 'get_scheduler_status']
+__all__ = [
+    'queue_analyze_feedback',
+    'queue_analyze_batch',
+    'get_task_status',
+    'get_celery_status',
+]

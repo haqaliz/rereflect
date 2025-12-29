@@ -11,4 +11,7 @@ pytest==7.4.3
 pytest-asyncio==0.21.1
 httpx==0.25.2
 python-dotenv==1.0.0
-apscheduler==3.10.4
+
+# Background processing (Celery + Redis)
+celery[redis]==5.3.6         # Distributed task queue
+redis==5.0.1                 # Redis client for Celery broker

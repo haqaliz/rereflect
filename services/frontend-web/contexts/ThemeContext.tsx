@@ -27,6 +27,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const applyTheme = React.useCallback((actualTheme: ResolvedTheme) => {
     console.log('[ThemeContext] Applying theme:', actualTheme);
     document.documentElement.setAttribute('data-theme', actualTheme);
+    // Also toggle .dark class for CSS that uses it
+    if (actualTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
     setResolvedTheme(actualTheme);
   }, []);
 

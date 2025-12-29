@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Brain, LayoutDashboard, MessageSquare, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { LayoutDashboard, MessageSquare, Settings as SettingsIcon, LogOut } from 'lucide-react';
 import { authAPI } from '@/lib/api/auth';
+import { Logo } from './Logo';
 
 export function Header() {
   const pathname = usePathname();
@@ -19,12 +20,7 @@ export function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="flex justify-between items-center">
           <Link href="/dashboard" className="flex items-center space-x-3 group">
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-br from-accent-amber-400 to-accent-amber-600 rounded-xl blur-md opacity-50 group-hover:opacity-75 transition-opacity"></div>
-              <div className="relative w-11 h-11 bg-gradient-to-br from-accent-amber-500 to-accent-amber-600 rounded-xl flex items-center justify-center shadow-lg">
-                <Brain className="w-6 h-6 text-white" />
-              </div>
-            </div>
+            <Logo size="xl" />
             <div>
               <h1 className="text-xl font-bold text-text-primary">Rereflect</h1>
               <p className="text-xs text-text-tertiary font-mono">Analytics Platform</p>
@@ -44,15 +40,15 @@ export function Header() {
               <span>Dashboard</span>
             </Link>
             <Link
-              href="/feedback"
+              href="/feedbacks"
               className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                isActive('/feedback')
+                isActive('/feedbacks')
                   ? 'bg-accent-amber-50 text-accent-amber-700 hover:bg-accent-amber-100'
                   : 'text-text-secondary hover:bg-surface-raised'
               }`}
             >
               <MessageSquare className="w-4 h-4" />
-              <span>Feedback</span>
+              <span>Feedbacks</span>
             </Link>
             <Link
               href="/settings"

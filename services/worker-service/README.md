@@ -18,10 +18,49 @@ Handles asynchronous tasks:
 ## Tech Stack
 
 - **Task Queue**: Celery 5.3+
-- **Broker**: Redis 7.0+
+- **Broker**: Redis 7.0+ (using Redis Streams)
 - **Backend**: Redis (result storage)
-- **Language**: Python 3.9+
+- **Language**: Python 3.12+
 - **Dependencies**: Same as analysis-engine
+
+---
+
+## Architecture Decision: Redis Streams
+
+### Why Redis Streams (not Kafka, RabbitMQ, or cloud queues)
+
+| Factor | Our Situation | Why Redis Fits |
+|--------|---------------|----------------|
+| **Scale** | MVP: 10 customers, ~10K items | Lightweight, no over-engineering |
+| **Stack** | Python FastAPI | Excellent Python support (redis-py) |
+| **Operations** | Small team | Single service for cache + queue |
+| **Workload** | ~200 items/sec max | Redis handles 100K+ ops/sec |
+| **Cost** | MVP budget | Free tier on most clouds |
+
+### Redis Database Layout
+
+```
+Redis Instance
+├── DB 0: Celery broker (task queue)
+├── DB 1: Session/auth cache
+├── DB 2: Application cache
+└── DB 3: Rate limiting
+```
+
+### When to Consider Alternatives
+
+| Trigger | Threshold | Alternative |
+|---------|-----------|-------------|
+| Advanced routing | Complex pub/sub patterns | RabbitMQ |
+| Event streaming | Analytics pipeline, 100K+ msg/sec | Apache Kafka |
+| Cloud-native | AWS-first architecture | SQS/SNS |
+| Memory pressure | Cache evictions affecting queue | Separate Redis instances |
+
+### Growth Path
+
+1. **Month 2-6**: Redis Streams + Celery (current)
+2. **Month 6+**: If advanced routing needed → migrate to RabbitMQ
+3. **Month 12+**: If event streaming needed → add Kafka for analytics pipeline
 
 ---
 

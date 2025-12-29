@@ -1,6 +1,13 @@
 #!/bin/bash
 
-# Master Startup Script - Starts Both Backend and Frontend
+# Master Startup Script - Starts All Services with tmux
+# Services: Redis (background), Celery Worker, Backend API, Frontend
+# Layout: 3 panes
+
+set -e
+
+SESSION_NAME="rereflect"
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=========================================="
 echo "  Customer Feedback Analyzer"
@@ -9,93 +16,122 @@ echo "=========================================="
 echo ""
 
 # Check if we're in the right directory
-if [ ! -d "services/backend-api" ] || [ ! -d "services/frontend-web" ]; then
+if [ ! -d "$PROJECT_ROOT/services/backend-api" ] || [ ! -d "$PROJECT_ROOT/services/frontend-web" ]; then
     echo "❌ Error: Please run this script from the project root directory"
     echo "Current directory: $(pwd)"
     exit 1
 fi
 
-echo "This will start:"
-echo "  1. Backend API (http://localhost:8000)"
-echo "  2. Frontend Web App (http://localhost:3000)"
-echo ""
-echo "Press Enter to continue or Ctrl+C to cancel..."
-read
-
-# Function to open terminal
-open_terminal() {
-    local cmd="$1"
-    local title="$2"
-
-    # Try gnome-terminal first (Ubuntu/GNOME)
-    if command -v gnome-terminal &> /dev/null; then
-        gnome-terminal --title="$title" -- bash -c "$cmd; exec bash" 2>/dev/null
-        return 0
-    fi
-
-    # Try konsole (KDE)
-    if command -v konsole &> /dev/null; then
-        konsole --title="$title" -e bash -c "$cmd; exec bash" &
-        return 0
-    fi
-
-    # Try xfce4-terminal (XFCE)
-    if command -v xfce4-terminal &> /dev/null; then
-        xfce4-terminal --title="$title" -e "bash -c '$cmd; exec bash'" &
-        return 0
-    fi
-
-    # Try xterm (fallback)
-    if command -v xterm &> /dev/null; then
-        xterm -title "$title" -e "bash -c '$cmd; exec bash'" &
-        return 0
-    fi
-
-    # Try alacritty (modern terminal)
-    if command -v alacritty &> /dev/null; then
-        alacritty --title "$title" -e bash -c "$cmd; exec bash" &
-        return 0
-    fi
-
-    echo "❌ No supported terminal emulator found!"
-    echo "Please install: gnome-terminal, konsole, xfce4-terminal, xterm, or alacritty"
-    return 1
-}
-
-# Start backend
-echo "🚀 Starting Backend API..."
-backend_cmd="cd $(pwd)/services/backend-api && ./start.sh"
-if open_terminal "$backend_cmd" "Backend API"; then
-    echo "✅ Backend terminal opened"
-else
-    echo "❌ Failed to open backend terminal"
+# Check for tmux
+if ! command -v tmux &> /dev/null; then
+    echo "❌ tmux is not installed!"
+    echo ""
+    echo "Please install tmux:"
+    echo "  Ubuntu/Debian: sudo apt install tmux"
+    echo "  macOS: brew install tmux"
+    echo ""
     exit 1
 fi
 
+# Check for Redis
+if ! command -v redis-server &> /dev/null; then
+    echo "❌ Redis is not installed!"
+    echo ""
+    echo "Please install Redis:"
+    echo "  Ubuntu/Debian: sudo apt install redis-server"
+    echo "  macOS: brew install redis"
+    echo ""
+    exit 1
+fi
+
+# Kill existing session if it exists
+tmux kill-session -t $SESSION_NAME 2>/dev/null || true
+
+# Start Redis in background if not already running
+if ! redis-cli ping > /dev/null 2>&1; then
+    echo "🔴 Starting Redis in background..."
+    redis-server --daemonize yes
+    sleep 1
+    if redis-cli ping > /dev/null 2>&1; then
+        echo "✅ Redis started"
+    else
+        echo "❌ Failed to start Redis"
+        exit 1
+    fi
+else
+    echo "✅ Redis already running"
+fi
+
+echo ""
+echo "Starting services in tmux session: $SESSION_NAME"
+echo ""
+
+# Create new tmux session (left pane - Worker)
+tmux new-session -d -s $SESSION_NAME -c "$PROJECT_ROOT/services/worker-service"
+
+# Split horizontally: creates right pane (API)
+tmux split-window -h -t $SESSION_NAME:0.0 -c "$PROJECT_ROOT/services/backend-api"
+
+# Split right pane vertically: creates bottom-right (Frontend)
+tmux split-window -v -t $SESSION_NAME:0.1 -c "$PROJECT_ROOT/services/frontend-web"
+
+# After all splits, pane layout is:
+# 0.0 = left (Worker) - worker-service
+# 0.1 = top-right (API) - backend-api
+# 0.2 = bottom-right (Frontend) - frontend-web
+
+# Start Celery Worker in left pane
+tmux send-keys -t $SESSION_NAME:0.0 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.0 "echo '  ⚙️  CELERY WORKER + REDIS'" Enter
+tmux send-keys -t $SESSION_NAME:0.0 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.0 "source venv/bin/activate 2>/dev/null || (python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt) && celery -A src.celery_app worker --beat --loglevel=info" Enter
+
+# Wait for worker to initialize
 sleep 2
 
-# Start frontend
-echo "🚀 Starting Frontend Web App..."
-frontend_cmd="cd $(pwd)/services/frontend-web && ./start.sh"
-if open_terminal "$frontend_cmd" "Frontend Web App"; then
-    echo "✅ Frontend terminal opened"
-else
-    echo "❌ Failed to open frontend terminal"
-    exit 1
-fi
+# Start Backend API in top-right pane
+tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "echo '  🚀 BACKEND API (port 8000)'" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "source venv/bin/activate 2>/dev/null || (python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt) && python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload" Enter
+
+# Start Frontend in bottom-right pane
+tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "echo '  🌐 FRONTEND (port 3000)'" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "npm run dev" Enter
+
+# Select the API pane as the active one
+tmux select-pane -t $SESSION_NAME:0.1
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  ✅ All services are starting!"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ✅ All services starting in tmux session!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "  Backend API:  http://localhost:8000"
-echo "  API Docs:     http://localhost:8000/docs"
-echo "  Frontend App: http://localhost:3000"
+echo "  Layout:"
+echo "  ┌─────────────────┬─────────────────┐"
+echo "  │                 │  🚀 API         │"
+echo "  │  ⚙️  Worker      │  (port 8000)    │"
+echo "  │  (Celery+Beat)  ├─────────────────┤"
+echo "  │                 │  🌐 Frontend    │"
+echo "  │                 │  (port 3000)    │"
+echo "  └─────────────────┴─────────────────┘"
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Services:"
+echo "    Redis:    localhost:6379 (background)"
+echo "    API:      http://localhost:8000"
+echo "    Docs:     http://localhost:8000/docs"
+echo "    Frontend: http://localhost:3000"
 echo ""
-echo "To stop the servers:"
-echo "  - Close the terminal windows, or"
-echo "  - Press Ctrl+C in each terminal"
+echo "  tmux commands:"
+echo "    Attach:      tmux attach -t $SESSION_NAME"
+echo "    Switch pane: Ctrl+b then arrow keys"
+echo "    Detach:      Ctrl+b then d"
+echo "    Stop all:    ./stop-all.sh"
 echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Attach to tmux session
+tmux attach -t $SESSION_NAME

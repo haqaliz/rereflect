@@ -11,9 +11,16 @@ import os
 
 # Add analysis-engine to path
 analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..", "..", "analysis-engine", "src"))
-sys.path.insert(0, analysis_engine_path)
+if analysis_engine_path not in sys.path:
+    sys.path.insert(0, analysis_engine_path)
 
 router = APIRouter(prefix="/api/v1/analyze", tags=["analyze"])
+
+
+def get_categorizers():
+    """Get categorizers with lazy import."""
+    from analyzer.categorizer import PainPointCategorizer, FeatureRequestCategorizer, UrgentCategorizer
+    return PainPointCategorizer(), FeatureRequestCategorizer(), UrgentCategorizer()
 
 
 # Schemas
@@ -57,6 +64,9 @@ def analyze_feedback(
         # Import analysis engine
         from analyzer import FeedbackAnalyzer, FeedbackInput, FeedbackItem as AnalyzerFeedbackItem
         from analyzer.sentiment import SentimentAnalyzer
+
+        # Initialize categorizers (lazy import)
+        pain_point_categorizer, feature_request_categorizer, urgent_categorizer = get_categorizers()
 
         # Prepare data for analyzer
         analyzer_items = [
@@ -103,6 +113,32 @@ def analyze_feedback(
                     if item_id in feature.examples:
                         item.extracted_issue = feature.feature
                         break
+
+            # Categorize based on sentiment
+            if item.sentiment_label == 'negative':
+                # Categorize as pain point
+                pain_result = pain_point_categorizer.categorize(item.text)
+                item.pain_point_category = pain_result.category
+                item.pain_point_severity = pain_result.level
+                item.pain_point_text = pain_result.text
+                item.categorization_confidence = pain_result.confidence
+
+            elif item.sentiment_label == 'positive':
+                # Categorize as feature request
+                feature_result = feature_request_categorizer.categorize(item.text)
+                item.feature_request_category = feature_result.category
+                item.feature_request_priority = feature_result.level
+                item.feature_request_text = feature_result.text
+                item.categorization_confidence = feature_result.confidence
+
+            # If urgent, also categorize urgent type
+            if item.is_urgent:
+                urgent_result = urgent_categorizer.categorize(item.text, item.sentiment_score or 0.0)
+                item.urgent_category = urgent_result.category
+                item.urgent_response_time = urgent_result.level
+                # Update confidence to be the higher of the two
+                if item.categorization_confidence is None or urgent_result.confidence > item.categorization_confidence:
+                    item.categorization_confidence = urgent_result.confidence
 
         db.commit()
 

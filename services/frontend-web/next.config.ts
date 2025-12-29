@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Silence the multiple lockfile warning
 };
 
 export default nextConfig;

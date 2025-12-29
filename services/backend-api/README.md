@@ -24,12 +24,48 @@ FastAPI backend that provides:
 - **Auth**: JWT (python-jose), OAuth (Google)
 - **Validation**: Pydantic 2.0
 - **Migrations**: Alembic
+- **Background Jobs**: Celery + Redis Streams
 - **Cache**: Redis (sessions, rate limits)
 - **Billing**: Stripe API
 
 ---
 
 ## Quick Start
+
+### Option 1: Start All Services (Recommended)
+
+From the project root directory:
+
+```bash
+./start-all.sh
+```
+
+This starts all services in a tmux session:
+- Redis (port 6379)
+- Celery Worker (background processing)
+- Backend API (port 8000)
+- Frontend (port 3000)
+
+### Option 2: Start Services Individually
+
+```bash
+# Terminal 1: Start Redis
+redis-server
+
+# Terminal 2: Start Celery worker
+cd services/worker-service
+./start.sh
+
+# Terminal 3: Start Backend API
+cd services/backend-api
+./start.sh
+
+# Terminal 4: Start Frontend
+cd services/frontend-web
+./start.sh
+```
+
+### First-Time Setup
 
 ```bash
 # Install dependencies
@@ -40,13 +76,9 @@ pip install -r requirements.txt
 # Set up database
 createdb customer_feedback_saas
 alembic upgrade head
-
-# Run server
-uvicorn src.api.main:app --reload --port 8000
-
-# Visit API docs
-open http://localhost:8000/docs
 ```
+
+**Prerequisites**: Redis and Celery worker must be running for feedback analysis to work.
 
 ---
 
@@ -182,9 +214,19 @@ async def create_feedback(...):
 ## Environment Variables
 
 ```bash
+# Database
 DATABASE_URL=postgresql://user:pass@localhost/customer_feedback_saas
-REDIS_URL=redis://localhost:6379
+
+# Redis (required for Celery + caching)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+CELERY_BROKER_DB=0    # Redis DB 0 for Celery queue
+
+# Authentication
 JWT_SECRET=your-secret-key-here
+
+# Integrations (Month 2+)
 STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 GOOGLE_CLIENT_ID=...

@@ -63,7 +63,10 @@ Open Source              Product-Market Fit            Enterprise Ready
 #### Week 5-6: File Upload & Processing
 - [ ] Drag-and-drop file upload (CSV, JSON, Excel)
 - [ ] File validation and parsing
-- [ ] Background job queue (Celery/Redis)
+- [ ] Background job queue (Celery + Redis Streams)
+  - Single Redis instance for queue + cache (scales to 50+ customers)
+  - Logical DB separation (DB0: queue, DB1: sessions, DB2: cache, DB3: rate limits)
+  - Migration path: RabbitMQ if advanced routing needed, Kafka for event streaming
 - [ ] Analysis integration (connect existing engine)
 - [ ] Progress indicators (upload → processing → complete)
 - [ ] Error handling and user feedback
@@ -306,8 +309,8 @@ Open Source              Product-Market Fit            Enterprise Ready
 │ Frontend: React/Next.js + TypeScript            │
 │ Backend:  FastAPI + Python (existing engine)   │
 │ Database: PostgreSQL (multi-tenant)            │
-│ Cache:    Redis (sessions, jobs, cache)        │
-│ Queue:    Celery (background jobs)             │
+│ Cache:    Redis (sessions, cache, rate limits) │
+│ Queue:    Celery + Redis Streams (single Redis)│
 │ Auth:     NextAuth.js / Auth0                   │
 │ Billing:  Stripe                                │
 │ Email:    SendGrid / AWS SES                    │
