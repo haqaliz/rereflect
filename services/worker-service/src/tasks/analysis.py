@@ -3,15 +3,10 @@ Analysis tasks for processing customer feedback.
 Migrated from APScheduler to Celery for distributed processing.
 """
 
-import sys
-import os
 import logging
 from typing import List, Optional
 
 from celery import shared_task
-
-# Add analysis-engine to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../analysis-engine/src")))
 
 from src.database import get_db_session
 from src.config import settings

@@ -1,23 +1,42 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import auth, organizations, feedback, dashboard, analyze
+from src.seed import seed_admin_user
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan - runs on startup and shutdown."""
+    # Startup: seed admin user
+    try:
+        seed_admin_user()
+    except Exception as e:
+        logger.warning(f"Could not seed admin user: {e}")
+    yield
+    # Shutdown: cleanup if needed
+
+
 app = FastAPI(
     title="Customer Feedback Analyzer API",
     version="1.0.0",
     description="Multi-tenant SaaS API for customer feedback analysis",
+    lifespan=lifespan,
 )
 
-# CORS
+# CORS - configurable via environment variable
+cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+cors_origins = [origin.strip() for origin in cors_origins_env.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Frontend URL
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

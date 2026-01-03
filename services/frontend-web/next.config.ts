@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Silence the multiple lockfile warning
+  // Enable standalone output for Docker deployments
+  output: "standalone",
 };
 
 export default nextConfig;

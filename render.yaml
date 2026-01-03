@@ -1,0 +1,112 @@
+# Render Blueprint - Infrastructure as Code
+# Deploy with: Connect repo to Render, it auto-detects this file
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # ===========================================
+  # Backend API (FastAPI)
+  # ===========================================
+  - type: web
+    name: rereflect-api
+    runtime: python
+    region: oregon
+    plan: starter  # $7/mo - upgrade to "standard" for production
+    rootDir: services/backend-api
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rereflect-db
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: rereflect-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: rereflect-redis
+          property: port
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false  # Set manually after frontend deploys
+      - key: ADMIN_EMAIL
+        sync: false  # Set your admin email
+      - key: ADMIN_PASSWORD
+        sync: false  # Set your admin password
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+
+  # ===========================================
+  # Celery Worker (Background Jobs)
+  # ===========================================
+  - type: worker
+    name: rereflect-worker
+    runtime: python
+    region: oregon
+    plan: starter  # $7/mo
+    rootDir: services/worker-service
+    buildCommand: |
+      pip install -r requirements.txt
+      python -c "import nltk; nltk.download('vader_lexicon', quiet=True); nltk.download('punkt', quiet=True)"
+    startCommand: celery -A src.celery_app worker --beat --loglevel=info
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rereflect-db
+          property: connectionString
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: rereflect-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: rereflect-redis
+          property: port
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+
+  # ===========================================
+  # Frontend (Next.js)
+  # ===========================================
+  - type: web
+    name: rereflect-frontend
+    runtime: node
+    region: oregon
+    plan: starter  # $7/mo
+    rootDir: services/frontend-web
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        sync: false  # Set to API URL after it deploys
+      - key: NODE_VERSION
+        value: "20"
+
+  # ===========================================
+  # Redis (Celery Broker + Cache)
+  # ===========================================
+  - type: redis
+    name: rereflect-redis
+    region: oregon
+    plan: starter  # $7/mo, 25MB
+    ipAllowList: []  # Only internal access
+    maxmemoryPolicy: allkeys-lru
+
+# ===========================================
+# PostgreSQL Database
+# ===========================================
+databases:
+  - name: rereflect-db
+    region: oregon
+    plan: starter  # $7/mo, 1GB storage
+    databaseName: rereflect
+    user: rereflect
+    ipAllowList: []  # Only internal access

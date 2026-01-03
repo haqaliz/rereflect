@@ -1,0 +1,107 @@
+# Docker Compose for local development and testing
+# Usage: docker compose up -d
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: rereflect-postgres
+    environment:
+      POSTGRES_DB: customer_feedback_saas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # Use 5433 to avoid conflict with local PostgreSQL
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Celery broker + cache)
+  redis:
+    image: redis:7-alpine
+    container_name: rereflect-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./services/backend-api
+      dockerfile: Dockerfile
+    container_name: rereflect-backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customer_feedback_saas
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      CORS_ORIGINS: http://localhost:3000,http://frontend:3000
+      # Admin user credentials (created on first startup)
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery Worker (with Beat scheduler)
+  worker:
+    build:
+      context: ./services
+      dockerfile: worker-service/Dockerfile
+    container_name: rereflect-worker
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customer_feedback_saas
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    # Scale workers as needed: docker-compose up -d --scale worker=3
+    deploy:
+      replicas: 1
+
+  # Frontend (Next.js)
+  frontend:
+    build:
+      context: ./services/frontend-web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: rereflect-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: rereflect-network

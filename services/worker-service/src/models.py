@@ -6,7 +6,7 @@ Note: In production, these should be in a shared package.
 For now, we duplicate the essential models.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, Index, JSON
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Index, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -18,7 +18,9 @@ class FeedbackItem(Base):
     __tablename__ = "feedback_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    # Note: No ForeignKey here - worker doesn't need the Organization model
+    # The FK constraint exists in the actual database
+    organization_id = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
     source = Column(String, nullable=True)  # intercom, zendesk, manual, etc
     sentiment_score = Column(Float, nullable=True)
@@ -55,7 +57,9 @@ class Integration(Base):
     __tablename__ = "integrations"
 
     id = Column(Integer, primary_key=True, index=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
+    # Note: No ForeignKey here - worker doesn't need the Organization model
+    # The FK constraint exists in the actual database
+    organization_id = Column(Integer, nullable=False)
     type = Column(String, nullable=False)  # slack, intercom, zendesk
     config = Column(JSON, nullable=True)  # API keys, webhook URLs, etc.
     is_active = Column(Boolean, default=True)
