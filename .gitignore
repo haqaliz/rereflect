@@ -139,9 +139,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# ML/AI Models & Cache
-models/
-cache/
+# ML/AI Models & Cache (but NOT Python ORM models in src/models/)
+/models/
+/cache/
+infrastructure/models/
 *.pkl
 *.joblib
 *.h5
