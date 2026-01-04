@@ -1,0 +1,19 @@
+[Unit]
+Description=Rereflect GitHub Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/rereflect/deploy
+Environment=WEBHOOK_PORT=9000
+Environment=WEBHOOK_SECRET=CHANGE_THIS_SECRET
+Environment=DEPLOY_SCRIPT=/opt/rereflect/deploy/deploy.sh
+Environment=ALLOWED_BRANCHES=master,main
+Environment=LOG_FILE=/var/log/rereflect-webhook.log
+ExecStart=/usr/bin/python3 /opt/rereflect/deploy/webhook-server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
