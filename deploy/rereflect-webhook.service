@@ -1,19 +1,21 @@
 [Unit]
-Description=Rereflect GitHub Webhook Server
-After=network.target
+Description=Rereflect GitHub Webhook Listener
+After=network.target docker.service
+Wants=docker.service
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/opt/rereflect/deploy
+Environment=WEBHOOK_SECRET=
 Environment=WEBHOOK_PORT=9000
-Environment=WEBHOOK_SECRET=CHANGE_THIS_SECRET
-Environment=DEPLOY_SCRIPT=/opt/rereflect/deploy/deploy.sh
-Environment=ALLOWED_BRANCHES=master,main
-Environment=LOG_FILE=/var/log/rereflect-webhook.log
 ExecStart=/usr/bin/python3 /opt/rereflect/deploy/webhook-server.py
 Restart=always
 RestartSec=10
+
+# Logging
+StandardOutput=append:/opt/rereflect/deploy/webhook.log
+StandardError=append:/opt/rereflect/deploy/webhook.log
 
 [Install]
 WantedBy=multi-user.target

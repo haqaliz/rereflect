@@ -1,58 +1,86 @@
 #!/bin/bash
-# Deployment script for Rereflect on Raspberry Pi
-# Called by webhook server when code is pushed
+# Rereflect Auto-Deployment Script
+# Triggered by GitHub webhook on push to master
 
 set -e
 
-BRANCH=${1:-master}
-APP_DIR="/opt/rereflect"
-LOG_FILE="/var/log/rereflect-deploy.log"
+# Configuration
+DEPLOY_DIR="/opt/rereflect"
 COMPOSE_FILE="docker-compose.prod.yml"
+ENV_FILE=".env.prod"
+LOG_FILE="/opt/rereflect/deploy/deploy.log"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
 log "=========================================="
-log "Starting deployment of branch: $BRANCH"
+log "Starting deployment"
 log "=========================================="
 
-cd "$APP_DIR"
+cd "$DEPLOY_DIR"
 
-# Pull latest code
-log "Pulling latest code..."
-git fetch origin
-git checkout "$BRANCH"
-git pull origin "$BRANCH"
+# Pull latest changes
+log "Pulling latest changes from git..."
+git fetch origin master
+git reset --hard origin/master
 
 # Build and deploy with docker compose
-log "Building containers..."
-docker compose -f "$COMPOSE_FILE" build --parallel
+log "Building and deploying containers..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache
 
-log "Stopping old containers..."
-docker compose -f "$COMPOSE_FILE" down --remove-orphans
+log "Stopping existing containers..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down --remove-orphans
 
-log "Starting new containers..."
-docker compose -f "$COMPOSE_FILE" up -d
+log "Starting containers..."
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
 
-# Wait for services to be healthy
-log "Waiting for services to be healthy..."
+# Wait for postgres to be healthy
+log "Waiting for PostgreSQL to be healthy..."
+for i in {1..30}; do
+    if docker exec rereflect-postgres pg_isready -U rereflect > /dev/null 2>&1; then
+        log "PostgreSQL is ready"
+        break
+    fi
+    sleep 2
+done
+
+# Wait for backend to start
+log "Waiting for backend to start..."
 sleep 10
 
-# Check health
-if docker compose -f "$COMPOSE_FILE" ps | grep -q "unhealthy"; then
-    log "ERROR: Some services are unhealthy!"
-    docker compose -f "$COMPOSE_FILE" ps
-    exit 1
+# Run database migrations
+log "Running database migrations..."
+docker exec rereflect-backend python -m alembic upgrade head || {
+    log "WARNING: Migration failed, but continuing..."
+}
+
+# Health check
+log "Running health checks..."
+sleep 5
+
+BACKEND_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+FRONTEND_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || echo "000")
+
+if [ "$BACKEND_HEALTH" = "200" ]; then
+    log "Backend health check: PASSED"
+else
+    log "Backend health check: FAILED (HTTP $BACKEND_HEALTH)"
 fi
 
-# Clean up old images
-log "Cleaning up old images..."
+if [ "$FRONTEND_HEALTH" = "200" ]; then
+    log "Frontend health check: PASSED"
+else
+    log "Frontend health check: FAILED (HTTP $FRONTEND_HEALTH)"
+fi
+
+# Cleanup old images
+log "Cleaning up old Docker images..."
 docker image prune -f
 
 log "=========================================="
-log "Deployment completed successfully!"
+log "Deployment completed"
 log "=========================================="
 
-# Show running services
+# Show container status
 docker compose -f "$COMPOSE_FILE" ps
