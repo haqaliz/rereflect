@@ -1,247 +1,509 @@
 # Rereflect Deployment Guide
 
-## Render Deployment (Recommended)
+Complete guide for deploying Rereflect to a Raspberry Pi 4b with automated CI/CD, SSL, and domain setup.
 
-Render provides a simple, scalable platform with managed PostgreSQL and Redis.
+## Architecture Overview
 
-### Prerequisites
-
-1. GitHub repository with your code
-2. [Render account](https://render.com) (free to sign up)
-
-### Step-by-Step Deployment
-
-#### 1. Push to GitHub
-
-```bash
-git add .
-git commit -m "Add deployment configuration"
-git push origin main
+```
+                    ┌─────────────────────────────────────────────────────────┐
+                    │                    Raspberry Pi 4b                       │
+                    │                                                          │
+ GitHub ──webhook──▶│  ┌─────────┐    ┌─────────┐    ┌─────────────────────┐  │
+                    │  │ Nginx   │───▶│ Webhook │───▶│ Deploy Script       │  │
+                    │  │ :80/443 │    │ :9000   │    │ (pull/build/migrate)│  │
+                    │  └────┬────┘    └─────────┘    └─────────────────────┘  │
+                    │       │                                                  │
+ Users ────HTTPS───▶│       ▼                                                  │
+                    │  ┌─────────┐    ┌─────────┐    ┌─────────┐              │
+                    │  │Frontend │    │ Backend │    │ Worker  │              │
+                    │  │ :3000   │    │ :8000   │    │ Celery  │              │
+                    │  └─────────┘    └────┬────┘    └────┬────┘              │
+                    │                      │              │                    │
+                    │                 ┌────┴────┐   ┌────┴────┐               │
+                    │                 │Postgres │   │  Redis  │               │
+                    │                 │  :5432  │   │  :6379  │               │
+                    │                 └─────────┘   └─────────┘               │
+                    └─────────────────────────────────────────────────────────┘
 ```
 
-#### 2. Connect to Render
+## Prerequisites
 
-1. Go to [Render Dashboard](https://dashboard.render.com)
-2. Click **"New"** > **"Blueprint"**
-3. Connect your GitHub repository
-4. Select the repo containing `render.yaml`
-5. Click **"Apply"**
+### On Your Pi4b
+- Raspberry Pi 4b with 4GB+ RAM
+- Raspberry Pi OS (64-bit) or Ubuntu Server
+- Docker and Docker Compose installed
+- Git installed
+- SSH access configured
 
-Render will automatically create:
-- `rereflect-api` - Backend API (FastAPI)
-- `rereflect-worker` - Celery background worker
-- `rereflect-frontend` - Next.js frontend
-- `rereflect-redis` - Redis instance
-- `rereflect-db` - PostgreSQL database
-
-#### 3. Configure Environment Variables
-
-After initial deployment, update these in the Render dashboard:
-
-**rereflect-api:**
-```
-CORS_ORIGINS=https://rereflect-frontend.onrender.com
-```
-
-**rereflect-frontend:**
-```
-NEXT_PUBLIC_API_URL=https://rereflect-api.onrender.com
-```
-
-#### 4. Run Database Migrations
-
-SSH into the API service or use the Shell tab:
-
-```bash
-cd /opt/render/project/src
-alembic upgrade head
-```
-
-#### 5. Verify Deployment
-
-- Frontend: `https://rereflect-frontend.onrender.com`
-- API: `https://rereflect-api.onrender.com/docs`
-- Health: `https://rereflect-api.onrender.com/health`
+### Domain & Network
+- A domain name (e.g., `rereflect.yourdomain.com`)
+- DNS A record pointing to your Pi's public IP
+- Ports 80 and 443 forwarded to Pi (if behind NAT)
+- Or: Use Tailscale for private access
 
 ---
 
-## Estimated Costs (Render)
+## Initial Server Setup
 
-| Service | Plan | Cost/Month |
-|---------|------|------------|
-| API | Starter | $7 |
-| Worker | Starter | $7 |
-| Frontend | Starter | $7 |
-| Redis | Starter (25MB) | $7 |
-| PostgreSQL | Starter (1GB) | $7 |
-| **Total** | | **$35/mo** |
+### 1. Install Docker on Pi4b
 
-For production workloads, upgrade to Standard plans (~$100/mo total).
+```bash
+# SSH into your Pi
+ssh root@pi4b
+
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+
+# Add user to docker group (if not root)
+usermod -aG docker $USER
+
+# Install Docker Compose plugin
+apt-get update
+apt-get install -y docker-compose-plugin
+
+# Verify installation
+docker --version
+docker compose version
+```
+
+### 2. Clone the Repository
+
+```bash
+# Create deployment directory
+mkdir -p /opt/rereflect
+cd /opt
+
+# Clone the repository
+git clone https://github.com/haqaliz/rereflect.git
+cd rereflect
+```
+
+### 3. Create Environment File
+
+```bash
+cat > /opt/rereflect/.env.prod << 'ENVEOF'
+# Database
+POSTGRES_USER=rereflect
+POSTGRES_PASSWORD=YOUR_SECURE_DB_PASSWORD
+POSTGRES_DB=rereflect
+
+# Security
+JWT_SECRET=YOUR_SECURE_JWT_SECRET_MIN_32_CHARS
+
+# Admin user (created on first startup)
+ADMIN_EMAIL=your@email.com
+ADMIN_PASSWORD=your_secure_admin_password
+
+# URLs - Update with your domain
+NEXT_PUBLIC_API_URL=https://yourdomain.com
+CORS_ORIGINS=https://yourdomain.com
+
+# Webhook (will be set by setup script)
+WEBHOOK_SECRET=
+ENVEOF
+
+# Secure the file
+chmod 600 /opt/rereflect/.env.prod
+```
 
 ---
 
-## Local Docker Development
+## Domain & SSL Setup
 
-Test the full stack locally before deploying:
+### Option A: Public Domain with Let's Encrypt
+
+#### 1. Configure DNS
+
+Add an A record in your DNS provider:
+```
+Type: A
+Name: rereflect (or @ for root domain)
+Value: YOUR_PI_PUBLIC_IP
+TTL: 300
+```
+
+#### 2. Port Forwarding (if behind NAT)
+
+Forward these ports to your Pi's local IP:
+- Port 80 → Pi:80 (HTTP, for Let's Encrypt)
+- Port 443 → Pi:443 (HTTPS)
+
+#### 3. Run Setup Script
 
 ```bash
-# Start all services
-docker compose up -d
+cd /opt/rereflect
+./deploy/setup-server.sh yourdomain.com
+```
 
-# View logs
-docker compose logs -f
+The script will:
+- Install Nginx and Certbot
+- Request SSL certificate from Let's Encrypt
+- Configure Nginx as reverse proxy
+- Start the webhook listener service
+- Set up SSL auto-renewal
+
+**Save the webhook secret displayed at the end!**
+
+### Option B: Tailscale (Private Access)
+
+If using Tailscale for private access without public domain:
+
+```bash
+# Install Tailscale on Pi
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up
+
+# Get Tailscale IP
+tailscale ip -4  # e.g., 100.107.59.96
+
+# Update .env.prod with Tailscale IP
+sed -i 's|NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=http://100.107.59.96:8000|' /opt/rereflect/.env.prod
+sed -i 's|CORS_ORIGINS=.*|CORS_ORIGINS=http://100.107.59.96:3000|' /opt/rereflect/.env.prod
+```
+
+For Tailscale, you can skip Nginx/SSL and access directly:
+- Frontend: `http://TAILSCALE_IP:3000`
+- Backend: `http://TAILSCALE_IP:8000`
+
+---
+
+## GitHub Webhook Configuration
+
+### 1. Get Your Webhook Secret
+
+If you used the setup script, it displayed the secret. Otherwise, generate one:
+
+```bash
+# Generate a new secret
+WEBHOOK_SECRET=$(openssl rand -hex 32)
+echo "Webhook Secret: $WEBHOOK_SECRET"
+
+# Add to .env.prod
+echo "WEBHOOK_SECRET=$WEBHOOK_SECRET" >> /opt/rereflect/.env.prod
+```
+
+### 2. Configure GitHub Webhook
+
+Go to: `https://github.com/YOUR_USERNAME/rereflect/settings/hooks/new`
+
+| Setting | Value |
+|---------|-------|
+| **Payload URL** | `https://yourdomain.com/webhook` |
+| **Content type** | `application/json` |
+| **Secret** | Your webhook secret from step 1 |
+| **SSL verification** | Enable (if using SSL) |
+| **Events** | ☑ Just the push event |
+| **Active** | ☑ Checked |
+
+Click **Add webhook**
+
+### 3. Test the Webhook
+
+GitHub will send a ping event. Check:
+```bash
+# View webhook logs
+tail -f /opt/rereflect/deploy/webhook.log
+
+# Or check systemd service
+journalctl -u rereflect-webhook -f
+```
+
+---
+
+## Manual Deployment
+
+If you need to deploy manually (without webhook):
+
+```bash
+ssh root@pi4b
+cd /opt/rereflect
+
+# Pull latest changes
+git pull origin master
+
+# Run deployment
+./deploy/deploy.sh
+```
+
+Or step by step:
+
+```bash
+# Pull changes
+git fetch origin master
+git reset --hard origin/master
+
+# Rebuild and restart
+docker compose -f docker-compose.prod.yml --env-file .env.prod build
+docker compose -f docker-compose.prod.yml --env-file .env.prod down
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
 # Run migrations
-docker compose exec backend alembic upgrade head
+docker exec rereflect-backend python -m alembic upgrade head
 
-# Stop all services
-docker compose down
-
-# Stop and remove volumes (reset data)
-docker compose down -v
+# Check status
+docker compose -f docker-compose.prod.yml ps
 ```
 
-### Service URLs (Local)
+---
 
-- Frontend: http://localhost:3000
-- API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-- PostgreSQL: localhost:5432
-- Redis: localhost:6379
+## Service Management
+
+### Webhook Service
+
+```bash
+# Status
+systemctl status rereflect-webhook
+
+# Restart
+systemctl restart rereflect-webhook
+
+# View logs
+journalctl -u rereflect-webhook -f
+
+# Stop/Start
+systemctl stop rereflect-webhook
+systemctl start rereflect-webhook
+```
+
+### Docker Containers
+
+```bash
+cd /opt/rereflect
+
+# View status
+docker compose -f docker-compose.prod.yml ps
+
+# View logs
+docker compose -f docker-compose.prod.yml logs -f
+docker compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml logs -f frontend
+
+# Restart all
+docker compose -f docker-compose.prod.yml restart
+
+# Restart specific service
+docker compose -f docker-compose.prod.yml restart backend
+
+# Stop all
+docker compose -f docker-compose.prod.yml down
+
+# Start all
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+```
+
+### Nginx
+
+```bash
+# Test config
+nginx -t
+
+# Reload
+systemctl reload nginx
+
+# View logs
+tail -f /var/log/nginx/access.log
+tail -f /var/log/nginx/error.log
+```
 
 ---
 
-## Scaling on Render
+## SSL Certificate Management
 
-### Horizontal Scaling
+### Check Certificate Status
 
-1. Go to service settings
-2. Increase instance count (API, Worker)
-3. Render handles load balancing automatically
+```bash
+certbot certificates
+```
 
-### Vertical Scaling
+### Manual Renewal
 
-Upgrade plans for more resources:
+```bash
+certbot renew
+systemctl reload nginx
+```
 
-| Plan | CPU | RAM | Best For |
-|------|-----|-----|----------|
-| Starter | 0.5 | 512MB | Development |
-| Standard | 1 | 2GB | Production |
-| Pro | 2 | 4GB | High traffic |
+### Auto-Renewal (set up by setup script)
 
-### Worker Scaling
+```bash
+# View cron job
+crontab -l | grep certbot
 
-For high feedback volume, scale workers:
-
-1. Create additional worker services from the same Dockerfile
-2. Remove `--beat` from extra workers (only one Beat scheduler needed)
-
----
-
-## Custom Domain
-
-1. Go to service settings > **Custom Domains**
-2. Add your domain (e.g., `app.rereflect.io`)
-3. Add DNS records as instructed
-4. Render provides free SSL
-
-Update `CORS_ORIGINS` and `NEXT_PUBLIC_API_URL` with custom domains.
-
----
-
-## Environment Variables Reference
-
-### Backend API
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://...` |
-| `REDIS_HOST` | Redis hostname | `rereflect-redis` |
-| `REDIS_PORT` | Redis port | `6379` |
-| `JWT_SECRET` | Secret for JWT tokens | (auto-generated) |
-| `CORS_ORIGINS` | Allowed origins (comma-separated) | `https://app.rereflect.io` |
-
-### Worker Service
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://...` |
-| `REDIS_HOST` | Redis hostname | `rereflect-redis` |
-| `REDIS_PORT` | Redis port | `6379` |
-
-### Frontend
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `NEXT_PUBLIC_API_URL` | Backend API URL | `https://rereflect-api.onrender.com` |
+# Should show:
+# 0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'
+```
 
 ---
 
 ## Troubleshooting
 
-### API not responding
+### Webhook Not Triggering
 
-```bash
-# Check health endpoint
-curl https://rereflect-api.onrender.com/health
+1. Check webhook service is running:
+   ```bash
+   systemctl status rereflect-webhook
+   ```
 
-# View logs in Render dashboard
-```
+2. Check webhook logs:
+   ```bash
+   tail -100 /opt/rereflect/deploy/webhook.log
+   ```
 
-### Worker not processing tasks
+3. Verify GitHub webhook delivery:
+   - Go to GitHub repo → Settings → Webhooks → Recent Deliveries
+   - Check for errors
 
-1. Check Redis connection in worker logs
-2. Verify `DATABASE_URL` is correct
-3. Ensure Beat scheduler is running (check for `celery beat` in logs)
+4. Test webhook manually:
+   ```bash
+   curl -X POST http://localhost:9000/webhook \
+     -H "Content-Type: application/json" \
+     -H "X-GitHub-Event: ping" \
+     -d '{"zen": "test"}'
+   ```
 
-### CORS errors
+### Container Issues
 
-1. Verify `CORS_ORIGINS` includes your frontend URL
-2. Include protocol: `https://...` not just domain
-3. Redeploy API after changing
+1. Check container status:
+   ```bash
+   docker compose -f docker-compose.prod.yml ps -a
+   ```
 
-### Database connection issues
+2. View container logs:
+   ```bash
+   docker logs rereflect-backend
+   docker logs rereflect-frontend
+   docker logs rereflect-worker
+   ```
 
-1. Check `DATABASE_URL` format
-2. Verify database is running (green status in Render)
-3. Check IP allowlist if using external connections
+3. Restart unhealthy container:
+   ```bash
+   docker compose -f docker-compose.prod.yml restart backend
+   ```
+
+### Database Issues
+
+1. Check PostgreSQL:
+   ```bash
+   docker exec rereflect-postgres pg_isready -U rereflect
+   ```
+
+2. Connect to database:
+   ```bash
+   docker exec -it rereflect-postgres psql -U rereflect -d rereflect
+   ```
+
+3. Run migrations manually:
+   ```bash
+   docker exec rereflect-backend python -m alembic upgrade head
+   ```
+
+### SSL Issues
+
+1. Check Nginx config:
+   ```bash
+   nginx -t
+   ```
+
+2. Check certificate:
+   ```bash
+   certbot certificates
+   ```
+
+3. Force renewal:
+   ```bash
+   certbot renew --force-renewal
+   systemctl reload nginx
+   ```
 
 ---
 
-## Monitoring
+## Backup & Restore
 
-### Render Dashboard
-
-- View logs, metrics, and alerts
-- Set up notifications for failures
-
-### Optional: Add Sentry
+### Backup Database
 
 ```bash
-# Add to requirements.txt
-sentry-sdk[fastapi]==1.x.x
+# Create backup
+docker exec rereflect-postgres pg_dump -U rereflect rereflect > backup_$(date +%Y%m%d).sql
 
-# Add to main.py
-import sentry_sdk
-sentry_sdk.init(dsn="your-sentry-dsn")
+# Compress
+gzip backup_$(date +%Y%m%d).sql
+```
+
+### Restore Database
+
+```bash
+# Stop backend and worker
+docker compose -f docker-compose.prod.yml stop backend worker
+
+# Restore
+gunzip backup_YYYYMMDD.sql.gz
+docker exec -i rereflect-postgres psql -U rereflect -d rereflect < backup_YYYYMMDD.sql
+
+# Start services
+docker compose -f docker-compose.prod.yml start backend worker
+```
+
+### Backup Volumes
+
+```bash
+# Create backup directory
+mkdir -p /opt/backups
+
+# Backup PostgreSQL data
+docker run --rm -v rereflect_postgres_data:/data -v /opt/backups:/backup alpine \
+  tar czf /backup/postgres_data_$(date +%Y%m%d).tar.gz /data
+
+# Backup Redis data
+docker run --rm -v rereflect_redis_data:/data -v /opt/backups:/backup alpine \
+  tar czf /backup/redis_data_$(date +%Y%m%d).tar.gz /data
 ```
 
 ---
 
-## Backup & Recovery
+## URLs Reference
 
-### Database Backups
+| Service | URL |
+|---------|-----|
+| Frontend | `https://yourdomain.com` |
+| Backend API | `https://yourdomain.com/api/` |
+| API Documentation | `https://yourdomain.com/docs` |
+| Health Check | `https://yourdomain.com/health` |
+| Webhook Endpoint | `https://yourdomain.com/webhook` |
 
-Render automatically backs up PostgreSQL daily (retained 7 days on Starter).
+---
 
-### Manual Backup
+## File Locations on Pi4b
+
+| Path | Description |
+|------|-------------|
+| `/opt/rereflect/` | Main application directory |
+| `/opt/rereflect/.env.prod` | Environment variables |
+| `/opt/rereflect/deploy/` | Deployment scripts |
+| `/opt/rereflect/deploy/deploy.log` | Deployment logs |
+| `/opt/rereflect/deploy/webhook.log` | Webhook service logs |
+| `/etc/nginx/sites-available/rereflect` | Nginx configuration |
+| `/etc/letsencrypt/live/yourdomain.com/` | SSL certificates |
+| `/etc/systemd/system/rereflect-webhook.service` | Webhook systemd service |
+
+---
+
+## Quick Reference Commands
 
 ```bash
-pg_dump $DATABASE_URL > backup.sql
-```
+# Deploy manually
+cd /opt/rereflect && ./deploy/deploy.sh
 
-### Restore
+# View all logs
+docker compose -f docker-compose.prod.yml logs -f
 
-```bash
-psql $DATABASE_URL < backup.sql
+# Restart everything
+docker compose -f docker-compose.prod.yml restart
+
+# Check webhook
+systemctl status rereflect-webhook
+
+# Run migrations
+docker exec rereflect-backend python -m alembic upgrade head
+
+# Check SSL
+certbot certificates
 ```
