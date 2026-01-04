@@ -96,7 +96,7 @@ services:
   - type: redis
     name: rereflect-redis
     region: oregon
-    plan: starter  # $7/mo, 25MB
+    plan: free  # Free tier, 25MB - upgrade to "basic" for production
     ipAllowList: []  # Only internal access
     maxmemoryPolicy: allkeys-lru
 
@@ -106,7 +106,7 @@ services:
 databases:
   - name: rereflect-db
     region: oregon
-    plan: starter  # $7/mo, 1GB storage
+    plan: basic-256mb  # Flexible plan - upgrade for production
     databaseName: rereflect
     user: rereflect
     ipAllowList: []  # Only internal access
