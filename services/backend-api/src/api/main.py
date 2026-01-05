@@ -23,11 +23,15 @@ async def lifespan(app: FastAPI):
     # Shutdown: cleanup if needed
 
 
+# Root path for reverse proxy (e.g., when served under /api)
+root_path = os.getenv("ROOT_PATH", "")
+
 app = FastAPI(
     title="Customer Feedback Analyzer API",
     version="1.0.0",
     description="Multi-tenant SaaS API for customer feedback analysis",
     lifespan=lifespan,
+    root_path=root_path,
 )
 
 # CORS - configurable via environment variable
