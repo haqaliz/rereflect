@@ -59,7 +59,7 @@ export interface DashboardData {
 
 export const dashboardAPI = {
   get: async (days = 30): Promise<DashboardData> => {
-    const response = await apiClient.get(`/api/v1/dashboard?days=${days}`);
+    const response = await apiClient.get(`/api/v1/dashboard/?days=${days}`);
     return response.data;
   },
 };

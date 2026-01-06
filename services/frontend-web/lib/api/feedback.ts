@@ -116,7 +116,7 @@ export const feedbackAPI = {
   },
 
   create: async (data: CreateFeedbackData): Promise<FeedbackItem> => {
-    const response = await apiClient.post('/api/v1/feedback', data);
+    const response = await apiClient.post('/api/v1/feedback/', data);
     return response.data;
   },
 
@@ -137,7 +137,7 @@ export const feedbackAPI = {
   },
 
   analyze: async (feedbackIds: number[]): Promise<{analyzed_count: number; message: string}> => {
-    const response = await apiClient.post('/api/v1/analyze', {
+    const response = await apiClient.post('/api/v1/analyze/', {
       feedback_ids: feedbackIds,
     });
     return response.data;
