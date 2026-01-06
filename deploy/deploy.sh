@@ -27,7 +27,7 @@ git reset --hard origin/master
 
 # Build and deploy with docker compose
 log "Building and deploying containers..."
-docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build --no-cache
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
 
 log "Stopping existing containers..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down --remove-orphans
