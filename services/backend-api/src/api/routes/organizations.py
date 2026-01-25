@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from src.database.session import get_db
@@ -12,15 +14,15 @@ router = APIRouter(prefix="/api/v1/organizations", tags=["organizations"])
 
 # Schemas
 class OrganizationUpdateRequest(BaseModel):
-    name: str | None = None
-    plan: str | None = None
+    name: Optional[str] = None
+    plan: Optional[str] = None
 
 
 class OrganizationResponse(BaseModel):
     id: int
     name: str
     plan: str
-    stripe_customer_id: str | None
+    stripe_customer_id: Optional[str]
     created_at: datetime
 
     class Config:

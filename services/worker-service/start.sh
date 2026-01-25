@@ -59,4 +59,4 @@ echo "Press Ctrl+C to stop the worker"
 echo ""
 
 # Start Celery worker with beat scheduler
-celery -A src.celery_app worker --beat --loglevel=info
+python3 -m celery -A src.celery_app worker --beat --loglevel=info

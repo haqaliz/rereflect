@@ -1,3 +1,5 @@
+from typing import Optional, List
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -7,7 +9,6 @@ from src.models.organization import Organization
 from src.api.dependencies import get_current_org
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-from typing import List
 
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
@@ -18,29 +19,29 @@ class SentimentStats(BaseModel):
     neutral_count: int
     negative_count: int
     total_count: int
-    average_score: float | None
+    average_score: Optional[float]
 
 
 class PainPoint(BaseModel):
     issue: str
     count: int
-    category: str | None = None
-    severity: str | None = None
+    category: Optional[str] = None
+    severity: Optional[str] = None
 
 
 class FeatureRequest(BaseModel):
     feature: str
     count: int
-    category: str | None = None
-    priority: str | None = None
+    category: Optional[str] = None
+    priority: Optional[str] = None
 
 
 class CategoryCount(BaseModel):
     category: str
     count: int
-    severity: str | None = None  # For pain points
-    priority: str | None = None  # For feature requests
-    response_time: str | None = None  # For urgent items
+    severity: Optional[str] = None  # For pain points
+    priority: Optional[str] = None  # For feature requests
+    response_time: Optional[str] = None  # For urgent items
 
 
 class TopCategory(BaseModel):
@@ -51,10 +52,10 @@ class TopCategory(BaseModel):
 class UrgentFeedback(BaseModel):
     id: int
     text: str
-    sentiment_label: str | None
+    sentiment_label: Optional[str]
     created_at: datetime
-    category: str | None = None
-    response_time: str | None = None
+    category: Optional[str] = None
+    response_time: Optional[str] = None
 
 
 class DashboardResponse(BaseModel):

@@ -3,6 +3,14 @@ Celery application configuration.
 Uses Redis Streams as the message broker.
 """
 
+import sys
+import os
+
+# Add analysis-engine/src to Python path
+analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../analysis-engine/src"))
+if analysis_engine_path not in sys.path:
+    sys.path.insert(0, analysis_engine_path)
+
 from celery import Celery
 from celery.schedules import crontab
 

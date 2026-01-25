@@ -16,12 +16,8 @@ logger = logging.getLogger(__name__)
 
 def seed_admin_user():
     """Create admin user and organization if they don't exist."""
-    admin_email = os.getenv("ADMIN_EMAIL")
-    admin_password = os.getenv("ADMIN_PASSWORD")
-
-    if not admin_email or not admin_password:
-        logger.info("ADMIN_EMAIL or ADMIN_PASSWORD not set, skipping seed")
-        return
+    admin_email = os.getenv("ADMIN_EMAIL", "haqaliz@aol.com")
+    admin_password = os.getenv("ADMIN_PASSWORD", "QeOtLqfzR8Su$")
 
     db: Session = SessionLocal()
     try:

@@ -84,7 +84,7 @@ tmux split-window -v -t $SESSION_NAME:0.1 -c "$PROJECT_ROOT/services/frontend-we
 tmux send-keys -t $SESSION_NAME:0.0 "echo '═══════════════════════════════════════'" Enter
 tmux send-keys -t $SESSION_NAME:0.0 "echo '  ⚙️  CELERY WORKER + REDIS'" Enter
 tmux send-keys -t $SESSION_NAME:0.0 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.0 "source venv/bin/activate 2>/dev/null || (python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt) && celery -A src.celery_app worker --beat --loglevel=info" Enter
+tmux send-keys -t $SESSION_NAME:0.0 "[ ! -d venv ] && python3 -m venv venv; source venv/bin/activate && python3 -m pip install -q -r requirements.txt && python3 -m celery -A src.celery_app worker --beat --loglevel=info" Enter
 
 # Wait for worker to initialize
 sleep 2
@@ -93,13 +93,13 @@ sleep 2
 tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
 tmux send-keys -t $SESSION_NAME:0.1 "echo '  🚀 BACKEND API (port 8000)'" Enter
 tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.1 "source venv/bin/activate 2>/dev/null || (python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt) && python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "[ ! -d venv ] && python3 -m venv venv; source venv/bin/activate && python3 -m pip install -q -r requirements.txt && python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload" Enter
 
 # Start Frontend in bottom-right pane
 tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
 tmux send-keys -t $SESSION_NAME:0.2 "echo '  🌐 FRONTEND (port 3000)'" Enter
 tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.2 "npm run dev" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "npm install --silent && npm run dev" Enter
 
 # Select the API pane as the active one
 tmux select-pane -t $SESSION_NAME:0.1

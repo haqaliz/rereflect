@@ -1,3 +1,5 @@
+from typing import Optional, List
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, cast, func
@@ -8,7 +10,6 @@ from src.models.organization import Organization
 from src.api.dependencies import get_current_org
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List
 import sys
 import os
 import csv
@@ -98,33 +99,33 @@ def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
 # Schemas
 class FeedbackCreateRequest(BaseModel):
     text: str
-    source: str | None = "manual"
+    source: Optional[str] = "manual"
 
 
 class FeedbackResponse(BaseModel):
     id: int
     organization_id: int
     text: str
-    source: str | None
-    sentiment_score: float | None
-    sentiment_label: str | None
-    extracted_issue: str | None
-    tags: list[str] | None
+    source: Optional[str]
+    sentiment_score: Optional[float]
+    sentiment_label: Optional[str]
+    extracted_issue: Optional[str]
+    tags: Optional[List[str]]
     is_urgent: bool
     created_at: datetime
     # Pain point categorization
-    pain_point_category: str | None
-    pain_point_severity: str | None
-    pain_point_text: str | None
+    pain_point_category: Optional[str]
+    pain_point_severity: Optional[str]
+    pain_point_text: Optional[str]
     # Feature request categorization
-    feature_request_category: str | None
-    feature_request_priority: str | None
-    feature_request_text: str | None
+    feature_request_category: Optional[str]
+    feature_request_priority: Optional[str]
+    feature_request_text: Optional[str]
     # Urgent categorization
-    urgent_category: str | None
-    urgent_response_time: str | None
+    urgent_category: Optional[str]
+    urgent_response_time: Optional[str]
     # Confidence score
-    categorization_confidence: float | None
+    categorization_confidence: Optional[float]
 
     class Config:
         from_attributes = True
@@ -175,19 +176,19 @@ def create_feedback(
 def list_feedback(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
-    search: str | None = Query(None, description="Search in feedback text and extracted issue"),
-    sentiment: str | None = Query(None, description="Filter by sentiment: positive, neutral, negative"),
-    source: str | None = Query(None, description="Filter by source"),
-    is_urgent: bool | None = Query(None, description="Filter by urgent status"),
-    tag: str | None = Query(None, description="Filter by tag"),
-    pain_point_category: str | None = Query(None, description="Filter by pain point category"),
-    pain_point_severity: str | None = Query(None, description="Filter by pain point severity"),
-    feature_request_category: str | None = Query(None, description="Filter by feature request category"),
-    feature_request_priority: str | None = Query(None, description="Filter by feature request priority"),
-    urgent_category: str | None = Query(None, description="Filter by urgent category"),
-    urgent_response_time: str | None = Query(None, description="Filter by urgent response time"),
-    sort_by: str | None = Query(None, description="Sort by field: created_at, sentiment_score, text"),
-    sort_order: str | None = Query("desc", description="Sort order: asc or desc"),
+    search: Optional[str] = Query(None, description="Search in feedback text and extracted issue"),
+    sentiment: Optional[str] = Query(None, description="Filter by sentiment: positive, neutral, negative"),
+    source: Optional[str] = Query(None, description="Filter by source"),
+    is_urgent: Optional[bool] = Query(None, description="Filter by urgent status"),
+    tag: Optional[str] = Query(None, description="Filter by tag"),
+    pain_point_category: Optional[str] = Query(None, description="Filter by pain point category"),
+    pain_point_severity: Optional[str] = Query(None, description="Filter by pain point severity"),
+    feature_request_category: Optional[str] = Query(None, description="Filter by feature request category"),
+    feature_request_priority: Optional[str] = Query(None, description="Filter by feature request priority"),
+    urgent_category: Optional[str] = Query(None, description="Filter by urgent category"),
+    urgent_response_time: Optional[str] = Query(None, description="Filter by urgent response time"),
+    sort_by: Optional[str] = Query(None, description="Sort by field: created_at, sentiment_score, text"),
+    sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
