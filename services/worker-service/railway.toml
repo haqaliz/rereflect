@@ -1,0 +1,13 @@
+# Railway configuration for Celery Worker Service
+# IMPORTANT: Set Root Directory to "services/" in Railway dashboard
+# This allows the Dockerfile to copy from both worker-service/ and analysis-engine/
+# Docs: https://docs.railway.com/guides/build-configuration
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "worker-service/Dockerfile"
+
+[deploy]
+# Worker services don't need health checks (no HTTP endpoint)
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
