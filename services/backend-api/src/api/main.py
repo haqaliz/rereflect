@@ -5,16 +5,36 @@ from src.api.routes import auth, organizations, feedback, dashboard, analyze
 from src.seed import seed_admin_user
 import logging
 import os
+import subprocess
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def run_migrations():
+    """Run Alembic migrations on startup."""
+    try:
+        logger.info("Running database migrations...")
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        )
+        if result.returncode == 0:
+            logger.info("Migrations completed successfully")
+        else:
+            logger.error(f"Migration failed: {result.stderr}")
+    except Exception as e:
+        logger.error(f"Could not run migrations: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - runs on startup and shutdown."""
-    # Startup: seed admin user
+    # Startup: run migrations then seed admin user
+    run_migrations()
     try:
         seed_admin_user()
     except Exception as e:
