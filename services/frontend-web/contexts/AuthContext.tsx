@@ -5,9 +5,9 @@ import { useRouter, usePathname } from 'next/navigation';
 import { authAPI } from '@/lib/api/auth';
 
 interface User {
-  id: string;
+  id: number;
   email: string;
-  organization_id: string;
+  organization_id: number;
   role: string;
 }
 
