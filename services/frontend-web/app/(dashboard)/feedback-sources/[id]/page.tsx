@@ -17,6 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   feedbackSourcesAPI,
   FeedbackSource,
@@ -380,7 +383,7 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
               <CardTitle>Webhook URL</CardTitle>
               <CardDescription>Send POST requests to this URL to create feedback</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="flex items-center gap-2">
                 <Input
                   readOnly
@@ -390,6 +393,56 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
                 <Button variant="outline" onClick={copyWebhookUrl}>
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                 </Button>
+              </div>
+
+              {/* Example code snippets */}
+              <div className="pt-2">
+                <p className="text-sm font-medium text-muted-foreground mb-3">Example requests:</p>
+                <Tabs defaultValue="curl" className="w-full">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="curl">cURL</TabsTrigger>
+                    <TabsTrigger value="nodejs">Node.js</TabsTrigger>
+                    <TabsTrigger value="python">Python</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="curl">
+                    <SyntaxHighlighter
+                      language="bash"
+                      style={oneDark}
+                      customStyle={{ borderRadius: '0.5rem', fontSize: '0.75rem', margin: 0 }}
+                    >
+{`curl -X POST "${source.webhook_url}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"text": "Your feedback message here"}'`}
+                    </SyntaxHighlighter>
+                  </TabsContent>
+                  <TabsContent value="nodejs">
+                    <SyntaxHighlighter
+                      language="javascript"
+                      style={oneDark}
+                      customStyle={{ borderRadius: '0.5rem', fontSize: '0.75rem', margin: 0 }}
+                    >
+{`fetch("${source.webhook_url}", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ text: "Your feedback message here" })
+});`}
+                    </SyntaxHighlighter>
+                  </TabsContent>
+                  <TabsContent value="python">
+                    <SyntaxHighlighter
+                      language="python"
+                      style={oneDark}
+                      customStyle={{ borderRadius: '0.5rem', fontSize: '0.75rem', margin: 0 }}
+                    >
+{`import requests
+
+requests.post(
+    "${source.webhook_url}",
+    json={"text": "Your feedback message here"}
+)`}
+                    </SyntaxHighlighter>
+                  </TabsContent>
+                </Tabs>
               </div>
             </CardContent>
           </Card>
