@@ -25,7 +25,8 @@ import {
   Trash2,
   Upload,
   FileText,
-  Inbox
+  Inbox,
+  RefreshCw
 } from 'lucide-react';
 import Link from 'next/link';
 import { FeedbackPageProvider, useFeedbackPage } from '@/contexts/FeedbackPageContext';
@@ -52,6 +53,8 @@ function FeedbackPageContent() {
   const [importResult, setImportResult] = useState<CSVImportResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   // Build filters object from current state
   const buildFilters = useCallback((search?: string): FeedbackFilters => {
@@ -65,7 +68,7 @@ function FeedbackPageContent() {
   }, [sentimentFilter, urgentFilter]);
 
   // Fetch feedback with filters
-  const fetchFeedback = useCallback(async (filters?: FeedbackFilters) => {
+  const fetchFeedback = useCallback(async (filters?: FeedbackFilters, isPolling = false) => {
     try {
       const token = localStorage.getItem('access_token');
       if (!token) {
@@ -75,6 +78,9 @@ function FeedbackPageContent() {
 
       const response = await feedbackAPI.list(1, 100, filters);
       setFeedbackList(response.items);
+      if (!isPolling) {
+        setLastUpdated(new Date());
+      }
     } catch (err) {
       console.error('Failed to load feedback:', err);
     }
@@ -84,10 +90,27 @@ function FeedbackPageContent() {
   useEffect(() => {
     const initialLoad = async () => {
       await fetchFeedback(buildFilters(searchQuery));
+      setLastUpdated(new Date());
       setLoading(false);
     };
     initialLoad();
   }, []);
+
+  // Polling for auto-refresh (every 30 seconds)
+  useEffect(() => {
+    if (loading) return;
+
+    pollingIntervalRef.current = setInterval(async () => {
+      await fetchFeedback(buildFilters(searchQuery), true);
+      setLastUpdated(new Date());
+    }, 30000);
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [loading, fetchFeedback, buildFilters, searchQuery]);
 
   // Debounced search - triggers backend query
   useEffect(() => {
@@ -244,7 +267,13 @@ function FeedbackPageContent() {
         <div className="mb-8 flex justify-between items-start">
           <div className="animate-fade-in">
             <h2 className="text-4xl font-bold text-foreground mb-2">Feedbacks</h2>
-            <p className="text-muted-foreground text-lg">View, analyze, and manage customer feedbacks</p>
+            <div className="flex items-center gap-3">
+              <p className="text-muted-foreground text-lg">View, analyze, and manage customer feedbacks</p>
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full">
+                <RefreshCw className="w-3 h-3 animate-spin" style={{ animationDuration: '3s' }} />
+                Auto-refresh
+              </span>
+            </div>
           </div>
           <div className="flex gap-3 animate-slide-up">
             <input
