@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.database.session import get_db
-from src.api.dependencies import get_current_org
+from src.api.dependencies import get_current_org, require_feature
 from src.models import Organization, FeedbackSource, FeedbackSourceEvent, Integration
 
 logger = logging.getLogger(__name__)
@@ -249,10 +249,45 @@ def create_feedback_source(
     db: Session = Depends(get_db),
 ):
     """Create a new feedback source."""
+    from src.config.plans import has_feature, get_plan_for_feature
+
     # Validate source type
     valid_types = ["slack", "webhook", "discord", "email"]
     if data.source_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid source type. Must be one of: {valid_types}")
+
+    # Feature gating based on source type
+    plan = current_org.plan or "free"
+
+    if data.source_type == "slack":
+        if not has_feature(plan, "slack_integration"):
+            required_plan = get_plan_for_feature("slack_integration")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "feature_not_available",
+                    "feature": "slack_integration",
+                    "current_plan": plan,
+                    "required_plan": required_plan,
+                    "message": f"Slack integration requires the {required_plan.title()} plan or higher.",
+                    "upgrade_url": "/settings/billing"
+                }
+            )
+
+    if data.source_type == "webhook":
+        if not has_feature(plan, "webhooks"):
+            required_plan = get_plan_for_feature("webhooks")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "feature_not_available",
+                    "feature": "webhooks",
+                    "current_plan": plan,
+                    "required_plan": required_plan,
+                    "message": f"Webhooks require the {required_plan.title()} plan or higher.",
+                    "upgrade_url": "/settings/billing"
+                }
+            )
 
     # Check if type is available
     unavailable_types = ["discord", "email"]

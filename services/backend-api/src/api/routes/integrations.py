@@ -18,7 +18,7 @@ from pydantic import BaseModel, HttpUrl, field_validator
 from src.database.session import get_db
 from src.models.integration import Integration, SlackAlertLog
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org
+from src.api.dependencies import get_current_org, require_feature
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +246,7 @@ def list_integrations(
     )
 
 
-@router.post("/slack/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/slack/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_feature("slack_integration"))])
 def create_slack_webhook(
     data: SlackWebhookCreateRequest,
     current_org: Organization = Depends(get_current_org),
@@ -395,7 +395,7 @@ def delete_integration(
     return None
 
 
-@router.post("/slack/test", response_model=SlackTestResponse)
+@router.post("/slack/test", response_model=SlackTestResponse, dependencies=[Depends(require_feature("slack_integration"))])
 def test_slack_integration(
     data: SlackTestRequest,
     current_org: Organization = Depends(get_current_org),
@@ -554,7 +554,7 @@ class OAuthCallbackResponse(BaseModel):
     message: str
 
 
-@router.get("/slack/oauth/connect", response_model=OAuthConnectResponse)
+@router.get("/slack/oauth/connect", response_model=OAuthConnectResponse, dependencies=[Depends(require_feature("slack_integration"))])
 def slack_oauth_connect(
     name: str = Query(..., description="Name for the integration"),
     current_org: Organization = Depends(get_current_org),

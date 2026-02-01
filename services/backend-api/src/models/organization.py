@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
 
@@ -8,9 +9,17 @@ class Organization(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    plan = Column(String, nullable=False, default="free")  # free, starter, professional, business, enterprise
+    plan = Column(String, nullable=False, default="free")  # free, pro, business, enterprise
     stripe_customer_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Seat tracking
+    seat_count = Column(Integer, default=1, nullable=False)
+    max_seats = Column(Integer, nullable=True)  # NULL = unlimited (enterprise)
+
+    # Relationships
+    subscription = relationship("Subscription", back_populates="organization", uselist=False)
+    usage_records = relationship("UsageRecord", back_populates="organization")
 
     def __repr__(self):
         return f"<Organization(id={self.id}, name='{self.name}', plan='{self.plan}')>"

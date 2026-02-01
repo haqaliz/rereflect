@@ -6,6 +6,8 @@ from .integration import Integration, SlackAlertLog
 from .feedback_source import FeedbackSource
 from .feedback_source_event import FeedbackSourceEvent
 from .pending_feedback import PendingFeedback
+from .subscription import Subscription
+from .usage import UsageRecord
 
 __all__ = [
     "Base",
@@ -17,4 +19,6 @@ __all__ = [
     "FeedbackSource",
     "FeedbackSourceEvent",
     "PendingFeedback",
+    "Subscription",
+    "UsageRecord",
 ]

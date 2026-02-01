@@ -26,6 +26,7 @@ import {
   Bell,
   Slack,
   ChevronRight,
+  CreditCard,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -240,10 +241,13 @@ export default function SettingsPage() {
                 <label className="block text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   Subscription Plan
                 </label>
-                <div className="flex items-center space-x-2">
+                <Link
+                  href="/settings/billing"
+                  className="inline-flex items-center space-x-2 group"
+                >
                   <Crown className="w-5 h-5 text-primary" />
                   <span
-                    className="px-3 py-1 rounded-lg text-sm font-bold capitalize"
+                    className="px-3 py-1 rounded-lg text-sm font-bold capitalize group-hover:opacity-80 transition-opacity"
                     style={{
                       backgroundColor: 'color-mix(in oklch, var(--primary) 15%, transparent)',
                       color: 'var(--primary)'
@@ -251,7 +255,8 @@ export default function SettingsPage() {
                   >
                     {org?.plan}
                   </span>
-                </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                </Link>
               </div>
 
               {/* Created At */}
@@ -274,8 +279,41 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Integrations */}
+        {/* Billing */}
         <Card className="animate-slide-up stagger-3">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-secondary rounded-lg">
+                <CreditCard className="w-5 h-5 text-primary" />
+              </div>
+              <CardTitle>Billing & Subscription</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <Link
+              href="/settings/billing"
+              className="flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary/50 transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-secondary rounded-lg">
+                  <Crown className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                    Manage Subscription
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    View plans, usage, and manage your billing
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Integrations */}
+        <Card className="animate-slide-up stagger-4">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">
@@ -308,7 +346,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Usage Statistics */}
-        <div className="animate-slide-up stagger-4">
+        <div className="animate-slide-up stagger-5">
           <h3 className="text-xl font-bold text-foreground mb-4 flex items-center space-x-2">
             <span>Usage Statistics</span>
           </h3>
@@ -329,7 +367,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Account Information */}
-        <Card className="animate-slide-up stagger-5">
+        <Card className="animate-slide-up stagger-6">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">

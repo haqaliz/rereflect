@@ -15,3 +15,6 @@ python-dotenv==1.0.0
 # Background processing (Celery + Redis)
 celery[redis]==5.3.6         # Distributed task queue
 redis==5.0.1                 # Redis client for Celery broker
+
+# Billing (Stripe)
+stripe==8.0.0                # Stripe Python SDK

@@ -12,6 +12,8 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { usePathname } from 'next/navigation';
+import { TrialBanner } from '@/components/TrialBanner';
+import { UsageWarning } from '@/components/UsageWarning';
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -23,6 +25,8 @@ const pageTitles: Record<string, string> = {
   '/feature-requests': 'Feature Requests',
   '/urgent-feedbacks': 'Urgent Feedbacks',
   '/settings': 'Settings',
+  '/settings/billing': 'Billing',
+  '/settings/integrations': 'Integrations',
 };
 
 export default function DashboardLayout({
@@ -76,6 +80,11 @@ export default function DashboardLayout({
           </Breadcrumb>
         </header>
         <div className="flex-1 overflow-auto">
+          {/* Billing banners */}
+          <div className="px-4 pt-4 space-y-2">
+            <TrialBanner />
+            <UsageWarning />
+          </div>
           {children}
         </div>
       </SidebarInset>

@@ -544,32 +544,36 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {/* Starter Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border border-border p-8 transition-all duration-300 hover:shadow-lg hover:border-border/80">
-              <div className="mb-6">
-                <h3 className="text-xl font-bold text-foreground mb-2">Starter</h3>
-                <p className="text-muted-foreground text-sm">Perfect for small teams getting started</p>
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
+            {/* Free Plan */}
+            <div className="pricing-card relative bg-card rounded-3xl border border-border p-6 transition-all duration-300 hover:shadow-lg hover:border-border/80">
+              <div className="mb-5">
+                <h3 className="text-xl font-bold text-foreground mb-2">Free</h3>
+                <p className="text-muted-foreground text-sm">For individuals getting started</p>
               </div>
-              <div className="mb-6">
+              <div className="mb-5">
                 <span className="text-4xl font-bold text-foreground">$0</span>
                 <span className="text-muted-foreground">/month</span>
               </div>
-              <ul className="space-y-3 mb-8">
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>Up to 500 feedback/month</span>
+              <ul className="space-y-2.5 mb-6">
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>250 feedback/month</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>2 team members</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>Basic sentiment analysis</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>1 team member</span>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>CSV import</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>Email support</span>
                 </li>
               </ul>
@@ -581,83 +585,122 @@ export default function Home() {
             </div>
 
             {/* Pro Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border-2 border-primary p-8 transition-all duration-300 hover:shadow-xl hover:shadow-primary/20 scale-[1.02]">
+            <div className="pricing-card relative bg-card rounded-3xl border-2 border-primary p-6 transition-all duration-300 hover:shadow-xl hover:shadow-primary/20 scale-[1.02]">
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-primary to-chart-5 rounded-full">
                 <span className="text-xs font-semibold text-white">Most Popular</span>
               </div>
-              <div className="mb-6">
+              <div className="mb-5">
                 <h3 className="text-xl font-bold text-foreground mb-2">Pro</h3>
-                <p className="text-muted-foreground text-sm">For growing teams with more needs</p>
+                <p className="text-muted-foreground text-sm">For growing teams</p>
               </div>
-              <div className="mb-6">
-                <span className="text-4xl font-bold text-foreground">$49</span>
+              <div className="mb-5">
+                <span className="text-4xl font-bold text-foreground">$29</span>
                 <span className="text-muted-foreground">/month</span>
               </div>
-              <ul className="space-y-3 mb-8">
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>Up to 5,000 feedback/month</span>
+              <ul className="space-y-2.5 mb-6">
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>2,500 feedback/month</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>Advanced AI analysis</span>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>10 team members</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>Up to 10 team members</span>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>Slack integration</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>Webhooks</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>Priority support</span>
-                </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>Custom integrations</span>
                 </li>
               </ul>
               <Link href="/signup" className="block">
                 <button className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-primary to-chart-5 text-white font-semibold hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300">
-                  Start Free Trial
+                  Start 14-Day Trial
+                </button>
+              </Link>
+            </div>
+
+            {/* Business Plan */}
+            <div className="pricing-card relative bg-card rounded-3xl border border-border p-6 transition-all duration-300 hover:shadow-lg hover:border-border/80">
+              <div className="mb-5">
+                <h3 className="text-xl font-bold text-foreground mb-2">Business</h3>
+                <p className="text-muted-foreground text-sm">For scaling companies</p>
+              </div>
+              <div className="mb-5">
+                <span className="text-4xl font-bold text-foreground">$99</span>
+                <span className="text-muted-foreground">/month</span>
+              </div>
+              <ul className="space-y-2.5 mb-6">
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>25,000 feedback/month</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>25 team members</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>API access</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>Advanced analytics</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>Custom categories</span>
+                </li>
+              </ul>
+              <Link href="/signup" className="block">
+                <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
+                  Start 14-Day Trial
                 </button>
               </Link>
             </div>
 
             {/* Enterprise Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border border-border p-8 transition-all duration-300 hover:shadow-lg hover:border-border/80">
-              <div className="mb-6">
+            <div className="pricing-card relative bg-card rounded-3xl border border-border p-6 transition-all duration-300 hover:shadow-lg hover:border-border/80">
+              <div className="mb-5">
                 <h3 className="text-xl font-bold text-foreground mb-2">Enterprise</h3>
-                <p className="text-muted-foreground text-sm">For large organizations with custom needs</p>
+                <p className="text-muted-foreground text-sm">Custom solutions</p>
               </div>
-              <div className="mb-6">
+              <div className="mb-5">
                 <span className="text-4xl font-bold text-foreground">Custom</span>
               </div>
-              <ul className="space-y-3 mb-8">
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+              <ul className="space-y-2.5 mb-6">
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>Unlimited feedback</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
-                  <span>Custom AI models</span>
-                </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>Unlimited team members</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
+                  <span>SSO / SAML</span>
+                </li>
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>Dedicated support</span>
                 </li>
-                <li className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Check className="w-5 h-5 text-success-text shrink-0" />
+                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
+                  <Check className="w-4 h-4 text-success-text shrink-0" />
                   <span>SLA guarantee</span>
                 </li>
               </ul>
-              <Link href="/signup" className="block">
+              <a href="mailto:sales@rereflect.com" className="block">
                 <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
                   Contact Sales
                 </button>
-              </Link>
+              </a>
             </div>
           </div>
         </div>

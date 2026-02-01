@@ -8,7 +8,8 @@ from src.database.session import get_db
 from src.models.feedback import FeedbackItem
 from src.models.feedback_source import FeedbackSource
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org
+from src.api.dependencies import get_current_org, check_feedback_limit, track_feedback_usage, get_current_usage
+from src.models.usage import UsageRecord
 from pydantic import BaseModel
 from datetime import datetime
 import sys
@@ -156,10 +157,13 @@ class CSVImportResponse(BaseModel):
 def create_feedback(
     data: FeedbackCreateRequest,
     current_org: Organization = Depends(get_current_org),
+    usage: UsageRecord = Depends(get_current_usage),
+    _limit_check: bool = Depends(check_feedback_limit),
     db: Session = Depends(get_db)
 ):
     """Create a new feedback item. Celery worker will analyze it automatically."""
     from src.background import queue_analyze_feedback
+    from src.config.plans import get_feedback_limit
 
     feedback = FeedbackItem(
         organization_id=current_org.id,
@@ -170,6 +174,17 @@ def create_feedback(
     db.add(feedback)
     db.commit()
     db.refresh(feedback)
+
+    # Track usage
+    plan = current_org.plan or "free"
+    limit = get_feedback_limit(plan)
+    if limit is None:
+        usage.feedback_count += 1
+    elif usage.feedback_count < limit:
+        usage.feedback_count += 1
+    else:
+        usage.overage_feedback += 1
+    db.commit()
 
     # Queue for analysis via Celery worker
     queue_analyze_feedback(feedback.id)
@@ -473,6 +488,7 @@ def update_feedback(
 async def import_csv(
     file: UploadFile = File(...),
     current_org: Organization = Depends(get_current_org),
+    usage: UsageRecord = Depends(get_current_usage),
     db: Session = Depends(get_db)
 ):
     """
@@ -482,12 +498,32 @@ async def import_csv(
     Common column names detected: feedback_text, text, feedback, comment, message, description
     Optional columns: source, customer_email, date, rating
     """
+    from src.config.plans import get_plan, get_feedback_limit
 
     # Validate file type
     if not file.filename.endswith('.csv'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File must be a CSV file"
+        )
+
+    # Check plan limits before importing
+    plan = current_org.plan or "free"
+    plan_config = get_plan(plan)
+    limit = get_feedback_limit(plan)
+    total_used = usage.feedback_count + usage.overage_feedback
+
+    # For free plan, check if there's remaining capacity
+    if limit is not None and not plan_config.get("overage_enabled") and total_used >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "feedback_limit_exceeded",
+                "limit": limit,
+                "used": total_used,
+                "message": f"You've reached your monthly limit of {limit} feedback items. Upgrade to continue.",
+                "upgrade_url": "/settings/billing"
+            }
         )
 
     # Read CSV file
@@ -548,6 +584,13 @@ async def import_csv(
             if source_column and row.get(source_column):
                 source = row.get(source_column).strip()
 
+            # Check if we can still import (for free plan)
+            if limit is not None and not plan_config.get("overage_enabled"):
+                if total_used + imported_count >= limit:
+                    errors.append(f"Row {row_num}: Feedback limit reached ({limit})")
+                    failed_count += 1
+                    continue
+
             # Create feedback item
             feedback = FeedbackItem(
                 organization_id=current_org.id,
@@ -559,6 +602,14 @@ async def import_csv(
             db.commit()
             db.refresh(feedback)
 
+            # Track usage
+            if limit is None:
+                usage.feedback_count += 1
+            elif usage.feedback_count < limit:
+                usage.feedback_count += 1
+            else:
+                usage.overage_feedback += 1
+
             # Note: Analysis will be done by background scheduler
             imported_count += 1
 
@@ -567,6 +618,9 @@ async def import_csv(
             errors.append(f"Row {row_num}: {str(e)}")
             db.rollback()
             continue
+
+    # Commit final usage tracking
+    db.commit()
 
     # Queue batch analysis via Celery worker
     from src.background import queue_analyze_batch
