@@ -260,6 +260,7 @@ def create_feedback_source(
         raise HTTPException(status_code=400, detail=f"Source type '{data.source_type}' is coming soon")
 
     # Validate integration for OAuth sources
+    integration = None
     if data.source_type == "slack":
         if not data.integration_id:
             raise HTTPException(status_code=400, detail="Slack sources require an integration_id")
@@ -273,8 +274,16 @@ def create_feedback_source(
         if not integration:
             raise HTTPException(status_code=400, detail="Integration not found or not a Slack integration")
 
-    # For webhook sources, generate a unique webhook_id
+    # Build provider_config
     provider_config = data.provider_config or {}
+
+    # For Slack sources, copy team_id from integration
+    if data.source_type == "slack" and integration:
+        integration_config = integration.config or {}
+        if integration_config.get("team_id"):
+            provider_config["team_id"] = integration_config["team_id"]
+        if integration_config.get("team_name"):
+            provider_config["team_name"] = integration_config["team_name"]
     if data.source_type == "webhook":
         webhook_id = str(uuid.uuid4())
         provider_config["webhook_id"] = webhook_id
