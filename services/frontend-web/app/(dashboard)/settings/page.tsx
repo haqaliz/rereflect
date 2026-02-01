@@ -22,8 +22,12 @@ import {
   Palette,
   Monitor,
   Sun,
-  Moon
+  Moon,
+  Bell,
+  Slack,
+  ChevronRight,
 } from 'lucide-react';
+import Link from 'next/link';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -270,8 +274,41 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Integrations */}
+        <Card className="animate-slide-up stagger-3">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-secondary rounded-lg">
+                <Bell className="w-5 h-5 text-primary" />
+              </div>
+              <CardTitle>Integrations</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <Link
+              href="/settings/integrations"
+              className="flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary/50 transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-secondary rounded-lg">
+                  <Slack className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                    Slack Integration
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    Receive feedback alerts in your Slack channels
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            </Link>
+          </CardContent>
+        </Card>
+
         {/* Usage Statistics */}
-        <div className="animate-slide-up stagger-3">
+        <div className="animate-slide-up stagger-4">
           <h3 className="text-xl font-bold text-foreground mb-4 flex items-center space-x-2">
             <span>Usage Statistics</span>
           </h3>
@@ -292,7 +329,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Account Information */}
-        <Card className="animate-slide-up stagger-4">
+        <Card className="animate-slide-up stagger-5">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">

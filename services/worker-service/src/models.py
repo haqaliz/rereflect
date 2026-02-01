@@ -6,7 +6,7 @@ Note: In production, these should be in a shared package.
 For now, we duplicate the essential models.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Index, JSON
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -53,19 +53,59 @@ class FeedbackItem(Base):
 
 
 class Integration(Base):
-    """Integration model for 3rd party connections."""
+    """Integration model for 3rd party connections (Slack, etc.)."""
     __tablename__ = "integrations"
 
     id = Column(Integer, primary_key=True, index=True)
     # Note: No ForeignKey here - worker doesn't need the Organization model
     # The FK constraint exists in the actual database
     organization_id = Column(Integer, nullable=False)
-    type = Column(String, nullable=False)  # slack, intercom, zendesk
-    config = Column(JSON, nullable=True)  # API keys, webhook URLs, etc.
+    type = Column(String(50), nullable=False)  # slack, intercom, zendesk
+    name = Column(String(255), nullable=True)
+    config = Column(JSON, nullable=True)  # {webhook_url, channel_id, channel_name}
+
+    # OAuth tokens (for Slack OAuth integration)
+    oauth_access_token = Column(Text, nullable=True)
+    oauth_refresh_token = Column(Text, nullable=True)
+    oauth_expires_at = Column(DateTime, nullable=True)
+
+    # Alert configuration
+    triggers = Column(JSON, nullable=True)  # ['urgent', 'negative', 'all', 'daily_digest', 'weekly_digest']
+    included_fields = Column(JSON, nullable=True)  # ['text', 'sentiment', 'pain_point_category', etc.]
+    digest_time = Column(Time, nullable=True)  # Time for daily/weekly digests
+    message_template = Column(Text, nullable=True)  # Custom message template with {{variables}}
+
+    # Status tracking
     is_active = Column(Boolean, default=True)
-    last_synced_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    error_count = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
         Index('ix_integration_org_type', 'organization_id', 'type'),
+        Index('ix_integration_active', 'is_active', 'type'),
+    )
+
+
+class SlackAlertLog(Base):
+    """Log of Slack alerts sent for tracking and debugging."""
+    __tablename__ = "slack_alert_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    integration_id = Column(Integer, nullable=False)
+    feedback_id = Column(Integer, nullable=True)  # NULL for digests
+
+    alert_type = Column(String(50), nullable=False)  # urgent, negative, digest, test
+    status = Column(String(20), nullable=False)  # sent, failed, pending
+
+    slack_response = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('ix_slack_alert_log_integration', 'integration_id', 'sent_at'),
     )
