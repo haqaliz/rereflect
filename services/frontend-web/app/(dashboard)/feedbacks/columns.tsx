@@ -13,7 +13,12 @@ import {
   Check,
   Edit,
   Trash2,
-  ArrowUpDown
+  ArrowUpDown,
+  Globe,
+  Hash,
+  Upload,
+  Webhook,
+  PenLine
 } from "lucide-react"
 import Link from "next/link"
 import { FeedbackItem } from "@/lib/api/feedback"
@@ -42,6 +47,36 @@ const getSentimentBadgeStyle = (sentiment: string) => {
       return getCategoryBadgeStyle('var(--chart-3)')
     default:
       return getCategoryBadgeStyle('var(--muted-foreground)')
+  }
+}
+
+const getSourceIcon = (source: string | null) => {
+  switch (source) {
+    case 'slack':
+      return <Hash className="w-3.5 h-3.5" />
+    case 'webhook':
+      return <Webhook className="w-3.5 h-3.5" />
+    case 'csv_import':
+      return <Upload className="w-3.5 h-3.5" />
+    case 'manual':
+      return <PenLine className="w-3.5 h-3.5" />
+    default:
+      return <Globe className="w-3.5 h-3.5" />
+  }
+}
+
+const getSourceLabel = (source: string | null) => {
+  switch (source) {
+    case 'slack':
+      return 'Slack'
+    case 'webhook':
+      return 'Webhook'
+    case 'csv_import':
+      return 'CSV Import'
+    case 'manual':
+      return 'Manual'
+    default:
+      return source || 'Unknown'
   }
 }
 
@@ -97,6 +132,33 @@ export const createColumns = (
     cell: ({ row }) => {
       const text = row.getValue("text") as string
       return <div className="max-w-md line-clamp-2 leading-relaxed">{text}</div>
+    },
+  },
+  {
+    id: "source_info",
+    header: "Source",
+    cell: ({ row }) => {
+      const item = row.original
+      const source = item.source
+      const sourceName = item.source_name
+      const metadata = item.source_metadata
+
+      // Build display: source type + name (if available) + channel (if Slack)
+      const channelName = metadata?.channel_name
+
+      return (
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-1.5 text-sm">
+            {getSourceIcon(source)}
+            <span className="font-medium">{getSourceLabel(source)}</span>
+          </div>
+          {(sourceName || channelName) && (
+            <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+              {sourceName || (channelName ? `#${channelName}` : null)}
+            </span>
+          )}
+        </div>
+      )
     },
   },
   {

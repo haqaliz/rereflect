@@ -1,10 +1,24 @@
 import apiClient from '../api-client';
 
+export interface SourceMetadata {
+  author_id?: string;
+  author_name?: string;
+  channel_id?: string;
+  channel_name?: string;
+  thread_ts?: string;
+  url?: string;
+  [key: string]: string | undefined;
+}
+
 export interface FeedbackItem {
   id: number;
   organization_id: number;
   text: string;
   source: string | null;
+  // Source tracking
+  source_id: number | null;
+  source_name: string | null;  // From FeedbackSource.name
+  source_metadata: SourceMetadata | null;
   sentiment_score: number | null;
   sentiment_label: string | null;
   extracted_issue: string | null;

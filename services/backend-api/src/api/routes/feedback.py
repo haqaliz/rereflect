@@ -6,6 +6,7 @@ from sqlalchemy import desc, asc, cast, func
 from sqlalchemy.dialects.postgresql import JSONB
 from src.database.session import get_db
 from src.models.feedback import FeedbackItem
+from src.models.feedback_source import FeedbackSource
 from src.models.organization import Organization
 from src.api.dependencies import get_current_org
 from pydantic import BaseModel
@@ -107,6 +108,10 @@ class FeedbackResponse(BaseModel):
     organization_id: int
     text: str
     source: Optional[str]
+    # Source tracking
+    source_id: Optional[int] = None
+    source_name: Optional[str] = None  # From FeedbackSource.name
+    source_metadata: Optional[dict] = None  # {author_name, channel_name, url, etc.}
     sentiment_score: Optional[float]
     sentiment_label: Optional[str]
     extracted_issue: Optional[str]
@@ -264,8 +269,44 @@ def list_feedback(
     # Get items
     items = query.order_by(order_func(sort_column)).offset(offset).limit(page_size).all()
 
+    # Fetch source names for items that have source_id
+    source_ids = [item.source_id for item in items if item.source_id]
+    source_map = {}
+    if source_ids:
+        sources = db.query(FeedbackSource).filter(FeedbackSource.id.in_(source_ids)).all()
+        source_map = {s.id: s.name for s in sources}
+
+    # Build response with source_name populated
+    response_items = []
+    for item in items:
+        item_dict = {
+            "id": item.id,
+            "organization_id": item.organization_id,
+            "text": item.text,
+            "source": item.source,
+            "source_id": item.source_id,
+            "source_name": source_map.get(item.source_id) if item.source_id else None,
+            "source_metadata": item.source_metadata,
+            "sentiment_score": item.sentiment_score,
+            "sentiment_label": item.sentiment_label,
+            "extracted_issue": item.extracted_issue,
+            "tags": item.tags,
+            "is_urgent": item.is_urgent,
+            "created_at": item.created_at,
+            "pain_point_category": item.pain_point_category,
+            "pain_point_severity": item.pain_point_severity,
+            "pain_point_text": item.pain_point_text,
+            "feature_request_category": item.feature_request_category,
+            "feature_request_priority": item.feature_request_priority,
+            "feature_request_text": item.feature_request_text,
+            "urgent_category": item.urgent_category,
+            "urgent_response_time": item.urgent_response_time,
+            "categorization_confidence": item.categorization_confidence,
+        }
+        response_items.append(FeedbackResponse(**item_dict))
+
     return FeedbackListResponse(
-        items=items,
+        items=response_items,
         total=total,
         page=page,
         page_size=page_size,
@@ -292,7 +333,37 @@ def get_feedback(
             detail="Feedback not found"
         )
 
-    return feedback
+    # Get source name if source_id exists
+    source_name = None
+    if feedback.source_id:
+        source = db.query(FeedbackSource).filter(FeedbackSource.id == feedback.source_id).first()
+        if source:
+            source_name = source.name
+
+    return FeedbackResponse(
+        id=feedback.id,
+        organization_id=feedback.organization_id,
+        text=feedback.text,
+        source=feedback.source,
+        source_id=feedback.source_id,
+        source_name=source_name,
+        source_metadata=feedback.source_metadata,
+        sentiment_score=feedback.sentiment_score,
+        sentiment_label=feedback.sentiment_label,
+        extracted_issue=feedback.extracted_issue,
+        tags=feedback.tags,
+        is_urgent=feedback.is_urgent,
+        created_at=feedback.created_at,
+        pain_point_category=feedback.pain_point_category,
+        pain_point_severity=feedback.pain_point_severity,
+        pain_point_text=feedback.pain_point_text,
+        feature_request_category=feedback.feature_request_category,
+        feature_request_priority=feedback.feature_request_priority,
+        feature_request_text=feedback.feature_request_text,
+        urgent_category=feedback.urgent_category,
+        urgent_response_time=feedback.urgent_response_time,
+        categorization_confidence=feedback.categorization_confidence,
+    )
 
 
 @router.delete("/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)

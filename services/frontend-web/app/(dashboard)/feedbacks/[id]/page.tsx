@@ -52,7 +52,13 @@ import {
   Receipt,
   UserMinus,
   Scale,
-  Megaphone
+  Megaphone,
+  Hash,
+  Upload,
+  Webhook,
+  PenLine,
+  User,
+  ExternalLink
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -201,6 +207,36 @@ export default function FeedbackDetailPage() {
     }
   };
 
+  const getSourceIcon = (source: string | null) => {
+    switch (source) {
+      case 'slack':
+        return <Hash className="w-4 h-4" />;
+      case 'webhook':
+        return <Webhook className="w-4 h-4" />;
+      case 'csv_import':
+        return <Upload className="w-4 h-4" />;
+      case 'manual':
+        return <PenLine className="w-4 h-4" />;
+      default:
+        return <Globe className="w-4 h-4" />;
+    }
+  };
+
+  const getSourceLabel = (source: string | null) => {
+    switch (source) {
+      case 'slack':
+        return 'Slack';
+      case 'webhook':
+        return 'Webhook';
+      case 'csv_import':
+        return 'CSV Import';
+      case 'manual':
+        return 'Manual Entry';
+      default:
+        return source || 'Unknown';
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -298,8 +334,11 @@ export default function FeedbackDetailPage() {
                     </span>
                     {feedback.source && (
                       <span className="flex items-center gap-1">
-                        <Globe className="w-3.5 h-3.5" />
-                        {feedback.source}
+                        {getSourceIcon(feedback.source)}
+                        {getSourceLabel(feedback.source)}
+                        {feedback.source_name && (
+                          <span className="text-foreground font-medium">• {feedback.source_name}</span>
+                        )}
                       </span>
                     )}
                   </div>
@@ -433,6 +472,60 @@ export default function FeedbackDetailPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Source Details - only show if we have source_metadata or source_name */}
+        {(feedback.source_metadata || feedback.source_name) && (
+          <Card className="animate-slide-up stagger-5">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                {getSourceIcon(feedback.source)}
+                Source Details
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {feedback.source_name && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Source Name</span>
+                    <span className="font-medium">{feedback.source_name}</span>
+                  </div>
+                )}
+                {feedback.source_metadata?.channel_name && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Channel</span>
+                    <span className="font-medium flex items-center gap-1">
+                      <Hash className="w-3.5 h-3.5" />
+                      {feedback.source_metadata.channel_name}
+                    </span>
+                  </div>
+                )}
+                {feedback.source_metadata?.author_name && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Author</span>
+                    <span className="font-medium flex items-center gap-1">
+                      <User className="w-3.5 h-3.5" />
+                      {feedback.source_metadata.author_name}
+                    </span>
+                  </div>
+                )}
+                {feedback.source_metadata?.url && (
+                  <div className="flex flex-col sm:col-span-2">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Original Link</span>
+                    <a
+                      href={feedback.source_metadata.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-primary hover:underline flex items-center gap-1"
+                    >
+                      View in {getSourceLabel(feedback.source)}
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Categorization Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
