@@ -24,8 +24,10 @@ import {
   Edit,
   Trash2,
   Upload,
-  FileText
+  FileText,
+  Inbox
 } from 'lucide-react';
+import Link from 'next/link';
 import { FeedbackPageProvider, useFeedbackPage } from '@/contexts/FeedbackPageContext';
 import { DataTable } from '@/components/shared/data-table';
 import { FeedbacksPageSkeleton } from '@/components/shared/page-skeletons';
@@ -263,6 +265,15 @@ function FeedbackPageContent() {
               <Upload className="w-5 h-5" />
               <span>Import CSV</span>
             </Button>
+            <Link href="/feedback-sources">
+              <Button
+                variant="outline"
+                className="flex items-center space-x-2"
+              >
+                <Inbox className="w-5 h-5" />
+                <span>Sources</span>
+              </Button>
+            </Link>
             <Button
               onClick={() => setShowCreateModal(true)}
               variant="default"

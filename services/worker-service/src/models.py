@@ -22,7 +22,13 @@ class FeedbackItem(Base):
     # The FK constraint exists in the actual database
     organization_id = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
-    source = Column(String, nullable=True)  # intercom, zendesk, manual, etc
+    source = Column(String, nullable=True)  # intercom, zendesk, manual, slack, webhook, etc
+
+    # Source tracking for inbound integrations
+    source_id = Column(Integer, nullable=True)  # FK to feedback_sources
+    source_external_id = Column(String(255), nullable=True)  # Original message ID from provider
+    source_metadata = Column(JSON, nullable=True)  # {author_id, author_name, channel_id, etc.}
+
     sentiment_score = Column(Float, nullable=True)
     sentiment_label = Column(String, nullable=True)  # positive, neutral, negative
     extracted_issue = Column(Text, nullable=True)
@@ -108,4 +114,91 @@ class SlackAlertLog(Base):
 
     __table_args__ = (
         Index('ix_slack_alert_log_integration', 'integration_id', 'sent_at'),
+    )
+
+
+class FeedbackSource(Base):
+    """Configuration for receiving feedback from external sources."""
+    __tablename__ = "feedback_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    integration_id = Column(Integer, nullable=True)  # FK to integrations
+
+    source_type = Column(String(50), nullable=False)  # slack, discord, webhook, email
+    name = Column(String(255), nullable=True)
+
+    provider_config = Column(JSON, nullable=True)  # {channel_id, webhook_id, etc.}
+    triggers = Column(JSON, nullable=True)  # {all_messages, reactions, mentions, keywords}
+    field_mapping = Column(JSON, nullable=True)  # {text_source, include_author, etc.}
+
+    auto_import = Column(Boolean, default=True)
+
+    is_active = Column(Boolean, default=True)
+    last_event_at = Column(DateTime, nullable=True)
+    events_processed = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('ix_feedback_source_org_type', 'organization_id', 'source_type'),
+        Index('ix_feedback_source_active', 'is_active', 'source_type'),
+    )
+
+
+class FeedbackSourceEvent(Base):
+    """Log of events received from feedback sources."""
+    __tablename__ = "feedback_source_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, nullable=False)  # FK to feedback_sources
+    organization_id = Column(Integer, nullable=False)
+
+    external_event_id = Column(String(255), nullable=False)
+    external_message_id = Column(String(255), nullable=True)
+    event_type = Column(String(50), nullable=False)  # message, reaction, mention, webhook
+
+    status = Column(String(20), nullable=False, default='pending')  # pending, processed, ignored, failed
+    trigger_matched = Column(String(100), nullable=True)
+
+    feedback_id = Column(Integer, nullable=True)
+    pending_feedback_id = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    event_data = Column(JSON, nullable=True)
+
+    received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    processed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index('ix_fse_source_received', 'source_id', 'received_at'),
+        Index('ix_fse_status', 'status', 'received_at'),
+    )
+
+
+class PendingFeedback(Base):
+    """Pending items awaiting manual approval."""
+    __tablename__ = "pending_feedbacks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, nullable=False)  # FK to feedback_sources
+    organization_id = Column(Integer, nullable=False)
+    event_id = Column(Integer, nullable=False)  # FK to feedback_source_events
+
+    text = Column(Text, nullable=False)
+    source_metadata = Column(JSON, nullable=True)
+    trigger_type = Column(String(100), nullable=True)
+
+    status = Column(String(20), nullable=False, default='pending')  # pending, approved, rejected
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('ix_pending_feedback_org_status', 'organization_id', 'status'),
+        Index('ix_pending_feedback_source', 'source_id', 'created_at'),
     )

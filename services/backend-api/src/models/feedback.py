@@ -9,7 +9,12 @@ class FeedbackItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
     text = Column(Text, nullable=False)
-    source = Column(String, nullable=True)  # intercom, zendesk, manual, etc
+    source = Column(String, nullable=True)  # intercom, zendesk, manual, slack, webhook, etc
+
+    # Source tracking for inbound integrations
+    source_id = Column(Integer, ForeignKey("feedback_sources.id", ondelete="SET NULL"), nullable=True)
+    source_external_id = Column(String(255), nullable=True)  # Original message ID from provider
+    source_metadata = Column(JSON, nullable=True)  # {author_id, author_name, channel_id, channel_name, url, etc.}
     sentiment_score = Column(Float, nullable=True)
     sentiment_label = Column(String, nullable=True)  # positive, neutral, negative
     extracted_issue = Column(Text, nullable=True)

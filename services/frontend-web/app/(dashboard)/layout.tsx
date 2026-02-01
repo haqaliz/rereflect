@@ -16,6 +16,9 @@ import { usePathname } from 'next/navigation';
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/feedbacks': 'Feedbacks',
+  '/feedback-sources': 'Feedback Sources',
+  '/feedback-sources/new': 'New Feedback Source',
+  '/feedback-sources/pending': 'Pending Feedback',
   '/pain-points': 'Pain Points',
   '/feature-requests': 'Feature Requests',
   '/urgent-feedbacks': 'Urgent Feedbacks',
@@ -38,6 +41,10 @@ export default function DashboardLayout({
     // Check for feedbacks detail page
     if (pathname.startsWith('/feedbacks/')) {
       return 'Feedback Details';
+    }
+    // Check for feedback source detail page
+    if (pathname.match(/^\/feedback-sources\/\d+$/)) {
+      return 'Source Details';
     }
     // Check for category page
     if (pathname.startsWith('/categories/')) {

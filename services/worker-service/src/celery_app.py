@@ -25,6 +25,7 @@ celery_app = Celery(
         "src.tasks.analysis",
         "src.tasks.alerts",
         "src.tasks.integrations",
+        "src.tasks.source_events",
     ],
 )
 

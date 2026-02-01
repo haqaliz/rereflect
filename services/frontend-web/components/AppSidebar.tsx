@@ -97,7 +97,7 @@ export function AppSidebar() {
 
   const isActive = (href: string) => {
     if (href === '/feedbacks') {
-      return pathname === href || pathname.startsWith('/feedbacks/');
+      return pathname === href || pathname.startsWith('/feedbacks/') || pathname.startsWith('/feedback-sources');
     }
     if (href === '/categories') {
       return pathname.startsWith('/categories/');
