@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from src.database.session import get_db
@@ -35,7 +36,8 @@ def signup(data: SignupRequest, db: Session = Depends(get_db)):
         email=data.email,
         password_hash=hash_password(data.password),
         organization_id=organization.id,
-        role="admin"  # First user is admin
+        role="owner",  # Organization creator is always owner
+        joined_at=datetime.utcnow()
     )
     db.add(user)
     db.commit()

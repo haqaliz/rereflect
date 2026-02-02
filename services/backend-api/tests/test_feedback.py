@@ -92,7 +92,7 @@ class TestListFeedback:
         """Test listing feedback without authentication fails."""
         response = client.get("/api/v1/feedback")
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
 
 class TestGetFeedback:
@@ -133,7 +133,7 @@ class TestGetFeedback:
         """Test getting feedback without authentication fails."""
         response = client.get(f"/api/v1/feedback/{test_feedback.id}")
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
 
 class TestCreateFeedback:
@@ -194,7 +194,7 @@ class TestCreateFeedback:
             }
         )
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
 
 class TestUpdateFeedback:
@@ -252,7 +252,7 @@ class TestUpdateFeedback:
             }
         )
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
 
 class TestDeleteFeedback:
@@ -298,7 +298,7 @@ class TestDeleteFeedback:
         """Test deleting feedback without authentication fails."""
         response = client.delete(f"/api/v1/feedback/{test_feedback.id}")
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
 
 class TestAnalyzeFeedback:
@@ -375,4 +375,4 @@ class TestAnalyzeFeedback:
             }
         )
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]

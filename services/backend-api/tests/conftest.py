@@ -64,10 +64,10 @@ def client(db: Session) -> Generator[TestClient, None, None]:
 
 @pytest.fixture
 def test_organization(db: Session) -> Organization:
-    """Create a test organization."""
+    """Create a test organization with Pro plan (10 seat limit)."""
     org = Organization(
         name="Test Company",
-        plan="free"
+        plan="pro"  # Pro plan has 10 seat limit for team tests
     )
     db.add(org)
     db.commit()

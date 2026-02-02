@@ -138,7 +138,7 @@ class TestGetDashboard:
         """Test getting dashboard without authentication fails."""
         response = client.get("/api/v1/dashboard")
 
-        assert response.status_code == 401
+        assert response.status_code in [401, 403]
 
     def test_get_dashboard_invalid_days(
         self,

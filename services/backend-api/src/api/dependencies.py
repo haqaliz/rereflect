@@ -224,3 +224,39 @@ def require_feature(feature: str) -> Callable:
         return True
 
     return dependency
+
+
+def require_admin_or_owner(current_user: User = Depends(get_current_user)) -> bool:
+    """
+    Dependency to check if user is admin or owner.
+    Raises 403 if user.role == 'member'.
+
+    Usage:
+        @router.post("/invite", dependencies=[Depends(require_admin_or_owner)])
+        def invite_member():
+            ...
+    """
+    if current_user.role == 'member':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires admin or owner privileges"
+        )
+    return True
+
+
+def require_owner(current_user: User = Depends(get_current_user)) -> bool:
+    """
+    Dependency to check if user is owner.
+    Raises 403 if user.role != 'owner'.
+
+    Usage:
+        @router.post("/transfer-ownership", dependencies=[Depends(require_owner)])
+        def transfer_ownership():
+            ...
+    """
+    if current_user.role != 'owner':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires owner privileges"
+        )
+    return True
