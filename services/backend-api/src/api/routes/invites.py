@@ -7,7 +7,7 @@ They are used by invited users to view and accept invitations.
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,7 @@ from src.models.user import User
 from src.models.organization import Organization
 from src.models.team_invite import TeamInvite
 from src.api.auth import hash_password, create_access_token
+from src.services.audit_service import log_action
 
 
 router = APIRouter()
@@ -114,6 +115,7 @@ def get_invite_details(
 def accept_invite(
     token: str,
     data: AcceptInviteRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
@@ -208,6 +210,23 @@ def accept_invite(
 
     db.commit()
     db.refresh(new_user)
+
+    # Create audit log for user joining
+    log_action(
+        db=db,
+        org_id=invite.organization_id,
+        user_id=new_user.id,
+        user_email=new_user.email,
+        action="user_joined",
+        target_type="user",
+        target_id=new_user.id,
+        details={
+            "email": new_user.email,
+            "role": new_user.role,
+            "invite_id": invite.id
+        },
+        request=request
+    )
 
     # Create access token for the new user
     access_token = create_access_token({

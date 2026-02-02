@@ -2388,3 +2388,1130 @@ class TestAcceptInviteEndpoint:
 
         # Should succeed without authentication
         assert response.status_code == 201
+
+
+# =============================================================================
+# PHASE 4: AUDIT LOGGING TESTS
+# =============================================================================
+#
+# TDD RED Phase - These tests define the expected behavior for:
+# 1. AuditLog model with required fields
+# 2. Audit log creation for team management actions
+# 3. GET /api/v1/audit-logs endpoint with plan gating
+# =============================================================================
+
+
+# =============================================================================
+# FIXTURES - Additional fixtures for audit logging tests
+# =============================================================================
+
+
+@pytest.fixture
+def business_org(db: Session) -> Organization:
+    """Create a test organization with Business plan (can access audit logs)."""
+    org = Organization(
+        name="Business Company",
+        plan="business"
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@pytest.fixture
+def business_owner(db: Session, business_org: Organization) -> User:
+    """Create an owner user in a Business plan organization."""
+    user = User(
+        email="business_owner@example.com",
+        password_hash=hash_password("password123"),
+        organization_id=business_org.id,
+        role="owner"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def business_admin(db: Session, business_org: Organization) -> User:
+    """Create an admin user in a Business plan organization."""
+    user = User(
+        email="business_admin@example.com",
+        password_hash=hash_password("password123"),
+        organization_id=business_org.id,
+        role="admin"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def business_member(db: Session, business_org: Organization) -> User:
+    """Create a member user in a Business plan organization."""
+    user = User(
+        email="business_member@example.com",
+        password_hash=hash_password("password123"),
+        organization_id=business_org.id,
+        role="member"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def business_owner_token(business_owner: User) -> str:
+    """Create a JWT token for business owner user."""
+    return create_access_token({
+        "user_id": business_owner.id,
+        "organization_id": business_owner.organization_id,
+        "role": business_owner.role
+    })
+
+
+@pytest.fixture
+def business_admin_token(business_admin: User) -> str:
+    """Create a JWT token for business admin user."""
+    return create_access_token({
+        "user_id": business_admin.id,
+        "organization_id": business_admin.organization_id,
+        "role": business_admin.role
+    })
+
+
+@pytest.fixture
+def business_member_token(business_member: User) -> str:
+    """Create a JWT token for business member user."""
+    return create_access_token({
+        "user_id": business_member.id,
+        "organization_id": business_member.organization_id,
+        "role": business_member.role
+    })
+
+
+@pytest.fixture
+def business_owner_headers(business_owner_token: str) -> dict:
+    """Create authentication headers for business owner."""
+    return {"Authorization": f"Bearer {business_owner_token}"}
+
+
+@pytest.fixture
+def business_admin_headers(business_admin_token: str) -> dict:
+    """Create authentication headers for business admin."""
+    return {"Authorization": f"Bearer {business_admin_token}"}
+
+
+@pytest.fixture
+def business_member_headers(business_member_token: str) -> dict:
+    """Create authentication headers for business member."""
+    return {"Authorization": f"Bearer {business_member_token}"}
+
+
+@pytest.fixture
+def pro_org(db: Session) -> Organization:
+    """Create a test organization with Pro plan (cannot access audit logs)."""
+    org = Organization(
+        name="Pro Company",
+        plan="pro"
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@pytest.fixture
+def pro_owner(db: Session, pro_org: Organization) -> User:
+    """Create an owner user in a Pro plan organization."""
+    user = User(
+        email="pro_owner@example.com",
+        password_hash=hash_password("password123"),
+        organization_id=pro_org.id,
+        role="owner"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def pro_owner_token(pro_owner: User) -> str:
+    """Create a JWT token for pro owner user."""
+    return create_access_token({
+        "user_id": pro_owner.id,
+        "organization_id": pro_owner.organization_id,
+        "role": pro_owner.role
+    })
+
+
+@pytest.fixture
+def pro_owner_headers(pro_owner_token: str) -> dict:
+    """Create authentication headers for pro owner."""
+    return {"Authorization": f"Bearer {pro_owner_token}"}
+
+
+# =============================================================================
+# AUDIT LOG MODEL TESTS
+# =============================================================================
+
+
+class TestAuditLogModel:
+    """Tests for AuditLog model fields and behavior.
+
+    All tests will FAIL because the AuditLog model doesn't exist yet.
+    This is TDD RED phase - tests define expected behavior.
+    """
+
+    def test_audit_log_model_exists(self):
+        """Test that AuditLog model can be imported."""
+        from src.models.audit_log import AuditLog
+        assert AuditLog is not None
+
+    def test_audit_log_has_required_fields(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that AuditLog model has all required fields.
+
+        Required fields per spec:
+        - id: Primary key
+        - organization_id: Foreign key to organization
+        - user_id: User who performed the action
+        - user_email: Email of user (for historical reference)
+        - action: The action performed (e.g., 'user_invited', 'role_changed')
+        - target_type: Type of entity affected (e.g., 'user', 'invite')
+        - target_id: ID of the affected entity
+        - details: JSON field with additional context
+        - ip_address: IP address of the request
+        - user_agent: User agent of the request
+        - created_at: Timestamp of the action
+        """
+        from src.models.audit_log import AuditLog
+
+        log = AuditLog(
+            organization_id=test_organization.id,
+            user_id=owner_user.id,
+            user_email=owner_user.email,
+            action="user_invited",
+            target_type="invite",
+            target_id=123,
+            details={"email": "test@example.com", "role": "member"},
+            ip_address="127.0.0.1",
+            user_agent="Mozilla/5.0 Test Browser"
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
+        # Verify all required fields exist
+        assert hasattr(log, 'id')
+        assert hasattr(log, 'organization_id')
+        assert hasattr(log, 'user_id')
+        assert hasattr(log, 'user_email')
+        assert hasattr(log, 'action')
+        assert hasattr(log, 'target_type')
+        assert hasattr(log, 'target_id')
+        assert hasattr(log, 'details')
+        assert hasattr(log, 'ip_address')
+        assert hasattr(log, 'user_agent')
+        assert hasattr(log, 'created_at')
+
+        # Verify field values
+        assert log.id is not None
+        assert log.organization_id == test_organization.id
+        assert log.user_id == owner_user.id
+        assert log.user_email == owner_user.email
+        assert log.action == "user_invited"
+        assert log.target_type == "invite"
+        assert log.target_id == 123
+        assert log.details == {"email": "test@example.com", "role": "member"}
+        assert log.ip_address == "127.0.0.1"
+        assert log.user_agent == "Mozilla/5.0 Test Browser"
+        assert log.created_at is not None
+
+    def test_audit_log_created_at_defaults_to_now(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that created_at field defaults to current timestamp."""
+        from src.models.audit_log import AuditLog
+
+        before_create = datetime.utcnow()
+
+        log = AuditLog(
+            organization_id=test_organization.id,
+            user_id=owner_user.id,
+            user_email=owner_user.email,
+            action="test_action",
+            target_type="test",
+            target_id=1
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
+        after_create = datetime.utcnow()
+
+        assert log.created_at is not None
+        assert before_create <= log.created_at <= after_create
+
+    def test_audit_log_details_is_json_field(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that details field stores and retrieves JSON properly."""
+        from src.models.audit_log import AuditLog
+
+        complex_details = {
+            "old_value": {"role": "member"},
+            "new_value": {"role": "admin"},
+            "metadata": {
+                "reason": "promotion",
+                "approved_by": owner_user.id
+            }
+        }
+
+        log = AuditLog(
+            organization_id=test_organization.id,
+            user_id=owner_user.id,
+            user_email=owner_user.email,
+            action="role_changed",
+            target_type="user",
+            target_id=456,
+            details=complex_details
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
+        # Verify JSON is preserved correctly
+        assert log.details == complex_details
+        assert log.details["old_value"]["role"] == "member"
+        assert log.details["new_value"]["role"] == "admin"
+
+    def test_audit_log_details_can_be_null(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that details field can be null."""
+        from src.models.audit_log import AuditLog
+
+        log = AuditLog(
+            organization_id=test_organization.id,
+            user_id=owner_user.id,
+            user_email=owner_user.email,
+            action="simple_action",
+            target_type="user",
+            target_id=789,
+            details=None
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
+        assert log.details is None
+
+    def test_audit_log_has_organization_relationship(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that AuditLog has relationship to Organization."""
+        from src.models.audit_log import AuditLog
+
+        log = AuditLog(
+            organization_id=test_organization.id,
+            user_id=owner_user.id,
+            user_email=owner_user.email,
+            action="test_relationship",
+            target_type="test",
+            target_id=1
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+
+        assert hasattr(log, 'organization')
+        assert log.organization.id == test_organization.id
+
+
+# =============================================================================
+# AUDIT LOG CREATION TESTS
+# =============================================================================
+
+
+class TestAuditLogCreation:
+    """Tests for audit log creation on team management actions.
+
+    All tests will FAIL because audit logging is not yet implemented.
+    These tests verify that appropriate audit logs are created when
+    team management actions are performed.
+    """
+
+    def test_audit_log_created_when_user_invited(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        db: Session
+    ):
+        """Test that audit log is created when a user is invited."""
+        from src.models.audit_log import AuditLog
+
+        # Invite a new user
+        response = client.post(
+            "/api/v1/team/invites",
+            headers=business_owner_headers,
+            json={
+                "email": "audit_invite_test@example.com",
+                "role": "member"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify audit log was created
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            AuditLog.action == "user_invited"
+        ).first()
+
+        assert log is not None
+        assert log.user_id == business_owner.id
+        assert log.user_email == business_owner.email
+        assert log.target_type == "invite"
+        assert log.details["email"] == "audit_invite_test@example.com"
+        assert log.details["role"] == "member"
+
+    def test_audit_log_created_when_user_joins(
+        self,
+        client: TestClient,
+        db: Session,
+        business_org: Organization,
+        business_owner: User
+    ):
+        """Test that audit log is created when a user accepts an invite and joins."""
+        from src.models.audit_log import AuditLog
+        from src.models.team_invite import TeamInvite
+
+        # Create a pending invite
+        invite = TeamInvite(
+            organization_id=business_org.id,
+            email="audit_join_test@example.com",
+            role="member",
+            token="audit_join_token_123",
+            invited_by_id=business_owner.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+
+        # Accept the invite
+        response = client.post(
+            f"/api/v1/invites/{invite.token}/accept",
+            json={
+                "password": "SecurePassword123!"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify audit log was created for user joining
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            AuditLog.action == "user_joined"
+        ).first()
+
+        assert log is not None
+        assert log.target_type == "user"
+        assert log.details["email"] == "audit_join_test@example.com"
+        assert log.details["role"] == "member"
+        assert log.details["invite_id"] == invite.id
+
+    def test_audit_log_created_when_user_removed(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        business_member: User,
+        db: Session
+    ):
+        """Test that audit log is created when a user is removed."""
+        from src.models.audit_log import AuditLog
+
+        # Remove the member
+        response = client.delete(
+            f"/api/v1/team/members/{business_member.id}",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 204
+
+        # Verify audit log was created
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            AuditLog.action == "user_removed"
+        ).first()
+
+        assert log is not None
+        assert log.user_id == business_owner.id
+        assert log.target_type == "user"
+        assert log.target_id == business_member.id
+        assert log.details["email"] == business_member.email
+        assert log.details["role"] == business_member.role
+
+    def test_audit_log_created_when_role_changed(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        business_member: User,
+        db: Session
+    ):
+        """Test that audit log is created when a user's role is changed."""
+        from src.models.audit_log import AuditLog
+
+        old_role = business_member.role
+
+        # Change role from member to admin
+        response = client.patch(
+            f"/api/v1/team/members/{business_member.id}/role",
+            headers=business_owner_headers,
+            json={"role": "admin"}
+        )
+
+        assert response.status_code == 200
+
+        # Verify audit log was created
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            AuditLog.action == "role_changed"
+        ).first()
+
+        assert log is not None
+        assert log.user_id == business_owner.id
+        assert log.target_type == "user"
+        assert log.target_id == business_member.id
+        assert log.details["email"] == business_member.email
+        assert log.details["old_role"] == old_role
+        assert log.details["new_role"] == "admin"
+
+    def test_audit_log_created_when_ownership_transferred(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        business_admin: User,
+        db: Session
+    ):
+        """Test that audit log is created when ownership is transferred."""
+        from src.models.audit_log import AuditLog
+
+        # Transfer ownership
+        response = client.post(
+            "/api/v1/team/transfer-ownership",
+            headers=business_owner_headers,
+            json={"user_id": business_admin.id}
+        )
+
+        assert response.status_code == 200
+
+        # Verify audit log was created
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            AuditLog.action == "ownership_transferred"
+        ).first()
+
+        assert log is not None
+        assert log.user_id == business_owner.id
+        assert log.target_type == "user"
+        assert log.target_id == business_admin.id
+        assert log.details["from_user_id"] == business_owner.id
+        assert log.details["from_user_email"] == business_owner.email
+        assert log.details["to_user_id"] == business_admin.id
+        assert log.details["to_user_email"] == business_admin.email
+
+    def test_audit_log_includes_ip_address(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        db: Session
+    ):
+        """Test that audit log captures the IP address of the request."""
+        from src.models.audit_log import AuditLog
+
+        # Perform an action
+        response = client.post(
+            "/api/v1/team/invites",
+            headers=business_owner_headers,
+            json={
+                "email": "ip_test@example.com",
+                "role": "member"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify audit log includes IP address
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            AuditLog.action == "user_invited"
+        ).order_by(AuditLog.created_at.desc()).first()
+
+        assert log is not None
+        assert log.ip_address is not None
+        # TestClient uses "testclient" as default, but in real env would be IP
+        assert len(log.ip_address) > 0
+
+    def test_audit_log_includes_user_agent(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        db: Session
+    ):
+        """Test that audit log captures the user agent of the request."""
+        from src.models.audit_log import AuditLog
+        from sqlalchemy import func
+
+        # Add custom user agent to headers
+        headers = {**business_owner_headers, "User-Agent": "TestBot/1.0"}
+
+        # Perform an action
+        response = client.post(
+            "/api/v1/team/invites",
+            headers=headers,
+            json={
+                "email": "useragent_test@example.com",
+                "role": "member"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify audit log includes user agent
+        # Note: Using json_extract for SQLite compatibility (contains doesn't work in SQLite)
+        log = db.query(AuditLog).filter(
+            AuditLog.organization_id == business_org.id,
+            func.json_extract(AuditLog.details, '$.email') == "useragent_test@example.com"
+        ).first()
+
+        assert log is not None
+        assert log.user_agent is not None
+        assert "TestBot/1.0" in log.user_agent
+
+
+# =============================================================================
+# GET AUDIT LOGS ENDPOINT TESTS
+# =============================================================================
+
+
+class TestAuditLogsEndpoint:
+    """Tests for GET /api/v1/audit-logs endpoint.
+
+    All tests will FAIL because the endpoint doesn't exist yet.
+    This endpoint is gated to Business+ plans only.
+    """
+
+    def test_get_audit_logs_success(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        db: Session
+    ):
+        """Test getting audit logs for organization."""
+        from src.models.audit_log import AuditLog
+
+        # Create some audit logs
+        for i in range(3):
+            log = AuditLog(
+                organization_id=business_org.id,
+                user_id=business_owner.id,
+                user_email=business_owner.email,
+                action=f"test_action_{i}",
+                target_type="test",
+                target_id=i
+            )
+            db.add(log)
+        db.commit()
+
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "logs" in data
+        assert "total" in data
+        assert "page" in data
+        assert "page_size" in data
+        assert isinstance(data["logs"], list)
+        assert len(data["logs"]) >= 3
+
+    def test_get_audit_logs_paginated(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        db: Session
+    ):
+        """Test that audit logs are paginated."""
+        from src.models.audit_log import AuditLog
+
+        # Create 25 audit logs
+        for i in range(25):
+            log = AuditLog(
+                organization_id=business_org.id,
+                user_id=business_owner.id,
+                user_email=business_owner.email,
+                action=f"paginated_action_{i}",
+                target_type="test",
+                target_id=i
+            )
+            db.add(log)
+        db.commit()
+
+        # Get first page (default page_size=20)
+        response = client.get(
+            "/api/v1/audit-logs?page=1&page_size=10",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["page"] == 1
+        assert data["page_size"] == 10
+        assert len(data["logs"]) == 10
+        assert data["total"] >= 25
+
+        # Get second page
+        response = client.get(
+            "/api/v1/audit-logs?page=2&page_size=10",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["page"] == 2
+        assert len(data["logs"]) == 10
+
+    def test_get_audit_logs_response_fields(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        db: Session
+    ):
+        """Test that audit log response includes required fields."""
+        from src.models.audit_log import AuditLog
+
+        # Create an audit log
+        log = AuditLog(
+            organization_id=business_org.id,
+            user_id=business_owner.id,
+            user_email=business_owner.email,
+            action="field_test_action",
+            target_type="user",
+            target_id=123,
+            details={"test": "data"},
+            ip_address="192.168.1.1",
+            user_agent="Test/1.0"
+        )
+        db.add(log)
+        db.commit()
+
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Find our test log
+        test_log = next((l for l in data["logs"] if l["action"] == "field_test_action"), None)
+        assert test_log is not None
+
+        # Check required fields
+        assert "id" in test_log
+        assert "user_id" in test_log
+        assert "user_email" in test_log
+        assert "action" in test_log
+        assert "target_type" in test_log
+        assert "target_id" in test_log
+        assert "details" in test_log
+        assert "ip_address" in test_log
+        assert "user_agent" in test_log
+        assert "created_at" in test_log
+
+    def test_get_audit_logs_free_plan_blocked(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        test_organization: Organization
+    ):
+        """Test that Free plan cannot access audit logs."""
+        # test_organization is Free plan by default
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 403
+        data = response.json()
+
+        assert "detail" in data
+        # Should include upgrade message
+        detail = data["detail"]
+        if isinstance(detail, dict):
+            assert "upgrade" in detail.get("message", "").lower() or \
+                   "business" in detail.get("required_plan", "").lower()
+        else:
+            assert "upgrade" in str(detail).lower() or "business" in str(detail).lower()
+
+    def test_get_audit_logs_pro_plan_blocked(
+        self,
+        client: TestClient,
+        pro_owner_headers: dict
+    ):
+        """Test that Pro plan cannot access audit logs."""
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=pro_owner_headers
+        )
+
+        assert response.status_code == 403
+        data = response.json()
+
+        # Should include upgrade message
+        detail = data["detail"]
+        if isinstance(detail, dict):
+            assert "upgrade" in detail.get("message", "").lower() or \
+                   "business" in detail.get("required_plan", "").lower()
+        else:
+            assert "upgrade" in str(detail).lower() or "business" in str(detail).lower()
+
+    def test_get_audit_logs_business_plan_allowed(
+        self,
+        client: TestClient,
+        business_owner_headers: dict
+    ):
+        """Test that Business plan can access audit logs."""
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_get_audit_logs_multi_tenant_isolation(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        other_org: Organization,
+        other_org_user: User,
+        db: Session
+    ):
+        """Test that audit logs from other organizations are not returned."""
+        from src.models.audit_log import AuditLog
+
+        # Create audit log in business_org
+        log1 = AuditLog(
+            organization_id=business_org.id,
+            user_id=business_owner.id,
+            user_email=business_owner.email,
+            action="business_org_action",
+            target_type="test",
+            target_id=1
+        )
+        db.add(log1)
+
+        # Create audit log in other_org
+        log2 = AuditLog(
+            organization_id=other_org.id,
+            user_id=other_org_user.id,
+            user_email=other_org_user.email,
+            action="other_org_action",
+            target_type="test",
+            target_id=2
+        )
+        db.add(log2)
+        db.commit()
+
+        # Get audit logs for business_org
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should only include business_org logs
+        actions = [log["action"] for log in data["logs"]]
+        assert "business_org_action" in actions
+        assert "other_org_action" not in actions
+
+    def test_get_audit_logs_owner_can_view(
+        self,
+        client: TestClient,
+        business_owner_headers: dict
+    ):
+        """Test that owner can view audit logs."""
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_get_audit_logs_admin_can_view(
+        self,
+        client: TestClient,
+        business_admin_headers: dict
+    ):
+        """Test that admin can view audit logs."""
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_admin_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_get_audit_logs_member_cannot_view(
+        self,
+        client: TestClient,
+        business_member_headers: dict
+    ):
+        """Test that member cannot view audit logs."""
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_member_headers
+        )
+
+        assert response.status_code == 403
+
+    def test_get_audit_logs_unauthorized(self, client: TestClient):
+        """Test that audit logs requires authentication."""
+        response = client.get("/api/v1/audit-logs")
+
+        assert response.status_code in [401, 403]
+
+    def test_get_audit_logs_sorted_by_created_at_desc(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        db: Session
+    ):
+        """Test that audit logs are sorted by created_at descending (most recent first)."""
+        from src.models.audit_log import AuditLog
+        import time
+
+        # Create audit logs with slight delays to ensure different timestamps
+        for i in range(3):
+            log = AuditLog(
+                organization_id=business_org.id,
+                user_id=business_owner.id,
+                user_email=business_owner.email,
+                action=f"sorted_action_{i}",
+                target_type="test",
+                target_id=i
+            )
+            db.add(log)
+            db.commit()
+            time.sleep(0.01)  # Small delay to ensure different timestamps
+
+        response = client.get(
+            "/api/v1/audit-logs",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Filter to just our test logs
+        sorted_logs = [l for l in data["logs"] if l["action"].startswith("sorted_action_")]
+
+        # Should be in descending order (most recent first)
+        timestamps = [l["created_at"] for l in sorted_logs]
+        assert timestamps == sorted(timestamps, reverse=True)
+
+    def test_get_audit_logs_filter_by_action(
+        self,
+        client: TestClient,
+        business_owner_headers: dict,
+        business_org: Organization,
+        business_owner: User,
+        db: Session
+    ):
+        """Test filtering audit logs by action type."""
+        from src.models.audit_log import AuditLog
+
+        # Create audit logs with different actions
+        for action in ["user_invited", "user_removed", "role_changed"]:
+            log = AuditLog(
+                organization_id=business_org.id,
+                user_id=business_owner.id,
+                user_email=business_owner.email,
+                action=action,
+                target_type="user",
+                target_id=1
+            )
+            db.add(log)
+        db.commit()
+
+        # Filter by action
+        response = client.get(
+            "/api/v1/audit-logs?action=user_invited",
+            headers=business_owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # All logs should have the filtered action
+        for log in data["logs"]:
+            assert log["action"] == "user_invited"
+
+
+# =============================================================================
+# LAST_ACTIVE_AT TRACKING TESTS
+# =============================================================================
+
+
+class TestLastActiveAtTracking:
+    """Tests for user.last_active_at tracking on authenticated requests.
+
+    This feature updates the user's last_active_at timestamp on every
+    authenticated API call to track user activity.
+    """
+
+    def test_last_active_at_updated_on_authenticated_request(
+        self,
+        client: TestClient,
+        owner_user: User,
+        owner_headers: dict,
+        db: Session
+    ):
+        """Test that last_active_at is updated when making an authenticated request."""
+        # Clear the last_active_at to ensure we can detect the update
+        owner_user.last_active_at = None
+        db.commit()
+        db.refresh(owner_user)
+
+        assert owner_user.last_active_at is None
+
+        before_request = datetime.utcnow()
+
+        # Make any authenticated API call
+        response = client.get(
+            "/api/v1/team/members",
+            headers=owner_headers
+        )
+
+        # Request should succeed (team endpoint exists)
+        assert response.status_code == 200
+
+        after_request = datetime.utcnow()
+
+        # Refresh user from database
+        db.refresh(owner_user)
+
+        # last_active_at should now be set
+        assert owner_user.last_active_at is not None
+        assert before_request <= owner_user.last_active_at <= after_request
+
+    def test_last_active_at_updated_on_multiple_requests(
+        self,
+        client: TestClient,
+        owner_user: User,
+        owner_headers: dict,
+        db: Session
+    ):
+        """Test that last_active_at is updated on each authenticated request."""
+        import time
+
+        # First request
+        client.get("/api/v1/team/members", headers=owner_headers)
+        db.refresh(owner_user)
+        first_timestamp = owner_user.last_active_at
+
+        assert first_timestamp is not None
+
+        # Small delay to ensure timestamps differ
+        time.sleep(0.01)
+
+        # Second request
+        client.get("/api/v1/team/members", headers=owner_headers)
+        db.refresh(owner_user)
+        second_timestamp = owner_user.last_active_at
+
+        # Second timestamp should be newer
+        assert second_timestamp is not None
+        assert second_timestamp >= first_timestamp
+
+    def test_last_active_at_not_updated_on_unauthenticated_request(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+        owner_user: User
+    ):
+        """Test that last_active_at is NOT updated on unauthenticated requests."""
+        # Clear the last_active_at
+        owner_user.last_active_at = None
+        db.commit()
+        db.refresh(owner_user)
+
+        # Make an unauthenticated request (should fail)
+        response = client.get("/api/v1/team/members")
+
+        # Request should be unauthorized
+        assert response.status_code in [401, 403]
+
+        # Refresh user from database
+        db.refresh(owner_user)
+
+        # last_active_at should still be None
+        assert owner_user.last_active_at is None
+
+    def test_last_active_at_visible_in_team_list(
+        self,
+        client: TestClient,
+        owner_user: User,
+        admin_user: User,
+        owner_headers: dict,
+        db: Session
+    ):
+        """Test that last_active_at is included in team member list response."""
+        # First make a request as admin to update their last_active_at
+        admin_token = create_access_token({
+            "user_id": admin_user.id,
+            "organization_id": admin_user.organization_id,
+            "role": admin_user.role
+        })
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+        client.get("/api/v1/team/members", headers=admin_headers)
+
+        # Now get the team list as owner
+        response = client.get("/api/v1/team/members", headers=owner_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Find the admin user in the response
+        admin_member = next(
+            (m for m in data["members"] if m["email"] == admin_user.email),
+            None
+        )
+
+        assert admin_member is not None
+        assert "last_active_at" in admin_member
+        assert admin_member["last_active_at"] is not None

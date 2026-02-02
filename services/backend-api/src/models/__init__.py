@@ -9,6 +9,7 @@ from .pending_feedback import PendingFeedback
 from .subscription import Subscription
 from .usage import UsageRecord
 from .team_invite import TeamInvite
+from .audit_log import AuditLog
 
 __all__ = [
     "Base",
@@ -23,4 +24,5 @@ __all__ = [
     "Subscription",
     "UsageRecord",
     "TeamInvite",
+    "AuditLog",
 ]

@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Table,
   TableBody,
@@ -60,6 +62,7 @@ import {
   ChevronLeft,
   Loader2,
   Clock,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -86,8 +89,14 @@ export default function TeamSettingsPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [resendingInvite, setResendingInvite] = useState<number | null>(null);
 
+  // Transfer ownership state
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false);
+  const [selectedNewOwner, setSelectedNewOwner] = useState<string>('');
+  const [transferConfirmText, setTransferConfirmText] = useState('');
+
   // Get current user ID from token (in real app, this would come from auth context)
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -98,10 +107,11 @@ export default function TeamSettingsPage() {
           return;
         }
 
-        // Parse the JWT to get the current user ID
+        // Parse the JWT to get the current user ID and role
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
           setCurrentUserId(payload.sub || payload.user_id);
+          setCurrentUserRole(payload.role || null);
         } catch {
           console.error('Failed to parse token');
         }
@@ -199,6 +209,41 @@ export default function TeamSettingsPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
       const message = error.response?.data?.detail || 'Failed to cancel invitation';
+      toast.error(message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTransferOwnership = async () => {
+    if (!selectedNewOwner || transferConfirmText !== 'TRANSFER') return;
+
+    setActionLoading(true);
+    try {
+      await teamAPI.transferOwnership(parseInt(selectedNewOwner, 10));
+      toast.success('Ownership transferred successfully. You are now an admin.');
+
+      // Refresh the team list to reflect changes
+      const [teamRes, invitesRes] = await Promise.all([
+        teamAPI.getTeam(),
+        teamAPI.getInvites(),
+      ]);
+
+      setMembers(teamRes.members);
+      setSeatsUsed(teamRes.seats_used);
+      setSeatsLimit(teamRes.seats_limit);
+      setInvites(invitesRes.invites.filter(i => i.status === 'pending'));
+
+      // Update the current user role
+      setCurrentUserRole('admin');
+
+      // Reset and close dialog
+      setTransferDialogOpen(false);
+      setSelectedNewOwner('');
+      setTransferConfirmText('');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      const message = error.response?.data?.detail || 'Failed to transfer ownership';
       toast.error(message);
     } finally {
       setActionLoading(false);
@@ -606,6 +651,148 @@ export default function TeamSettingsPage() {
                   <>
                     <X className="w-4 h-4 mr-2" />
                     Cancel Invite
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Danger Zone - Owner only */}
+        {currentUserRole === 'owner' && (
+          <Card className="animate-slide-up stagger-4 border-destructive/30">
+            <CardHeader className="border-b border-destructive/20">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 bg-destructive/10 rounded-lg">
+                  <AlertTriangle className="w-5 h-5 text-destructive" />
+                </div>
+                <div>
+                  <CardTitle className="text-destructive">Danger Zone</CardTitle>
+                  <CardDescription>Irreversible actions that affect organization ownership</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-foreground">Transfer Ownership</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Transfer organization ownership to another team member. You will become an admin.
+                  </p>
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={() => setTransferDialogOpen(true)}
+                  disabled={members.filter(m => m.role !== 'owner').length === 0}
+                >
+                  <Crown className="w-4 h-4 mr-2" />
+                  Transfer Ownership
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Transfer Ownership Dialog */}
+        <Dialog open={transferDialogOpen} onOpenChange={(open) => {
+          if (!open) {
+            setSelectedNewOwner('');
+            setTransferConfirmText('');
+          }
+          setTransferDialogOpen(open);
+        }}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="w-5 h-5" />
+                Transfer Organization Ownership
+              </DialogTitle>
+              <DialogDescription>
+                This action cannot be undone. The new owner will have full control over the organization.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  <strong>Warning:</strong> Transferring ownership will:
+                  <ul className="list-disc list-inside mt-2 space-y-1">
+                    <li>Give the new owner full control of the organization</li>
+                    <li>Remove your access to billing and subscription settings</li>
+                    <li>Change your role from Owner to Admin</li>
+                    <li>Cannot be reversed without the new owner's consent</li>
+                  </ul>
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Select new owner
+                </label>
+                <Select
+                  value={selectedNewOwner}
+                  onValueChange={setSelectedNewOwner}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a team member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {members
+                      .filter(m => m.role !== 'owner' && m.id !== currentUserId)
+                      .map(member => (
+                        <SelectItem key={member.id} value={member.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={getRoleColor(member.role)}>
+                              {getRoleLabel(member.role)}
+                            </Badge>
+                            {member.email}
+                          </div>
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">
+                  Type <span className="font-mono bg-muted px-1 rounded">TRANSFER</span> to confirm
+                </label>
+                <Input
+                  value={transferConfirmText}
+                  onChange={(e) => setTransferConfirmText(e.target.value)}
+                  placeholder="Type TRANSFER to confirm"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setTransferDialogOpen(false);
+                  setSelectedNewOwner('');
+                  setTransferConfirmText('');
+                }}
+                disabled={actionLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleTransferOwnership}
+                disabled={actionLoading || !selectedNewOwner || transferConfirmText !== 'TRANSFER'}
+              >
+                {actionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Transferring...
+                  </>
+                ) : (
+                  <>
+                    <Crown className="w-4 h-4 mr-2" />
+                    Transfer Ownership
                   </>
                 )}
               </Button>

@@ -18,7 +18,10 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
-    """Get current authenticated user from JWT token."""
+    """Get current authenticated user from JWT token.
+
+    Also updates user.last_active_at on each authenticated request.
+    """
 
     token = credentials.credentials
     payload = decode_access_token(token)
@@ -42,6 +45,11 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
+
+    # Update last_active_at on each authenticated request
+    user.last_active_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
 
     return user
 
