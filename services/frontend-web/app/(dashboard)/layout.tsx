@@ -28,6 +28,7 @@ const pageTitles: Record<string, string> = {
   '/settings': 'Settings',
   '/settings/billing': 'Billing',
   '/settings/integrations': 'Integrations',
+  '/settings/team': 'Team',
 };
 
 export default function DashboardLayout({

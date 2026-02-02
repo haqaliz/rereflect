@@ -8,6 +8,7 @@ from .feedback_source_event import FeedbackSourceEvent
 from .pending_feedback import PendingFeedback
 from .subscription import Subscription
 from .usage import UsageRecord
+from .team_invite import TeamInvite
 
 __all__ = [
     "Base",
@@ -21,4 +22,5 @@ __all__ = [
     "PendingFeedback",
     "Subscription",
     "UsageRecord",
+    "TeamInvite",
 ]

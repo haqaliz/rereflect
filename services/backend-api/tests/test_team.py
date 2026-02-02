@@ -1100,3 +1100,1291 @@ class TestRemoveUser:
 
         # 403 Forbidden - cannot remove owner (includes self)
         assert response.status_code == 403
+
+
+# =============================================================================
+# PHASE 2: TEAM INVITATION SYSTEM TESTS
+# =============================================================================
+#
+# TDD RED Phase - These tests define the expected behavior for:
+# 1. TeamInvite model with required fields
+# 2. Invite status management (pending, accepted, expired, canceled)
+# 3. List pending invites endpoint
+# 4. Resend invite endpoint
+# 5. Cancel invite endpoint
+# 6. Public invite endpoints (get details, accept)
+# =============================================================================
+
+
+from datetime import timedelta
+import secrets
+
+
+# =============================================================================
+# FIXTURES - Additional fixtures for invitation tests
+# =============================================================================
+
+
+@pytest.fixture
+def pending_invite(db: Session, test_organization: Organization, owner_user: User):
+    """Create a pending team invite.
+
+    This fixture will FAIL until TeamInvite model is implemented.
+    """
+    from src.models.team_invite import TeamInvite
+
+    invite = TeamInvite(
+        organization_id=test_organization.id,
+        email="pending@example.com",
+        role="member",
+        token=secrets.token_urlsafe(32),
+        invited_by_id=owner_user.id,
+        status="pending"
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+@pytest.fixture
+def expired_invite(db: Session, test_organization: Organization, owner_user: User):
+    """Create an expired team invite.
+
+    This fixture will FAIL until TeamInvite model is implemented.
+    """
+    from src.models.team_invite import TeamInvite
+
+    invite = TeamInvite(
+        organization_id=test_organization.id,
+        email="expired@example.com",
+        role="member",
+        token=secrets.token_urlsafe(32),
+        invited_by_id=owner_user.id,
+        status="pending",
+        expires_at=datetime.utcnow() - timedelta(days=1)  # Already expired
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+@pytest.fixture
+def accepted_invite(db: Session, test_organization: Organization, owner_user: User):
+    """Create an accepted team invite.
+
+    This fixture will FAIL until TeamInvite model is implemented.
+    """
+    from src.models.team_invite import TeamInvite
+
+    invite = TeamInvite(
+        organization_id=test_organization.id,
+        email="accepted@example.com",
+        role="member",
+        token=secrets.token_urlsafe(32),
+        invited_by_id=owner_user.id,
+        status="accepted",
+        accepted_at=datetime.utcnow()
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+@pytest.fixture
+def canceled_invite(db: Session, test_organization: Organization, owner_user: User):
+    """Create a canceled team invite.
+
+    This fixture will FAIL until TeamInvite model is implemented.
+    """
+    from src.models.team_invite import TeamInvite
+
+    invite = TeamInvite(
+        organization_id=test_organization.id,
+        email="canceled@example.com",
+        role="admin",
+        token=secrets.token_urlsafe(32),
+        invited_by_id=owner_user.id,
+        status="canceled"
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+@pytest.fixture
+def other_org_invite(db: Session, other_org: Organization, other_org_user: User):
+    """Create an invite in a different organization.
+
+    This fixture will FAIL until TeamInvite model is implemented.
+    """
+    from src.models.team_invite import TeamInvite
+
+    invite = TeamInvite(
+        organization_id=other_org.id,
+        email="otherorginvite@example.com",
+        role="member",
+        token=secrets.token_urlsafe(32),
+        invited_by_id=other_org_user.id,
+        status="pending"
+    )
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
+
+
+# =============================================================================
+# TEAM INVITE MODEL TESTS
+# =============================================================================
+
+
+class TestTeamInviteModel:
+    """Tests for TeamInvite model fields and behavior.
+
+    All tests will FAIL because the TeamInvite model doesn't exist yet.
+    """
+
+    def test_team_invite_model_exists(self):
+        """Test that TeamInvite model can be imported."""
+        from src.models.team_invite import TeamInvite
+        assert TeamInvite is not None
+
+    def test_team_invite_has_required_fields(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that TeamInvite model has all required fields."""
+        from src.models.team_invite import TeamInvite
+
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="test@example.com",
+            role="member",
+            token="test_token_123",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+        # Verify all required fields exist
+        assert hasattr(invite, 'id')
+        assert hasattr(invite, 'organization_id')
+        assert hasattr(invite, 'email')
+        assert hasattr(invite, 'role')
+        assert hasattr(invite, 'token')
+        assert hasattr(invite, 'invited_by_id')
+        assert hasattr(invite, 'status')
+        assert hasattr(invite, 'created_at')
+        assert hasattr(invite, 'expires_at')
+        assert hasattr(invite, 'accepted_at')
+
+        # Verify field values
+        assert invite.id is not None
+        assert invite.organization_id == test_organization.id
+        assert invite.email == "test@example.com"
+        assert invite.role == "member"
+        assert invite.token == "test_token_123"
+        assert invite.invited_by_id == owner_user.id
+        assert invite.status == "pending"
+
+    def test_team_invite_expires_at_defaults_to_7_days(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that expires_at defaults to 7 days from creation.
+
+        Per PRD: Invites expire after 7 days by default.
+        """
+        from src.models.team_invite import TeamInvite
+
+        before_create = datetime.utcnow()
+
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="expiry_test@example.com",
+            role="member",
+            token="expiry_token",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+        after_create = datetime.utcnow()
+
+        # expires_at should be approximately 7 days from now
+        expected_min = before_create + timedelta(days=7)
+        expected_max = after_create + timedelta(days=7)
+
+        assert invite.expires_at is not None
+        assert expected_min <= invite.expires_at <= expected_max
+
+    def test_team_invite_token_is_unique(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that invite token has unique constraint."""
+        from src.models.team_invite import TeamInvite
+        from sqlalchemy.exc import IntegrityError
+
+        invite1 = TeamInvite(
+            organization_id=test_organization.id,
+            email="unique1@example.com",
+            role="member",
+            token="same_token",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite1)
+        db.commit()
+
+        invite2 = TeamInvite(
+            organization_id=test_organization.id,
+            email="unique2@example.com",
+            role="member",
+            token="same_token",  # Same token - should fail
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite2)
+
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+    def test_team_invite_status_values(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that status can be set to all valid values: pending, accepted, expired, canceled."""
+        from src.models.team_invite import TeamInvite
+
+        statuses = ["pending", "accepted", "expired", "canceled"]
+
+        for i, status in enumerate(statuses):
+            invite = TeamInvite(
+                organization_id=test_organization.id,
+                email=f"status_test_{i}@example.com",
+                role="member",
+                token=f"status_token_{i}",
+                invited_by_id=owner_user.id,
+                status=status
+            )
+            db.add(invite)
+            db.commit()
+            db.refresh(invite)
+
+            assert invite.status == status
+
+    def test_team_invite_created_at_defaults_to_now(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that created_at field defaults to current timestamp."""
+        from src.models.team_invite import TeamInvite
+
+        before_create = datetime.utcnow()
+
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="created_test@example.com",
+            role="member",
+            token="created_token",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+        after_create = datetime.utcnow()
+
+        assert invite.created_at is not None
+        assert before_create <= invite.created_at <= after_create
+
+    def test_team_invite_has_organization_relationship(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that TeamInvite has relationship to Organization."""
+        from src.models.team_invite import TeamInvite
+
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="org_rel@example.com",
+            role="member",
+            token="org_rel_token",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+        assert hasattr(invite, 'organization')
+        assert invite.organization.id == test_organization.id
+        assert invite.organization.name == test_organization.name
+
+    def test_team_invite_has_invited_by_relationship(self, db: Session, test_organization: Organization, owner_user: User):
+        """Test that TeamInvite has relationship to inviting User."""
+        from src.models.team_invite import TeamInvite
+
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="inviter_rel@example.com",
+            role="member",
+            token="inviter_rel_token",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+        assert hasattr(invite, 'invited_by')
+        assert invite.invited_by.id == owner_user.id
+        assert invite.invited_by.email == owner_user.email
+
+
+# =============================================================================
+# LIST INVITES ENDPOINT TESTS
+# =============================================================================
+
+
+class TestListInvitesEndpoint:
+    """Tests for GET /api/v1/team/invites endpoint.
+
+    All tests will FAIL because the endpoint doesn't exist yet.
+    """
+
+    def test_list_invites_success(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        expired_invite,
+        accepted_invite
+    ):
+        """Test listing pending invites for organization."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "invites" in data
+        assert "total" in data
+        assert isinstance(data["invites"], list)
+
+    def test_list_invites_returns_pending_only(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        accepted_invite,
+        canceled_invite
+    ):
+        """Test that list only returns pending status invites by default."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should only include pending invites
+        for invite in data["invites"]:
+            assert invite["status"] == "pending"
+
+        # Check pending invite is included
+        emails = [inv["email"] for inv in data["invites"]]
+        assert "pending@example.com" in emails
+        assert "accepted@example.com" not in emails
+        assert "canceled@example.com" not in emails
+
+    def test_list_invites_includes_expired_with_filter(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        expired_invite
+    ):
+        """Test that expired invites can be included with query param."""
+        response = client.get(
+            "/api/v1/team/invites?include_expired=true",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        emails = [inv["email"] for inv in data["invites"]]
+        assert "expired@example.com" in emails
+
+    def test_list_invites_response_fields(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite
+    ):
+        """Test that invite response includes required fields."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert len(data["invites"]) > 0
+        invite = data["invites"][0]
+
+        # Required fields per PRD
+        assert "id" in invite
+        assert "email" in invite
+        assert "role" in invite
+        assert "status" in invite
+        assert "created_at" in invite
+        assert "expires_at" in invite
+        assert "invited_by" in invite  # Should include inviter info
+
+        # Should NOT include token (security)
+        assert "token" not in invite
+
+    def test_list_invites_multi_tenant_isolation(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        other_org_invite
+    ):
+        """Test that invites from other organizations are not returned."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        emails = [inv["email"] for inv in data["invites"]]
+        assert "otherorginvite@example.com" not in emails
+
+    def test_list_invites_owner_can_view(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite
+    ):
+        """Test that owner can view invites."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_list_invites_admin_can_view(
+        self,
+        client: TestClient,
+        admin_headers: dict,
+        pending_invite
+    ):
+        """Test that admin can view invites."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=admin_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_list_invites_member_cannot_view(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        pending_invite
+    ):
+        """Test that member cannot view invites (admin+ only per PRD)."""
+        response = client.get(
+            "/api/v1/team/invites",
+            headers=member_headers
+        )
+
+        assert response.status_code == 403
+
+    def test_list_invites_unauthorized(self, client: TestClient):
+        """Test that list invites requires authentication."""
+        response = client.get("/api/v1/team/invites")
+
+        assert response.status_code in [401, 403]
+
+
+# =============================================================================
+# RESEND INVITE ENDPOINT TESTS
+# =============================================================================
+
+
+class TestResendInviteEndpoint:
+    """Tests for POST /api/v1/team/invites/:id/resend endpoint.
+
+    All tests will FAIL because the endpoint doesn't exist yet.
+    """
+
+    def test_resend_invite_success(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        db: Session
+    ):
+        """Test that resending invite generates new token."""
+        old_token = pending_invite.token
+
+        response = client.post(
+            f"/api/v1/team/invites/{pending_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should return updated invite
+        assert data["id"] == pending_invite.id
+        assert data["email"] == pending_invite.email
+
+        # Verify token was regenerated in database
+        db.refresh(pending_invite)
+        assert pending_invite.token != old_token
+
+    def test_resend_invite_resets_expiry(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        db: Session
+    ):
+        """Test that resending invite resets expires_at to 7 days from now."""
+        before_resend = datetime.utcnow()
+
+        response = client.post(
+            f"/api/v1/team/invites/{pending_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+
+        after_resend = datetime.utcnow()
+
+        # Verify expiry was reset
+        db.refresh(pending_invite)
+        expected_min = before_resend + timedelta(days=7)
+        expected_max = after_resend + timedelta(days=7)
+
+        assert expected_min <= pending_invite.expires_at <= expected_max
+
+    def test_resend_expired_invite(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        expired_invite,
+        db: Session
+    ):
+        """Test that expired invites can be resent."""
+        response = client.post(
+            f"/api/v1/team/invites/{expired_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+
+        # Verify status changed back to pending
+        db.refresh(expired_invite)
+        assert expired_invite.status == "pending"
+
+    def test_resend_accepted_invite_fails(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        accepted_invite
+    ):
+        """Test that accepted invites cannot be resent."""
+        response = client.post(
+            f"/api/v1/team/invites/{accepted_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 400
+        assert "already accepted" in response.json()["detail"].lower()
+
+    def test_resend_canceled_invite_fails(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        canceled_invite
+    ):
+        """Test that canceled invites cannot be resent."""
+        response = client.post(
+            f"/api/v1/team/invites/{canceled_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 400
+        assert "canceled" in response.json()["detail"].lower()
+
+    def test_resend_invite_multi_tenant_isolation(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        other_org_invite
+    ):
+        """Test that cannot resend invite from different organization."""
+        response = client.post(
+            f"/api/v1/team/invites/{other_org_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_resend_invite_nonexistent(
+        self,
+        client: TestClient,
+        owner_headers: dict
+    ):
+        """Test resending non-existent invite returns 404."""
+        response = client.post(
+            "/api/v1/team/invites/99999/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_resend_invite_owner_can_resend(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite
+    ):
+        """Test that owner can resend invites."""
+        response = client.post(
+            f"/api/v1/team/invites/{pending_invite.id}/resend",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_resend_invite_admin_can_resend(
+        self,
+        client: TestClient,
+        admin_headers: dict,
+        pending_invite
+    ):
+        """Test that admin can resend invites."""
+        response = client.post(
+            f"/api/v1/team/invites/{pending_invite.id}/resend",
+            headers=admin_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_resend_invite_member_cannot_resend(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        pending_invite
+    ):
+        """Test that member cannot resend invites."""
+        response = client.post(
+            f"/api/v1/team/invites/{pending_invite.id}/resend",
+            headers=member_headers
+        )
+
+        assert response.status_code == 403
+
+    def test_resend_invite_unauthorized(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that resend requires authentication."""
+        response = client.post(
+            f"/api/v1/team/invites/{pending_invite.id}/resend"
+        )
+
+        assert response.status_code in [401, 403]
+
+
+# =============================================================================
+# CANCEL INVITE ENDPOINT TESTS
+# =============================================================================
+
+
+class TestCancelInviteEndpoint:
+    """Tests for DELETE /api/v1/team/invites/:id endpoint.
+
+    All tests will FAIL because the endpoint doesn't exist yet.
+    """
+
+    def test_cancel_invite_success(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite,
+        db: Session
+    ):
+        """Test that canceling invite sets status to 'canceled'."""
+        response = client.delete(
+            f"/api/v1/team/invites/{pending_invite.id}",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+
+        # Verify status changed in database
+        db.refresh(pending_invite)
+        assert pending_invite.status == "canceled"
+
+    def test_cancel_invite_response(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite
+    ):
+        """Test cancel invite returns the updated invite."""
+        response = client.delete(
+            f"/api/v1/team/invites/{pending_invite.id}",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["id"] == pending_invite.id
+        assert data["status"] == "canceled"
+
+    def test_cancel_accepted_invite_fails(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        accepted_invite
+    ):
+        """Test that accepted invites cannot be canceled."""
+        response = client.delete(
+            f"/api/v1/team/invites/{accepted_invite.id}",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 400
+        assert "already accepted" in response.json()["detail"].lower()
+
+    def test_cancel_already_canceled_invite(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        canceled_invite
+    ):
+        """Test canceling already canceled invite is idempotent."""
+        response = client.delete(
+            f"/api/v1/team/invites/{canceled_invite.id}",
+            headers=owner_headers
+        )
+
+        # Should succeed (idempotent) or return appropriate message
+        assert response.status_code in [200, 400]
+
+    def test_cancel_invite_multi_tenant_isolation(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        other_org_invite
+    ):
+        """Test that cannot cancel invite from different organization."""
+        response = client.delete(
+            f"/api/v1/team/invites/{other_org_invite.id}",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_cancel_invite_nonexistent(
+        self,
+        client: TestClient,
+        owner_headers: dict
+    ):
+        """Test canceling non-existent invite returns 404."""
+        response = client.delete(
+            "/api/v1/team/invites/99999",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 404
+
+    def test_cancel_invite_owner_can_cancel(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        pending_invite
+    ):
+        """Test that owner can cancel invites."""
+        response = client.delete(
+            f"/api/v1/team/invites/{pending_invite.id}",
+            headers=owner_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_cancel_invite_admin_can_cancel(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+        owner_user: User,
+        admin_headers: dict
+    ):
+        """Test that admin can cancel invites."""
+        from src.models.team_invite import TeamInvite
+
+        # Create a fresh invite for this test
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="admin_cancel_test@example.com",
+            role="member",
+            token=secrets.token_urlsafe(32),
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+        db.refresh(invite)
+
+        response = client.delete(
+            f"/api/v1/team/invites/{invite.id}",
+            headers=admin_headers
+        )
+
+        assert response.status_code == 200
+
+    def test_cancel_invite_member_cannot_cancel(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        pending_invite
+    ):
+        """Test that member cannot cancel invites."""
+        response = client.delete(
+            f"/api/v1/team/invites/{pending_invite.id}",
+            headers=member_headers
+        )
+
+        assert response.status_code == 403
+
+    def test_cancel_invite_unauthorized(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that cancel requires authentication."""
+        response = client.delete(
+            f"/api/v1/team/invites/{pending_invite.id}"
+        )
+
+        assert response.status_code in [401, 403]
+
+
+# =============================================================================
+# PUBLIC INVITE DETAILS ENDPOINT TESTS
+# =============================================================================
+
+
+class TestGetInviteDetailsEndpoint:
+    """Tests for GET /api/v1/invites/:token endpoint (public).
+
+    This is a PUBLIC endpoint - no authentication required.
+    Used to display invite details before accepting.
+
+    All tests will FAIL because the endpoint doesn't exist yet.
+    """
+
+    def test_get_invite_details_success(
+        self,
+        client: TestClient,
+        pending_invite,
+        test_organization: Organization
+    ):
+        """Test getting invite details by token."""
+        response = client.get(
+            f"/api/v1/invites/{pending_invite.token}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["email"] == pending_invite.email
+        assert data["role"] == pending_invite.role
+        assert "organization_name" in data
+        assert data["organization_name"] == test_organization.name
+
+    def test_get_invite_details_response_fields(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that invite details response includes correct fields."""
+        response = client.get(
+            f"/api/v1/invites/{pending_invite.token}"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should include these fields
+        assert "email" in data
+        assert "role" in data
+        assert "organization_name" in data
+        assert "expires_at" in data
+        assert "invited_by_name" in data  # Inviter's name/email
+
+        # Should NOT include sensitive data
+        assert "id" not in data or data.get("id") is None
+        assert "token" not in data
+        assert "organization_id" not in data
+
+    def test_get_invite_details_invalid_token(self, client: TestClient):
+        """Test that invalid token returns 404."""
+        response = client.get(
+            "/api/v1/invites/invalid_token_12345"
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower() or "invalid" in response.json()["detail"].lower()
+
+    def test_get_invite_details_expired_token(
+        self,
+        client: TestClient,
+        expired_invite
+    ):
+        """Test that expired invite returns appropriate error."""
+        response = client.get(
+            f"/api/v1/invites/{expired_invite.token}"
+        )
+
+        # Could return 404 or 410 (Gone) for expired
+        assert response.status_code in [404, 410]
+        assert "expired" in response.json()["detail"].lower()
+
+    def test_get_invite_details_accepted_token(
+        self,
+        client: TestClient,
+        accepted_invite
+    ):
+        """Test that already accepted invite returns appropriate error."""
+        response = client.get(
+            f"/api/v1/invites/{accepted_invite.token}"
+        )
+
+        # Could return 404 or 410 for already used
+        assert response.status_code in [404, 410]
+        assert "already" in response.json()["detail"].lower() or "accepted" in response.json()["detail"].lower()
+
+    def test_get_invite_details_canceled_token(
+        self,
+        client: TestClient,
+        canceled_invite
+    ):
+        """Test that canceled invite returns appropriate error."""
+        response = client.get(
+            f"/api/v1/invites/{canceled_invite.token}"
+        )
+
+        assert response.status_code in [404, 410]
+        assert "canceled" in response.json()["detail"].lower() or "not found" in response.json()["detail"].lower()
+
+    def test_get_invite_details_no_auth_required(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that this endpoint does NOT require authentication."""
+        # No auth headers
+        response = client.get(
+            f"/api/v1/invites/{pending_invite.token}"
+        )
+
+        # Should succeed without authentication
+        assert response.status_code == 200
+
+
+# =============================================================================
+# ACCEPT INVITE ENDPOINT TESTS
+# =============================================================================
+
+
+class TestAcceptInviteEndpoint:
+    """Tests for POST /api/v1/invites/:token/accept endpoint (public).
+
+    This is a PUBLIC endpoint - can be used by new users.
+    Creates user if new, adds to org if existing.
+
+    All tests will FAIL because the endpoint doesn't exist yet.
+    """
+
+    def test_accept_invite_new_user(
+        self,
+        client: TestClient,
+        pending_invite,
+        test_organization: Organization,
+        db: Session
+    ):
+        """Test accepting invite creates new user."""
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "NewUserPassword123!"
+            }
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+
+        # Should return user info and auth token
+        assert "user" in data
+        assert "access_token" in data
+        assert data["user"]["email"] == pending_invite.email
+        assert data["user"]["role"] == pending_invite.role
+
+        # Verify user created in database
+        new_user = db.query(User).filter(User.email == pending_invite.email).first()
+        assert new_user is not None
+        assert new_user.organization_id == test_organization.id
+        assert new_user.role == pending_invite.role
+
+    def test_accept_invite_updates_invite_status(
+        self,
+        client: TestClient,
+        pending_invite,
+        db: Session
+    ):
+        """Test that accepting invite updates invite status to 'accepted'."""
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "NewUserPassword123!"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify invite status changed
+        db.refresh(pending_invite)
+        assert pending_invite.status == "accepted"
+        assert pending_invite.accepted_at is not None
+
+    def test_accept_invite_sets_user_invited_by(
+        self,
+        client: TestClient,
+        pending_invite,
+        owner_user: User,
+        db: Session
+    ):
+        """Test that accepted invite sets invited_by_id on new user."""
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "NewUserPassword123!"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify invited_by_id is set
+        new_user = db.query(User).filter(User.email == pending_invite.email).first()
+        assert new_user.invited_by_id == owner_user.id
+
+    def test_accept_invite_sets_joined_at(
+        self,
+        client: TestClient,
+        pending_invite,
+        db: Session
+    ):
+        """Test that accepting invite sets joined_at on new user."""
+        before_accept = datetime.utcnow()
+
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "NewUserPassword123!"
+            }
+        )
+
+        assert response.status_code == 201
+
+        after_accept = datetime.utcnow()
+
+        # Verify joined_at is set
+        new_user = db.query(User).filter(User.email == pending_invite.email).first()
+        assert new_user.joined_at is not None
+        assert before_accept <= new_user.joined_at <= after_accept
+
+    def test_accept_invite_existing_user_different_org(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+        owner_user: User,
+        other_org: Organization
+    ):
+        """Test that existing user from different org can accept invite."""
+        from src.models.team_invite import TeamInvite
+
+        # Create a user in other_org
+        existing_user = User(
+            email="existing@other.com",
+            password_hash=hash_password("password123"),
+            organization_id=other_org.id,
+            role="member"
+        )
+        db.add(existing_user)
+        db.commit()
+
+        # Create invite for this user's email
+        invite = TeamInvite(
+            organization_id=test_organization.id,
+            email="existing@other.com",
+            role="admin",
+            token="existing_user_token",
+            invited_by_id=owner_user.id,
+            status="pending"
+        )
+        db.add(invite)
+        db.commit()
+
+        # Accept invite (existing user, but different org)
+        response = client.post(
+            f"/api/v1/invites/{invite.token}/accept",
+            json={
+                "password": "password123"  # Existing password
+            }
+        )
+
+        assert response.status_code == 201
+
+        # User should now be in test_organization with new role
+        db.refresh(existing_user)
+        # Note: This might create a new user or update existing - depends on implementation
+
+    def test_accept_invite_invalid_token(self, client: TestClient):
+        """Test accepting with invalid token returns 404."""
+        response = client.post(
+            "/api/v1/invites/invalid_token_xyz/accept",
+            json={
+                "password": "SomePassword123!"
+            }
+        )
+
+        assert response.status_code == 404
+
+    def test_accept_invite_expired_token(
+        self,
+        client: TestClient,
+        expired_invite
+    ):
+        """Test that expired invite cannot be accepted."""
+        response = client.post(
+            f"/api/v1/invites/{expired_invite.token}/accept",
+            json={
+                "password": "SomePassword123!"
+            }
+        )
+
+        assert response.status_code in [400, 404, 410]
+        assert "expired" in response.json()["detail"].lower()
+
+    def test_accept_invite_already_accepted(
+        self,
+        client: TestClient,
+        accepted_invite
+    ):
+        """Test that already accepted invite cannot be accepted again."""
+        response = client.post(
+            f"/api/v1/invites/{accepted_invite.token}/accept",
+            json={
+                "password": "SomePassword123!"
+            }
+        )
+
+        assert response.status_code in [400, 404, 410]
+        assert "already" in response.json()["detail"].lower() or "accepted" in response.json()["detail"].lower()
+
+    def test_accept_invite_canceled(
+        self,
+        client: TestClient,
+        canceled_invite
+    ):
+        """Test that canceled invite cannot be accepted."""
+        response = client.post(
+            f"/api/v1/invites/{canceled_invite.token}/accept",
+            json={
+                "password": "SomePassword123!"
+            }
+        )
+
+        assert response.status_code in [400, 404, 410]
+
+    def test_accept_invite_requires_password(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that accepting invite requires password."""
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={}  # No password
+        )
+
+        assert response.status_code == 422  # Validation error
+
+    def test_accept_invite_weak_password(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that weak password is rejected."""
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "123"  # Too weak
+            }
+        )
+
+        # Should reject weak password
+        assert response.status_code == 400
+
+    def test_accept_invite_increments_seat_count(
+        self,
+        client: TestClient,
+        pending_invite,
+        test_organization: Organization,
+        db: Session
+    ):
+        """Test that accepting invite increments organization seat count."""
+        initial_seats = test_organization.seat_count
+
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "NewUserPassword123!"
+            }
+        )
+
+        assert response.status_code == 201
+
+        # Verify seat count incremented
+        db.refresh(test_organization)
+        assert test_organization.seat_count == initial_seats + 1
+
+    def test_accept_invite_no_auth_required(
+        self,
+        client: TestClient,
+        pending_invite
+    ):
+        """Test that accept endpoint does NOT require authentication."""
+        # No auth headers
+        response = client.post(
+            f"/api/v1/invites/{pending_invite.token}/accept",
+            json={
+                "password": "NewUserPassword123!"
+            }
+        )
+
+        # Should succeed without authentication
+        assert response.status_code == 201

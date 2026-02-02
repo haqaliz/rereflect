@@ -312,8 +312,41 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Integrations */}
+        {/* Team Management */}
         <Card className="animate-slide-up stagger-4">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-secondary rounded-lg">
+                <Users className="w-5 h-5 text-primary" />
+              </div>
+              <CardTitle>Team Management</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <Link
+              href="/settings/team"
+              className="flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary/50 transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-secondary rounded-lg">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                    Manage Team Members
+                  </h4>
+                  <p className="text-sm text-muted-foreground">
+                    Invite members, manage roles, and team settings
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Integrations */}
+        <Card className="animate-slide-up stagger-5">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">
@@ -346,7 +379,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Usage Statistics */}
-        <div className="animate-slide-up stagger-5">
+        <div className="animate-slide-up stagger-6">
           <h3 className="text-xl font-bold text-foreground mb-4 flex items-center space-x-2">
             <span>Usage Statistics</span>
           </h3>
@@ -367,7 +400,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Account Information */}
-        <Card className="animate-slide-up stagger-6">
+        <Card className="animate-slide-up stagger-7">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">

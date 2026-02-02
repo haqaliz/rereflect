@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import auth, organizations, feedback, dashboard, analyze, integrations
-from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team
+from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team, invites
 from src.seed import seed_admin_user
 import logging
 import os
@@ -79,6 +79,7 @@ app.include_router(feedback_sources.router)
 app.include_router(pending_feedback.router)
 app.include_router(billing.router)
 app.include_router(team.router, prefix="/api/v1/team", tags=["team"])
+app.include_router(invites.router, prefix="/api/v1/invites", tags=["invites"])
 
 
 @app.get("/")

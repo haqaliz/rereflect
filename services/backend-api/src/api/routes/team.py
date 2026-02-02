@@ -2,15 +2,17 @@
 Team Management API routes for managing organization members.
 """
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
 
 from src.database.session import get_db
 from src.models.organization import Organization
 from src.models.user import User
+from src.models.team_invite import TeamInvite
 from src.api.dependencies import (
     get_current_user,
     get_current_org,
@@ -55,6 +57,29 @@ class InviteRequest(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class InvitedByInfo(BaseModel):
+    id: int
+    email: str
+
+
+class TeamInviteResponse(BaseModel):
+    id: int
+    email: str
+    role: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    invited_by: InvitedByInfo
+
+    class Config:
+        from_attributes = True
+
+
+class TeamInviteListResponse(BaseModel):
+    invites: list[TeamInviteResponse]
+    total: int
 
 
 # ============================================================================
@@ -326,3 +351,147 @@ def transfer_ownership(
         joined_at=target_user.joined_at,
         invited_by_id=target_user.invited_by_id,
     )
+
+
+# ============================================================================
+# Invite Management Endpoints
+# ============================================================================
+
+
+def _invite_to_response(invite: TeamInvite) -> TeamInviteResponse:
+    """Helper to convert TeamInvite to response schema."""
+    return TeamInviteResponse(
+        id=invite.id,
+        email=invite.email,
+        role=invite.role,
+        status=invite.status,
+        created_at=invite.created_at,
+        expires_at=invite.expires_at,
+        invited_by=InvitedByInfo(
+            id=invite.invited_by.id,
+            email=invite.invited_by.email
+        )
+    )
+
+
+@router.get("/invites", response_model=TeamInviteListResponse)
+def list_invites(
+    include_expired: bool = Query(False, description="Include expired invites"),
+    current_user: User = Depends(get_current_user),
+    current_org: Organization = Depends(get_current_org),
+    _admin_check: bool = Depends(require_admin_or_owner),
+    db: Session = Depends(get_db)
+):
+    """
+    List pending invites for the organization.
+    - Owner/Admin only
+    - By default only returns pending status invites
+    - Use include_expired=true to also include expired invites
+    """
+    query = db.query(TeamInvite).filter(
+        TeamInvite.organization_id == current_org.id
+    )
+
+    if include_expired:
+        # Include pending (even if expired by date)
+        query = query.filter(TeamInvite.status == "pending")
+    else:
+        # Only pending and not expired by date
+        query = query.filter(
+            TeamInvite.status == "pending",
+            TeamInvite.expires_at > datetime.utcnow()
+        )
+
+    invites = query.order_by(TeamInvite.created_at.desc()).all()
+
+    return TeamInviteListResponse(
+        invites=[_invite_to_response(inv) for inv in invites],
+        total=len(invites)
+    )
+
+
+@router.post("/invites/{invite_id}/resend", response_model=TeamInviteResponse)
+def resend_invite(
+    invite_id: int,
+    current_user: User = Depends(get_current_user),
+    current_org: Organization = Depends(get_current_org),
+    _admin_check: bool = Depends(require_admin_or_owner),
+    db: Session = Depends(get_db)
+):
+    """
+    Resend an invite - generates new token and resets expiry.
+    - Owner/Admin only
+    - Only pending or expired invites can be resent
+    - Accepted or canceled invites cannot be resent
+    """
+    invite = db.query(TeamInvite).filter(
+        TeamInvite.id == invite_id,
+        TeamInvite.organization_id == current_org.id
+    ).first()
+
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found"
+        )
+
+    if invite.status == "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot resend an already accepted invite"
+        )
+
+    if invite.status == "canceled":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot resend a canceled invite"
+        )
+
+    # Generate new token and reset expiry
+    now = datetime.utcnow()
+    invite.token = secrets.token_urlsafe(32)
+    invite.expires_at = now + timedelta(days=7)
+    invite.status = "pending"  # In case it was expired
+
+    db.commit()
+    db.refresh(invite)
+
+    return _invite_to_response(invite)
+
+
+@router.delete("/invites/{invite_id}", response_model=TeamInviteResponse)
+def cancel_invite(
+    invite_id: int,
+    current_user: User = Depends(get_current_user),
+    current_org: Organization = Depends(get_current_org),
+    _admin_check: bool = Depends(require_admin_or_owner),
+    db: Session = Depends(get_db)
+):
+    """
+    Cancel an invite - sets status to 'canceled'.
+    - Owner/Admin only
+    - Cannot cancel already accepted invites
+    """
+    invite = db.query(TeamInvite).filter(
+        TeamInvite.id == invite_id,
+        TeamInvite.organization_id == current_org.id
+    ).first()
+
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found"
+        )
+
+    if invite.status == "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot cancel an already accepted invite"
+        )
+
+    # Set status to canceled
+    invite.status = "canceled"
+    db.commit()
+    db.refresh(invite)
+
+    return _invite_to_response(invite)
