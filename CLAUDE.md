@@ -178,6 +178,47 @@ Authorization: Bearer <token>
 ### Multi-tenancy
 All data is scoped by `organization_id` extracted from JWT.
 
+## Billing & Subscription Tiers
+
+Rereflect uses Stripe for billing with 4 subscription tiers:
+
+| Tier | Price | Feedback/mo | Seats | Key Features |
+|------|-------|-------------|-------|--------------|
+| **Free** | $0 | 250 | 2 | Dashboard, CSV Import, Sentiment Analysis, Email Support |
+| **Pro** | $29/mo | 2,500 | 10 | + Slack Integration, Webhooks, Data Export, Trends Analytics |
+| **Business** | $99/mo | 25,000 | 25 | + API Access, Advanced Analytics, Custom Categories, Dedicated Support |
+| **Enterprise** | Contact Sales | Unlimited | Unlimited | + SSO/SAML, Custom Integrations, SLA, Dedicated CSM, Audit Logs |
+
+### Feature Gating
+
+Features are gated by plan level using the `require_feature` dependency:
+
+```python
+@router.post("/slack/webhook", dependencies=[Depends(require_feature("slack_integration"))])
+```
+
+Feature IDs by tier:
+- **Free**: `basic_dashboard`, `csv_import`, `sentiment_analysis`, `email_support`
+- **Pro**: + `slack_integration`, `webhooks`, `data_export`, `trends_analytics`, `priority_support`
+- **Business**: + `api_access`, `advanced_analytics`, `custom_categories`, `dedicated_support`
+- **Enterprise**: + `sso_saml`, `custom_integrations`, `sla`, `dedicated_csm`, `audit_logs`, `custom_retention`
+
+### Billing Enforcement
+
+- **Feedback limits**: Checked in `POST /api/v1/feedback` via `check_feedback_limit` dependency
+- **Feature access**: Checked via `require_feature(feature_id)` dependency
+- **Overage tracking**: Pro/Business allow overage at $0.02/$0.01 per feedback
+- **Enterprise**: Pay-as-you-go metered billing via Stripe Usage Records
+
+### Key Billing Files
+- `src/config/plans.py` - Plan definitions and feature mappings
+- `src/api/routes/billing.py` - Billing API endpoints
+- `src/api/dependencies.py` - Feature gating dependencies
+- `src/services/stripe_service.py` - Stripe integration
+- `src/models/subscription.py` - Subscription model
+- `src/models/usage.py` - Usage tracking model
+- `lib/api/billing.ts` - Frontend billing API
+
 ### Pagination
 ```
 GET /api/v1/feedback?page=1&page_size=20&sort_by=created_at&sort_order=desc

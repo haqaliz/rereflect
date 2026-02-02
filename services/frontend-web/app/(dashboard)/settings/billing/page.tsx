@@ -437,7 +437,7 @@ function BillingPageContent() {
                       <CardTitle className="text-lg">{plan.name}</CardTitle>
                     </div>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-3xl font-bold text-foreground">
+                      <span className={`font-bold text-foreground ${price === null ? 'text-xl' : 'text-3xl'}`}>
                         {formatPrice(price)}
                       </span>
                       {price !== null && (
