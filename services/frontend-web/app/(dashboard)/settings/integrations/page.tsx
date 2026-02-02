@@ -2,7 +2,6 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,11 +21,15 @@ import {
   Loader2,
   Settings2,
   Clock,
-  ArrowLeft,
   ChevronRight,
   Link as LinkIcon,
   Webhook,
+  Settings as SettingsIcon,
+  MessageSquare,
+  Users,
 } from 'lucide-react';
+import { SettingsTabs } from '@/components/SettingsTabs';
+import Link from 'next/link';
 
 function IntegrationsContent() {
   const router = useRouter();
@@ -113,21 +116,14 @@ function IntegrationsContent() {
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Header */}
         <div className="animate-fade-in">
-          <Link
-            href="/settings"
-            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4"
-          >
-            <ArrowLeft className="w-4 h-4 mr-1" />
-            Back to Settings
-          </Link>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center space-x-3">
               <div className="p-3 bg-secondary rounded-xl">
-                <Slack className="w-8 h-8 text-primary" />
+                <SettingsIcon className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-foreground">Integrations</h1>
-                <p className="text-muted-foreground">Manage your Slack and notification integrations</p>
+                <h1 className="text-4xl font-bold text-foreground">Settings</h1>
+                <p className="text-muted-foreground text-lg">Manage your organization and preferences</p>
               </div>
             </div>
             <Link href="/settings/integrations/new">
@@ -137,6 +133,9 @@ function IntegrationsContent() {
               </Button>
             </Link>
           </div>
+
+          {/* Settings Tabs */}
+          <SettingsTabs />
         </div>
 
         {/* OAuth Error */}
@@ -308,6 +307,102 @@ function IntegrationsContent() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Available Integrations */}
+        <Card className="animate-slide-up stagger-1">
+          <CardHeader className="border-b border-border">
+            <CardTitle>Available Integrations</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Slack - Available */}
+              <Link href="/settings/integrations/new">
+                <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-[#4A154B]/10 rounded-lg">
+                      <Slack className="w-6 h-6 text-[#4A154B]" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Slack</span>
+                        <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                          Available
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Get feedback alerts in your Slack channels
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                </div>
+              </Link>
+
+              {/* Webhooks - Available */}
+              <Link href="/settings/integrations/new">
+                <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <Webhook className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Webhooks</span>
+                        <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                          Available
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Send feedback data to your own endpoints
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                </div>
+              </Link>
+
+              {/* Discord - Coming Soon */}
+              <div className="p-4 border border-border rounded-xl bg-muted/30 opacity-60 cursor-not-allowed">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-[#5865F2]/10 rounded-lg">
+                    <MessageSquare className="w-6 h-6 text-[#5865F2]" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">Discord</span>
+                      <Badge variant="secondary" className="text-xs">
+                        Coming Soon
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Get alerts in your Discord server
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Microsoft Teams - Coming Soon */}
+              <div className="p-4 border border-border rounded-xl bg-muted/30 opacity-60 cursor-not-allowed">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-[#6264A7]/10 rounded-lg">
+                    <Users className="w-6 h-6 text-[#6264A7]" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">Microsoft Teams</span>
+                      <Badge variant="secondary" className="text-xs">
+                        Coming Soon
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Receive feedback alerts in Teams channels
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </main>

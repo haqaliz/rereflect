@@ -19,7 +19,6 @@ import {
   BILLING_CYCLES,
 } from '@/lib/api/billing';
 import {
-  CreditCard,
   Crown,
   Zap,
   Building2,
@@ -34,9 +33,9 @@ import {
   MessageSquare,
   Users,
   Loader2,
-  ChevronLeft,
+  Settings as SettingsIcon,
 } from 'lucide-react';
-import Link from 'next/link';
+import { SettingsTabs } from '@/components/SettingsTabs';
 import { toast } from 'sonner';
 
 function BillingPageContent() {
@@ -180,24 +179,20 @@ function BillingPageContent() {
   return (
     <div className="min-h-screen pattern-bg">
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Back button and Header */}
+        {/* Header */}
         <div className="animate-fade-in">
-          <Link
-            href="/settings"
-            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4 mr-1" />
-            Back to Settings
-          </Link>
-          <div className="flex items-center space-x-3 mb-2">
+          <div className="flex items-center space-x-3 mb-6">
             <div className="p-3 bg-secondary rounded-xl">
-              <CreditCard className="w-8 h-8 text-primary" />
+              <SettingsIcon className="w-8 h-8 text-primary" />
             </div>
             <div>
-              <h1 className="text-4xl font-bold text-foreground">Billing & Subscription</h1>
-              <p className="text-muted-foreground text-lg">Manage your subscription and view usage</p>
+              <h1 className="text-4xl font-bold text-foreground">Settings</h1>
+              <p className="text-muted-foreground text-lg">Manage your organization and preferences</p>
             </div>
           </div>
+
+          {/* Settings Tabs */}
+          <SettingsTabs />
         </div>
 
         {/* Current Subscription Card */}

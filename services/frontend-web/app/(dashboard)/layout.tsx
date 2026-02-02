@@ -26,6 +26,7 @@ const pageTitles: Record<string, string> = {
   '/feature-requests': 'Feature Requests',
   '/urgent-feedbacks': 'Urgent Feedbacks',
   '/settings': 'Settings',
+  '/settings/preferences': 'Preferences',
   '/settings/billing': 'Billing',
   '/settings/integrations': 'Integrations',
   '/settings/team': 'Team',

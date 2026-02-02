@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -48,6 +47,7 @@ import {
   formatRelativeTime,
 } from '@/lib/api/team';
 import { InviteMemberModal } from '@/components/InviteMemberModal';
+import { SettingsTabs } from '@/components/SettingsTabs';
 import {
   Users,
   UserPlus,
@@ -59,10 +59,10 @@ import {
   RefreshCw,
   X,
   Trash2,
-  ChevronLeft,
   Loader2,
   Clock,
   AlertTriangle,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -280,23 +280,16 @@ export default function TeamSettingsPage() {
   return (
     <div className="min-h-screen pattern-bg">
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Back button and Header */}
+        {/* Header */}
         <div className="animate-fade-in">
-          <Link
-            href="/settings"
-            className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4 mr-1" />
-            Back to Settings
-          </Link>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center space-x-3">
               <div className="p-3 bg-secondary rounded-xl">
-                <Users className="w-8 h-8 text-primary" />
+                <SettingsIcon className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h1 className="text-4xl font-bold text-foreground">Team Members</h1>
-                <p className="text-muted-foreground text-lg">Manage your organization's team</p>
+                <h1 className="text-4xl font-bold text-foreground">Settings</h1>
+                <p className="text-muted-foreground text-lg">Manage your organization and preferences</p>
               </div>
             </div>
             <Button onClick={() => setInviteModalOpen(true)}>
@@ -304,6 +297,9 @@ export default function TeamSettingsPage() {
               Invite Member
             </Button>
           </div>
+
+          {/* Settings Tabs */}
+          <SettingsTabs />
         </div>
 
         {/* Seat Usage */}
