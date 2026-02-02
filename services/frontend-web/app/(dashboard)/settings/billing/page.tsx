@@ -37,6 +37,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 
 function BillingPageContent() {
   const router = useRouter();
@@ -51,7 +52,6 @@ function BillingPageContent() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -71,12 +71,13 @@ function BillingPageContent() {
             const syncRes = await billingAPI.syncSubscription();
             setSubscription(syncRes.subscription);
             setCanManageBilling(syncRes.can_manage_billing);
-            setSyncMessage('Subscription updated successfully!');
+            toast.success('Subscription updated successfully!');
 
             // Clear the URL params after sync
             router.replace('/settings/billing');
           } catch (syncErr) {
             console.error('Failed to sync subscription:', syncErr);
+            toast.error('Failed to sync subscription');
           }
         }
 
@@ -198,22 +199,6 @@ function BillingPageContent() {
             </div>
           </div>
         </div>
-
-        {/* Success Message */}
-        {syncMessage && (
-          <div className="animate-fade-in p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-            <div className="flex items-center gap-2">
-              <Check className="w-5 h-5 text-green-600" />
-              <p className="text-green-800 dark:text-green-200 font-medium">{syncMessage}</p>
-              <button
-                onClick={() => setSyncMessage(null)}
-                className="ml-auto text-green-600 hover:text-green-800"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Current Subscription Card */}
         <Card className="animate-slide-up stagger-1">
