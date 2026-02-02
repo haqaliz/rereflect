@@ -1,6 +1,7 @@
 """
 Team Management API routes for managing organization members.
 """
+import os
 from typing import Optional
 from datetime import datetime, timedelta
 import secrets
@@ -22,9 +23,13 @@ from src.api.dependencies import (
     check_seat_limit,
 )
 from src.services.audit_service import log_action
+from src.services.email_service import send_team_invite_email
 
 
 router = APIRouter()
+
+# Super admin email that can invite owners
+SUPER_ADMIN_EMAIL = os.getenv("SUPER_ADMIN_EMAIL", "support@rereflect.ca")
 
 
 # ============================================================================
@@ -54,7 +59,7 @@ class RoleUpdateRequest(BaseModel):
 
 class InviteRequest(BaseModel):
     email: EmailStr
-    role: str  # 'admin' or 'member'
+    role: str  # 'owner', 'admin', or 'member' (owner only by super admin)
 
 
 class MessageResponse(BaseModel):
@@ -481,13 +486,25 @@ def create_invite(
     - Owner/Admin only
     - Validates email doesn't exist
     - Admin cannot invite as 'owner' or 'admin'
+    - Only super admin (support@rereflect.ca) can invite owners
     - Creates a TeamInvite with pending status
     """
+    is_super_admin = current_user.email == SUPER_ADMIN_EMAIL
+
     # Validate role
-    if data.role not in ['admin', 'member']:
+    valid_roles = ['admin', 'member']
+    if is_super_admin:
+        valid_roles.append('owner')  # Super admin can invite owners
+
+    if data.role not in valid_roles:
+        if data.role == 'owner' and not is_super_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the super admin can invite members as owner"
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role must be 'admin' or 'member'"
+            detail=f"Role must be one of: {', '.join(valid_roles)}"
         )
 
     # Admin cannot invite as admin (only owner can)
@@ -549,6 +566,15 @@ def create_invite(
         request=request
     )
 
+    # Send invite email
+    send_team_invite_email(
+        to_email=data.email,
+        invite_token=invite.token,
+        organization_name=current_org.name,
+        inviter_email=current_user.email,
+        role=data.role,
+    )
+
     return _invite_to_response(invite)
 
 
@@ -567,11 +593,22 @@ def invite_member_legacy(
     """
     from src.api.auth import hash_password
 
+    is_super_admin = current_user.email == SUPER_ADMIN_EMAIL
+
     # Validate role
-    if data.role not in ['admin', 'member']:
+    valid_roles = ['admin', 'member']
+    if is_super_admin:
+        valid_roles.append('owner')  # Super admin can invite owners
+
+    if data.role not in valid_roles:
+        if data.role == 'owner' and not is_super_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the super admin can invite members as owner"
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Role must be 'admin' or 'member'"
+            detail=f"Role must be one of: {', '.join(valid_roles)}"
         )
 
     # Admin cannot invite as admin (only owner can)
@@ -698,6 +735,15 @@ def resend_invite(
 
     db.commit()
     db.refresh(invite)
+
+    # Resend invite email
+    send_team_invite_email(
+        to_email=invite.email,
+        invite_token=invite.token,
+        organization_name=current_org.name,
+        inviter_email=current_user.email,
+        role=invite.role,
+    )
 
     return _invite_to_response(invite)
 
