@@ -34,12 +34,15 @@ Open Source              Product-Market Fit            Enterprise Ready
 #### Week 1-2: Authentication & Multi-tenancy ✅ COMPLETE
 - [x] Design database schema (multi-tenant architecture)
 - [x] Implement user authentication (email/password)
-- [ ] OAuth integration (Google Sign-In) - deferred
+- [ ] OAuth integration (Google Sign-In) - deferred to Phase 2
 - [x] Organization model (tenant isolation)
-- [ ] User roles (Admin, Member, Viewer) - deferred
-- [ ] Invite team members flow - deferred
+- [x] User roles (Owner, Admin, Member) ✅
+- [x] Invite team members flow ✅
+- [x] Role-based access control (frontend + backend) ✅
+- [x] Ownership transfer ✅
+- [x] Audit logging (Business+) ✅
 
-**Deliverable**: ✅ Working auth system with org isolation
+**Deliverable**: ✅ Working auth system with org isolation + full RBAC
 
 #### Week 3-4: Core Dashboard UI ✅ COMPLETE
 - [x] Create React/Next.js project structure

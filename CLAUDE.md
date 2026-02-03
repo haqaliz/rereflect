@@ -178,6 +178,62 @@ Authorization: Bearer <token>
 ### Multi-tenancy
 All data is scoped by `organization_id` extracted from JWT.
 
+## Role-Based Access Control (RBAC)
+
+### Role Hierarchy
+```
+Owner (level 3) > Admin (level 2) > Member (level 1)
+```
+
+### Permission Matrix
+
+| Action | Owner | Admin | Member |
+|--------|-------|-------|--------|
+| View dashboard & analytics | ✅ | ✅ | ✅ |
+| View feedback items | ✅ | ✅ | ✅ |
+| Import feedback (CSV) | ✅ | ✅ | ✅ |
+| View team list & invites | ✅ | ✅ | ✅ |
+| Manage integrations | ✅ | ✅ | ❌ |
+| Invite/remove members | ✅ | ✅ | ❌ |
+| Change member roles | ✅ | ✅ | ❌ |
+| Access billing | ✅ | ❌ | ❌ |
+| Transfer ownership | ✅ | ❌ | ❌ |
+
+### Backend Enforcement
+
+Role checking dependencies in `src/api/dependencies.py`:
+```python
+require_admin_or_owner  # For admin/owner-only endpoints
+require_owner           # For owner-only endpoints (billing, delete org)
+```
+
+Usage in routes:
+```python
+@router.post("/invite", dependencies=[Depends(require_admin_or_owner)])
+@router.post("/billing/checkout", dependencies=[Depends(require_owner)])
+```
+
+### Frontend Enforcement
+
+1. **Tab Visibility** (`components/SettingsTabs.tsx`):
+   - Billing tab: owner only
+   - Integrations tab: admin/owner only
+   - Preferences & Team: all roles
+
+2. **Route Protection** (in page components):
+   - `/settings/billing` → redirects non-owners to `/settings/preferences`
+   - `/settings/integrations` → redirects members to `/settings/preferences`
+
+3. **Conditional UI** (buttons, actions):
+   - `isOwner = user?.role === 'owner'`
+   - `isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin'`
+
+### Key RBAC Files
+- `src/api/dependencies.py` - Backend role checking
+- `src/api/routes/team.py` - Team management endpoints
+- `components/SettingsTabs.tsx` - Tab visibility by role
+- `contexts/AuthContext.tsx` - User role from JWT
+
 ## Billing & Subscription Tiers
 
 Rereflect uses Stripe for billing with 4 subscription tiers:

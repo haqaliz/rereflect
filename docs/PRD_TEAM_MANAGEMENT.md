@@ -368,29 +368,42 @@ GET    /api/v1/audit-logs              # List audit logs (paginated)
 
 ## Implementation Phases
 
-### Phase 1: Core RBAC (MVP)
-- Add `role` field to User model
-- Implement permission checking middleware
-- Update existing endpoints with role checks
-- Create team list endpoint
+### Phase 1: Core RBAC (MVP) ✅ COMPLETE
+- [x] Add `role` field to User model
+- [x] Implement permission checking middleware (`require_admin_or_owner`, `require_owner`)
+- [x] Update existing endpoints with role checks
+- [x] Create team list endpoint
+- [x] Frontend tab visibility by role (`SettingsTabs.tsx`)
+- [x] Frontend route protection (billing, integrations pages redirect unauthorized users)
+- [x] Conditional UI rendering (hide actions for members)
 
-### Phase 2: Invitations
-- TeamInvite model and migration
-- Invite creation, listing, resend, cancel
-- Email sending for invites
-- Invite acceptance flow (new/existing users)
+### Phase 2: Invitations ✅ COMPLETE
+- [x] TeamInvite model and migration
+- [x] Invite creation, listing, resend, cancel
+- [x] Email sending for invites (Resend integration)
+- [x] Invite acceptance flow (new/existing users)
+- [x] `/invite/[token]` public page for accepting invites
 
-### Phase 3: Team Management UI
-- Team settings page
-- Invite modal
-- Role change dropdown
-- Remove member confirmation
+### Phase 3: Team Management UI ✅ COMPLETE
+- [x] Team settings page (`/settings/team`)
+- [x] Invite modal (`InviteMemberModal.tsx`)
+- [x] Role change dropdown
+- [x] Remove member confirmation
+- [x] Seat usage display
+- [x] Pending invites section
+- [x] Actions column hidden for members
 
-### Phase 4: Ownership & Advanced
-- Ownership transfer flow
-- Audit logging (Business+)
-- Last active tracking
-- Email notifications for all events
+### Phase 4: Ownership & Advanced ✅ COMPLETE
+- [x] Ownership transfer flow (with TRANSFER confirmation)
+- [x] Audit logging (Business+)
+- [x] Last active tracking
+- [x] Email notifications for invites (via Resend)
+
+### Next Steps / Future Enhancements
+- [ ] Email notifications for role changes, removals
+- [ ] OAuth signup integration (Google Sign-In)
+- [ ] SSO/SAML for Enterprise tier
+- [ ] Custom roles (Enterprise feature)
 
 ---
 
