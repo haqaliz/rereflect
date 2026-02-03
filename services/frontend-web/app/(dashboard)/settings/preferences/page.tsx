@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { organizationAPI, Organization, OrganizationStats } from '@/lib/api/organization';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +31,7 @@ import Link from 'next/link';
 
 export default function PreferencesPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [org, setOrg] = useState<Organization | null>(null);
   const [stats, setStats] = useState<OrganizationStats | null>(null);
@@ -40,6 +42,26 @@ export default function PreferencesPage() {
   // Only access theme context after mounting (client-side only)
   const themeContext = mounted ? useTheme() : { theme: 'system', setTheme: () => {} };
   const { theme, setTheme } = themeContext;
+
+  // Helper to get role display name
+  const getRoleDisplayName = (role: string) => {
+    switch (role) {
+      case 'owner': return 'Owner';
+      case 'admin': return 'Administrator';
+      case 'member': return 'Member';
+      default: return role;
+    }
+  };
+
+  // Helper to get role color
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'owner': return 'var(--chart-5)'; // Purple
+      case 'admin': return 'var(--chart-2)'; // Amber
+      case 'member': return 'var(--muted-foreground)';
+      default: return 'var(--muted-foreground)';
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -319,11 +341,11 @@ export default function PreferencesPage() {
                 <span
                   className="px-3 py-1 rounded-lg text-sm font-bold"
                   style={{
-                    backgroundColor: 'color-mix(in oklch, var(--chart-2) 15%, transparent)',
-                    color: 'var(--chart-2)'
+                    backgroundColor: `color-mix(in oklch, ${getRoleColor(user?.role || 'member')} 15%, transparent)`,
+                    color: getRoleColor(user?.role || 'member')
                   }}
                 >
-                  Administrator
+                  {getRoleDisplayName(user?.role || 'member')}
                 </span>
               </div>
             </div>
