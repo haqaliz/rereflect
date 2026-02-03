@@ -36,9 +36,12 @@ apiClient.interceptors.response.use(
       // Unauthorized - clear token and redirect to login
       if (typeof window !== 'undefined') {
         localStorage.removeItem('access_token');
-        // Don't redirect if already on login or signup page (to preserve error messages)
-        const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/signup';
-        if (!isAuthPage) {
+        // Don't redirect if on auth pages or public routes like invite
+        const pathname = window.location.pathname;
+        const isPublicPage = pathname === '/login' ||
+                             pathname === '/signup' ||
+                             pathname.startsWith('/invite');
+        if (!isPublicPage) {
           window.location.href = '/login';
         }
       }

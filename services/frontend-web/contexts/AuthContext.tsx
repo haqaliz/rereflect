@@ -24,8 +24,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Public routes that don't require authentication
 const publicRoutes = ['/', '/login', '/signup', '/privacy', '/terms'];
 
+// Public route prefixes (routes that start with these paths)
+const publicRoutePrefixes = ['/invite'];
+
 // Auth routes that should redirect to dashboard if already logged in
 const authRoutes = ['/login', '/signup'];
+
+// Check if a path is public
+const isPublicRoute = (path: string): boolean => {
+  if (publicRoutes.includes(path)) return true;
+  return publicRoutePrefixes.some(prefix => path.startsWith(prefix));
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -45,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
 
         // Redirect to login if on a protected route
-        if (!publicRoutes.includes(pathname)) {
+        if (!isPublicRoute(pathname)) {
           router.push('/login');
         }
         return;
@@ -66,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
 
         // Redirect to login if on a protected route
-        if (!publicRoutes.includes(pathname)) {
+        if (!isPublicRoute(pathname)) {
           router.push('/login');
         }
       } finally {
