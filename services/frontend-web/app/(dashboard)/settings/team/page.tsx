@@ -46,6 +46,7 @@ import {
   getInviteStatusColor,
   formatRelativeTime,
 } from '@/lib/api/team';
+import { useAuth } from '@/contexts/AuthContext';
 import { InviteMemberModal } from '@/components/InviteMemberModal';
 import { SettingsTabs } from '@/components/SettingsTabs';
 import {
@@ -68,6 +69,7 @@ import { toast } from 'sonner';
 
 export default function TeamSettingsPage() {
   const router = useRouter();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invites, setInvites] = useState<TeamInvite[]>([]);
@@ -94,9 +96,11 @@ export default function TeamSettingsPage() {
   const [selectedNewOwner, setSelectedNewOwner] = useState<string>('');
   const [transferConfirmText, setTransferConfirmText] = useState('');
 
-  // Get current user ID from token (in real app, this would come from auth context)
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null);
+  // Role-based permissions
+  const currentUserId = user?.id || null;
+  const currentUserRole = user?.role || null;
+  const isOwner = currentUserRole === 'owner';
+  const isAdminOrOwner = currentUserRole === 'owner' || currentUserRole === 'admin';
 
   useEffect(() => {
     const fetchData = async () => {
@@ -105,15 +109,6 @@ export default function TeamSettingsPage() {
         if (!token) {
           router.push('/login');
           return;
-        }
-
-        // Parse the JWT to get the current user ID and role
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          setCurrentUserId(payload.sub || payload.user_id);
-          setCurrentUserRole(payload.role || null);
-        } catch {
-          console.error('Failed to parse token');
         }
 
         const [teamRes, invitesRes] = await Promise.all([
@@ -234,8 +229,8 @@ export default function TeamSettingsPage() {
       setSeatsLimit(teamRes.seats_limit);
       setInvites(invitesRes.invites.filter(i => i.status === 'pending'));
 
-      // Update the current user role
-      setCurrentUserRole('admin');
+      // Reload page to refresh auth context with new role
+      window.location.reload();
 
       // Reset and close dialog
       setTransferDialogOpen(false);
@@ -292,10 +287,12 @@ export default function TeamSettingsPage() {
                 <p className="text-muted-foreground text-lg">Manage your organization and preferences</p>
               </div>
             </div>
-            <Button onClick={() => setInviteModalOpen(true)}>
-              <UserPlus className="w-4 h-4 mr-2" />
-              Invite Member
-            </Button>
+            {isAdminOrOwner && (
+              <Button onClick={() => setInviteModalOpen(true)}>
+                <UserPlus className="w-4 h-4 mr-2" />
+                Invite Member
+              </Button>
+            )}
           </div>
 
           {/* Settings Tabs */}
@@ -385,7 +382,7 @@ export default function TeamSettingsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        {canModify && (
+                        {isAdminOrOwner && canModify && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon">
@@ -393,6 +390,7 @@ export default function TeamSettingsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              {/* Only owner can change roles to admin */}
                               <DropdownMenuItem
                                 onClick={() => {
                                   setSelectedMember(member);
@@ -476,33 +474,35 @@ export default function TeamSettingsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleResendInvite(invite)}
-                            disabled={resendingInvite === invite.id}
-                          >
-                            {resendingInvite === invite.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <RefreshCw className="w-4 h-4" />
-                            )}
-                            <span className="ml-1 hidden sm:inline">Resend</span>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => {
-                              setSelectedInvite(invite);
-                              setCancelInviteDialogOpen(true);
-                            }}
-                          >
-                            <X className="w-4 h-4" />
-                            <span className="ml-1 hidden sm:inline">Cancel</span>
-                          </Button>
-                        </div>
+                        {isAdminOrOwner && (
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleResendInvite(invite)}
+                              disabled={resendingInvite === invite.id}
+                            >
+                              {resendingInvite === invite.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="w-4 h-4" />
+                              )}
+                              <span className="ml-1 hidden sm:inline">Resend</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => {
+                                setSelectedInvite(invite);
+                                setCancelInviteDialogOpen(true);
+                              }}
+                            >
+                              <X className="w-4 h-4" />
+                              <span className="ml-1 hidden sm:inline">Cancel</span>
+                            </Button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -655,7 +655,7 @@ export default function TeamSettingsPage() {
         </Dialog>
 
         {/* Danger Zone - Owner only */}
-        {currentUserRole === 'owner' && (
+        {isOwner && (
           <Card className="animate-slide-up stagger-4 border-destructive/30">
             <CardHeader className="border-b border-destructive/20">
               <div className="flex items-center space-x-2">
