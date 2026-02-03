@@ -16,29 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 def seed_admin_user():
-    """Create owner user and organization if they don't exist."""
+    """Create owner user and organization if they don't exist.
+
+    IMPORTANT: This only seeds when there are NO users in the database.
+    It will NOT modify existing users or promote anyone to owner.
+    """
     admin_email = os.getenv("ADMIN_EMAIL", "support@rereflect.ca")
     admin_password = os.getenv("ADMIN_PASSWORD", "QeOtLqfzR8Su$")
 
     db: Session = SessionLocal()
     try:
-        # Check if user already exists
-        existing_user = db.query(User).filter(User.email == admin_email).first()
-        if existing_user:
-            # Fix existing user if needed (role should be owner, joined_at should be set)
-            updated = False
-            if existing_user.role != "owner":
-                existing_user.role = "owner"
-                updated = True
-                logger.info(f"Updated user {admin_email} role to owner")
-            if existing_user.joined_at is None:
-                existing_user.joined_at = existing_user.created_at or datetime.utcnow()
-                updated = True
-                logger.info(f"Set joined_at for user {admin_email}")
-            if updated:
-                db.commit()
-            else:
-                logger.info(f"Owner user {admin_email} already exists, skipping seed")
+        # Check if ANY users exist - if so, skip seeding entirely
+        user_count = db.query(User).count()
+        if user_count > 0:
+            logger.info(f"Database already has {user_count} users, skipping seed")
             return
 
         # Create default organization
