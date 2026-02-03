@@ -131,7 +131,7 @@ rereflect/
 │
 ├── shared/                    # Shared libraries
 ├── infrastructure/            # K8s, Terraform, Docker configs
-├── docs/                      # Strategic documentation
+├── TRACKING.md                # Development progress tracking
 └── start-all.sh               # Start all services script
 ```
 
@@ -349,7 +349,6 @@ Wrap components using `useSearchParams` in `<Suspense>` boundary.
 
 ## Resources
 
-- [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) - Complete implementation guide
-- [docs/PRD.md](docs/PRD.md) - Product requirements
-- [docs/ROADMAP.md](docs/ROADMAP.md) - 12-month roadmap
-- [Backend API Docs](http://localhost:8000/docs) - Swagger UI
+- [README.md](README.md) - Project overview and setup
+- [TRACKING.md](TRACKING.md) - Development progress and roadmap
+- [Backend API Docs](http://localhost:8000/docs) - Swagger UI (when running)

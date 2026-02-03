@@ -1,190 +1,324 @@
-# Customer Feedback Analyzer
+# Rereflect
 
 **AI-powered customer feedback analysis platform for SaaS businesses**
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688.svg)](https://fastapi.tiangolo.com)
-[![Tests](https://img.shields.io/badge/tests-29%20passed-success)](tests/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+Transform customer feedback into actionable insights with sentiment analysis, pain point detection, feature request extraction, and churn risk identification.
 
 ---
 
-## 📌 Quick Links
+## Features
 
-| Document | Purpose |
-|----------|---------|
-| **[WEEK_1_GUIDE.md](WEEK_1_GUIDE.md)** | 👈 **START HERE** - Step-by-step Week 1 implementation |
-| **[DEVELOPMENT_TRACKER.md](DEVELOPMENT_TRACKER.md)** | 📊 Track your progress through the roadmap |
-| **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** | 📘 Complete 12-month implementation guide |
-| **[docs/PRD.md](docs/PRD.md)** | 📋 Product requirements & vision |
-| **[docs/ROADMAP.md](docs/ROADMAP.md)** | 🗺️ 12-month development roadmap |
-| [docs/API.md](docs/API.md) | API reference |
+- **Sentiment Analysis** - Track positive/neutral/negative trends
+- **Pain Point Detection** - Auto-identify customer complaints
+- **Feature Requests** - Detect and prioritize what customers want
+- **Urgent Flagging** - Identify churn risks in real-time
+- **Topic Clustering** - Group feedback by themes
+- **Multi-tenant** - Organization isolation with RBAC
 
 ---
 
-## 🎯 Project Status
+## Quick Start
 
-### ✅ Phase 1 Complete: Week 1-3 MVP Implementation
+### Prerequisites
+- Python 3.12+
+- Node.js 18+
+- PostgreSQL 14+
+- Redis
 
-#### Backend API (Week 1 & 2)
-- ✅ Multi-tenant PostgreSQL database with SQLAlchemy
-- ✅ JWT authentication with secure password hashing
-- ✅ Complete REST API with FastAPI
-- ✅ Analysis engine integration with automatic analysis
-- ✅ Background scheduler for continuous feedback processing
-- ✅ Comprehensive pytest test suite (60+ tests)
-- ✅ Database migrations with Alembic
+### Start All Services
+```bash
+./start-all.sh
+```
 
-#### Frontend Web App (Week 3)
-- ✅ Next.js 16 with TypeScript
-- ✅ Modern UI with TailwindCSS & Recharts
-- ✅ Complete authentication flow (login/signup)
-- ✅ Interactive dashboard with analytics
-- ✅ Feedback management with filters, edit, and delete
-- ✅ CSV batch import with automatic schema detection
-- ✅ Organization settings page
-- ✅ iOS-style storage chart for sentiment distribution
-- ✅ Dark mode support
-- ✅ Automatic analysis on feedback creation and updates
+### Or Start Individually
 
-### 🚀 Ready for Production
-The application is fully functional and ready for deployment! You can:
-- Create accounts and organizations
-- Add, edit, and delete customer feedback
-- Import feedback in bulk from CSV files
-- Automatic AI analysis on every feedback submission
-- View analytics and insights
-- Manage feedback with advanced filters
+**Backend API:**
+```bash
+cd services/backend-api && ./start.sh
+```
 
-See **[STARTUP_GUIDE.md](STARTUP_GUIDE.md)** to run the application.
+**Frontend:**
+```bash
+cd services/frontend-web && npm run dev
+```
 
----
+**Worker (Celery):**
+```bash
+cd services/worker-service && ./start.sh
+```
 
-## 💡 What This Does
-
-Transform customer feedback into actionable insights:
-
-- **🎯 Pain Point Detection** - Auto-identifies customer complaints
-- **💡 Feature Requests** - Detects what customers want  
-- **📊 Sentiment Analysis** - Tracks trends over time
-- **🚨 Urgent Flagging** - Identifies churn risks
-- **🏷️ Topic Clustering** - Groups by themes
+### Access URLs
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
 
 ---
 
-## 🚀 Quick Start
+## Architecture
 
-### Try the Analysis Engine
+```
+┌─────────────────┐
+│  frontend-web   │  Next.js 16 + TypeScript + TailwindCSS
+└────────┬────────┘
+         │ REST API
+         ▼
+┌─────────────────┐
+│   backend-api   │  FastAPI + PostgreSQL + SQLAlchemy
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌────────┐ ┌────────────┐
+│analysis│ │worker-     │  Celery + Redis
+│-engine │ │service     │
+└────────┘ └────────────┘
+```
+
+---
+
+## Tech Stack
+
+### Frontend (`services/frontend-web`)
+- Next.js 16 (App Router)
+- TypeScript 5.9
+- TailwindCSS 3.4 + shadcn/ui
+- Recharts
+
+### Backend (`services/backend-api`)
+- FastAPI 0.115
+- PostgreSQL + SQLAlchemy 2.0
+- Alembic (migrations)
+- JWT authentication
+- Celery 5.3 + Redis
+
+### AI/ML (`services/analysis-engine`)
+- VADER sentiment analysis
+- scikit-learn + BERTopic
+
+---
+
+## Project Structure
+
+```
+rereflect/
+├── services/
+│   ├── frontend-web/          # Next.js frontend
+│   │   ├── app/               # App Router pages
+│   │   │   └── (dashboard)/   # Protected routes
+│   │   ├── components/        # React components
+│   │   ├── contexts/          # Auth, Theme contexts
+│   │   └── lib/               # API client, utilities
+│   │
+│   ├── backend-api/           # FastAPI backend
+│   │   ├── src/api/routes/    # API endpoints
+│   │   ├── src/models/        # SQLAlchemy models
+│   │   └── alembic/           # Database migrations
+│   │
+│   ├── analysis-engine/       # AI analysis service
+│   └── worker-service/        # Celery background jobs
+│
+├── infrastructure/            # K8s, Terraform, Docker
+├── CLAUDE.md                  # Claude Code instructions
+├── README.md                  # This file
+└── TRACKING.md                # Development progress
+```
+
+---
+
+## Role-Based Access Control (RBAC)
+
+### Role Hierarchy
+```
+Owner (level 3) > Admin (level 2) > Member (level 1)
+```
+
+### Permission Matrix
+
+| Action | Owner | Admin | Member |
+|--------|-------|-------|--------|
+| View dashboard & analytics | Yes | Yes | Yes |
+| View feedback items | Yes | Yes | Yes |
+| Import feedback (CSV) | Yes | Yes | Yes |
+| View team list & invites | Yes | Yes | Yes |
+| Manage integrations | Yes | Yes | No |
+| Invite/remove members | Yes | Yes | No |
+| Change member roles | Yes | Yes | No |
+| Access billing | Yes | No | No |
+| Transfer ownership | Yes | No | No |
+
+---
+
+## Billing Tiers
+
+| Tier | Price | Feedback/mo | Seats |
+|------|-------|-------------|-------|
+| Free | $0 | 250 | 2 |
+| Pro | $29/mo | 2,500 | 10 |
+| Business | $99/mo | 25,000 | 25 |
+| Enterprise | Contact | Unlimited | Unlimited |
+
+---
+
+## Development Setup
+
+### Database Setup
+```bash
+createdb customer_feedback_saas
+cd services/backend-api
+source venv/bin/activate
+alembic upgrade head
+```
+
+### Backend Environment (.env)
+```
+DATABASE_URL=postgresql:///customer_feedback_saas
+JWT_SECRET=dev-secret-key-change-in-production
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+### Frontend Environment (.env.local)
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+---
+
+## Railway Deployment
+
+### Services to Deploy
+1. PostgreSQL (Database plugin)
+2. Redis (Database plugin)
+3. Backend API (Root: `services/backend-api`)
+4. Worker Service (Root: `services/`, Config: `services/worker-service/railway.toml`)
+5. Frontend (Root: `services/frontend-web`)
+
+### Key Environment Variables
+
+**Backend:**
+```
+DATABASE_URL=[Reference PostgreSQL]
+REDIS_HOST=[Reference Redis]
+REDIS_PORT=[Reference Redis]
+JWT_SECRET=[Generate random 32+ chars]
+CORS_ORIGINS=https://your-frontend.up.railway.app
+```
+
+**Frontend:**
+```
+NEXT_PUBLIC_API_URL=https://your-backend.up.railway.app
+```
+
+### Useful Commands
+```bash
+railway login
+railway link
+railway logs -s backend-api
+railway up --service backend-api --detach
+```
+
+---
+
+## API Reference
+
+### Authentication
+```
+POST /api/v1/auth/signup
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+```
+
+### Feedback
+```
+GET    /api/v1/feedback              # List with pagination
+POST   /api/v1/feedback              # Create
+GET    /api/v1/feedback/{id}         # Get one
+PUT    /api/v1/feedback/{id}         # Update
+DELETE /api/v1/feedback/{id}         # Delete
+POST   /api/v1/feedback/import       # CSV import
+```
+
+### Dashboard
+```
+GET /api/v1/dashboard                # Analytics data
+```
+
+### Team Management
+```
+GET    /api/v1/team                  # List members
+POST   /api/v1/team/invite           # Send invite
+PATCH  /api/v1/team/{id}/role        # Change role
+DELETE /api/v1/team/{id}             # Remove member
+```
+
+### Billing (Owner only)
+```
+GET  /api/v1/billing/subscription    # Current plan
+POST /api/v1/billing/checkout        # Stripe checkout
+POST /api/v1/billing/portal          # Billing portal
+```
+
+---
+
+## Common Commands
 
 ```bash
-cd services/analysis-engine
-./quickstart.sh
+# Start all services
+./start-all.sh
+
+# Stop all services
+./stop-all.sh
+
+# Run backend tests
+cd services/backend-api && pytest tests/ -v
+
+# Run database migrations
+cd services/backend-api && alembic upgrade head
+
+# Create new migration
+alembic revision -m "description"
+
+# Frontend build
+cd services/frontend-web && npm run build
 ```
 
-### Start Building the SaaS
-
-Read **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** for complete setup instructions.
-
 ---
 
-## 📚 Documentation
+## Troubleshooting
 
-### Strategic Documents
-- **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** - Complete implementation guide
-- **[docs/PRD.md](docs/PRD.md)** - Product vision & SaaS strategy
-- **[docs/ROADMAP.md](docs/ROADMAP.md)** - 12-month development plan
-- **[docs/SAAS_TRANSFORMATION_SUMMARY.md](docs/SAAS_TRANSFORMATION_SUMMARY.md)** - Transformation guide
-
-### Technical Documentation
-- **[docs/API.md](docs/API.md)** - API reference
-- **[docs/USAGE.md](docs/USAGE.md)** - Usage examples
-- **[.claude/skills/](. claude/skills/)** - Development patterns and guides
-
----
-
-## 🛠️ Technology
-
-**Current**: FastAPI + Python + VADER + scikit-learn + BERTopic
-
-**Planned SaaS Stack**: Next.js + PostgreSQL + Redis + Stripe + Kubernetes
-
----
-
-## 💰 Planned Pricing
-
-| Plan | Price | Feedback/Month |
-|------|-------|----------------|
-| Free | $0 | 100 |
-| Starter | $49 | 2,500 |
-| Professional | $199 | 10,000 |
-| Business | $599 | 50,000 |
-| Enterprise | Custom | Custom |
-
-See **[docs/PRD.md](docs/PRD.md#pricing-strategy)** for details.
-
----
-
-## 📈 Roadmap Highlights
-
-**Month 1-3**: MVP SaaS (Auth, Billing, Integrations) → 10 customers, $500 MRR
-
-**Month 4-6**: Growth (Analytics, AI) → 50 customers, $5K MRR
-
-**Month 7-12**: Enterprise (SSO, Security) → 500 customers, $50K MRR
-
-Full roadmap: **[docs/ROADMAP.md](docs/ROADMAP.md)**
-
----
-
-## 📦 Project Structure
-
-```
-customer-feedback-analyzer/
-├── docs/                          # All strategic documentation
-├── services/                      # Microservices
-│   ├── analysis-engine/           # ✅ Production-ready AI engine
-│   ├── backend-api/               # 🚧 Month 1: REST API + Auth
-│   ├── frontend-web/              # 🚧 Month 1: Next.js dashboard
-│   ├── worker-service/            # 🚧 Month 2: Background jobs
-│   └── integration-service/       # 🚧 Month 2: 3rd party connectors
-├── shared/                        # Shared libraries
-│   ├── models/                    # Common data models
-│   └── utils/                     # Utilities
-├── infrastructure/                # DevOps
-│   ├── kubernetes/                # K8s manifests
-│   ├── terraform/                 # Infrastructure as code
-│   └── docker/                    # Dockerfiles
-├── .claude/skills/                # Development guides
-└── IMPLEMENTATION_GUIDE.md        # 👈 Start here
+### Port already in use
+```bash
+lsof -ti:8000 | xargs kill  # Backend
+lsof -ti:3000 | xargs kill  # Frontend
 ```
 
-**See each service's README for details**:
-- [services/analysis-engine/README.md](services/analysis-engine/README.md)
-- [services/backend-api/README.md](services/backend-api/README.md)
-- [services/frontend-web/README.md](services/frontend-web/README.md)
-- [services/worker-service/README.md](services/worker-service/README.md)
-- [services/integration-service/README.md](services/integration-service/README.md)
+### Database connection errors
+```bash
+# Check PostgreSQL is running
+pg_isready
+
+# Create database if missing
+createdb customer_feedback_saas
+```
+
+### Redis connection errors
+```bash
+redis-cli ping  # Should return PONG
+```
+
+### Analysis not running
+- Verify Redis: `redis-cli ping`
+- Check Celery worker logs
+- Ensure worker service is running
 
 ---
 
-## 🚀 Next Steps
+## License
 
-### This Week
-1. **Read** [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) - Complete setup guide
-2. **Review** [docs/PRD.md](docs/PRD.md) - Understand the product vision
-3. **Study** [docs/ROADMAP.md](docs/ROADMAP.md) - 12-month development plan
-4. **Try** Analysis Engine: `cd services/analysis-engine && ./quickstart.sh`
-
-### Start Development (Month 1)
-1. Set up PostgreSQL database
-2. Build [backend-api](services/backend-api) - Authentication & multi-tenancy
-3. Build [frontend-web](services/frontend-web) - Dashboard UI
-4. See [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) for detailed steps
+MIT
 
 ---
 
-**Version**: 1.0.0 (Open Source MVP)
-**Goal**: $50K MRR SaaS Platform (12 months)
-**License**: MIT
-
-**Let's build the future of customer feedback analysis!** 🚀
+**Goal**: $50K MRR SaaS Platform
