@@ -57,12 +57,24 @@ function BillingPageContent() {
   // Only owner can manage billing
   const isOwner = user?.role === 'owner';
 
+  // Redirect non-owners to preferences
+  useEffect(() => {
+    if (user && user.role !== 'owner') {
+      router.replace('/settings/preferences');
+    }
+  }, [user, router]);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
         const token = localStorage.getItem('access_token');
         if (!token) {
           router.push('/login');
+          return;
+        }
+
+        // Don't fetch if user is not owner (will be redirected)
+        if (user && user.role !== 'owner') {
           return;
         }
 

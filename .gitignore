@@ -375,3 +375,6 @@ services/*/cache/
 
 # Backup files
 *.orig
+
+# AI Tools
+.claude

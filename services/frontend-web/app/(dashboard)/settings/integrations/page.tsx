@@ -45,7 +45,19 @@ function IntegrationsContent() {
   // Only admin/owner can manage integrations
   const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
+  // Redirect non-admin/owner to preferences
   useEffect(() => {
+    if (user && user.role !== 'owner' && user.role !== 'admin') {
+      router.replace('/settings/preferences');
+    }
+  }, [user, router]);
+
+  useEffect(() => {
+    // Don't fetch if user is not admin/owner (will be redirected)
+    if (user && user.role !== 'owner' && user.role !== 'admin') {
+      return;
+    }
+
     // Check for OAuth error in URL
     const error = searchParams.get('oauth_error');
     if (error) {
