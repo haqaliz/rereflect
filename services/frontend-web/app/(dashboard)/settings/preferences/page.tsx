@@ -63,6 +63,9 @@ export default function PreferencesPage() {
     }
   };
 
+  // Only admin/owner can edit organization details
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -204,7 +207,7 @@ export default function PreferencesPage() {
                 </div>
                 <CardTitle>Organization Details</CardTitle>
               </div>
-              {!isEditing && (
+              {isAdminOrOwner && !isEditing && (
                 <Button
                   onClick={() => setIsEditing(true)}
                   variant="outline"

@@ -29,16 +29,21 @@ import {
   Users,
 } from 'lucide-react';
 import { SettingsTabs } from '@/components/SettingsTabs';
+import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 
 function IntegrationsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [loading, setLoading] = useState(true);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<{ id: number; success: boolean; message: string } | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+
+  // Only admin/owner can manage integrations
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
   useEffect(() => {
     // Check for OAuth error in URL
@@ -126,12 +131,14 @@ function IntegrationsContent() {
                 <p className="text-muted-foreground text-lg">Manage your organization and preferences</p>
               </div>
             </div>
-            <Link href="/settings/integrations/new">
-              <Button className="flex items-center gap-2">
-                <Plus className="w-4 h-4" />
-                Add Integration
-              </Button>
-            </Link>
+            {isAdminOrOwner && (
+              <Link href="/settings/integrations/new">
+                <Button className="flex items-center gap-2">
+                  <Plus className="w-4 h-4" />
+                  Add Integration
+                </Button>
+              </Link>
+            )}
           </div>
 
           {/* Settings Tabs */}
@@ -167,12 +174,18 @@ function IntegrationsContent() {
                 <p className="text-muted-foreground mb-6">
                   Connect Slack to receive feedback alerts in real-time
                 </p>
-                <Link href="/settings/integrations/new">
-                  <Button>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Your First Integration
-                  </Button>
-                </Link>
+                {isAdminOrOwner ? (
+                  <Link href="/settings/integrations/new">
+                    <Button>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Your First Integration
+                    </Button>
+                  </Link>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Contact an admin to add integrations.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -233,41 +246,43 @@ function IntegrationsContent() {
                           </div>
                         </div>
                       </Link>
-                      <div className="flex items-center gap-2 ml-4">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleTest(integration);
-                          }}
-                          disabled={testingId === integration.id}
-                          title="Send test message"
-                        >
-                          {testingId === integration.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Send className="w-4 h-4" />
-                          )}
-                        </Button>
-                        <Link href={`/settings/integrations/${integration.id}`}>
-                          <Button variant="outline" size="sm" title="Configure">
-                            <Settings2 className="w-4 h-4" />
+                      {isAdminOrOwner && (
+                        <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleTest(integration);
+                            }}
+                            disabled={testingId === integration.id}
+                            title="Send test message"
+                          >
+                            {testingId === integration.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Send className="w-4 h-4" />
+                            )}
                           </Button>
-                        </Link>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleDelete(integration);
-                          }}
-                          className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                          <Link href={`/settings/integrations/${integration.id}`}>
+                            <Button variant="outline" size="sm" title="Configure">
+                              <Settings2 className="w-4 h-4" />
+                            </Button>
+                          </Link>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleDelete(integration);
+                            }}
+                            className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Status info */}

@@ -18,6 +18,7 @@ import {
   canUpgrade,
   BILLING_CYCLES,
 } from '@/lib/api/billing';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Crown,
   Zap,
@@ -41,6 +42,7 @@ import { toast } from 'sonner';
 function BillingPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
@@ -51,6 +53,9 @@ function BillingPageContent() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
+
+  // Only owner can manage billing
+  const isOwner = user?.role === 'owner';
 
   useEffect(() => {
     const fetchData = async () => {
@@ -208,7 +213,7 @@ function BillingPageContent() {
                   <CardDescription>Your subscription details</CardDescription>
                 </div>
               </div>
-              {canManageBilling && subscription?.stripe_subscription_id && (
+              {isOwner && canManageBilling && subscription?.stripe_subscription_id && (
                 <Button
                   onClick={handleManageBilling}
                   variant="outline"
@@ -290,8 +295,8 @@ function BillingPageContent() {
               </div>
             </div>
 
-            {/* Trial CTA for free users */}
-            {subscription?.plan === 'free' && !subscription.is_trial && (
+            {/* Trial CTA for free users - Owner only */}
+            {isOwner && subscription?.plan === 'free' && !subscription.is_trial && (
               <div className="mt-6 p-4 bg-primary/5 border border-primary/20 rounded-xl">
                 <div className="flex items-center justify-between">
                   <div>
@@ -488,6 +493,10 @@ function BillingPageContent() {
                               Contact Sales
                               <ArrowRight className="w-4 h-4 ml-2" />
                             </a>
+                          </Button>
+                        ) : !isOwner ? (
+                          <Button variant="outline" className="w-full" disabled>
+                            Owner Only
                           </Button>
                         ) : showUpgrade ? (
                           <Button
