@@ -659,12 +659,11 @@ def list_invites(
     include_expired: bool = Query(False, description="Include expired invites"),
     current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
-    _admin_check: bool = Depends(require_admin_or_owner),
     db: Session = Depends(get_db)
 ):
     """
     List pending invites for the organization.
-    - Owner/Admin only
+    - All authenticated users can view invites
     - By default only returns pending status invites
     - Use include_expired=true to also include expired invites
     """
