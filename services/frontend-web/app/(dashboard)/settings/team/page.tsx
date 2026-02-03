@@ -340,7 +340,7 @@ export default function TeamSettingsPage() {
                   <TableHead className="w-[40%]">User</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  {isAdminOrOwner && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -381,9 +381,10 @@ export default function TeamSettingsPage() {
                           {formatRelativeTime(member.last_active_at)}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        {isAdminOrOwner && canModify && (
-                          <DropdownMenu>
+                      {isAdminOrOwner && (
+                        <TableCell className="text-right">
+                          {canModify && (
+                            <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon">
                                 <MoreHorizontal className="w-4 h-4" />
@@ -445,7 +446,7 @@ export default function TeamSettingsPage() {
                     <TableHead className="w-[40%]">Email</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Expires</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    {isAdminOrOwner && <TableHead className="text-right">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -473,8 +474,8 @@ export default function TeamSettingsPage() {
                           })}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        {isAdminOrOwner && (
+                      {isAdminOrOwner && (
+                        <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
                             <Button
                               variant="ghost"
@@ -502,8 +503,8 @@ export default function TeamSettingsPage() {
                               <span className="ml-1 hidden sm:inline">Cancel</span>
                             </Button>
                           </div>
-                        )}
-                      </TableCell>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
