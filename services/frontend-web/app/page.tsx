@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check } from 'lucide-react';
+import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, Twitter } from 'lucide-react';
 import Link from 'next/link';
 import { Logo } from '@/components/Logo';
 import gsap from 'gsap';
@@ -756,6 +756,29 @@ export default function Home() {
               <p className="text-muted-foreground max-w-sm mb-6">
                 Transform overwhelming customer feedback into clear, actionable insights with AI-powered analysis.
               </p>
+              <div className="flex flex-col gap-4">
+                <a
+                  href="https://twitter.com/rereflect_ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit"
+                >
+                  <Twitter className="w-5 h-5" />
+                  <span className="text-sm">Follow us on X</span>
+                </a>
+                <a
+                  href="https://www.producthunt.com/products/rereflect?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-rereflect"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <img
+                    alt="Rereflect - AI-powered customer feedback analysis for SaaS teams | Product Hunt"
+                    width="250"
+                    height="54"
+                    src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1073104&theme=dark&t=1770240628252"
+                  />
+                </a>
+              </div>
             </div>
             <div>
               <h4 className="font-semibold text-foreground mb-4">Product</h4>
