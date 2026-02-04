@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-04
 
 ---
 
@@ -10,7 +10,7 @@
 
 | Milestone | Status | MRR Target |
 |-----------|--------|------------|
-| Phase 1: MVP SaaS | 90% Complete | $500 |
+| Phase 1: MVP SaaS | 100% Complete | $500 |
 | Phase 2: Growth | Next | $5,000 |
 | Phase 3: Enterprise | Planned | $50,000 |
 
@@ -66,10 +66,10 @@
 - [x] Feature gating
 - [x] Trial support (14 days)
 
-### Quick Wins - Pending
-- [ ] Email notifications for role changes
-- [ ] Email notifications for member removal
-- [ ] OAuth signup (Google Sign-In)
+### Quick Wins - COMPLETE
+- [x] Email notifications for role changes
+- [x] Email notifications for member removal
+- [x] OAuth signup (Google Sign-In)
 
 ---
 
@@ -188,12 +188,16 @@
 - Ownership transfer with confirmation
 - Audit logging for team actions
 - Documentation consolidation
+- Google Sign-In OAuth integration
+- Email notifications for role changes
+- Email notifications for member removal
+- Resend template management script
 
 ---
 
 ## Decisions Made
 
-- Using Resend for transactional emails
+- Using Resend for transactional emails (with template management script)
 - Stripe for all billing
 - Railway for hosting
-- No OAuth signup yet (deferred to Phase 2)
+- Google OAuth via access token flow (full-width custom button)

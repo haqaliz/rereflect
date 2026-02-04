@@ -23,7 +23,11 @@ from src.api.dependencies import (
     check_seat_limit,
 )
 from src.services.audit_service import log_action
-from src.services.email_service import send_team_invite_email
+from src.services.email_service import (
+    send_team_invite_email,
+    send_role_change_email,
+    send_member_removed_email,
+)
 
 
 router = APIRouter()
@@ -240,6 +244,15 @@ def update_member_role(
         request=request
     )
 
+    # Send role change notification email
+    send_role_change_email(
+        to_email=target_user.email,
+        organization_name=current_org.name,
+        old_role=old_role,
+        new_role=data.role,
+        changed_by_email=current_user.email,
+    )
+
     return TeamMember(
         id=target_user.id,
         email=target_user.email,
@@ -335,6 +348,13 @@ def remove_member(
             "role": removed_user_role
         },
         request=request
+    )
+
+    # Send removal notification email
+    send_member_removed_email(
+        to_email=removed_user_email,
+        organization_name=current_org.name,
+        removed_by_email=current_user.email,
     )
 
     return None

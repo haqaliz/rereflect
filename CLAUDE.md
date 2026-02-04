@@ -285,6 +285,94 @@ GET /api/v1/feedback?page=1&page_size=20&sort_by=created_at&sort_order=desc
 GET /api/v1/feedback?sentiment=negative&is_urgent=true&search=payment
 ```
 
+## Email Templates (Resend)
+
+Rereflect uses [Resend](https://resend.com) for transactional emails with template-based rendering.
+
+### Template Management Script
+
+Use the management script to create, update, list, and delete templates:
+
+```bash
+cd services/backend-api
+
+# List all templates
+python scripts/manage_resend_templates.py list
+
+# Get a specific template (view HTML content)
+python scripts/manage_resend_templates.py get <template_id>
+
+# Create a new template from HTML file
+python scripts/manage_resend_templates.py create "template-name" "Subject Line" templates/email/template.html
+
+# Update an existing template
+python scripts/manage_resend_templates.py update <template_id> templates/email/template.html
+
+# Delete a template (with confirmation)
+python scripts/manage_resend_templates.py delete <template_id>
+```
+
+### Template Variable Syntax
+
+Use triple curly braces for variables in HTML templates:
+```html
+<p>Hello, your role in {{{ORGANIZATION_NAME}}} has changed to {{{NEW_ROLE}}}.</p>
+```
+
+**Reserved variable names** (cannot be used): `FIRST_NAME`, `LAST_NAME`, `EMAIL`, `RESEND_UNSUBSCRIBE_URL`, `contact`, `this`
+
+### Current Templates
+
+| Template | Env Variable | Variables |
+|----------|--------------|-----------|
+| Team Invite | `RESEND_TEMPLATE_TEAM_INVITE` | `ORGANIZATION_NAME`, `INVITER_EMAIL`, `ROLE`, `INVITE_URL` |
+| Welcome | `RESEND_TEMPLATE_WELCOME` | `ORGANIZATION_NAME`, `DASHBOARD_URL` |
+| Password Reset | `RESEND_TEMPLATE_PASSWORD_RESET` | `RESET_URL` |
+| Weekly Digest | `RESEND_TEMPLATE_WEEKLY_DIGEST` | `ORGANIZATION_NAME`, `WEEK_DATE`, `TOTAL_FEEDBACK`, `PAIN_POINTS`, `FEATURE_REQUESTS`, `POSITIVE_PERCENT`, `NEUTRAL_PERCENT`, `NEGATIVE_PERCENT`, `URGENT_COUNT`, `DASHBOARD_URL`, `UNSUBSCRIBE_URL` |
+| Role Change | `RESEND_TEMPLATE_ROLE_CHANGE` | `ORGANIZATION_NAME`, `OLD_ROLE`, `NEW_ROLE`, `CHANGED_BY_EMAIL`, `DASHBOARD_URL` |
+| Member Removed | `RESEND_TEMPLATE_MEMBER_REMOVED` | `ORGANIZATION_NAME`, `REMOVED_BY_EMAIL` |
+
+### Adding a New Email Template
+
+1. **Create HTML file** in `templates/email/`:
+   ```bash
+   # Use existing templates as reference for consistent styling
+   cp templates/email/role_change.html templates/email/new_template.html
+   ```
+
+2. **Create template in Resend**:
+   ```bash
+   python scripts/manage_resend_templates.py create "new-template" "Subject with {{{VAR}}}" templates/email/new_template.html
+   ```
+
+3. **Add env variable** to `.env` and Railway:
+   ```
+   RESEND_TEMPLATE_NEW_TEMPLATE=<template_id_from_step_2>
+   ```
+
+4. **Add to email_service.py**:
+   ```python
+   TEMPLATE_NEW_TEMPLATE = os.getenv("RESEND_TEMPLATE_NEW_TEMPLATE")
+
+   def send_new_template_email(to_email: str, var1: str) -> bool:
+       return _send_with_template(
+           to=to_email,
+           template_id=TEMPLATE_NEW_TEMPLATE,
+           variables={"VAR1": var1},
+       )
+   ```
+
+5. **Call from route handler**:
+   ```python
+   from src.services.email_service import send_new_template_email
+   send_new_template_email(user.email, some_value)
+   ```
+
+### Key Email Files
+- `src/services/email_service.py` - Email sending functions
+- `templates/email/` - HTML template source files
+- `scripts/manage_resend_templates.py` - Template management CLI
+
 ## Common Commands
 
 ```bash

@@ -21,6 +21,8 @@ TEMPLATE_TEAM_INVITE = os.getenv("RESEND_TEMPLATE_TEAM_INVITE")
 TEMPLATE_WELCOME = os.getenv("RESEND_TEMPLATE_WELCOME")
 TEMPLATE_PASSWORD_RESET = os.getenv("RESEND_TEMPLATE_PASSWORD_RESET")
 TEMPLATE_WEEKLY_DIGEST = os.getenv("RESEND_TEMPLATE_WEEKLY_DIGEST")
+TEMPLATE_ROLE_CHANGE = os.getenv("RESEND_TEMPLATE_ROLE_CHANGE")
+TEMPLATE_MEMBER_REMOVED = os.getenv("RESEND_TEMPLATE_MEMBER_REMOVED")
 
 # Resend API endpoints
 RESEND_API_BASE = "https://api.resend.com"
@@ -222,5 +224,44 @@ def send_weekly_digest_email(
             "URGENT_COUNT": urgent_count,
             "DASHBOARD_URL": dashboard_url,
             "UNSUBSCRIBE_URL": unsubscribe_url,
+        },
+    )
+
+
+def send_role_change_email(
+    to_email: str,
+    organization_name: str,
+    old_role: str,
+    new_role: str,
+    changed_by_email: str,
+) -> bool:
+    """Send a notification email when a user's role is changed."""
+    dashboard_url = f"{APP_URL}/dashboard"
+
+    return _send_with_template(
+        to=to_email,
+        template_id=TEMPLATE_ROLE_CHANGE,
+        variables={
+            "ORGANIZATION_NAME": organization_name,
+            "OLD_ROLE": old_role.capitalize(),
+            "NEW_ROLE": new_role.capitalize(),
+            "CHANGED_BY_EMAIL": changed_by_email,
+            "DASHBOARD_URL": dashboard_url,
+        },
+    )
+
+
+def send_member_removed_email(
+    to_email: str,
+    organization_name: str,
+    removed_by_email: str,
+) -> bool:
+    """Send a notification email when a user is removed from an organization."""
+    return _send_with_template(
+        to=to_email,
+        template_id=TEMPLATE_MEMBER_REMOVED,
+        variables={
+            "ORGANIZATION_NAME": organization_name,
+            "REMOVED_BY_EMAIL": removed_by_email,
         },
     )
