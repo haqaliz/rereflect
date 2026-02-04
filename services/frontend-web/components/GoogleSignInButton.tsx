@@ -10,7 +10,10 @@ interface GoogleSignInButtonProps {
   disabled?: boolean;
 }
 
-export function GoogleSignInButton({
+// Check if Google OAuth is configured
+const isGoogleConfigured = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
+function GoogleSignInButtonInner({
   onSuccess,
   onError,
   mode,
@@ -88,4 +91,13 @@ export function GoogleSignInButton({
       </span>
     </button>
   );
+}
+
+export function GoogleSignInButton(props: GoogleSignInButtonProps) {
+  // Don't render if Google OAuth is not configured
+  if (!isGoogleConfigured) {
+    return null;
+  }
+
+  return <GoogleSignInButtonInner {...props} />;
 }
