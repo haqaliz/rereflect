@@ -96,7 +96,7 @@ export default function FeedbackDetailPage() {
       setLoading(true);
       const data = await feedbackAPI.get(feedbackId);
       setFeedback(data);
-      analytics.feedbackViewed(data.id, data.sentiment || 'unknown');
+      analytics.feedbackViewed(data.id, data.sentiment_label || 'unknown');
     } catch (err: any) {
       if (err.response?.status === 401) {
         router.push('/login');
