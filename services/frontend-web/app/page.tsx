@@ -758,7 +758,7 @@ export default function Home() {
               </p>
               <div className="flex flex-col gap-4">
                 <a
-                  href="https://twitter.com/rereflect_ai"
+                  href="https://twitter.com/rereflectapp"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit"
