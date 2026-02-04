@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
+import { analytics } from '@/lib/analytics';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -95,6 +96,7 @@ export default function FeedbackDetailPage() {
       setLoading(true);
       const data = await feedbackAPI.get(feedbackId);
       setFeedback(data);
+      analytics.feedbackViewed(data.id, data.sentiment || 'unknown');
     } catch (err: any) {
       if (err.response?.status === 401) {
         router.push('/login');
