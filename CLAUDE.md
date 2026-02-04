@@ -438,5 +438,6 @@ Wrap components using `useSearchParams` in `<Suspense>` boundary.
 ## Resources
 
 - [README.md](README.md) - Project overview and setup
-- [TRACKING.md](TRACKING.md) - Development progress and roadmap
+- [DEV-TRACKING.md](DEV-TRACKING.md) - Development progress and roadmap
+- [SALES-TRACKING.md](SALES-TRACKING.md) - Sales strategy and growth tracking
 - [Backend API Docs](http://localhost:8000/docs) - Swagger UI (when running)
