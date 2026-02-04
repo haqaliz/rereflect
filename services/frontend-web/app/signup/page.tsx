@@ -4,13 +4,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { authAPI } from '@/lib/api/auth';
 import { useAuth } from '@/contexts/AuthContext';
-import { Mail, Lock, Building2, ArrowRight, Sparkles, CheckCircle2, Zap, Shield, Loader2 } from 'lucide-react';
+import { Mail, Lock, Building2, ArrowRight, Sparkles, CheckCircle2, Zap, Shield, Loader2, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import gsap from 'gsap';
 
 export default function SignupPage() {
@@ -22,6 +23,10 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Google OAuth state
+  const [googleCredential, setGoogleCredential] = useState<string | null>(null);
+  const [showOrgNameInput, setShowOrgNameInput] = useState(false);
 
   // Redirect to dashboard if already authenticated
   useEffect(() => {
@@ -103,6 +108,44 @@ export default function SignupPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Google OAuth handlers
+  const handleGoogleInitiate = (credential: string) => {
+    // Store credential and show org name input
+    setGoogleCredential(credential);
+    setShowOrgNameInput(true);
+    setError('');
+  };
+
+  const handleGoogleSignupComplete = async () => {
+    if (!googleCredential || !organizationName) return;
+
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await authAPI.googleSignup({
+        id_token: googleCredential,
+        organization_name: organizationName,
+      });
+      localStorage.setItem('access_token', response.access_token);
+      router.push('/dashboard');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } };
+      setError(error.response?.data?.detail || 'Google signup failed. Please try again.');
+      // Reset flow on error
+      setGoogleCredential(null);
+      setShowOrgNameInput(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleBack = () => {
+    setGoogleCredential(null);
+    setShowOrgNameInput(false);
+    setOrganizationName('');
   };
 
   // Show loading state while checking authentication
@@ -245,90 +288,177 @@ export default function SignupPage() {
             </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="form-field space-y-2">
-              <Label htmlFor="organization-name" className="text-foreground font-medium">Organization Name</Label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Building2 className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
-                </div>
-                <Input
-                  id="organization-name"
-                  name="organization-name"
-                  type="text"
-                  required
-                  value={organizationName}
-                  onChange={(e) => setOrganizationName(e.target.value)}
-                  className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
-                  placeholder="Your Company Name"
+          {!showOrgNameInput ? (
+            <>
+              {/* Google Sign-Up Button */}
+              <div className="form-field mb-6">
+                <GoogleSignInButton
+                  mode="signup"
+                  onSuccess={handleGoogleInitiate}
+                  onError={(err) => setError(err)}
+                  disabled={loading}
                 />
               </div>
-            </div>
 
-            <div className="form-field space-y-2">
-              <Label htmlFor="email" className="text-foreground font-medium">Email address</Label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+              {/* Divider */}
+              <div className="form-field relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border" />
                 </div>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
-                  placeholder="you@company.com"
-                />
-              </div>
-            </div>
-
-            <div className="form-field space-y-2">
-              <Label htmlFor="password" className="text-foreground font-medium">Password</Label>
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-3 text-muted-foreground">Or sign up with email</span>
                 </div>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
-                  placeholder="Create a strong password"
-                />
               </div>
-              <p className="text-xs text-muted-foreground pl-1">
-                Must be at least 8 characters long
-              </p>
-            </div>
 
-            <Button
-              type="submit"
-              disabled={loading}
-              className="form-button w-full h-12 text-base font-semibold bg-gradient-to-r from-primary to-chart-5 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300 rounded-xl"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Creating account...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  Create account
-                  <ArrowRight className="w-5 h-5" />
-                </span>
-              )}
-            </Button>
-          </form>
+              {/* Email/Password Form */}
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="form-field space-y-2">
+                  <Label htmlFor="organization-name" className="text-foreground font-medium">Organization Name</Label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Building2 className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                    </div>
+                    <Input
+                      id="organization-name"
+                      name="organization-name"
+                      type="text"
+                      required
+                      value={organizationName}
+                      onChange={(e) => setOrganizationName(e.target.value)}
+                      className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
+                      placeholder="Your Company Name"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-field space-y-2">
+                  <Label htmlFor="email" className="text-foreground font-medium">Email address</Label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Mail className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                    </div>
+                    <Input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
+                      placeholder="you@company.com"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-field space-y-2">
+                  <Label htmlFor="password" className="text-foreground font-medium">Password</Label>
+                  <div className="relative group">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Lock className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                    </div>
+                    <Input
+                      id="password"
+                      name="password"
+                      type="password"
+                      autoComplete="new-password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
+                      placeholder="Create a strong password"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground pl-1">
+                    Must be at least 8 characters long
+                  </p>
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={loading}
+                  className="form-button w-full h-12 text-base font-semibold bg-gradient-to-r from-primary to-chart-5 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300 rounded-xl"
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Creating account...
+                    </span>
+                  ) : (
+                    <span className="flex items-center justify-center gap-2">
+                      Create account
+                      <ArrowRight className="w-5 h-5" />
+                    </span>
+                  )}
+                </Button>
+              </form>
+            </>
+          ) : (
+            /* Google Signup - Organization Name Step */
+            <div className="space-y-6">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-success-bg to-success-text/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 className="w-8 h-8 text-success-text" />
+                </div>
+                <h3 className="text-xl font-semibold text-foreground mb-2">Google account verified</h3>
+                <p className="text-muted-foreground">Just one more step - name your organization</p>
+              </div>
+
+              <div className="form-field space-y-2">
+                <Label htmlFor="google-org-name" className="text-foreground font-medium">Organization Name</Label>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Building2 className="h-5 w-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
+                  </div>
+                  <Input
+                    id="google-org-name"
+                    name="google-org-name"
+                    type="text"
+                    required
+                    value={organizationName}
+                    onChange={(e) => setOrganizationName(e.target.value)}
+                    className="pl-12 h-12 text-base bg-background border-border focus:border-primary focus:ring-primary/20 rounded-xl transition-all"
+                    placeholder="Your Company Name"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={handleGoogleSignupComplete}
+                disabled={loading || !organizationName.trim()}
+                className="w-full h-12 text-base font-semibold bg-gradient-to-r from-primary to-chart-5 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300 rounded-xl"
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Creating account...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    Complete signup
+                    <ArrowRight className="w-5 h-5" />
+                  </span>
+                )}
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={handleGoogleBack}
+                disabled={loading}
+                className="w-full h-10 text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to signup options
+              </Button>
+            </div>
+          )}
 
           <p className="form-footer mt-6 text-center text-sm text-muted-foreground">
             By signing up, you agree to our{' '}

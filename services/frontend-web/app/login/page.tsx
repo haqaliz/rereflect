@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import gsap from 'gsap';
 
 export default function LoginPage() {
@@ -85,6 +86,29 @@ export default function LoginPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
       setError(error.response?.data?.detail || 'Login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSuccess = async (credential: string) => {
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await authAPI.googleLogin({ id_token: credential });
+      localStorage.setItem('access_token', response.access_token);
+      router.push('/dashboard');
+    } catch (err: unknown) {
+      const error = err as { response?: { status?: number; data?: { detail?: string } } };
+      const detail = error.response?.data?.detail;
+
+      // Handle specific error: user needs to sign up
+      if (error.response?.status === 404) {
+        setError('No account found with this email. Please sign up first.');
+      } else {
+        setError(detail || 'Google sign-in failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -285,6 +309,26 @@ export default function LoginPage() {
                 </span>
               )}
             </Button>
+
+            {/* Divider */}
+            <div className="form-field relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-3 text-muted-foreground">Or continue with</span>
+              </div>
+            </div>
+
+            {/* Google Sign-In */}
+            <div className="form-field">
+              <GoogleSignInButton
+                mode="login"
+                onSuccess={handleGoogleSuccess}
+                onError={(err) => setError(err)}
+                disabled={loading}
+              />
+            </div>
           </form>
         </div>
       </div>

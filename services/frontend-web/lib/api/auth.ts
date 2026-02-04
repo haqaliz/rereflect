@@ -11,6 +11,15 @@ export interface LoginData {
   password: string;
 }
 
+export interface GoogleLoginData {
+  id_token: string;
+}
+
+export interface GoogleSignupData {
+  id_token: string;
+  organization_name: string;
+}
+
 export interface AuthResponse {
   access_token: string;
   token_type: string;
@@ -45,5 +54,16 @@ export const authAPI = {
       localStorage.removeItem('access_token');
       window.location.href = '/login';
     }
+  },
+
+  // Google OAuth methods
+  googleLogin: async (data: GoogleLoginData): Promise<AuthResponse> => {
+    const response = await apiClient.post('/api/v1/auth/google/login', data);
+    return response.data;
+  },
+
+  googleSignup: async (data: GoogleSignupData): Promise<AuthResponse> => {
+    const response = await apiClient.post('/api/v1/auth/google/signup', data);
+    return response.data;
   },
 };
