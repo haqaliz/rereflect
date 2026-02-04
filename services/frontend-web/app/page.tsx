@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, Twitter } from 'lucide-react';
+import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import { Logo } from '@/components/Logo';
 import gsap from 'gsap';
@@ -763,7 +763,7 @@ export default function Home() {
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit"
                 >
-                  <Twitter className="w-5 h-5" />
+                  <X className="w-5 h-5" />
                   <span className="text-sm">Follow us on X</span>
                 </a>
                 <a
