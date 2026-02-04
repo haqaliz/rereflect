@@ -190,15 +190,18 @@ MOCK_GOOGLE_USER = {
 class TestGoogleSignup:
     """Tests for /api/v1/auth/google/signup endpoint."""
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_signup_success(self, mock_verify: MagicMock, client: TestClient, db: Session):
         """Test successful signup with Google creates user and organization."""
-        mock_verify.return_value = MOCK_GOOGLE_USER
+        # Mock async function
+        async def mock_return(*args, **kwargs):
+            return MOCK_GOOGLE_USER
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/signup",
             json={
-                "id_token": "valid-google-token",
+                "access_token": "valid-google-token",
                 "organization_name": "Google Company"
             }
         )
@@ -221,15 +224,17 @@ class TestGoogleSignup:
         assert org is not None
         assert org.name == "Google Company"
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_signup_invalid_token(self, mock_verify: MagicMock, client: TestClient):
         """Test signup with invalid Google token fails."""
-        mock_verify.return_value = None  # Invalid token returns None
+        async def mock_return(*args, **kwargs):
+            return None  # Invalid token returns None
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/signup",
             json={
-                "id_token": "invalid-google-token",
+                "access_token": "invalid-google-token",
                 "organization_name": "Test Company"
             }
         )
@@ -237,15 +242,17 @@ class TestGoogleSignup:
         assert response.status_code == 401
         assert "Invalid Google token" in response.json()["detail"]
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_signup_existing_email(self, mock_verify: MagicMock, client: TestClient, test_user: User):
         """Test Google signup with existing email fails."""
-        mock_verify.return_value = {**MOCK_GOOGLE_USER, "email": test_user.email}
+        async def mock_return(*args, **kwargs):
+            return {**MOCK_GOOGLE_USER, "email": test_user.email}
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/signup",
             json={
-                "id_token": "valid-google-token",
+                "access_token": "valid-google-token",
                 "organization_name": "Another Company"
             }
         )
@@ -254,15 +261,17 @@ class TestGoogleSignup:
         # Should suggest signing in instead
         assert "already exists" in response.json()["detail"].lower()
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_signup_missing_org_name(self, mock_verify: MagicMock, client: TestClient):
         """Test Google signup without organization name fails."""
-        mock_verify.return_value = MOCK_GOOGLE_USER
+        async def mock_return(*args, **kwargs):
+            return MOCK_GOOGLE_USER
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/signup",
             json={
-                "id_token": "valid-google-token"
+                "access_token": "valid-google-token"
                 # Missing organization_name
             }
         )
@@ -273,7 +282,7 @@ class TestGoogleSignup:
 class TestGoogleLogin:
     """Tests for /api/v1/auth/google/login endpoint."""
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_login_existing_google_user(self, mock_verify: MagicMock, client: TestClient, db: Session):
         """Test login with existing Google user returns token."""
         # First create a Google user
@@ -292,34 +301,38 @@ class TestGoogleLogin:
         db.add(user)
         db.commit()
 
-        mock_verify.return_value = {
-            **MOCK_GOOGLE_USER,
-            "email": "existinggoogle@gmail.com",
-            "google_id": "existing-google-id"
-        }
+        async def mock_return(*args, **kwargs):
+            return {
+                **MOCK_GOOGLE_USER,
+                "email": "existinggoogle@gmail.com",
+                "google_id": "existing-google-id"
+            }
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/login",
-            json={"id_token": "valid-google-token"}
+            json={"access_token": "valid-google-token"}
         )
 
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_login_links_email_account(self, mock_verify: MagicMock, client: TestClient, test_user: User, db: Session):
         """Test Google login with existing email user links accounts."""
         # test_user is an email-based user (has password_hash, no google_id)
-        mock_verify.return_value = {
-            **MOCK_GOOGLE_USER,
-            "email": test_user.email,
-            "google_id": "new-google-id-for-existing-user"
-        }
+        async def mock_return(*args, **kwargs):
+            return {
+                **MOCK_GOOGLE_USER,
+                "email": test_user.email,
+                "google_id": "new-google-id-for-existing-user"
+            }
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/login",
-            json={"id_token": "valid-google-token"}
+            json={"access_token": "valid-google-token"}
         )
 
         assert response.status_code == 200
@@ -331,36 +344,40 @@ class TestGoogleLogin:
         assert test_user.google_id == "new-google-id-for-existing-user"
         assert test_user.auth_provider == "both"  # Now has both email and Google
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_login_no_account(self, mock_verify: MagicMock, client: TestClient):
         """Test Google login with no existing account fails."""
-        mock_verify.return_value = {
-            **MOCK_GOOGLE_USER,
-            "email": "nonexistent@gmail.com"
-        }
+        async def mock_return(*args, **kwargs):
+            return {
+                **MOCK_GOOGLE_USER,
+                "email": "nonexistent@gmail.com"
+            }
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/login",
-            json={"id_token": "valid-google-token"}
+            json={"access_token": "valid-google-token"}
         )
 
         assert response.status_code == 404
         assert "No account found" in response.json()["detail"]
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_login_invalid_token(self, mock_verify: MagicMock, client: TestClient):
         """Test Google login with invalid token fails."""
-        mock_verify.return_value = None
+        async def mock_return(*args, **kwargs):
+            return None
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/login",
-            json={"id_token": "invalid-token"}
+            json={"access_token": "invalid-token"}
         )
 
         assert response.status_code == 401
         assert "Invalid Google token" in response.json()["detail"]
 
-    @patch("src.api.routes.auth.verify_google_token")
+    @patch("src.api.routes.auth.verify_google_access_token")
     def test_google_login_mismatched_google_id(self, mock_verify: MagicMock, client: TestClient, db: Session):
         """Test Google login fails if email is linked to different Google account."""
         # Create user with one Google ID
@@ -380,15 +397,17 @@ class TestGoogleLogin:
         db.commit()
 
         # Try to login with different Google ID but same email
-        mock_verify.return_value = {
-            **MOCK_GOOGLE_USER,
-            "email": "linked@gmail.com",
-            "google_id": "different-google-id"
-        }
+        async def mock_return(*args, **kwargs):
+            return {
+                **MOCK_GOOGLE_USER,
+                "email": "linked@gmail.com",
+                "google_id": "different-google-id"
+            }
+        mock_verify.side_effect = mock_return
 
         response = client.post(
             "/api/v1/auth/google/login",
-            json={"id_token": "valid-google-token"}
+            json={"access_token": "valid-google-token"}
         )
 
         assert response.status_code == 401

@@ -91,12 +91,12 @@ export default function LoginPage() {
     }
   };
 
-  const handleGoogleSuccess = async (credential: string) => {
+  const handleGoogleSuccess = async (accessToken: string) => {
     setError('');
     setLoading(true);
 
     try {
-      const response = await authAPI.googleLogin({ id_token: credential });
+      const response = await authAPI.googleLogin({ access_token: accessToken });
       localStorage.setItem('access_token', response.access_token);
       router.push('/dashboard');
     } catch (err: unknown) {

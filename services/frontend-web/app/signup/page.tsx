@@ -126,7 +126,7 @@ export default function SignupPage() {
 
     try {
       const response = await authAPI.googleSignup({
-        id_token: googleCredential,
+        access_token: googleCredential,
         organization_name: organizationName,
       });
       localStorage.setItem('access_token', response.access_token);

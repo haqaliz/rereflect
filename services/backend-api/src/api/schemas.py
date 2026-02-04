@@ -17,13 +17,13 @@ class LoginRequest(BaseModel):
 
 # Google OAuth schemas
 class GoogleLoginRequest(BaseModel):
-    """Login with Google ID token (existing user)."""
-    id_token: str
+    """Login with Google access token (existing user)."""
+    access_token: str
 
 
 class GoogleSignupRequest(BaseModel):
-    """Signup with Google ID token (new user + organization)."""
-    id_token: str
+    """Signup with Google access token (new user + organization)."""
+    access_token: str
     organization_name: str = Field(min_length=2, max_length=100)
 
 

@@ -10,7 +10,7 @@ from src.api.schemas import (
 )
 from src.api.auth import hash_password, verify_password, create_access_token
 from src.api.dependencies import get_current_user
-from src.services.google_auth import verify_google_token
+from src.services.google_auth import verify_google_access_token
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -105,11 +105,11 @@ def get_current_user_info(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/google/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def google_signup(data: GoogleSignupRequest, db: Session = Depends(get_db)):
+async def google_signup(data: GoogleSignupRequest, db: Session = Depends(get_db)):
     """Create a new user and organization using Google account."""
 
-    # Verify Google token
-    google_user = verify_google_token(data.id_token)
+    # Verify Google access token
+    google_user = await verify_google_access_token(data.access_token)
     if not google_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -165,11 +165,11 @@ def google_signup(data: GoogleSignupRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/google/login", response_model=TokenResponse)
-def google_login(data: GoogleLoginRequest, db: Session = Depends(get_db)):
+async def google_login(data: GoogleLoginRequest, db: Session = Depends(get_db)):
     """Login with Google account."""
 
-    # Verify Google token
-    google_user = verify_google_token(data.id_token)
+    # Verify Google access token
+    google_user = await verify_google_access_token(data.access_token)
     if not google_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

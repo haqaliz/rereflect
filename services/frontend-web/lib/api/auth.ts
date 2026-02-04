@@ -12,11 +12,11 @@ export interface LoginData {
 }
 
 export interface GoogleLoginData {
-  id_token: string;
+  access_token: string;
 }
 
 export interface GoogleSignupData {
-  id_token: string;
+  access_token: string;
   organization_name: string;
 }
 
