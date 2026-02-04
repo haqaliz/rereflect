@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { analytics } from '@/lib/analytics';
 import gsap from 'gsap';
 
 export default function LoginPage() {
@@ -82,6 +83,7 @@ export default function LoginPage() {
     try {
       const response = await authAPI.login({ email, password });
       localStorage.setItem('access_token', response.access_token);
+      analytics.login('email');
       router.push('/dashboard');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -98,6 +100,7 @@ export default function LoginPage() {
     try {
       const response = await authAPI.googleLogin({ access_token: accessToken });
       localStorage.setItem('access_token', response.access_token);
+      analytics.login('google');
       router.push('/dashboard');
     } catch (err: unknown) {
       const error = err as { response?: { status?: number; data?: { detail?: string } } };

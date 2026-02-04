@@ -33,6 +33,7 @@
     "clsx": "^2.1.1",
     "gsap": "^3.14.2",
     "lucide-react": "^0.562.0",
+    "mixpanel-browser": "^2.74.0",
     "next": "^16.1.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

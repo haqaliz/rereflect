@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { feedbackAPI, FeedbackItem, CSVImportResponse, FeedbackFilters } from '@/lib/api/feedback';
+import { analytics } from '@/lib/analytics';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -237,6 +238,7 @@ function FeedbackPageContent() {
     try {
       const result = await feedbackAPI.importCSV(file);
       setImportResult(result);
+      analytics.csvUploaded(result.imported_count);
       await fetchFeedback(buildFilters(searchQuery));
     } catch (err: any) {
       console.error('Failed to import CSV:', err);

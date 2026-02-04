@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { authAPI } from '@/lib/api/auth';
+import { identifyUser, analytics } from '@/lib/analytics';
 
 interface User {
   id: number;
@@ -65,6 +66,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userData = await authAPI.getMe();
         setUser(userData);
 
+        // Identify user in Mixpanel
+        identifyUser(String(userData.id), {
+          email: userData.email,
+          role: userData.role,
+          organization_id: userData.organization_id,
+        });
+
         // Redirect to dashboard if on auth routes and already logged in
         if (authRoutes.includes(pathname)) {
           router.push('/dashboard');
@@ -92,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    analytics.logout(); // Track and reset Mixpanel
     localStorage.removeItem('access_token');
     setUser(null);
     router.push('/login');

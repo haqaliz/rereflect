@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { analytics } from '@/lib/analytics';
 import gsap from 'gsap';
 
 export default function SignupPage() {
@@ -101,6 +102,7 @@ export default function SignupPage() {
         organization_name: organizationName,
       });
       localStorage.setItem('access_token', response.access_token);
+      analytics.signup('email'); // Track email signup
       router.push('/dashboard');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -130,6 +132,7 @@ export default function SignupPage() {
         organization_name: organizationName,
       });
       localStorage.setItem('access_token', response.access_token);
+      analytics.signup('google'); // Track Google signup
       router.push('/dashboard');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };

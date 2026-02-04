@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { dashboardAPI, DashboardData } from '@/lib/api/dashboard';
+import { analytics } from '@/lib/analytics';
 import { StatCard } from '@/components/StatCard';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import {
@@ -77,6 +78,7 @@ export default function DashboardPage() {
 
         const dashboardData = await dashboardAPI.get(30);
         setData(dashboardData);
+        analytics.dashboardViewed();
       } catch (err: any) {
         setError('Failed to load dashboard data');
       } finally {
