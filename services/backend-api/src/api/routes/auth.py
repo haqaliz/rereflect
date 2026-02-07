@@ -6,7 +6,8 @@ from src.models.user import User
 from src.models.organization import Organization
 from src.api.schemas import (
     SignupRequest, LoginRequest, TokenResponse, UserResponse,
-    GoogleLoginRequest, GoogleSignupRequest
+    GoogleLoginRequest, GoogleSignupRequest,
+    PreferencesResponse, PreferencesUpdateRequest,
 )
 from src.api.auth import hash_password, verify_password, create_access_token
 from src.api.dependencies import get_current_user
@@ -97,6 +98,37 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information."""
     return current_user
+
+
+# ============================================================================
+# User Preferences Endpoints
+# ============================================================================
+
+
+@router.get("/me/preferences", response_model=PreferencesResponse)
+def get_preferences(current_user: User = Depends(get_current_user)):
+    """Get current user's notification preferences."""
+    return PreferencesResponse(
+        weekly_digest_enabled=current_user.weekly_digest_enabled,
+    )
+
+
+@router.patch("/me/preferences", response_model=PreferencesResponse)
+def update_preferences(
+    data: PreferencesUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update current user's notification preferences."""
+    if data.weekly_digest_enabled is not None:
+        current_user.weekly_digest_enabled = data.weekly_digest_enabled
+
+    db.commit()
+    db.refresh(current_user)
+
+    return PreferencesResponse(
+        weekly_digest_enabled=current_user.weekly_digest_enabled,
+    )
 
 
 # ============================================================================

@@ -102,6 +102,11 @@ celery_app.conf.beat_schedule = {
         "task": "billing.check_usage_warnings",
         "schedule": crontab(hour=10, minute=0),
     },
+    # Weekly digest: Every Monday at 9 AM UTC
+    "send-weekly-digests": {
+        "task": "src.tasks.alerts.send_weekly_digests",
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+    },
 }
 
 

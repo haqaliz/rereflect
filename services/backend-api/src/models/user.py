@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -17,6 +17,9 @@ class User(Base):
     # Google OAuth fields
     google_id = Column(String(255), unique=True, nullable=True, index=True)
     auth_provider = Column(String(50), nullable=False, default="email")  # email, google, both
+
+    # Notification preferences
+    weekly_digest_enabled = Column(Boolean, default=True, nullable=False, server_default="true")
 
     # Team management fields
     last_active_at = Column(DateTime, nullable=True)

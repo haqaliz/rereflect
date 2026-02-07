@@ -6,11 +6,73 @@ Note: In production, these should be in a shared package.
 For now, we duplicate the essential models.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
 Base = declarative_base()
+
+
+class User(Base):
+    """User model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False)
+    organization_id = Column(Integer, nullable=False)
+    role = Column(String, nullable=False, default="member")
+    weekly_digest_enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Organization(Base):
+    """Organization model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "organizations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    plan = Column(String, nullable=False, default="free")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Subscription(Base):
+    """Subscription model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    stripe_subscription_id = Column(String(255), nullable=True, index=True)
+    stripe_price_id = Column(String(255), nullable=True)
+    plan = Column(String(50), nullable=False, default="free")
+    billing_cycle = Column(String(20), nullable=True)
+    status = Column(String(50), nullable=False, default="active")
+    trial_start = Column(DateTime, nullable=True)
+    trial_end = Column(DateTime, nullable=True)
+    current_period_start = Column(DateTime, nullable=True)
+    current_period_end = Column(DateTime, nullable=True)
+    cancel_at_period_end = Column(Boolean, default=False)
+    canceled_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UsageRecord(Base):
+    """Usage record model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "usage_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False, index=True)
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    feedback_count = Column(Integer, default=0, nullable=False)
+    api_calls_count = Column(Integer, default=0, nullable=False)
+    overage_feedback = Column(Integer, default=0, nullable=False)
+    overage_reported_to_stripe = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', 'period_start', name='uix_org_period'),
+    )
 
 
 class FeedbackItem(Base):

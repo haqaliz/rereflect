@@ -39,9 +39,22 @@ class UserResponse(BaseModel):
     organization_id: int
     role: str
     created_at: datetime
+    weekly_digest_enabled: bool = True
 
     class Config:
         from_attributes = True
+
+
+# Preferences schemas
+class PreferencesResponse(BaseModel):
+    weekly_digest_enabled: bool
+
+    class Config:
+        from_attributes = True
+
+
+class PreferencesUpdateRequest(BaseModel):
+    weekly_digest_enabled: Optional[bool] = None
 
 
 # Organization schemas

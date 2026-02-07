@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { organizationAPI, Organization, OrganizationStats } from '@/lib/api/organization';
+import { preferencesAPI, Preferences } from '@/lib/api/preferences';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { StatCard } from '@/components/StatCard';
 import { SettingsTabs } from '@/components/SettingsTabs';
@@ -26,6 +28,7 @@ import {
   Sun,
   Moon,
   ChevronRight,
+  Bell,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -38,6 +41,8 @@ export default function PreferencesPage() {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editedOrgName, setEditedOrgName] = useState('');
+  const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [savingDigest, setSavingDigest] = useState(false);
 
   // Only access theme context after mounting (client-side only)
   const themeContext = mounted ? useTheme() : { theme: 'system', setTheme: () => {} };
@@ -79,13 +84,15 @@ export default function PreferencesPage() {
           return;
         }
 
-        const [orgData, statsData] = await Promise.all([
+        const [orgData, statsData, prefsData] = await Promise.all([
           organizationAPI.getMe(),
-          organizationAPI.getStats()
+          organizationAPI.getStats(),
+          preferencesAPI.get(),
         ]);
 
         setOrg(orgData);
         setStats(statsData);
+        setPreferences(prefsData);
         setEditedOrgName(orgData.name);
       } catch (err) {
         console.error('Failed to load organization data:', err);
@@ -96,6 +103,18 @@ export default function PreferencesPage() {
 
     fetchData();
   }, [router]);
+
+  const handleToggleDigest = async (checked: boolean) => {
+    setSavingDigest(true);
+    try {
+      const updated = await preferencesAPI.update({ weekly_digest_enabled: checked });
+      setPreferences(updated);
+    } catch (err) {
+      console.error('Failed to update preferences:', err);
+    } finally {
+      setSavingDigest(false);
+    }
+  };
 
   const handleSaveOrgName = async () => {
     try {
@@ -197,8 +216,35 @@ export default function PreferencesPage() {
           </CardContent>
         </Card>
 
-        {/* Organization Details */}
+        {/* Notifications */}
         <Card className="animate-slide-up stagger-2">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-secondary rounded-lg">
+                <Bell className="w-5 h-5 text-primary" />
+              </div>
+              <CardTitle>Notifications</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-foreground">Weekly Digest</p>
+                <p className="text-sm text-muted-foreground">
+                  Receive a weekly email summary of feedback trends every Monday at 9 AM UTC
+                </p>
+              </div>
+              <Switch
+                checked={preferences?.weekly_digest_enabled ?? true}
+                onCheckedChange={handleToggleDigest}
+                disabled={savingDigest}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Organization Details */}
+        <Card className="animate-slide-up stagger-3">
           <CardHeader className="border-b border-border">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -305,7 +351,7 @@ export default function PreferencesPage() {
         </Card>
 
         {/* Usage Statistics */}
-        <div className="animate-slide-up stagger-3">
+        <div className="animate-slide-up stagger-4">
           <h3 className="text-xl font-bold text-foreground mb-4 flex items-center space-x-2">
             <span>Usage Statistics</span>
           </h3>
@@ -326,7 +372,7 @@ export default function PreferencesPage() {
         </div>
 
         {/* Account Information */}
-        <Card className="animate-slide-up stagger-4">
+        <Card className="animate-slide-up stagger-5">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">

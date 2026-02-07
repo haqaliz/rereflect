@@ -21,8 +21,7 @@ def check_trial_expirations():
     logger.info("Checking for expired trials...")
 
     with get_db_session() as db:
-        from src.models.subscription import Subscription
-        from src.models.organization import Organization
+        from src.models import Subscription, Organization
 
         # Find all trialing subscriptions that have expired
         now = datetime.utcnow()
@@ -79,8 +78,7 @@ def report_overages_to_stripe():
     logger.info("Reporting overages to Stripe...")
 
     with get_db_session() as db:
-        from src.models.usage import UsageRecord
-        from src.models.subscription import Subscription
+        from src.models import UsageRecord, Subscription
 
         # Find usage records with unreported overages
         unreported = db.query(UsageRecord).filter(
@@ -133,9 +131,7 @@ def send_trial_ending_reminder():
     logger.info("Checking for trials ending soon...")
 
     with get_db_session() as db:
-        from src.models.subscription import Subscription
-        from src.models.organization import Organization
-        from src.models.user import User
+        from src.models import Subscription, Organization, User
 
         now = datetime.utcnow()
         reminder_date = now + timedelta(days=3)
@@ -200,8 +196,7 @@ def sync_subscription_status(organization_id: int):
     logger.info(f"Syncing subscription status for org {organization_id}...")
 
     with get_db_session() as db:
-        from src.models.subscription import Subscription
-        from src.models.organization import Organization
+        from src.models import Subscription, Organization
 
         subscription = db.query(Subscription).filter(
             Subscription.organization_id == organization_id
@@ -253,11 +248,8 @@ def check_usage_warnings():
     logger.info("Checking for usage warnings...")
 
     with get_db_session() as db:
-        from src.models.usage import UsageRecord
-        from src.models.subscription import Subscription
-        from src.models.organization import Organization
-        from src.models.user import User
-        from src.config.plans import get_plan, get_feedback_limit
+        from src.models import UsageRecord, Subscription, Organization, User
+        from src.plans import get_feedback_limit
 
         # Get all usage records for current period
         now = datetime.utcnow()

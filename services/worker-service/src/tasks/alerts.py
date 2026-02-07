@@ -5,7 +5,7 @@ Supports configurable triggers and customizable message templates.
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
 from celery import shared_task
@@ -475,33 +475,129 @@ def send_slack_alert(
             raise self.retry(exc=e)
 
 
-@shared_task(
-    bind=True,
-    max_retries=3,
-    default_retry_delay=60,
-)
-def send_email_digest(
-    self,
-    org_id: int,
-    recipient_emails: List[str],
-    digest_type: str = "daily",
-) -> dict:
+@shared_task(name="src.tasks.alerts.send_weekly_digests")
+def send_weekly_digests() -> dict:
     """
-    Send email digest of feedback summary.
+    Periodic task: Send weekly email digests to all eligible organizations.
+    Runs every Monday at 9 AM UTC via Celery Beat.
 
-    Args:
-        org_id: Organization ID
-        recipient_emails: List of email addresses
-        digest_type: "daily" or "weekly"
-
-    Returns:
-        dict with send status
+    Workflow:
+    1. Query all organizations
+    2. For each org, count feedback from the past 7 days
+    3. Skip orgs with 0 feedback
+    4. Calculate stats and send digest to opted-in users
     """
-    # TODO: Implement email sending (SendGrid/AWS SES)
-    logger.info(f"Email digest task for org {org_id}: {digest_type}")
+    from sqlalchemy import func, case
+    from src.models import Organization, User, FeedbackItem
+    from src.email import send_weekly_digest_email
 
-    return {
-        "status": "not_implemented",
-        "org_id": org_id,
-        "digest_type": digest_type,
-    }
+    with get_db_session() as db:
+        organizations = db.query(Organization).all()
+
+        if not organizations:
+            return {"status": "no_organizations", "sent": 0}
+
+        total_sent = 0
+        total_skipped = 0
+        errors = 0
+
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=7)
+        week_date = f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}"
+
+        for org in organizations:
+            try:
+                # Count total feedback for this org in the past week
+                total_feedback = db.query(FeedbackItem).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= start_date,
+                    FeedbackItem.created_at <= end_date,
+                ).count()
+
+                if total_feedback == 0:
+                    total_skipped += 1
+                    continue
+
+                # Sentiment breakdown
+                sentiment_stats = db.query(
+                    func.sum(case((FeedbackItem.sentiment_label == "positive", 1), else_=0)).label("positive"),
+                    func.sum(case((FeedbackItem.sentiment_label == "neutral", 1), else_=0)).label("neutral"),
+                    func.sum(case((FeedbackItem.sentiment_label == "negative", 1), else_=0)).label("negative"),
+                ).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= start_date,
+                    FeedbackItem.created_at <= end_date,
+                ).first()
+
+                positive = int(sentiment_stats.positive or 0)
+                neutral = int(sentiment_stats.neutral or 0)
+                negative = int(sentiment_stats.negative or 0)
+
+                positive_pct = round((positive / total_feedback) * 100) if total_feedback > 0 else 0
+                neutral_pct = round((neutral / total_feedback) * 100) if total_feedback > 0 else 0
+                negative_pct = 100 - positive_pct - neutral_pct
+
+                # Pain points count
+                pain_points = db.query(FeedbackItem).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= start_date,
+                    FeedbackItem.created_at <= end_date,
+                    FeedbackItem.pain_point_category.isnot(None),
+                ).count()
+
+                # Feature requests count
+                feature_requests = db.query(FeedbackItem).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= start_date,
+                    FeedbackItem.created_at <= end_date,
+                    FeedbackItem.feature_request_category.isnot(None),
+                ).count()
+
+                # Urgent count
+                urgent_count = db.query(FeedbackItem).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= start_date,
+                    FeedbackItem.created_at <= end_date,
+                    FeedbackItem.is_urgent == True,
+                ).count()
+
+                # Get opted-in users
+                users = db.query(User).filter(
+                    User.organization_id == org.id,
+                    User.weekly_digest_enabled == True,
+                ).all()
+
+                for user in users:
+                    try:
+                        success = send_weekly_digest_email(
+                            to_email=user.email,
+                            organization_name=org.name,
+                            week_date=week_date,
+                            total_feedback=total_feedback,
+                            pain_points=pain_points,
+                            feature_requests=feature_requests,
+                            positive_percent=positive_pct,
+                            neutral_percent=neutral_pct,
+                            negative_percent=negative_pct,
+                            urgent_count=urgent_count,
+                        )
+                        if success:
+                            total_sent += 1
+                        else:
+                            errors += 1
+                    except Exception as e:
+                        logger.error(f"Failed to send digest to {user.email}: {e}")
+                        errors += 1
+
+            except Exception as e:
+                logger.error(f"Error processing org {org.id}: {e}")
+                errors += 1
+
+        logger.info(f"Weekly digest complete: sent={total_sent}, skipped={total_skipped}, errors={errors}")
+
+        return {
+            "status": "complete",
+            "sent": total_sent,
+            "skipped": total_skipped,
+            "errors": errors,
+        }
