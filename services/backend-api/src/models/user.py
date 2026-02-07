@@ -25,6 +25,13 @@ class User(Base):
     # System admin flag (for platform-wide admin access)
     is_system_admin = Column(Boolean, default=False, nullable=False, server_default="false")
 
+    # Notification preferences (new — per-type prefs are in UserAlertPreference)
+    notification_retention_days = Column(Integer, default=30, nullable=False, server_default="30")
+    daily_digest_enabled = Column(Boolean, default=True, nullable=False, server_default="true")
+    daily_digest_hour = Column(Integer, default=8, nullable=False, server_default="8")  # 0-23 UTC
+    weekly_digest_day = Column(Integer, default=1, nullable=False, server_default="1")  # 0=Mon, 6=Sun
+    weekly_digest_hour = Column(Integer, default=9, nullable=False, server_default="9")  # 0-23 UTC
+
     # Team management fields
     last_active_at = Column(DateTime, nullable=True)
     invited_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)

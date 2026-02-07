@@ -55,7 +55,11 @@ class AlertChannels(BaseModel):
 
 class PreferencesResponse(BaseModel):
     weekly_digest_enabled: bool
+    daily_digest_enabled: bool = True
     alert_channels: Optional[Dict[str, bool]] = None
+    daily_digest_hour: int = 8
+    weekly_digest_day: int = 1
+    weekly_digest_hour: int = 9
 
     class Config:
         from_attributes = True
@@ -63,7 +67,11 @@ class PreferencesResponse(BaseModel):
 
 class PreferencesUpdateRequest(BaseModel):
     weekly_digest_enabled: Optional[bool] = None
+    daily_digest_enabled: Optional[bool] = None
     alert_channels: Optional[AlertChannels] = None
+    daily_digest_hour: Optional[int] = Field(None, ge=0, le=23)
+    weekly_digest_day: Optional[int] = Field(None, ge=0, le=6)
+    weekly_digest_hour: Optional[int] = Field(None, ge=0, le=23)
 
 
 # Organization schemas

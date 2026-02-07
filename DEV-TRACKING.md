@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-02-07
 
 ---
 
@@ -89,21 +89,26 @@
 
 ---
 
-### 1. AI Enhancements (Priority: HIGH)
+### 1. AI Enhancements (Priority: HIGH) - COMPLETE
 > *Our differentiator - this is why customers choose Rereflect*
 
-- [ ] Auto-categorization (learned categories from user behavior)
-- [ ] Impact scoring (predict which feedback indicates churn risk)
-- [ ] Anomaly detection (unusual spikes in negative sentiment)
-- [ ] Suggested actions (recommend next steps based on feedback patterns)
+- [x] Auto-categorization (LLM-powered with custom categories)
+- [x] Impact scoring / churn risk detection (displayed on feedback detail)
+- [x] Anomaly detection (unusual spikes in negative sentiment)
+- [x] Suggested actions (AI-generated weekly insights with actions)
 
-### 2. Notifications (Priority: HIGH)
+### 2. Notifications (Priority: HIGH) - COMPLETE
 > *Keeps users engaged and surfaces critical insights proactively*
 
-- [ ] Urgent feedback Slack alerts (outbound notifications)
-- [ ] Email digest (daily/weekly summary of feedback trends)
-- [ ] Alert configuration UI (set thresholds for notifications)
-- [ ] In-app notification center (bell icon with unread count)
+- [x] Urgent feedback Slack alerts (outbound notifications)
+- [x] Email digest (daily + weekly with configurable schedule)
+- [x] Alert configuration UI (per-type thresholds, channels, retention)
+- [x] In-app notification center (header bell popover + full page)
+- [x] Notification detail page with metadata display
+- [x] Dismiss/restore workflow
+- [x] Per-type retention billing (30–365 days with Stripe metering)
+- [x] Slack brand icon for channel settings
+- [x] Replace all native HTML selects with shadcn components
 
 ### 3. Enhanced Analytics (Priority: MEDIUM)
 > *Proves ROI and enables data-driven product decisions*
@@ -203,8 +208,39 @@
 
 ---
 
+### 0. Public Changelog - COMPLETE
+> *Transparency and trust — show customers what's shipping*
+
+- [x] Public changelog page (`/changelog`) with category + date range filters
+- [x] Auto-sync from git commits via GitHub API on every deploy (idempotent)
+- [x] Admin management UI (`/system/changelog`) for system admins
+- [x] Server-side pagination (20 per batch, "Load more")
+- [x] Conventional commit parsing (feat/fix/chore/refactor/breaking)
+
+---
+
 ## Recent Completions (Feb 2026)
 
+- **Full notification system** (10 phases):
+  - DB models, migrations, and alert preferences
+  - Notification API (list, detail, mark read, dismiss, restore, preferences, retention)
+  - Alert dispatch engine (urgent feedback, sentiment spike, churn risk, volume spike)
+  - Daily + weekly email digests with per-user scheduling (hourly Celery Beat)
+  - Per-type retention billing with Stripe metered usage
+  - Alert preferences UI (per-type thresholds, email/Slack/in-app channels)
+  - Header bell popover (5 recent, 30s polling for unread count)
+  - Full notifications page (`/notifications`) with type filters, pagination, dismissed view
+  - Notification detail page (`/notifications/[id]`) with metadata, dismiss/restore
+  - Slack brand SVG icon for channel settings
+  - Replaced all native `<select>` elements with shadcn Select components
+  - Hidden number input spinners globally via CSS
+  - Sidebar restructured: Settings as nested group, System section moved to end
+- Public changelog with auto-sync from GitHub API on deploy
+- Admin changelog management (edit/hide/delete entries)
+- AI enhancements: auto-categorization, anomaly detection, suggested actions, churn risk
+- Weekly email digest with opt-in/out preferences
+- Redis distributed lock for worker deduplication
+- Churn risk display on feedback detail page
 - Full RBAC implementation with frontend/backend enforcement
 - Tab visibility filtering by role
 - Route protection for billing/integrations pages
@@ -227,6 +263,11 @@
 - Phase 2 prioritizes AI/Notifications over Integrations (differentiator focus)
 - Collaboration features scoped down to "Feedback Workflow" (status, assignment, notes only)
 - Excluded @mentions, comments, activity feed (avoids becoming project management tool)
+- Changelog auto-syncs via GitHub API at startup (idempotent, no manual intervention)
+- `is_system_admin` boolean on User model for system-level access (separate from org roles)
+- Notification bell in header (not sidebar) with Radix popover for quick access
+- Per-type retention billing: each alert type has independent retention days, Stripe billed on total extra days
+- Digest scheduling: hourly Celery Beat, tasks filter users by preferred hour/day (no per-user cron)
 
 ---
 

@@ -9,7 +9,7 @@ import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { SettingsTabs } from '@/components/SettingsTabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Settings as SettingsIcon,
   Brain,
@@ -190,7 +190,6 @@ export default function AISettingsPage() {
               <p className="text-muted-foreground text-lg">Manage your organization and preferences</p>
             </div>
           </div>
-          <SettingsTabs />
         </div>
 
         {/* AI Analysis Toggle */}
@@ -332,15 +331,19 @@ export default function AISettingsPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Type</label>
-                    <select
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    <Select
                       value={newCatType}
-                      onChange={(e) => setNewCatType(e.target.value as CategoryType)}
+                      onValueChange={(value) => setNewCatType(value as CategoryType)}
                     >
-                      <option value="pain_point">Pain Point</option>
-                      <option value="feature_request">Feature Request</option>
-                      <option value="general">General</option>
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pain_point">Pain Point</SelectItem>
+                        <SelectItem value="feature_request">Feature Request</SelectItem>
+                        <SelectItem value="general">General</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div>

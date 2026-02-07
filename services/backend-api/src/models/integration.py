@@ -29,6 +29,10 @@ class Integration(Base):
     # Custom message template with variables like {{text}}, {{sentiment}}, etc.
     message_template = Column(Text, nullable=True)  # If null, use default template
 
+    # Dedicated alert channel override (optional)
+    alert_channel_id = Column(String(100), nullable=True)
+    alert_channel_name = Column(String(255), nullable=True)
+
     # Status tracking
     is_active = Column(Boolean, default=True)
     last_used_at = Column(DateTime, nullable=True)

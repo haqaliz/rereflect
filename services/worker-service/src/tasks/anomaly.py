@@ -177,32 +177,28 @@ def _check_org_for_anomaly(db, org) -> bool:
 
 
 def _dispatch_anomaly_alerts(db, org, anomaly):
-    """Dispatch anomaly alerts based on user/org preferences."""
-    from src.models import User
+    """Dispatch anomaly alerts via the new per-user preference system."""
+    from src.notification_dispatch import dispatch_alert
 
-    # Get org default channels
-    default_channels = org.default_alert_channels or {"dashboard": True, "email": False, "slack": False}
-
-    # Get all users in this org
-    users = db.query(User).filter(User.organization_id == org.id).all()
-
-    for user in users:
-        # User-level override or fall back to org defaults
-        channels = user.alert_channels or default_channels
-
-        # Email alert
-        if channels.get("email", False):
-            try:
-                _send_anomaly_email(user.email, org.name, anomaly)
-            except Exception as e:
-                logger.error(f"Failed to send anomaly email to {user.email}: {e}")
-
-    # Slack alert (org-level)
-    if default_channels.get("slack", False):
-        try:
-            _send_anomaly_slack(db, org, anomaly)
-        except Exception as e:
-            logger.error(f"Failed to send anomaly Slack alert for org {org.id}: {e}")
+    severity_label = anomaly.severity.upper()
+    dispatch_alert(
+        org_id=org.id,
+        alert_type="sentiment_spike",
+        title=f"Sentiment Anomaly ({severity_label}): {anomaly.current_negative_pct:.0f}% negative",
+        message=(
+            f"Negative sentiment spiked to {anomaly.current_negative_pct:.0f}% "
+            f"(baseline: {anomaly.baseline_negative_pct:.0f}%, "
+            f"+{anomaly.deviation_pct:.0f}pp). "
+            f"Based on {anomaly.feedback_count} feedback items in the last 24h."
+        ),
+        link="/dashboard",
+        metadata={
+            "anomaly_id": anomaly.id if hasattr(anomaly, 'id') and anomaly.id else None,
+            "severity": anomaly.severity,
+            "current_negative_pct": anomaly.current_negative_pct,
+            "baseline_negative_pct": anomaly.baseline_negative_pct,
+        },
+    )
 
 
 def _send_anomaly_email(to_email: str, org_name: str, anomaly):

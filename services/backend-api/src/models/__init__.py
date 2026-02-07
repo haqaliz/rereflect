@@ -14,6 +14,8 @@ from .custom_category import CustomCategory
 from .anomaly import SentimentAnomaly
 from .weekly_insight import WeeklyInsight
 from .changelog_entry import ChangelogEntry
+from .notification import Notification
+from .user_alert_preference import UserAlertPreference
 
 __all__ = [
     "Base",
@@ -33,4 +35,6 @@ __all__ = [
     "SentimentAnomaly",
     "WeeklyInsight",
     "ChangelogEntry",
+    "Notification",
+    "UserAlertPreference",
 ]

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -14,9 +14,15 @@ import {
   UserX,
   ChevronUp,
   FileText,
+  Bell,
+  CreditCard,
+  Users,
+  Plug,
+  Brain,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
+
 import {
   Sidebar,
   SidebarContent,
@@ -73,17 +79,24 @@ const analysisNavItems = [
   },
 ];
 
-const bottomNavItems = [
-  {
-    title: 'Settings',
-    href: '/settings',
-    icon: SettingsIcon,
-  },
+const settingsNavItems = [
+  { title: 'Preferences', href: '/settings/preferences', icon: SettingsIcon },
+  { title: 'Notifications', href: '/settings/notifications', icon: Bell },
+  { title: 'Team', href: '/settings/team', icon: Users },
+  { title: 'Integrations', href: '/settings/integrations', icon: Plug, requiredRole: 'admin' as const },
+  { title: 'AI', href: '/settings/ai', icon: Brain, requiredRole: 'admin' as const },
+  { title: 'Billing', href: '/settings/billing', icon: CreditCard, requiredRole: 'owner' as const },
 ];
+
+const hasRole = (userRole: string | undefined, requiredRole?: 'owner' | 'admin' | 'member'): boolean => {
+  if (!requiredRole) return true;
+  if (!userRole) return false;
+  const hierarchy: Record<string, number> = { owner: 3, admin: 2, member: 1 };
+  return (hierarchy[userRole] || 0) >= (hierarchy[requiredRole] || 0);
+};
 
 export function AppSidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const [user, setUser] = useState<UserResponse | null>(null);
 
   useEffect(() => {
@@ -108,6 +121,9 @@ export function AppSidebar() {
     }
     if (href === '/categories') {
       return pathname.startsWith('/categories/');
+    }
+    if (href.startsWith('/settings/')) {
+      return pathname.startsWith(href);
     }
     return pathname === href;
   };
@@ -173,6 +189,33 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
+        <SidebarSeparator />
+
+        {/* Settings Section */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Settings</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {settingsNavItems
+                .filter(item => hasRole(user?.role, item.requiredRole))
+                .map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(item.href)}
+                      tooltip={item.title}
+                    >
+                      <Link href={item.href}>
+                        <item.icon className="w-4 h-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
         {/* System Section (System Admins only) */}
         {user?.is_system_admin && (
           <>
@@ -198,37 +241,6 @@ export function AppSidebar() {
             </SidebarGroup>
           </>
         )}
-
-        <SidebarSeparator />
-
-        {/* Bottom Navigation */}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {bottomNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild={item.href !== '#'}
-                    isActive={isActive(item.href)}
-                    tooltip={item.title}
-                  >
-                    {item.href !== '#' ? (
-                      <Link href={item.href}>
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    ) : (
-                      <>
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.title}</span>
-                      </>
-                    )}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>

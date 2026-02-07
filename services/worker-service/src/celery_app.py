@@ -104,10 +104,10 @@ celery_app.conf.beat_schedule = {
         "task": "billing.check_usage_warnings",
         "schedule": crontab(hour=10, minute=0),
     },
-    # Weekly digest: Every Monday at 9 AM UTC
+    # Weekly digest: Every hour at :05, task filters by user's preferred day+hour
     "send-weekly-digests": {
         "task": "src.tasks.alerts.send_weekly_digests",
-        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+        "schedule": crontab(minute=5),
     },
     # Retry LLM analysis for items that fell back to keyword analysis
     "retry-llm-analysis": {
@@ -123,6 +123,21 @@ celery_app.conf.beat_schedule = {
     "generate-weekly-insights": {
         "task": "src.tasks.insights.generate_weekly_insights",
         "schedule": crontab(hour=8, minute=30, day_of_week=1),
+    },
+    # Check for feedback volume spikes every hour
+    "check-volume-spikes": {
+        "task": "src.tasks.alerts.check_volume_spikes",
+        "schedule": crontab(minute=30),  # At 30 minutes past every hour
+    },
+    # Daily alert digest: Every hour at :00, task filters by user's preferred hour
+    "send-daily-alert-digests": {
+        "task": "src.tasks.alerts.send_daily_alert_digests",
+        "schedule": crontab(minute=0),
+    },
+    # Cleanup expired notifications daily at 3:30 AM UTC
+    "cleanup-expired-notifications": {
+        "task": "src.tasks.alerts.cleanup_expired_notifications",
+        "schedule": crontab(hour=3, minute=30),
     },
 }
 

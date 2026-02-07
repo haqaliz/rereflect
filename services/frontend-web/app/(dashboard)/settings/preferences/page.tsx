@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { StatCard } from '@/components/StatCard';
-import { SettingsTabs } from '@/components/SettingsTabs';
 import {
   Building2,
   Calendar,
@@ -178,8 +177,6 @@ export default function PreferencesPage() {
             </div>
           </div>
 
-          {/* Settings Tabs */}
-          <SettingsTabs />
         </div>
 
         {/* Theme Preference */}

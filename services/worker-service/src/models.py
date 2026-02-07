@@ -22,6 +22,11 @@ class User(Base):
     organization_id = Column(Integer, nullable=False)
     role = Column(String, nullable=False, default="member")
     weekly_digest_enabled = Column(Boolean, default=True, nullable=False)
+    daily_digest_enabled = Column(Boolean, default=True, nullable=False)
+    notification_retention_days = Column(Integer, default=30, nullable=False)
+    daily_digest_hour = Column(Integer, default=8, nullable=False)
+    weekly_digest_day = Column(Integer, default=1, nullable=False)
+    weekly_digest_hour = Column(Integer, default=9, nullable=False)
     alert_channels = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -173,6 +178,10 @@ class Integration(Base):
     included_fields = Column(JSON, nullable=True)  # ['text', 'sentiment', 'pain_point_category', etc.]
     digest_time = Column(Time, nullable=True)  # Time for daily/weekly digests
     message_template = Column(Text, nullable=True)  # Custom message template with {{variables}}
+
+    # Alert channel override
+    alert_channel_id = Column(String(100), nullable=True)
+    alert_channel_name = Column(String(255), nullable=True)
 
     # Status tracking
     is_active = Column(Boolean, default=True)
@@ -336,4 +345,47 @@ class WeeklyInsight(Base):
 
     __table_args__ = (
         Index('ix_weekly_insight_org_week', 'organization_id', 'week_start'),
+    )
+
+
+class Notification(Base):
+    """In-app notification for users."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False)
+    organization_id = Column(Integer, nullable=False)
+    type = Column(String(50), nullable=False)
+    title = Column(String(500), nullable=False)
+    message = Column(Text, nullable=True)
+    link = Column(String(500), nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False)
+    is_dismissed = Column(Boolean, default=False, nullable=False)
+    metadata_ = Column("metadata", JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_notification_user_read", "user_id", "is_read", "is_dismissed"),
+        Index("ix_notification_expires", "expires_at"),
+        Index("ix_notification_org", "organization_id"),
+    )
+
+
+class UserAlertPreference(Base):
+    """Per-user alert preferences for each alert type."""
+    __tablename__ = "user_alert_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False)
+    alert_type = Column(String(50), nullable=False)
+    is_enabled = Column(Boolean, default=True, nullable=False)
+    channel_email = Column(Boolean, default=False, nullable=False)
+    channel_slack = Column(Boolean, default=True, nullable=False)
+    channel_inapp = Column(Boolean, default=True, nullable=False)
+    threshold_value = Column(Float, nullable=True)
+    retention_days = Column(Integer, default=30, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "alert_type", name="uq_user_alert_type"),
     )

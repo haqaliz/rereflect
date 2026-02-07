@@ -110,7 +110,11 @@ def get_preferences(current_user: User = Depends(get_current_user)):
     """Get current user's notification preferences."""
     return PreferencesResponse(
         weekly_digest_enabled=current_user.weekly_digest_enabled,
+        daily_digest_enabled=current_user.daily_digest_enabled,
         alert_channels=current_user.alert_channels,
+        daily_digest_hour=current_user.daily_digest_hour,
+        weekly_digest_day=current_user.weekly_digest_day,
+        weekly_digest_hour=current_user.weekly_digest_hour,
     )
 
 
@@ -124,15 +128,31 @@ def update_preferences(
     if data.weekly_digest_enabled is not None:
         current_user.weekly_digest_enabled = data.weekly_digest_enabled
 
+    if data.daily_digest_enabled is not None:
+        current_user.daily_digest_enabled = data.daily_digest_enabled
+
     if data.alert_channels is not None:
         current_user.alert_channels = data.alert_channels.model_dump()
+
+    if data.daily_digest_hour is not None:
+        current_user.daily_digest_hour = data.daily_digest_hour
+
+    if data.weekly_digest_day is not None:
+        current_user.weekly_digest_day = data.weekly_digest_day
+
+    if data.weekly_digest_hour is not None:
+        current_user.weekly_digest_hour = data.weekly_digest_hour
 
     db.commit()
     db.refresh(current_user)
 
     return PreferencesResponse(
         weekly_digest_enabled=current_user.weekly_digest_enabled,
+        daily_digest_enabled=current_user.daily_digest_enabled,
         alert_channels=current_user.alert_channels,
+        daily_digest_hour=current_user.daily_digest_hour,
+        weekly_digest_day=current_user.weekly_digest_day,
+        weekly_digest_hour=current_user.weekly_digest_hour,
     )
 
 

@@ -8,12 +8,20 @@ export interface AlertChannels {
 
 export interface Preferences {
   weekly_digest_enabled: boolean;
+  daily_digest_enabled: boolean;
   alert_channels: AlertChannels | null;
+  daily_digest_hour: number;
+  weekly_digest_day: number;
+  weekly_digest_hour: number;
 }
 
 export interface PreferencesUpdate {
   weekly_digest_enabled?: boolean;
+  daily_digest_enabled?: boolean;
   alert_channels?: AlertChannels;
+  daily_digest_hour?: number;
+  weekly_digest_day?: number;
+  weekly_digest_hour?: number;
 }
 
 export const preferencesAPI = {

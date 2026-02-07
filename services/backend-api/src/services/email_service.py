@@ -23,6 +23,7 @@ TEMPLATE_PASSWORD_RESET = os.getenv("RESEND_TEMPLATE_PASSWORD_RESET")
 TEMPLATE_WEEKLY_DIGEST = os.getenv("RESEND_TEMPLATE_WEEKLY_DIGEST")
 TEMPLATE_ROLE_CHANGE = os.getenv("RESEND_TEMPLATE_ROLE_CHANGE")
 TEMPLATE_MEMBER_REMOVED = os.getenv("RESEND_TEMPLATE_MEMBER_REMOVED")
+TEMPLATE_DAILY_ALERT_DIGEST = os.getenv("RESEND_TEMPLATE_DAILY_ALERT_DIGEST")
 
 # Resend API endpoints
 RESEND_API_BASE = "https://api.resend.com"
@@ -247,6 +248,31 @@ def send_role_change_email(
             "NEW_ROLE": new_role.capitalize(),
             "CHANGED_BY_EMAIL": changed_by_email,
             "DASHBOARD_URL": dashboard_url,
+        },
+    )
+
+
+def send_daily_alert_digest_email(
+    to_email: str,
+    organization_name: str,
+    date: str,
+    alert_count: int,
+    alerts_html: str,
+) -> bool:
+    """Send a daily alert digest email."""
+    dashboard_url = f"{APP_URL}/dashboard"
+    unsubscribe_url = f"{APP_URL}/settings/notifications"
+
+    return _send_with_template(
+        to=to_email,
+        template_id=TEMPLATE_DAILY_ALERT_DIGEST,
+        variables={
+            "ORGANIZATION_NAME": organization_name,
+            "DATE": date,
+            "ALERT_COUNT": alert_count,
+            "ALERTS_HTML": alerts_html,
+            "DASHBOARD_URL": dashboard_url,
+            "UNSUBSCRIBE_URL": unsubscribe_url,
         },
     )
 

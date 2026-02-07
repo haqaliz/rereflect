@@ -48,7 +48,6 @@ import {
 } from '@/lib/api/team';
 import { useAuth } from '@/contexts/AuthContext';
 import { InviteMemberModal } from '@/components/InviteMemberModal';
-import { SettingsTabs } from '@/components/SettingsTabs';
 import {
   Users,
   UserPlus,
@@ -295,8 +294,6 @@ export default function TeamSettingsPage() {
             )}
           </div>
 
-          {/* Settings Tabs */}
-          <SettingsTabs />
         </div>
 
         {/* Seat Usage */}

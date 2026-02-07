@@ -247,15 +247,18 @@ def send_slack_message_oauth(access_token: str, channel_id: str, blocks: list, t
 @shared_task
 def check_urgent_alerts() -> dict:
     """
-    Periodic task: Check for urgent feedback and send alerts.
+    Periodic task: Check for urgent feedback and send alerts via dispatch system.
     Runs every 5 minutes via Celery Beat.
+
+    Dispatches to in-app, Slack, and email channels based on user preferences.
 
     Returns:
         dict with alert results
     """
     from sqlalchemy import inspect
-    from src.models import FeedbackItem
+    from src.models import FeedbackItem, Organization
     from src.database import engine
+    from src.notification_dispatch import dispatch_alert
 
     # Check if integrations table exists
     inspector = inspect(engine)
@@ -263,86 +266,85 @@ def check_urgent_alerts() -> dict:
         logger.debug("Integrations table not yet created, skipping alert check")
         return {"status": "skipped", "reason": "integrations_table_not_exists"}
 
-    from src.models import Integration
-
     with get_db_session() as db:
-        # Get all active Slack integrations
-        integrations = db.query(Integration).filter(
-            Integration.type == "slack",
-            Integration.is_active == True,
-        ).all()
+        organizations = db.query(Organization).all()
 
-        if not integrations:
-            return {"status": "no_integrations", "alerts_sent": 0}
+        if not organizations:
+            return {"status": "no_organizations", "alerts_sent": 0}
 
         total_alerts = 0
 
-        for integration in integrations:
-            triggers = integration.triggers or ["urgent"]
-
-            # Build query based on triggers
-            query = db.query(FeedbackItem).filter(
-                FeedbackItem.organization_id == integration.organization_id,
-            )
-
-            # Filter based on trigger type
-            if "all" in triggers:
-                pass  # No additional filter
-            elif "urgent" in triggers and "negative" in triggers:
-                query = query.filter(
-                    (FeedbackItem.is_urgent == True) |
-                    (FeedbackItem.sentiment_label == "negative")
-                )
-            elif "urgent" in triggers:
-                query = query.filter(FeedbackItem.is_urgent == True)
-            elif "negative" in triggers:
-                query = query.filter(FeedbackItem.sentiment_label == "negative")
-            else:
-                continue
-
-            feedback_items = query.limit(20).all()
-
-            if not feedback_items:
-                continue
-
-            # Determine alert type
-            if "urgent" in triggers and any(item.is_urgent for item in feedback_items):
-                alert_type = "urgent"
-            elif "negative" in triggers:
-                alert_type = "negative"
-            else:
-                alert_type = "all"
-
-            # Send Slack alert
+        for org in organizations:
             try:
-                config = integration.config or {}
-                integration_type = config.get("integration_type", "webhook")
+                # Find urgent feedback from last 5 minutes (since last check)
+                since = datetime.utcnow() - timedelta(minutes=6)
 
-                # Check if integration can send messages
-                can_send = False
-                if integration_type == "oauth":
-                    can_send = bool(integration.oauth_access_token and config.get("channel_id"))
-                else:
-                    can_send = bool(config.get("webhook_url"))
+                urgent_items = db.query(FeedbackItem).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.is_urgent == True,
+                    FeedbackItem.created_at >= since,
+                ).all()
 
-                if can_send:
-                    send_slack_alert.delay(
-                        integration_id=integration.id,
-                        feedback_ids=[item.id for item in feedback_items],
-                        org_id=integration.organization_id,
-                        alert_type=alert_type,
-                        message_template=integration.message_template,
+                if not urgent_items:
+                    continue
+
+                for item in urgent_items:
+                    text_preview = (item.text[:100] + "...") if len(item.text) > 100 else item.text
+                    dispatch_alert(
+                        org_id=org.id,
+                        alert_type="urgent_feedback",
+                        title=f"Urgent Feedback: \"{text_preview}\"",
+                        message=f"Churn risk detected. Source: {item.source or 'unknown'}",
+                        link=f"/feedbacks?search={item.id}",
+                        metadata={"feedback_id": item.id},
                     )
-                    total_alerts += len(feedback_items)
+                    total_alerts += 1
+
+                # Also send legacy Slack Block Kit alerts for integrations that have custom templates
+                _send_legacy_slack_alerts(db, org.id, urgent_items)
 
             except Exception as e:
-                logger.error(f"Failed to queue alert for org {integration.organization_id}: {e}")
+                logger.error(f"Failed to check urgent alerts for org {org.id}: {e}")
 
         return {
             "status": "complete",
-            "integrations_checked": len(integrations),
-            "alerts_sent": total_alerts,
+            "orgs_checked": len(organizations),
+            "alerts_dispatched": total_alerts,
         }
+
+
+def _send_legacy_slack_alerts(db, org_id: int, feedback_items: list) -> None:
+    """Send legacy Slack Block Kit alerts for integrations with custom templates."""
+    from src.models import Integration
+
+    integrations = db.query(Integration).filter(
+        Integration.organization_id == org_id,
+        Integration.type == "slack",
+        Integration.is_active == True,
+        Integration.message_template.isnot(None),
+    ).all()
+
+    for integration in integrations:
+        try:
+            config = integration.config or {}
+            integration_type = config.get("integration_type", "webhook")
+
+            can_send = False
+            if integration_type == "oauth":
+                can_send = bool(integration.oauth_access_token and config.get("channel_id"))
+            else:
+                can_send = bool(config.get("webhook_url"))
+
+            if can_send:
+                send_slack_alert.delay(
+                    integration_id=integration.id,
+                    feedback_ids=[item.id for item in feedback_items],
+                    org_id=org_id,
+                    alert_type="urgent",
+                    message_template=integration.message_template,
+                )
+        except Exception as e:
+            logger.error(f"Failed to queue legacy alert for integration {integration.id}: {e}")
 
 
 @shared_task(
@@ -478,38 +480,56 @@ def send_slack_alert(
 @shared_task(name="src.tasks.alerts.send_weekly_digests")
 def send_weekly_digests() -> dict:
     """
-    Periodic task: Send weekly email digests to all eligible organizations.
-    Runs every Monday at 9 AM UTC via Celery Beat.
+    Periodic task: Send weekly email digests to eligible users.
+    Runs every hour at :05 via Celery Beat. Filters users by preferred day+hour.
 
     Workflow:
-    1. Query all organizations
-    2. For each org, count feedback from the past 7 days
-    3. Skip orgs with 0 feedback
-    4. Calculate stats and send digest to opted-in users
+    1. Determine current UTC day-of-week and hour
+    2. Query users whose weekly_digest_day and weekly_digest_hour match now
+    3. For each user's org, count feedback from the past 7 days
+    4. Skip if 0 feedback, otherwise calculate stats and send digest
     """
     from sqlalchemy import func, case
     from src.models import Organization, User, FeedbackItem, WeeklyInsight
     from src.email import send_weekly_digest_email
 
-    with get_db_session() as db:
-        organizations = db.query(Organization).all()
+    now = datetime.utcnow()
+    current_day = now.weekday()  # 0=Mon, 6=Sun
+    current_hour = now.hour
 
-        if not organizations:
-            return {"status": "no_organizations", "sent": 0}
+    with get_db_session() as db:
+        # Only fetch users whose preferred day+hour match the current run
+        users = db.query(User).filter(
+            User.weekly_digest_enabled == True,
+            User.weekly_digest_day == current_day,
+            User.weekly_digest_hour == current_hour,
+        ).all()
+
+        if not users:
+            return {"status": "no_matching_users", "sent": 0}
 
         total_sent = 0
         total_skipped = 0
         errors = 0
 
-        end_date = datetime.utcnow()
+        end_date = now
         start_date = end_date - timedelta(days=7)
         week_date = f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}"
 
-        for org in organizations:
+        # Group users by org to avoid duplicate stats queries
+        org_users: Dict[int, list] = {}
+        for user in users:
+            org_users.setdefault(user.organization_id, []).append(user)
+
+        for org_id, org_user_list in org_users.items():
             try:
+                org = db.query(Organization).filter(Organization.id == org_id).first()
+                if not org:
+                    continue
+
                 # Count total feedback for this org in the past week
                 total_feedback = db.query(FeedbackItem).filter(
-                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.organization_id == org_id,
                     FeedbackItem.created_at >= start_date,
                     FeedbackItem.created_at <= end_date,
                 ).count()
@@ -524,7 +544,7 @@ def send_weekly_digests() -> dict:
                     func.sum(case((FeedbackItem.sentiment_label == "neutral", 1), else_=0)).label("neutral"),
                     func.sum(case((FeedbackItem.sentiment_label == "negative", 1), else_=0)).label("negative"),
                 ).filter(
-                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.organization_id == org_id,
                     FeedbackItem.created_at >= start_date,
                     FeedbackItem.created_at <= end_date,
                 ).first()
@@ -539,7 +559,7 @@ def send_weekly_digests() -> dict:
 
                 # Pain points count
                 pain_points = db.query(FeedbackItem).filter(
-                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.organization_id == org_id,
                     FeedbackItem.created_at >= start_date,
                     FeedbackItem.created_at <= end_date,
                     FeedbackItem.pain_point_category.isnot(None),
@@ -547,7 +567,7 @@ def send_weekly_digests() -> dict:
 
                 # Feature requests count
                 feature_requests = db.query(FeedbackItem).filter(
-                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.organization_id == org_id,
                     FeedbackItem.created_at >= start_date,
                     FeedbackItem.created_at <= end_date,
                     FeedbackItem.feature_request_category.isnot(None),
@@ -555,15 +575,15 @@ def send_weekly_digests() -> dict:
 
                 # Urgent count
                 urgent_count = db.query(FeedbackItem).filter(
-                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.organization_id == org_id,
                     FeedbackItem.created_at >= start_date,
                     FeedbackItem.created_at <= end_date,
                     FeedbackItem.is_urgent == True,
                 ).count()
 
-                # Fetch latest weekly insight for this org (generated at 8:30 AM)
+                # Fetch latest weekly insight for this org
                 latest_insight = db.query(WeeklyInsight).filter(
-                    WeeklyInsight.organization_id == org.id,
+                    WeeklyInsight.organization_id == org_id,
                 ).order_by(WeeklyInsight.generated_at.desc()).first()
 
                 # Format insights for email
@@ -578,13 +598,7 @@ def send_weekly_digests() -> dict:
                             lines.append(f"<li><strong>{title}</strong>: {desc}</li>")
                         insights_html = "<ul>" + "".join(lines) + "</ul>"
 
-                # Get opted-in users
-                users = db.query(User).filter(
-                    User.organization_id == org.id,
-                    User.weekly_digest_enabled == True,
-                ).all()
-
-                for user in users:
+                for user in org_user_list:
                     try:
                         success = send_weekly_digest_email(
                             to_email=user.email,
@@ -608,7 +622,7 @@ def send_weekly_digests() -> dict:
                         errors += 1
 
             except Exception as e:
-                logger.error(f"Error processing org {org.id}: {e}")
+                logger.error(f"Error processing org {org_id}: {e}")
                 errors += 1
 
         logger.info(f"Weekly digest complete: sent={total_sent}, skipped={total_skipped}, errors={errors}")
@@ -618,4 +632,238 @@ def send_weekly_digests() -> dict:
             "sent": total_sent,
             "skipped": total_skipped,
             "errors": errors,
+        }
+
+
+@shared_task(name="src.tasks.alerts.check_volume_spikes")
+def check_volume_spikes() -> dict:
+    """
+    Periodic task: Detect feedback volume spikes per organization.
+    Runs every hour via Celery Beat.
+
+    Algorithm:
+    - For each org, compare last 24h feedback count to 30-day daily average
+    - For each user, check their volume_spike threshold multiplier
+    - If exceeded, dispatch alert
+
+    Returns:
+        dict with detection results
+    """
+    from sqlalchemy import func
+    from src.models import Organization, FeedbackItem, UserAlertPreference, User
+    from src.notification_dispatch import dispatch_alert
+
+    with get_db_session() as db:
+        organizations = db.query(Organization).all()
+
+        if not organizations:
+            return {"status": "no_organizations", "alerts_sent": 0}
+
+        total_alerts = 0
+        now = datetime.utcnow()
+        last_24h = now - timedelta(hours=24)
+        last_30d = now - timedelta(days=30)
+
+        for org in organizations:
+            try:
+                # Count last 24h feedback
+                recent_count = db.query(func.count(FeedbackItem.id)).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= last_24h,
+                ).scalar() or 0
+
+                if recent_count < 5:
+                    continue
+
+                # Calculate 30-day daily average
+                total_30d = db.query(func.count(FeedbackItem.id)).filter(
+                    FeedbackItem.organization_id == org.id,
+                    FeedbackItem.created_at >= last_30d,
+                ).scalar() or 0
+
+                daily_avg = total_30d / 30.0 if total_30d > 0 else 0
+
+                if daily_avg < 1:
+                    continue
+
+                multiplier = recent_count / daily_avg
+
+                # Default threshold is 2.0x — check if any user in org has a custom threshold
+                # Use the lowest threshold among org users for the org-wide check
+                users = db.query(User).filter(User.organization_id == org.id).all()
+                user_ids = [u.id for u in users]
+
+                prefs = db.query(UserAlertPreference).filter(
+                    UserAlertPreference.user_id.in_(user_ids),
+                    UserAlertPreference.alert_type == "volume_spike",
+                    UserAlertPreference.is_enabled == True,
+                ).all()
+
+                if not prefs:
+                    # No users have volume spike alerts enabled, use default
+                    min_threshold = 2.0
+                else:
+                    min_threshold = min(p.threshold_value or 2.0 for p in prefs)
+
+                if multiplier < min_threshold:
+                    continue
+
+                dispatch_alert(
+                    org_id=org.id,
+                    alert_type="volume_spike",
+                    title=f"Feedback Volume Spike: {multiplier:.1f}x daily average",
+                    message=f"{recent_count} items in last 24h vs {daily_avg:.0f} daily average",
+                    link="/feedbacks",
+                    metadata={
+                        "recent_count": recent_count,
+                        "daily_average": round(daily_avg, 1),
+                        "multiplier": round(multiplier, 1),
+                    },
+                )
+                total_alerts += 1
+
+            except Exception as e:
+                logger.error(f"Error checking volume spikes for org {org.id}: {e}")
+
+        return {
+            "status": "complete",
+            "orgs_checked": len(organizations),
+            "alerts_sent": total_alerts,
+        }
+
+
+@shared_task(name="src.tasks.alerts.send_daily_alert_digests")
+def send_daily_alert_digests() -> dict:
+    """
+    Periodic task: Send daily alert digest emails.
+    Runs every hour at :00 via Celery Beat. Filters users by preferred hour.
+
+    For each user with daily_digest_enabled whose daily_digest_hour matches:
+    - Query notifications created in last 24 hours
+    - Check which alert types have channel_email enabled
+    - If any alerts exist, send digest email
+
+    Returns:
+        dict with send results
+    """
+    from src.models import User, Notification, UserAlertPreference
+    from src.email import _send_with_template
+    import os
+
+    TEMPLATE_DAILY_DIGEST = os.getenv("RESEND_TEMPLATE_DAILY_ALERT_DIGEST")
+    APP_URL = os.getenv("APP_URL", "http://localhost:3000")
+
+    current_hour = datetime.utcnow().hour
+
+    with get_db_session() as db:
+        users = db.query(User).filter(
+            User.daily_digest_enabled == True,
+            User.daily_digest_hour == current_hour,
+        ).all()
+
+        if not users:
+            return {"status": "no_users", "sent": 0}
+
+        total_sent = 0
+        errors = 0
+        now = datetime.utcnow()
+        last_24h = now - timedelta(hours=24)
+
+        for user in users:
+            try:
+                # Get alert types where user has email enabled
+                email_prefs = db.query(UserAlertPreference).filter(
+                    UserAlertPreference.user_id == user.id,
+                    UserAlertPreference.is_enabled == True,
+                    UserAlertPreference.channel_email == True,
+                ).all()
+
+                if not email_prefs:
+                    continue
+
+                email_alert_types = [p.alert_type for p in email_prefs]
+
+                # Get notifications from last 24h matching those types
+                notifications = db.query(Notification).filter(
+                    Notification.user_id == user.id,
+                    Notification.type.in_(email_alert_types),
+                    Notification.created_at >= last_24h,
+                ).order_by(Notification.created_at.desc()).all()
+
+                if not notifications:
+                    continue
+
+                # Build HTML summary of alerts
+                alerts_html_lines = []
+                for n in notifications[:20]:
+                    link = f"{APP_URL}{n.link}" if n.link else APP_URL
+                    alerts_html_lines.append(
+                        f'<li><strong>{n.title}</strong><br/>'
+                        f'<span style="color:#666">{n.message or ""}</span><br/>'
+                        f'<a href="{link}">View details</a></li>'
+                    )
+                alerts_html = "<ul>" + "".join(alerts_html_lines) + "</ul>"
+
+                # Get org name
+                from src.models import Organization
+                org = db.query(Organization).filter(Organization.id == user.organization_id).first()
+                org_name = org.name if org else "Your Organization"
+
+                success = _send_with_template(
+                    to=user.email,
+                    template_id=TEMPLATE_DAILY_DIGEST,
+                    variables={
+                        "ORGANIZATION_NAME": org_name,
+                        "DATE": now.strftime("%B %d, %Y"),
+                        "ALERT_COUNT": str(len(notifications)),
+                        "ALERTS_HTML": alerts_html,
+                        "DASHBOARD_URL": f"{APP_URL}/dashboard",
+                        "UNSUBSCRIBE_URL": f"{APP_URL}/settings/notifications",
+                    },
+                )
+
+                if success:
+                    total_sent += 1
+                else:
+                    errors += 1
+
+            except Exception as e:
+                logger.error(f"Failed to send daily digest to {user.email}: {e}")
+                errors += 1
+
+        logger.info(f"Daily digest complete: sent={total_sent}, errors={errors}")
+
+        return {
+            "status": "complete",
+            "sent": total_sent,
+            "errors": errors,
+        }
+
+
+@shared_task(name="src.tasks.alerts.cleanup_expired_notifications")
+def cleanup_expired_notifications() -> dict:
+    """
+    Periodic task: Delete expired notifications.
+    Runs daily at 3 AM UTC via Celery Beat.
+
+    Returns:
+        dict with cleanup results
+    """
+    from src.models import Notification
+
+    with get_db_session() as db:
+        now = datetime.utcnow()
+
+        deleted = db.query(Notification).filter(
+            Notification.expires_at.isnot(None),
+            Notification.expires_at < now,
+        ).delete(synchronize_session=False)
+
+        db.commit()
+
+        logger.info(f"Cleaned up {deleted} expired notifications")
+
+        return {
+            "status": "complete",
+            "deleted": deleted,
         }

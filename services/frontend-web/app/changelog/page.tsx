@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Logo } from '@/components/Logo';
 import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
 import { changelogAPI, type ChangelogEntry } from '@/lib/api/changelog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const ENTRY_TYPES = [
   { value: '', label: 'All' },
@@ -136,15 +137,19 @@ export default function ChangelogPage() {
           </div>
 
           {/* Date range dropdown */}
-          <select
-            value={selectedDays}
-            onChange={(e) => setSelectedDays(Number(e.target.value))}
-            className="px-3 py-1.5 text-sm rounded-md border border-border bg-background text-foreground sm:ml-auto"
+          <Select
+            value={String(selectedDays)}
+            onValueChange={(value) => setSelectedDays(Number(value))}
           >
-            {DATE_RANGES.map(range => (
-              <option key={range.value} value={range.value}>{range.label}</option>
-            ))}
-          </select>
+            <SelectTrigger className="w-[140px] sm:ml-auto">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_RANGES.map(range => (
+                <SelectItem key={range.value} value={String(range.value)}>{range.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Entry list */}

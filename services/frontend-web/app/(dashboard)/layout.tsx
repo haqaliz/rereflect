@@ -15,6 +15,7 @@ import { usePathname } from 'next/navigation';
 import { TrialBanner } from '@/components/TrialBanner';
 import { UsageWarning } from '@/components/UsageWarning';
 import { Toaster } from 'sonner';
+import { NotificationBell } from '@/components/NotificationBell';
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -31,6 +32,9 @@ const pageTitles: Record<string, string> = {
   '/settings/billing': 'Billing',
   '/settings/integrations': 'Integrations',
   '/settings/team': 'Team',
+  '/notifications': 'Notifications',
+  '/settings/notifications': 'Notifications',
+  '/settings/ai': 'AI',
 };
 
 export default function DashboardLayout({
@@ -45,6 +49,10 @@ export default function DashboardLayout({
     // Check for exact match first
     if (pageTitles[pathname]) {
       return pageTitles[pathname];
+    }
+    // Check for notification detail page
+    if (pathname.match(/^\/notifications\/\d+$/)) {
+      return 'Notification Details';
     }
     // Check for feedbacks detail page
     if (pathname.startsWith('/feedbacks/')) {
@@ -83,6 +91,9 @@ export default function DashboardLayout({
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>
+          <div className="ml-auto">
+            <NotificationBell />
+          </div>
         </header>
         <div className="flex-1 overflow-auto">
           {/* Billing banners */}

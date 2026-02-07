@@ -28,7 +28,6 @@ import {
   MessageSquare,
   Users,
 } from 'lucide-react';
-import { SettingsTabs } from '@/components/SettingsTabs';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 
@@ -153,8 +152,6 @@ function IntegrationsContent() {
             )}
           </div>
 
-          {/* Settings Tabs */}
-          <SettingsTabs />
         </div>
 
         {/* OAuth Error */}

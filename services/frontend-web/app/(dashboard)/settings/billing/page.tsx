@@ -36,7 +36,6 @@ import {
   Loader2,
   Settings as SettingsIcon,
 } from 'lucide-react';
-import { SettingsTabs } from '@/components/SettingsTabs';
 import { toast } from 'sonner';
 
 function BillingPageContent() {
@@ -208,8 +207,6 @@ function BillingPageContent() {
             </div>
           </div>
 
-          {/* Settings Tabs */}
-          <SettingsTabs />
         </div>
 
         {/* Current Subscription Card */}

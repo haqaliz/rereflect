@@ -259,6 +259,60 @@ class StripeService:
         except stripe.error.StripeError:
             return None
 
+    def manage_retention_addon(
+        self,
+        subscription_id: str,
+        extra_days: int,
+    ) -> bool:
+        """
+        Manage the notification retention add-on for a subscription.
+
+        - extra_days > 0: Add or update the retention add-on subscription item
+        - extra_days == 0: Remove the retention add-on if it exists
+
+        Each unit = 1 extra day beyond the free 30-day baseline.
+        Monthly cost = extra_days * $0.10 (configured in Stripe Price).
+        """
+        from src.config.plans import STRIPE_PRICE_RETENTION_ADDON
+
+        if not STRIPE_PRICE_RETENTION_ADDON:
+            return False
+
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            items = subscription["items"]["data"]
+
+            # Find existing retention add-on item
+            addon_item = None
+            for item in items:
+                if item["price"]["id"] == STRIPE_PRICE_RETENTION_ADDON:
+                    addon_item = item
+                    break
+
+            if extra_days > 0:
+                if addon_item:
+                    stripe.SubscriptionItem.modify(
+                        addon_item["id"],
+                        quantity=extra_days,
+                    )
+                else:
+                    stripe.SubscriptionItem.create(
+                        subscription=subscription_id,
+                        price=STRIPE_PRICE_RETENTION_ADDON,
+                        quantity=extra_days,
+                    )
+            elif addon_item:
+                stripe.SubscriptionItem.delete(
+                    addon_item["id"],
+                    proration_behavior="create_prorations",
+                )
+
+            return True
+        except stripe.error.StripeError as e:
+            import logging
+            logging.getLogger(__name__).error(f"Retention addon error: {e}")
+            return False
+
     def verify_webhook_signature(
         self,
         payload: bytes,
