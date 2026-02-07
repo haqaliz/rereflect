@@ -144,14 +144,21 @@ Cheers,
 ## Weekly Action Plan
 
 ### Week 1: Foundation
-- [ ] Set up analytics (Mixpanel/Amplitude for signups, Plausible for website)
-- [ ] Create landing page with clear value prop
-- [ ] Set up email capture for waitlist
-- [ ] Draft Product Hunt assets
+- [x] Set up analytics (Mixpanel - signup, login, CSV upload, dashboard view, feedback view tracking)
+- [x] Create landing page with clear value prop
+- [x] Create Twitter/X account (@rereflectapp)
+- [x] Add Product Hunt badge + Twitter link to landing page
+- [x] Draft Product Hunt assets (profile, tagline, description, shoutouts)
+- [x] Submit to free directories:
+  - [x] SaaSHub
+  - [x] AlternativeTo
+  - [x] Uneed
+  - [x] Product Hunt (profile ready, launch pending)
+  - [x] Hacker News (Show HN post prepared)
+- [ ] Create feedback analysis template (lead magnet) - template ready, Gumroad paused
 
 ### Week 2: Content & Community
 - [ ] Write 2 blog posts (SEO-focused)
-- [ ] Create feedback analysis template (lead magnet)
 - [ ] Join 3 founder communities, start participating
 - [ ] Post first "building in public" update
 
