@@ -35,12 +35,17 @@ def run_migrations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - runs on startup and shutdown."""
-    # Startup: run migrations then seed admin user
+    # Startup: run migrations, seed admin user, sync changelog
     run_migrations()
     try:
         seed_admin_user()
     except Exception as e:
         logger.warning(f"Could not seed admin user: {e}")
+    try:
+        from scripts.sync_changelog import run_changelog_sync
+        run_changelog_sync()
+    except Exception as e:
+        logger.warning(f"Changelog sync skipped: {e}")
     yield
     # Shutdown: cleanup if needed
 
