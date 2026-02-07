@@ -13,6 +13,7 @@ from .audit_log import AuditLog
 from .custom_category import CustomCategory
 from .anomaly import SentimentAnomaly
 from .weekly_insight import WeeklyInsight
+from .changelog_entry import ChangelogEntry
 
 __all__ = [
     "Base",
@@ -31,4 +32,5 @@ __all__ = [
     "CustomCategory",
     "SentimentAnomaly",
     "WeeklyInsight",
+    "ChangelogEntry",
 ]

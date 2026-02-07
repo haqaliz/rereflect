@@ -435,6 +435,149 @@ Wrap components using `useSearchParams` in `<Suspense>` boundary.
 - Check Celery worker is active
 - Look for errors in worker logs
 
+## Agent Teams
+
+Agent Teams coordinate multiple Claude Code sessions working in parallel. Use them for complex tasks where parallel work adds real value. Each teammate is an independent session with its own context window.
+
+### When to Use Teams vs Subagents
+
+| Scenario | Use |
+|---|---|
+| Quick focused task (search, single file edit) | **Subagent** |
+| Complex cross-service feature (frontend + backend + worker) | **Agent Team** |
+| Multi-angle code review (security + performance + architecture) | **Agent Team** |
+| Bug investigation with competing hypotheses | **Agent Team** |
+| Refactoring with test coverage | **Agent Team** |
+| Simple code generation or single-file review | **Subagent** |
+
+### Team Composition Patterns
+
+When creating agent teams for Rereflect, use these compositions. Each references existing agent definitions from `~/.claude/agents/`.
+
+#### 1. Full-Stack Feature Team
+
+For implementing features that span frontend, backend, worker, and database layers.
+
+**Teammates:**
+- **frontend-dev** (`fe-react-specialist`): Next.js pages, React components, API client functions in `services/frontend-web/`
+- **backend-dev** (`be-fastapi-specialist`): FastAPI routes, Pydantic schemas, SQLAlchemy models in `services/backend-api/`
+- **worker-dev** (`be-fastapi-specialist`): Celery tasks, background jobs in `services/worker-service/`
+- **db-architect** (`db-schema-designer`): Alembic migrations, schema design, index planning
+
+**File ownership** (avoids conflicts):
+- frontend-dev: `services/frontend-web/`
+- backend-dev: `services/backend-api/src/api/`, `services/backend-api/src/models/`
+- worker-dev: `services/worker-service/`
+- db-architect: `services/backend-api/alembic/`
+
+**Execution order:**
+1. db-architect designs schema + creates migration
+2. backend-dev implements models + API routes (depends on schema)
+3. worker-dev implements background tasks (depends on models)
+4. frontend-dev builds UI + API client (depends on API routes)
+
+**Example prompt:**
+```
+Create an agent team to implement [FEATURE NAME]. Spawn 4 teammates:
+- "frontend-dev" (fe-react-specialist): Build Next.js pages and components in services/frontend-web/
+- "backend-dev" (be-fastapi-specialist): Implement FastAPI routes and Pydantic models in services/backend-api/
+- "worker-dev" (be-fastapi-specialist): Build Celery tasks in services/worker-service/
+- "db-architect" (db-schema-designer): Design schema and create Alembic migration
+
+Require plan approval for db-architect before they create migrations.
+Execution order: db-architect first, then backend-dev + worker-dev in parallel, then frontend-dev last.
+Each teammate owns only their service directory — no cross-file edits.
+```
+
+#### 2. Code Review Squad
+
+For thorough multi-angle review of PRs or significant changes.
+
+**Teammates:**
+- **security-reviewer** (`review-security`): OWASP vulnerabilities, auth issues, input validation, secrets
+- **perf-reviewer** (`review-performance`): N+1 queries, re-renders, bundle size, API response size
+- **arch-reviewer** (`review-architecture`): SOLID principles, separation of concerns, coupling, testability
+
+**All teammates are read-only** — they review and report findings without making changes.
+
+**Example prompt:**
+```
+Create an agent team to review the recent changes. Spawn 3 reviewers:
+- "security-reviewer" (review-security): Check for OWASP vulnerabilities, auth issues, input validation
+- "perf-reviewer" (review-performance): Check for N+1 queries, unnecessary re-renders, API payload size
+- "arch-reviewer" (review-architecture): Check SOLID principles, coupling, testability
+
+All reviewers are read-only — report findings only, do not edit code.
+Focus on files changed in the current branch: [LIST FILES OR use `git diff --name-only master`]
+Have each reviewer report findings with severity levels, then synthesize a combined review.
+```
+
+#### 3. Debug Investigation Team
+
+For investigating bugs with multiple competing hypotheses in parallel.
+
+**Teammates:**
+- **detective-1** (`util-debug-detective`): Hypothesis A investigation
+- **detective-2** (`util-debug-detective`): Hypothesis B investigation
+- **backend-expert** (`be-fastapi-specialist`): FastAPI/SQLAlchemy-specific debugging
+- **frontend-expert** (`fe-react-specialist`): React/Next.js-specific debugging
+
+**Example prompt:**
+```
+Create an agent team to investigate [BUG DESCRIPTION]. Spawn teammates to test competing hypotheses:
+- "detective-backend" (util-debug-detective): Investigate if the issue is in the FastAPI backend — check routes, models, DB queries in services/backend-api/
+- "detective-frontend" (util-debug-detective): Investigate if the issue is in the Next.js frontend — check components, API calls, state in services/frontend-web/
+- "detective-worker" (util-debug-detective): Investigate if the issue is in the Celery worker — check tasks, Redis connection in services/worker-service/
+
+Have them share findings with each other and challenge each other's hypotheses.
+The bug symptoms are: [DESCRIBE SYMPTOMS]
+```
+
+#### 4. Refactoring Team
+
+For safe, well-tested refactoring of existing code.
+
+**Teammates:**
+- **architect** (`review-architecture`): Analyze current structure, design target architecture (read-only)
+- **refactorer** (`util-refactoring-specialist`): Execute the refactoring changes
+- **test-writer** (`qa-unit-test`): Write/update tests to maintain coverage through the refactoring
+
+**Example prompt:**
+```
+Create an agent team to refactor [MODULE/AREA]. Spawn 3 teammates:
+- "architect" (review-architecture): Analyze current structure and design the target architecture — read-only, plan approval required
+- "refactorer" (util-refactoring-specialist): Execute refactoring changes following the architect's plan
+- "test-writer" (qa-unit-test): Write tests before refactoring (characterization tests) and update after
+
+Execution order: architect plans first (require approval), then test-writer writes characterization tests, then refactorer executes changes, then test-writer updates tests.
+Focus area: [DESCRIBE WHAT TO REFACTOR]
+```
+
+### Team Usage Tips
+
+- **Delegate mode**: Press `Shift+Tab` to restrict the lead to coordination only (no coding)
+- **Direct messaging**: Use `Shift+Up/Down` to select and message individual teammates
+- **Task list**: Press `Ctrl+T` to toggle the shared task list
+- **Plan approval**: Add "Require plan approval" for risky changes (DB migrations, auth changes)
+- **File ownership**: Always assign clear file boundaries to avoid edit conflicts
+- **Cleanup**: Tell the lead to "shut down all teammates, then clean up the team" when done
+
+### Rereflect-Specific Agent Mapping
+
+| Layer | Primary Agent | Secondary Agent |
+|---|---|---|
+| Frontend (Next.js) | `fe-react-specialist` | `fe-ui-implementer` |
+| Backend (FastAPI) | `be-fastapi-specialist` | `be-api-designer` |
+| Database (PostgreSQL) | `db-schema-designer` | `db-migration-planner` |
+| Worker (Celery) | `be-fastapi-specialist` | — |
+| Security Review | `review-security` | — |
+| Performance Review | `review-performance` | — |
+| Architecture Review | `review-architecture` | — |
+| Unit Tests | `qa-unit-test` | `qa-test-generator` |
+| E2E Tests | `qa-e2e-playwright` | — |
+| Bug Investigation | `util-debug-detective` | `qa-bug-hunter` |
+| Refactoring | `util-refactoring-specialist` | — |
+
 ## Resources
 
 - [README.md](README.md) - Project overview and setup

@@ -40,6 +40,7 @@ class UserResponse(BaseModel):
     role: str
     created_at: datetime
     weekly_digest_enabled: bool = True
+    is_system_admin: bool = False
 
     class Config:
         from_attributes = True

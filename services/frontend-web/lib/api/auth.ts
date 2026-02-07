@@ -31,6 +31,7 @@ export interface UserResponse {
   organization_id: number;
   role: string;
   created_at: string;
+  is_system_admin: boolean;
 }
 
 export const authAPI = {

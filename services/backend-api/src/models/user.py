@@ -22,6 +22,9 @@ class User(Base):
     weekly_digest_enabled = Column(Boolean, default=True, nullable=False, server_default="true")
     alert_channels = Column(JSON, nullable=True)  # Per-user override: {"dashboard": true, "email": false, "slack": false}
 
+    # System admin flag (for platform-wide admin access)
+    is_system_admin = Column(Boolean, default=False, nullable=False, server_default="false")
+
     # Team management fields
     last_active_at = Column(DateTime, nullable=True)
     invited_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)

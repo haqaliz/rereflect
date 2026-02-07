@@ -10,6 +10,7 @@ interface User {
   email: string;
   organization_id: number;
   role: string;
+  is_system_admin: boolean;
 }
 
 interface AuthContextType {
@@ -23,7 +24,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Public routes that don't require authentication
-const publicRoutes = ['/', '/login', '/signup', '/privacy', '/terms'];
+const publicRoutes = ['/', '/login', '/signup', '/privacy', '/terms', '/changelog'];
 
 // Public route prefixes (routes that start with these paths)
 const publicRoutePrefixes = ['/invite'];

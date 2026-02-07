@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   UserX,
   ChevronUp,
+  FileText,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -171,6 +172,32 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* System Section (System Admins only) */}
+        {user?.is_system_admin && (
+          <>
+            <SidebarSeparator />
+            <SidebarGroup>
+              <SidebarGroupLabel>System</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive('/system/changelog')}
+                      tooltip="Changelog"
+                    >
+                      <Link href="/system/changelog">
+                        <FileText className="w-4 h-4" />
+                        <span>Changelog</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
 
         <SidebarSeparator />
 

@@ -268,3 +268,21 @@ def require_owner(current_user: User = Depends(get_current_user)) -> bool:
             detail="This action requires owner privileges"
         )
     return True
+
+
+def require_system_admin(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Dependency to check if user is a system admin.
+    Raises 403 if user.is_system_admin is False.
+
+    Usage:
+        @router.get("/admin", dependencies=[Depends(require_system_admin)])
+        def admin_only():
+            ...
+    """
+    if not current_user.is_system_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System admin access required"
+        )
+    return current_user

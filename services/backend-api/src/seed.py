@@ -51,6 +51,7 @@ def seed_admin_user():
             password_hash=hash_password(admin_password),
             organization_id=org.id,
             role="owner",
+            is_system_admin=True,
             joined_at=now,
             created_at=now,
         )
