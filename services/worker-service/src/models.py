@@ -22,6 +22,7 @@ class User(Base):
     organization_id = Column(Integer, nullable=False)
     role = Column(String, nullable=False, default="member")
     weekly_digest_enabled = Column(Boolean, default=True, nullable=False)
+    alert_channels = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -37,6 +38,9 @@ class Organization(Base):
     # AI Analysis settings
     ai_analysis_enabled = Column(Boolean, default=True, nullable=False)
     openai_api_key = Column(Text, nullable=True)
+
+    # Alert configuration
+    default_alert_channels = Column(JSON, nullable=False, default={"dashboard": True, "email": False, "slack": False})
 
 
 class Subscription(Base):
@@ -290,4 +294,30 @@ class PendingFeedback(Base):
     __table_args__ = (
         Index('ix_pending_feedback_org_status', 'organization_id', 'status'),
         Index('ix_pending_feedback_source', 'source_id', 'created_at'),
+    )
+
+
+class SentimentAnomaly(Base):
+    """Sentiment anomaly detection records."""
+    __tablename__ = "sentiment_anomalies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    detected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    anomaly_type = Column(String(50), nullable=False)  # negative_spike
+    severity = Column(String(20), nullable=False)  # warning, critical
+
+    baseline_negative_pct = Column(Float, nullable=False)
+    current_negative_pct = Column(Float, nullable=False)
+    deviation_pct = Column(Float, nullable=False)
+
+    time_window_hours = Column(Integer, nullable=False, default=24)
+    feedback_count = Column(Integer, nullable=False, default=0)
+
+    is_resolved = Column(Boolean, default=False, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index('ix_anomaly_org_resolved', 'organization_id', 'is_resolved'),
+        Index('ix_anomaly_detected', 'detected_at'),
     )

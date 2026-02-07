@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { dashboardAPI, DashboardData } from '@/lib/api/dashboard';
+import { anomaliesAPI, SentimentAnomaly } from '@/lib/api/anomalies';
 import { analytics } from '@/lib/analytics';
 import { StatCard } from '@/components/StatCard';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
@@ -67,6 +68,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [anomalies, setAnomalies] = useState<SentimentAnomaly[]>([]);
+  const [dismissingAnomaly, setDismissingAnomaly] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -77,8 +80,12 @@ export default function DashboardPage() {
           return;
         }
 
-        const dashboardData = await dashboardAPI.get(30);
+        const [dashboardData, anomalyData] = await Promise.all([
+          dashboardAPI.get(30),
+          anomaliesAPI.list(false).catch(() => ({ items: [], total: 0 })),
+        ]);
         setData(dashboardData);
+        setAnomalies(anomalyData.items);
         analytics.dashboardViewed();
       } catch (err: any) {
         setError('Failed to load dashboard data');
@@ -241,6 +248,18 @@ export default function DashboardPage() {
     );
   }
 
+  const handleDismissAnomaly = async (anomalyId: number) => {
+    setDismissingAnomaly(anomalyId);
+    try {
+      await anomaliesAPI.resolve(anomalyId);
+      setAnomalies((prev) => prev.filter((a) => a.id !== anomalyId));
+    } catch (err) {
+      console.error('Failed to dismiss anomaly:', err);
+    } finally {
+      setDismissingAnomaly(null);
+    }
+  };
+
   return (
     <div className="min-h-screen pattern-bg">
       {/* Main Content */}
@@ -256,6 +275,53 @@ export default function DashboardPage() {
           </div>
           <p className="text-text-secondary text-lg">Real-time customer feedback analytics and insights</p>
         </div>
+
+        {/* Anomaly Alert Banners */}
+        {anomalies.length > 0 && (
+          <div className="space-y-3 animate-fade-in">
+            {anomalies.map((anomaly) => {
+              const isCritical = anomaly.severity === 'critical';
+              const borderColor = isCritical ? 'var(--destructive)' : 'var(--chart-2)';
+              const bgColor = isCritical
+                ? 'color-mix(in oklch, var(--destructive) 10%, var(--card))'
+                : 'color-mix(in oklch, var(--chart-2) 10%, var(--card))';
+
+              return (
+                <div
+                  key={anomaly.id}
+                  className="rounded-xl p-4 border-2 flex items-center justify-between"
+                  style={{ backgroundColor: bgColor, borderColor }}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div
+                      className="p-2 rounded-lg"
+                      style={{ backgroundColor: `color-mix(in oklch, ${borderColor} 20%, transparent)` }}
+                    >
+                      <AlertTriangle className="w-5 h-5" style={{ color: borderColor }} />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">
+                        {isCritical ? 'Critical' : 'Warning'}: Negative Sentiment Spike Detected
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {anomaly.current_negative_pct.toFixed(0)}% negative sentiment vs {anomaly.baseline_negative_pct.toFixed(0)}% baseline
+                        {' '}(+{anomaly.deviation_pct.toFixed(0)}pp) — based on {anomaly.feedback_count} feedback items in the last {anomaly.time_window_hours}h
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDismissAnomaly(anomaly.id)}
+                    disabled={dismissingAnomaly === anomaly.id}
+                    className="ml-4 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors hover:bg-secondary flex-shrink-0"
+                    style={{ borderColor: 'var(--border)', color: 'var(--muted-foreground)' }}
+                  >
+                    {dismissingAnomaly === anomaly.id ? 'Dismissing...' : 'Dismiss'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

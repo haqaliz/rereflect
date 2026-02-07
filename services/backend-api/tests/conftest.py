@@ -17,6 +17,7 @@ from src.models.user import User
 from src.models.organization import Organization
 from src.models.feedback import FeedbackItem
 from src.models.integration import Integration, SlackAlertLog
+from src.models.anomaly import SentimentAnomaly
 from src.api.auth import hash_password, create_access_token
 
 

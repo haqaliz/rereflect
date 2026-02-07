@@ -27,6 +27,7 @@ celery_app = Celery(
         "src.tasks.integrations",
         "src.tasks.source_events",
         "src.tasks.billing",
+        "src.tasks.anomaly",
     ],
 )
 
@@ -111,6 +112,11 @@ celery_app.conf.beat_schedule = {
     "retry-llm-analysis": {
         "task": "src.tasks.analysis.retry_llm_analysis",
         "schedule": 300.0,  # Every 5 minutes
+    },
+    # Detect sentiment anomalies every hour
+    "detect-sentiment-anomalies": {
+        "task": "src.tasks.anomaly.detect_sentiment_anomalies",
+        "schedule": crontab(minute=0),  # Top of every hour
     },
 }
 

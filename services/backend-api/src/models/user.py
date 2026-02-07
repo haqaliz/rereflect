@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -20,6 +20,7 @@ class User(Base):
 
     # Notification preferences
     weekly_digest_enabled = Column(Boolean, default=True, nullable=False, server_default="true")
+    alert_channels = Column(JSON, nullable=True)  # Per-user override: {"dashboard": true, "email": false, "slack": false}
 
     # Team management fields
     last_active_at = Column(DateTime, nullable=True)

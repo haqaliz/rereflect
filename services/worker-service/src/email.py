@@ -15,6 +15,7 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", "noreply@rereflect.ca")
 FROM_NAME = os.getenv("FROM_NAME", "Rereflect")
 APP_URL = os.getenv("APP_URL", "http://localhost:3000")
 TEMPLATE_WEEKLY_DIGEST = os.getenv("RESEND_TEMPLATE_WEEKLY_DIGEST")
+TEMPLATE_ANOMALY_ALERT = os.getenv("RESEND_TEMPLATE_ANOMALY_ALERT")
 
 RESEND_API_BASE = "https://api.resend.com"
 
@@ -138,5 +139,34 @@ def send_weekly_digest_email(
             "URGENT_COUNT": urgent_count,
             "DASHBOARD_URL": dashboard_url,
             "UNSUBSCRIBE_URL": unsubscribe_url,
+        },
+    )
+
+
+def send_anomaly_alert_email(
+    to_email: str,
+    organization_name: str,
+    severity: str,
+    current_negative_pct: str,
+    baseline_negative_pct: str,
+    deviation_pct: str,
+    feedback_count: str,
+) -> bool:
+    """Send anomaly alert email when a sentiment spike is detected."""
+    dashboard_url = f"{APP_URL}/dashboard"
+    settings_url = f"{APP_URL}/settings/preferences"
+
+    return _send_with_template(
+        to=to_email,
+        template_id=TEMPLATE_ANOMALY_ALERT,
+        variables={
+            "ORGANIZATION_NAME": organization_name,
+            "SEVERITY": severity,
+            "CURRENT_NEGATIVE_PCT": current_negative_pct,
+            "BASELINE_NEGATIVE_PCT": baseline_negative_pct,
+            "DEVIATION_PCT": deviation_pct,
+            "FEEDBACK_COUNT": feedback_count,
+            "DASHBOARD_URL": dashboard_url,
+            "SETTINGS_URL": settings_url,
         },
     )

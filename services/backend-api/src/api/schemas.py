@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 
 
 # Auth schemas
@@ -46,8 +46,15 @@ class UserResponse(BaseModel):
 
 
 # Preferences schemas
+class AlertChannels(BaseModel):
+    dashboard: bool = True
+    email: bool = False
+    slack: bool = False
+
+
 class PreferencesResponse(BaseModel):
     weekly_digest_enabled: bool
+    alert_channels: Optional[Dict[str, bool]] = None
 
     class Config:
         from_attributes = True
@@ -55,6 +62,7 @@ class PreferencesResponse(BaseModel):
 
 class PreferencesUpdateRequest(BaseModel):
     weekly_digest_enabled: Optional[bool] = None
+    alert_channels: Optional[AlertChannels] = None
 
 
 # Organization schemas

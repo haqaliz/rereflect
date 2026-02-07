@@ -11,6 +11,7 @@ from .usage import UsageRecord
 from .team_invite import TeamInvite
 from .audit_log import AuditLog
 from .custom_category import CustomCategory
+from .anomaly import SentimentAnomaly
 
 __all__ = [
     "Base",
@@ -27,4 +28,5 @@ __all__ = [
     "TeamInvite",
     "AuditLog",
     "CustomCategory",
+    "SentimentAnomaly",
 ]

@@ -29,6 +29,7 @@ import {
   Moon,
   ChevronRight,
   Bell,
+  AlertTriangle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -43,6 +44,7 @@ export default function PreferencesPage() {
   const [editedOrgName, setEditedOrgName] = useState('');
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [savingDigest, setSavingDigest] = useState(false);
+  const [savingAlerts, setSavingAlerts] = useState(false);
 
   // Only access theme context after mounting (client-side only)
   const themeContext = mounted ? useTheme() : { theme: 'system', setTheme: () => {} };
@@ -113,6 +115,21 @@ export default function PreferencesPage() {
       console.error('Failed to update preferences:', err);
     } finally {
       setSavingDigest(false);
+    }
+  };
+
+  const handleToggleAlertChannel = async (channel: 'dashboard' | 'email' | 'slack', checked: boolean) => {
+    setSavingAlerts(true);
+    try {
+      const currentChannels = preferences?.alert_channels || { dashboard: true, email: false, slack: false };
+      const updated = await preferencesAPI.update({
+        alert_channels: { ...currentChannels, [channel]: checked },
+      });
+      setPreferences(updated);
+    } catch (err) {
+      console.error('Failed to update alert channels:', err);
+    } finally {
+      setSavingAlerts(false);
     }
   };
 
@@ -243,8 +260,68 @@ export default function PreferencesPage() {
           </CardContent>
         </Card>
 
-        {/* Organization Details */}
+        {/* Alert Channels */}
         <Card className="animate-slide-up stagger-3">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-secondary rounded-lg">
+                <AlertTriangle className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Alert Channels</CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Choose how you receive anomaly and spike alerts
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-foreground">Dashboard</p>
+                <p className="text-sm text-muted-foreground">
+                  Show anomaly banners on the dashboard
+                </p>
+              </div>
+              <Switch
+                checked={preferences?.alert_channels?.dashboard ?? true}
+                onCheckedChange={(checked) => handleToggleAlertChannel('dashboard', checked)}
+                disabled={savingAlerts}
+              />
+            </div>
+            <div className="border-t border-border" />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-foreground">Email</p>
+                <p className="text-sm text-muted-foreground">
+                  Receive email alerts when sentiment spikes are detected
+                </p>
+              </div>
+              <Switch
+                checked={preferences?.alert_channels?.email ?? false}
+                onCheckedChange={(checked) => handleToggleAlertChannel('email', checked)}
+                disabled={savingAlerts}
+              />
+            </div>
+            <div className="border-t border-border" />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-foreground">Slack</p>
+                <p className="text-sm text-muted-foreground">
+                  Send anomaly alerts to your connected Slack channel
+                </p>
+              </div>
+              <Switch
+                checked={preferences?.alert_channels?.slack ?? false}
+                onCheckedChange={(checked) => handleToggleAlertChannel('slack', checked)}
+                disabled={savingAlerts}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Organization Details */}
+        <Card className="animate-slide-up stagger-4">
           <CardHeader className="border-b border-border">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -351,7 +428,7 @@ export default function PreferencesPage() {
         </Card>
 
         {/* Usage Statistics */}
-        <div className="animate-slide-up stagger-4">
+        <div className="animate-slide-up stagger-5">
           <h3 className="text-xl font-bold text-foreground mb-4 flex items-center space-x-2">
             <span>Usage Statistics</span>
           </h3>
@@ -372,7 +449,7 @@ export default function PreferencesPage() {
         </div>
 
         {/* Account Information */}
-        <Card className="animate-slide-up stagger-5">
+        <Card className="animate-slide-up stagger-6">
           <CardHeader className="border-b border-border">
             <div className="flex items-center space-x-2">
               <div className="p-2 bg-secondary rounded-lg">
