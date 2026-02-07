@@ -278,12 +278,25 @@ Either way, wishing you continued growth with [Product]!
 | Demos booked | >5% | ___ |
 | Signups from outreach | 5/week | ___ |
 
+### How to Find Emails (Priority Order)
+
+1. **Check their website** - About/Team page, footer, contact page, privacy policy
+2. **Check their Twitter/X bio** - Many founders put email in bio
+3. **Check their GitHub** - Email often visible in git commits
+4. **Hunter.io Domain Search** - Enter company domain → shows all emails (25 free/month)
+5. **Hunter.io Email Finder** - Enter name + domain → generates likely email
+6. **Try common patterns** - firstname@company.com (most startups use this)
+7. **Just DM them** - Twitter/X or LinkedIn DMs often have higher reply rates than email
+
+**Verify emails for free:** Type guessed email in Gmail compose - if Google shows a profile pic, it's valid.
+
 ### Tools for Outreach (Free)
 
 | Tool | Purpose | Cost |
 |------|---------|------|
 | Gmail | Sending emails | Free |
-| LinkedIn | Finding prospects | Free (basic) |
+| LinkedIn | Finding prospects + DMs | Free (basic) |
+| Twitter/X | DM founders directly | Free |
 | Hunter.io | Finding email addresses | 25 free/month |
 | Apollo.io | Lead database | 50 free credits/month |
 | Streak CRM | Track emails in Gmail | Free tier |
