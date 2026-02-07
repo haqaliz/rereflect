@@ -44,6 +44,22 @@ export interface UrgentFeedback {
   response_time: string | null;
 }
 
+export interface ChurnRiskSummary {
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  total_at_risk: number;
+}
+
+export interface ChurnRiskItem {
+  id: number;
+  text: string;
+  churn_risk_score: number;
+  sentiment_label: string | null;
+  suggested_action: string | null;
+  created_at: string;
+}
+
 export interface DashboardData {
   sentiment: SentimentStats;
   pain_points: PainPoint[];
@@ -53,6 +69,8 @@ export interface DashboardData {
   pain_point_categories: CategoryCount[];
   feature_request_categories: CategoryCount[];
   urgent_categories: CategoryCount[];
+  churn_risk_summary: ChurnRiskSummary;
+  top_churn_risks: ChurnRiskItem[];
   total_feedback: number;
   date_range: string;
 }

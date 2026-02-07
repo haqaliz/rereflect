@@ -38,6 +38,9 @@ export interface FeedbackItem {
   urgent_response_time: string | null;
   // Confidence score
   categorization_confidence: number | null;
+  // Churn risk
+  churn_risk_score: number | null;
+  suggested_action: string | null;
 }
 
 // Category type definitions
@@ -95,6 +98,8 @@ export interface FeedbackFilters {
   feature_request_priority?: string;
   urgent_category?: string;
   urgent_response_time?: string;
+  churn_risk_min?: number;
+  churn_risk_max?: number;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -117,6 +122,8 @@ export const feedbackAPI = {
     if (filters?.feature_request_priority) params.append('feature_request_priority', filters.feature_request_priority);
     if (filters?.urgent_category) params.append('urgent_category', filters.urgent_category);
     if (filters?.urgent_response_time) params.append('urgent_response_time', filters.urgent_response_time);
+    if (filters?.churn_risk_min !== undefined) params.append('churn_risk_min', filters.churn_risk_min.toString());
+    if (filters?.churn_risk_max !== undefined) params.append('churn_risk_max', filters.churn_risk_max.toString());
     if (filters?.sort_by) params.append('sort_by', filters.sort_by);
     if (filters?.sort_order) params.append('sort_order', filters.sort_order);
 

@@ -235,6 +235,51 @@ export const createColumns = (
     },
   },
   {
+    accessorKey: "churn_risk_score",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="h-8 px-2 lg:px-3"
+        >
+          Churn Risk
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      )
+    },
+    cell: ({ row }) => {
+      const score = row.getValue("churn_risk_score") as number | null
+
+      if (score === null || score === undefined) {
+        return <span className="text-muted-foreground text-sm">-</span>
+      }
+
+      const getRiskLevel = (s: number) => {
+        if (s > 70) return { label: 'High', color: 'var(--destructive)' }
+        if (s >= 40) return { label: 'Medium', color: 'var(--chart-2)' }
+        return { label: 'Low', color: 'var(--chart-5)' }
+      }
+
+      const risk = getRiskLevel(score)
+
+      return (
+        <div className="flex items-center gap-2">
+          <div
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: risk.color }}
+          />
+          <Badge
+            variant="outline"
+            style={getCategoryBadgeStyle(risk.color)}
+          >
+            {score}
+          </Badge>
+        </div>
+      )
+    },
+  },
+  {
     accessorKey: "is_urgent",
     header: ({ column }) => {
       return (

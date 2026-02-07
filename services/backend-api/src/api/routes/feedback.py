@@ -132,6 +132,9 @@ class FeedbackResponse(BaseModel):
     urgent_response_time: Optional[str]
     # Confidence score
     categorization_confidence: Optional[float]
+    # Churn risk
+    churn_risk_score: Optional[int] = None
+    suggested_action: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -207,7 +210,9 @@ def list_feedback(
     feature_request_priority: Optional[str] = Query(None, description="Filter by feature request priority"),
     urgent_category: Optional[str] = Query(None, description="Filter by urgent category"),
     urgent_response_time: Optional[str] = Query(None, description="Filter by urgent response time"),
-    sort_by: Optional[str] = Query(None, description="Sort by field: created_at, sentiment_score, text"),
+    churn_risk_min: Optional[int] = Query(None, ge=0, le=100, description="Minimum churn risk score"),
+    churn_risk_max: Optional[int] = Query(None, ge=0, le=100, description="Maximum churn risk score"),
+    sort_by: Optional[str] = Query(None, description="Sort by field: created_at, sentiment_score, text, churn_risk_score"),
     sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
@@ -263,6 +268,12 @@ def list_feedback(
     if urgent_response_time:
         query = query.filter(FeedbackItem.urgent_response_time == urgent_response_time)
 
+    if churn_risk_min is not None:
+        query = query.filter(FeedbackItem.churn_risk_score >= churn_risk_min)
+
+    if churn_risk_max is not None:
+        query = query.filter(FeedbackItem.churn_risk_score <= churn_risk_max)
+
     # Get total count
     total = query.count()
 
@@ -277,6 +288,7 @@ def list_feedback(
         'text': FeedbackItem.text,
         'source': FeedbackItem.source,
         'id': FeedbackItem.id,
+        'churn_risk_score': FeedbackItem.churn_risk_score,
     }
     sort_column = sort_column_map.get(sort_by, FeedbackItem.created_at)
     order_func = asc if sort_order == 'asc' else desc
@@ -317,6 +329,8 @@ def list_feedback(
             "urgent_category": item.urgent_category,
             "urgent_response_time": item.urgent_response_time,
             "categorization_confidence": item.categorization_confidence,
+            "churn_risk_score": item.churn_risk_score,
+            "suggested_action": item.suggested_action,
         }
         response_items.append(FeedbackResponse(**item_dict))
 
@@ -378,6 +392,8 @@ def get_feedback(
         urgent_category=feedback.urgent_category,
         urgent_response_time=feedback.urgent_response_time,
         categorization_confidence=feedback.categorization_confidence,
+        churn_risk_score=feedback.churn_risk_score,
+        suggested_action=feedback.suggested_action,
     )
 
 

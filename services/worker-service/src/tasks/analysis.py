@@ -338,8 +338,67 @@ def _apply_keyword_analysis(feedback) -> None:
     # Tag extraction
     feedback.tags = tag_extractor.extract_tags(feedback.text)
 
+    # Keyword fallback: compute heuristic churn risk score
+    feedback.churn_risk_score = _compute_heuristic_churn_risk(feedback)
+    feedback.suggested_action = _compute_heuristic_suggestion(feedback)
+
     # Keyword fallback doesn't set LLM fields
     feedback.llm_analyzed = False
+
+
+def _compute_heuristic_churn_risk(feedback) -> int:
+    """Compute a churn risk score (0-100) using heuristics when LLM is unavailable."""
+    score = 0
+    text_lower = feedback.text.lower()
+
+    # Sentiment-based scoring (0-40 points)
+    if feedback.sentiment_score is not None:
+        if feedback.sentiment_score < -0.7:
+            score += 40
+        elif feedback.sentiment_score < -0.5:
+            score += 30
+        elif feedback.sentiment_score < -0.3:
+            score += 20
+        elif feedback.sentiment_score < 0:
+            score += 10
+
+    # Urgency (0-20 points)
+    if feedback.is_urgent:
+        score += 20
+
+    # Churn-signal keywords (0-25 points)
+    churn_keywords = [
+        'cancel', 'canceling', 'cancellation',
+        'switch', 'switching', 'alternative', 'competitor',
+        'leave', 'leaving', 'quit', 'done with',
+        'refund', 'money back', 'waste of money',
+        'unsubscribe', 'downgrade', 'not renewing',
+    ]
+    churn_matches = sum(1 for kw in churn_keywords if kw in text_lower)
+    score += min(churn_matches * 10, 25)
+
+    # Frustration keywords (0-15 points)
+    frustration_keywords = [
+        'frustrated', 'frustrating', 'terrible', 'awful', 'horrible',
+        'worst', 'useless', 'waste', 'disappointed', 'unacceptable',
+    ]
+    frustration_matches = sum(1 for kw in frustration_keywords if kw in text_lower)
+    score += min(frustration_matches * 5, 15)
+
+    return min(score, 100)
+
+
+def _compute_heuristic_suggestion(feedback) -> Optional[str]:
+    """Generate a simple suggested action based on heuristics."""
+    if not feedback.churn_risk_score or feedback.churn_risk_score < 40:
+        return None
+
+    if feedback.churn_risk_score >= 70:
+        if feedback.is_urgent:
+            return "High churn risk with urgent issue. Prioritize immediate outreach to understand and resolve the customer's concern."
+        return "High churn risk detected. Consider proactive outreach to address the customer's frustration before they leave."
+
+    return "Moderate churn risk. Monitor this customer and address their feedback in the next sprint."
 
 
 @shared_task

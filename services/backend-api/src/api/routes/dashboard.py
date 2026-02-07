@@ -58,6 +58,22 @@ class UrgentFeedback(BaseModel):
     response_time: Optional[str] = None
 
 
+class ChurnRiskSummary(BaseModel):
+    high_count: int  # score > 70
+    medium_count: int  # score 40-70
+    low_count: int  # score < 40
+    total_at_risk: int  # high + medium
+
+
+class ChurnRiskItem(BaseModel):
+    id: int
+    text: str
+    churn_risk_score: int
+    sentiment_label: Optional[str] = None
+    suggested_action: Optional[str] = None
+    created_at: datetime
+
+
 class DashboardResponse(BaseModel):
     sentiment: SentimentStats
     pain_points: List[PainPoint]
@@ -67,6 +83,8 @@ class DashboardResponse(BaseModel):
     pain_point_categories: List[CategoryCount]
     feature_request_categories: List[CategoryCount]
     urgent_categories: List[CategoryCount]
+    churn_risk_summary: ChurnRiskSummary
+    top_churn_risks: List[ChurnRiskItem]
     total_feedback: int
     date_range: str
 
@@ -247,6 +265,46 @@ def get_dashboard(
         for row in urgent_cat_query.all()
     ]
 
+    # Churn risk summary
+    churn_stats = base_query.filter(
+        FeedbackItem.churn_risk_score.isnot(None)
+    ).with_entities(
+        func.sum(case((FeedbackItem.churn_risk_score > 70, 1), else_=0)).label("high"),
+        func.sum(case((FeedbackItem.churn_risk_score.between(40, 70), 1), else_=0)).label("medium"),
+        func.sum(case((FeedbackItem.churn_risk_score < 40, 1), else_=0)).label("low"),
+    ).first()
+
+    high_count = int(churn_stats.high or 0) if churn_stats else 0
+    medium_count = int(churn_stats.medium or 0) if churn_stats else 0
+    low_count = int(churn_stats.low or 0) if churn_stats else 0
+
+    churn_risk_summary = ChurnRiskSummary(
+        high_count=high_count,
+        medium_count=medium_count,
+        low_count=low_count,
+        total_at_risk=high_count + medium_count,
+    )
+
+    # Top 5 highest churn risk items
+    top_churn_query = base_query.filter(
+        FeedbackItem.churn_risk_score.isnot(None),
+        FeedbackItem.churn_risk_score > 0,
+    ).order_by(
+        FeedbackItem.churn_risk_score.desc()
+    ).limit(5)
+
+    top_churn_risks = [
+        ChurnRiskItem(
+            id=item.id,
+            text=item.text,
+            churn_risk_score=item.churn_risk_score,
+            sentiment_label=item.sentiment_label,
+            suggested_action=item.suggested_action,
+            created_at=item.created_at,
+        )
+        for item in top_churn_query.all()
+    ]
+
     return DashboardResponse(
         sentiment=SentimentStats(
             positive_count=positive_count,
@@ -262,6 +320,8 @@ def get_dashboard(
         pain_point_categories=pain_point_categories,
         feature_request_categories=feature_request_categories,
         urgent_categories=urgent_categories,
+        churn_risk_summary=churn_risk_summary,
+        top_churn_risks=top_churn_risks,
         total_feedback=total_feedback,
         date_range=f"Last {days} days"
     )

@@ -11,6 +11,7 @@ import {
   CircleAlert,
   Lightbulb,
   AlertTriangle,
+  UserX,
   ChevronUp,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
@@ -63,6 +64,11 @@ const analysisNavItems = [
     title: 'Urgent Feedbacks',
     href: '/urgent-feedbacks',
     icon: CircleAlert,
+  },
+  {
+    title: 'Churn Risks',
+    href: '/churn-risks',
+    icon: UserX,
   },
 ];
 

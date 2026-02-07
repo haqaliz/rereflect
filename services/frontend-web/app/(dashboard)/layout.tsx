@@ -25,6 +25,7 @@ const pageTitles: Record<string, string> = {
   '/pain-points': 'Pain Points',
   '/feature-requests': 'Feature Requests',
   '/urgent-feedbacks': 'Urgent Feedbacks',
+  '/churn-risks': 'Churn Risks',
   '/settings': 'Settings',
   '/settings/preferences': 'Preferences',
   '/settings/billing': 'Billing',
