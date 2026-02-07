@@ -285,7 +285,7 @@ export const createColumns = (
             variant="outline"
             style={getCategoryBadgeStyle(risk.color)}
           >
-            {score}
+            {score}%
           </Badge>
         </div>
       )

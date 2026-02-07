@@ -473,64 +473,62 @@ export default function FeedbackDetailPage() {
               )}
             </CardContent>
           </Card>
-        </div>
 
-        {/* Source Details - only show if we have source_metadata or source_name */}
-        {(feedback.source_metadata || feedback.source_name) && (
+          {/* Churn Risk */}
           <Card className="animate-slide-up stagger-5">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                {getSourceIcon(feedback.source)}
-                Source Details
+                <UserMinus className="w-5 h-5 text-destructive" />
+                Churn Risk
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                {feedback.source_name && (
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Source Name</span>
-                    <span className="font-medium">{feedback.source_name}</span>
-                  </div>
-                )}
-                {feedback.source_metadata?.channel_name && (
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Channel</span>
-                    <span className="font-medium flex items-center gap-1">
-                      <Hash className="w-3.5 h-3.5" />
-                      {feedback.source_metadata.channel_name}
-                    </span>
-                  </div>
-                )}
-                {feedback.source_metadata?.author_name && (
-                  <div className="flex flex-col">
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Author</span>
-                    <span className="font-medium flex items-center gap-1">
-                      <User className="w-3.5 h-3.5" />
-                      {feedback.source_metadata.author_name}
-                    </span>
-                  </div>
-                )}
-                {feedback.source_metadata?.url && (
-                  <div className="flex flex-col sm:col-span-2">
-                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Original Link</span>
-                    <a
-                      href={feedback.source_metadata.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-medium text-primary hover:underline flex items-center gap-1"
-                    >
-                      View in {getSourceLabel(feedback.source)}
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                )}
-              </div>
+              {feedback.churn_risk_score !== null && feedback.churn_risk_score !== undefined ? (
+                <div className="space-y-3">
+                  {(() => {
+                    const score = feedback.churn_risk_score!;
+                    const getRiskLevel = (s: number) => {
+                      if (s > 70) return { label: 'High', color: 'var(--destructive)' };
+                      if (s >= 40) return { label: 'Medium', color: 'var(--chart-2)' };
+                      return { label: 'Low', color: 'var(--chart-5)' };
+                    };
+                    const risk = getRiskLevel(score);
+                    return (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Risk Level</span>
+                          <Badge
+                            variant="outline"
+                            style={getCategoryBadgeStyle(risk.color)}
+                          >
+                            {risk.label}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Score</span>
+                          <span className="font-mono font-semibold" style={{ color: risk.color }}>
+                            {score}%
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${score}%`,
+                              backgroundColor: risk.color
+                            }}
+                          />
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <p className="text-muted-foreground italic text-sm">Not calculated</p>
+              )}
             </CardContent>
           </Card>
-        )}
 
-        {/* Categorization Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Pain Point Categorization */}
           <Card className="animate-slide-up stagger-5">
             <CardHeader className="pb-3">
@@ -667,7 +665,76 @@ export default function FeedbackDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Suggested Action */}
+          {feedback.suggested_action && (
+            <Card className="animate-slide-up stagger-5 md:col-span-2">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Lightbulb className="w-5 h-5 text-[var(--chart-2)]" />
+                  AI Suggested Action
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm leading-relaxed">{feedback.suggested_action}</p>
+              </CardContent>
+            </Card>
+          )}
         </div>
+
+        {/* Source Details - only show if we have source_metadata or source_name */}
+        {(feedback.source_metadata || feedback.source_name) && (
+          <Card className="animate-slide-up stagger-5">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                {getSourceIcon(feedback.source)}
+                Source Details
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {feedback.source_name && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Source Name</span>
+                    <span className="font-medium">{feedback.source_name}</span>
+                  </div>
+                )}
+                {feedback.source_metadata?.channel_name && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Channel</span>
+                    <span className="font-medium flex items-center gap-1">
+                      <Hash className="w-3.5 h-3.5" />
+                      {feedback.source_metadata.channel_name}
+                    </span>
+                  </div>
+                )}
+                {feedback.source_metadata?.author_name && (
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Author</span>
+                    <span className="font-medium flex items-center gap-1">
+                      <User className="w-3.5 h-3.5" />
+                      {feedback.source_metadata.author_name}
+                    </span>
+                  </div>
+                )}
+                {feedback.source_metadata?.url && (
+                  <div className="flex flex-col sm:col-span-2">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Original Link</span>
+                    <a
+                      href={feedback.source_metadata.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-primary hover:underline flex items-center gap-1"
+                    >
+                      View in {getSourceLabel(feedback.source)}
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );
