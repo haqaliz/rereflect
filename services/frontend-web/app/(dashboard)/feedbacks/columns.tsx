@@ -18,7 +18,8 @@ import {
   Hash,
   Upload,
   Webhook,
-  PenLine
+  PenLine,
+  Lightbulb
 } from "lucide-react"
 import Link from "next/link"
 import { FeedbackItem } from "@/lib/api/feedback"
@@ -131,7 +132,18 @@ export const createColumns = (
     header: "Feedback Text",
     cell: ({ row }) => {
       const text = row.getValue("text") as string
-      return <div className="max-w-md line-clamp-2 leading-relaxed">{text}</div>
+      const suggestedAction = row.original.suggested_action
+      return (
+        <div className="max-w-md">
+          <div className="line-clamp-2 leading-relaxed">{text}</div>
+          {suggestedAction && (
+            <div className="flex items-start gap-1.5 mt-1.5 text-xs text-muted-foreground">
+              <Lightbulb className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: 'var(--chart-2)' }} />
+              <span className="line-clamp-1">{suggestedAction}</span>
+            </div>
+          )}
+        </div>
+      )
     },
   },
   {

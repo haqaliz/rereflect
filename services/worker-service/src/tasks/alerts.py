@@ -488,7 +488,7 @@ def send_weekly_digests() -> dict:
     4. Calculate stats and send digest to opted-in users
     """
     from sqlalchemy import func, case
-    from src.models import Organization, User, FeedbackItem
+    from src.models import Organization, User, FeedbackItem, WeeklyInsight
     from src.email import send_weekly_digest_email
 
     with get_db_session() as db:
@@ -561,6 +561,23 @@ def send_weekly_digests() -> dict:
                     FeedbackItem.is_urgent == True,
                 ).count()
 
+                # Fetch latest weekly insight for this org (generated at 8:30 AM)
+                latest_insight = db.query(WeeklyInsight).filter(
+                    WeeklyInsight.organization_id == org.id,
+                ).order_by(WeeklyInsight.generated_at.desc()).first()
+
+                # Format insights for email
+                insights_html = ""
+                if latest_insight and latest_insight.insights:
+                    insight_items = latest_insight.insights
+                    if isinstance(insight_items, list) and len(insight_items) > 0:
+                        lines = []
+                        for ins in insight_items[:5]:
+                            title = ins.get("title", "")
+                            desc = ins.get("description", "")
+                            lines.append(f"<li><strong>{title}</strong>: {desc}</li>")
+                        insights_html = "<ul>" + "".join(lines) + "</ul>"
+
                 # Get opted-in users
                 users = db.query(User).filter(
                     User.organization_id == org.id,
@@ -580,6 +597,7 @@ def send_weekly_digests() -> dict:
                             neutral_percent=neutral_pct,
                             negative_percent=negative_pct,
                             urgent_count=urgent_count,
+                            insights_html=insights_html,
                         )
                         if success:
                             total_sent += 1

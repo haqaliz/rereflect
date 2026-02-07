@@ -27,7 +27,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
-from src.models import Base, User, Organization, FeedbackItem, CustomCategory
+from src.models import Base, User, Organization, FeedbackItem, CustomCategory, WeeklyInsight
 
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"

@@ -163,3 +163,88 @@ def categorize_feedback(
     except Exception as e:
         logger.error(f"Unexpected error in OpenAI categorization: {e}")
         return None
+
+
+INSIGHTS_PROMPT = """You are a customer feedback analyst. Analyze the following batch of customer feedback items and generate 3-5 actionable insights for the product team.
+
+Each insight should identify a pattern, trend, or actionable recommendation based on the feedback.
+
+Feedback items:
+{feedback_items}
+
+Return ONLY valid JSON with this structure:
+{{
+  "insights": [
+    {{
+      "title": "Short insight title (max 10 words)",
+      "description": "Detailed explanation with specific evidence from feedback (2-3 sentences)",
+      "category": "pain_point" | "feature_request" | "positive_trend" | "churn_risk" | "opportunity",
+      "priority": "high" | "medium" | "low"
+    }}
+  ]
+}}"""
+
+
+def generate_insights(
+    feedback_texts: list[str],
+    org_api_key: str | None = None,
+) -> list[dict] | None:
+    """
+    Use GPT to generate weekly insights from a batch of feedback items.
+
+    Args:
+        feedback_texts: List of feedback text strings to analyze.
+        org_api_key: Optional BYOK API key for this organization.
+
+    Returns:
+        List of insight dicts, or None on failure.
+    """
+    client = _get_client(org_api_key)
+    if not client:
+        logger.warning("No OpenAI API key configured, skipping insights generation")
+        return None
+
+    # Format feedback items with numbering
+    formatted = "\n".join(f"{i+1}. \"{text[:500]}\"" for i, text in enumerate(feedback_texts[:50]))
+
+    prompt = INSIGHTS_PROMPT.format(feedback_items=formatted)
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            logger.error("OpenAI returned empty content for insights")
+            return None
+
+        result = json.loads(content)
+        insights = result.get("insights", [])
+
+        # Validate structure
+        validated = []
+        for insight in insights[:5]:
+            if isinstance(insight, dict) and "title" in insight and "description" in insight:
+                validated.append({
+                    "title": str(insight.get("title", ""))[:100],
+                    "description": str(insight.get("description", ""))[:500],
+                    "category": insight.get("category", "opportunity"),
+                    "priority": insight.get("priority", "medium"),
+                })
+
+        return validated if validated else None
+
+    except (APIError, RateLimitError, APITimeoutError) as e:
+        logger.error(f"OpenAI API error generating insights: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse OpenAI insights response: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error generating insights: {e}")
+        return None

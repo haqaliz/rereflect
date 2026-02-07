@@ -120,6 +120,7 @@ def send_weekly_digest_email(
     neutral_percent: int,
     negative_percent: int,
     urgent_count: int,
+    insights_html: str = "",
 ) -> bool:
     dashboard_url = f"{APP_URL}/dashboard"
     unsubscribe_url = f"{APP_URL}/settings/preferences"
@@ -137,6 +138,7 @@ def send_weekly_digest_email(
             "NEUTRAL_PERCENT": neutral_percent,
             "NEGATIVE_PERCENT": negative_percent,
             "URGENT_COUNT": urgent_count,
+            "AI_INSIGHTS": insights_html,
             "DASHBOARD_URL": dashboard_url,
             "UNSUBSCRIBE_URL": unsubscribe_url,
         },

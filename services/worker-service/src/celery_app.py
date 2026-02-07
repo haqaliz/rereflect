@@ -28,6 +28,7 @@ celery_app = Celery(
         "src.tasks.source_events",
         "src.tasks.billing",
         "src.tasks.anomaly",
+        "src.tasks.insights",
     ],
 )
 
@@ -117,6 +118,11 @@ celery_app.conf.beat_schedule = {
     "detect-sentiment-anomalies": {
         "task": "src.tasks.anomaly.detect_sentiment_anomalies",
         "schedule": crontab(minute=0),  # Top of every hour
+    },
+    # Generate weekly AI insights: Every Monday at 8:30 AM UTC (before digest at 9 AM)
+    "generate-weekly-insights": {
+        "task": "src.tasks.insights.generate_weekly_insights",
+        "schedule": crontab(hour=8, minute=30, day_of_week=1),
     },
 }
 
