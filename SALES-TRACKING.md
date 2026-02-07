@@ -163,16 +163,144 @@ Cheers,
 - [ ] Post first "building in public" update
 
 ### Week 3: Outreach
-- [ ] Build list of 50 ICP prospects
+- [ ] Build list of 50 ICP prospects (see Outreach Playbook below)
 - [ ] Send first 20 personalized emails
 - [ ] Schedule 5+ demo calls
 - [ ] Follow up on community conversations
 
 ### Week 4: Launch
-- [ ] Product Hunt launch
+- [ ] Product Hunt launch (Tuesday or Wednesday, 12:01 AM PST)
+- [ ] Post "Show HN" on Hacker News (same week)
 - [ ] Announce on all channels
 - [ ] Follow up with all demo prospects
 - [ ] Start onboarding first users
+
+---
+
+## Outreach Playbook (Detailed)
+
+### Step 1: Build Prospect List (50 targets)
+
+**Where to find prospects:**
+
+| Source | How to Find | Why They're Good |
+|--------|-------------|------------------|
+| Product Hunt | Browse recently launched SaaS products | They just launched = getting feedback now |
+| LinkedIn | Search "Head of Product" + "SaaS" + Seed/Series A | Decision makers at right-sized companies |
+| AngelList/Wellfound | Browse funded startups in SaaS category | Have budget, growing fast |
+| G2/Capterra | Look at tools with mixed reviews | Users are giving feedback they can't process |
+| Twitter/X | Search #buildinpublic #SaaS #indiemaker | Founders who are active and approachable |
+
+**Prospect qualification checklist:**
+- [ ] SaaS company (B2B or B2C)
+- [ ] 5-50 employees (sweet spot)
+- [ ] Has a product with users (not pre-launch)
+- [ ] Shows signs of growth (recent funding, hiring, launches)
+- [ ] Founder/PM is reachable (email or LinkedIn)
+
+### Step 2: Email Templates
+
+**Template A: Product Hunt Founders**
+```
+Subject: Congrats on the [Product Hunt/launch] traction!
+
+Hi [Name],
+
+Just saw [Product] on Product Hunt - love what you're building!
+
+Quick question: now that you're getting traction, how are you
+organizing all the customer feedback coming in?
+
+I built Rereflect to solve exactly this - it uses AI to auto-categorize
+feedback into pain points, feature requests, and churn risk alerts.
+
+Happy to give you 3 months free if you'd try it and share honest feedback.
+Takes 30 seconds to upload a CSV and see it work.
+
+[Your name]
+```
+
+**Template B: LinkedIn PM/Founder**
+```
+Subject: How [Company] handles customer feedback
+
+Hi [Name],
+
+I've been researching how growing SaaS teams manage customer feedback
+and noticed [Company] is scaling fast - congrats!
+
+Most teams I talk to are still using spreadsheets or Notion to track
+feedback. It works until you hit 100+ items/week, then insights get lost.
+
+I built an AI tool that auto-categorizes feedback into actionable buckets
+(pain points, features, churn risks). Would love your take on it.
+
+Free to try: https://app.rereflect.ca
+Or happy to do a quick 15-min walkthrough.
+
+[Your name]
+```
+
+**Template C: Follow-up (Day 3, if no reply)**
+```
+Subject: Re: [Original subject]
+
+Hi [Name],
+
+Just bumping this in case it got buried. No pressure at all.
+
+If feedback management isn't a pain point right now, totally understand.
+But if it is, I'm offering free extended access for early feedback.
+
+Either way, wishing you continued growth with [Product]!
+
+[Your name]
+```
+
+### Step 3: Outreach Schedule
+
+| Day | Action | Volume |
+|-----|--------|--------|
+| Monday | Research & build prospect list | 10 prospects |
+| Tuesday | Send first batch of emails | 10 emails |
+| Wednesday | Research more prospects | 10 prospects |
+| Thursday | Send second batch | 10 emails |
+| Friday | Follow up on Day 2 batch + review metrics | 10 follow-ups |
+| Next week | Repeat + follow up on Thursday batch | Continue |
+
+### Step 4: Track Results
+
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Emails sent | 20/week | ___ |
+| Open rate | >40% | ___ |
+| Reply rate | >10% | ___ |
+| Demos booked | >5% | ___ |
+| Signups from outreach | 5/week | ___ |
+
+### Tools for Outreach (Free)
+
+| Tool | Purpose | Cost |
+|------|---------|------|
+| Gmail | Sending emails | Free |
+| LinkedIn | Finding prospects | Free (basic) |
+| Hunter.io | Finding email addresses | 25 free/month |
+| Apollo.io | Lead database | 50 free credits/month |
+| Streak CRM | Track emails in Gmail | Free tier |
+
+---
+
+## Directory Submissions Tracker
+
+| Platform | Status | Date Submitted | Link |
+|----------|--------|----------------|------|
+| Product Hunt | Profile ready, launch pending | Feb 2026 | producthunt.com/products/rereflect |
+| SaaSHub | Submitted | Feb 2026 | saashub.com |
+| AlternativeTo | Submitted | Feb 2026 | alternativeto.net |
+| Uneed | Submitted | Feb 2026 | uneed.best |
+| Hacker News | Show HN post prepared | Pending | news.ycombinator.com |
+| BetaList | Skipped (paid only, $49+) | - | - |
+| There's An AI For That | Skipped (paid only, $49+) | - | - |
 
 ---
 
