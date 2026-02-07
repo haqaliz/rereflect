@@ -34,6 +34,10 @@ class Organization(Base):
     plan = Column(String, nullable=False, default="free")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    # AI Analysis settings
+    ai_analysis_enabled = Column(Boolean, default=True, nullable=False)
+    openai_api_key = Column(Text, nullable=True)
+
 
 class Subscription(Base):
     """Subscription model - mirrors backend-api model (lightweight, no FKs)."""
@@ -115,8 +119,31 @@ class FeedbackItem(Base):
     # Confidence score for categorization (0.0-1.0)
     categorization_confidence = Column(Float, nullable=True)
 
+    # AI/LLM analysis fields
+    llm_analyzed = Column(Boolean, default=False, nullable=False)
+    llm_analysis_pending = Column(Boolean, default=False, nullable=False)
+    churn_risk_score = Column(Integer, nullable=True)  # 0-100
+    suggested_action = Column(Text, nullable=True)
+
     __table_args__ = (
         Index('ix_feedback_org_date', 'organization_id', 'created_at'),
+    )
+
+
+class CustomCategory(Base):
+    """Custom category model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "custom_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    category_type = Column(String(50), nullable=False)  # pain_point, feature_request, general
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('ix_custom_cat_org', 'organization_id', 'category_type'),
     )
 
 

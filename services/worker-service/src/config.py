@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     max_retries: int = 3
     retry_delay: int = 60  # seconds
 
+    # OpenAI configuration
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

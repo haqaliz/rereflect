@@ -1,6 +1,7 @@
 """
 Analysis tasks for processing customer feedback.
 Migrated from APScheduler to Celery for distributed processing.
+Supports LLM-powered categorization (OpenAI) with keyword fallback.
 """
 
 import logging
@@ -10,6 +11,7 @@ from celery import shared_task
 
 from src.database import get_db_session
 from src.config import settings
+from src.openai_client import categorize_feedback
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,7 @@ def analyze_single_feedback(self, feedback_id: int) -> dict:
             return {"status": "already_analyzed", "feedback_id": feedback_id}
 
         try:
-            _analyze_feedback_item(feedback)
+            _analyze_feedback_item(feedback, db)
             db.commit()
             logger.info(f"Successfully analyzed feedback {feedback_id}")
             return {
@@ -126,7 +128,7 @@ def analyze_feedback_batch(self, org_id: int, feedback_ids: List[int]) -> dict:
 
         for feedback in feedback_items:
             try:
-                _analyze_feedback_item(feedback)
+                _analyze_feedback_item(feedback, db)
                 success_count += 1
             except Exception as e:
                 logger.error(f"Failed to analyze feedback {feedback.id}: {e}")
@@ -171,7 +173,7 @@ def process_unanalyzed_feedback() -> dict:
 
         for feedback in unanalyzed:
             try:
-                _analyze_feedback_item(feedback)
+                _analyze_feedback_item(feedback, db)
                 success_count += 1
             except Exception as e:
                 logger.error(f"Failed to analyze feedback {feedback.id}: {e}")
@@ -188,14 +190,86 @@ def process_unanalyzed_feedback() -> dict:
         }
 
 
-def _analyze_feedback_item(feedback) -> None:
+def _analyze_feedback_item(feedback, db=None) -> None:
     """
     Core analysis logic for a single feedback item.
+    Tries LLM-powered analysis first, falls back to keyword-based.
     Updates the feedback object in place.
 
     Args:
         feedback: FeedbackItem ORM object to analyze
+        db: SQLAlchemy session (needed for org lookup and custom categories)
     """
+    from src.models import Organization, CustomCategory
+
+    # Check if org has AI analysis enabled
+    org = None
+    use_llm = False
+    custom_categories = []
+
+    if db is not None:
+        org = db.query(Organization).filter(Organization.id == feedback.organization_id).first()
+        if org and org.ai_analysis_enabled:
+            use_llm = True
+            # Fetch active custom categories for this org
+            custom_cats = db.query(CustomCategory).filter(
+                CustomCategory.organization_id == feedback.organization_id,
+                CustomCategory.is_active == True,
+            ).all()
+            custom_categories = [
+                {"name": c.name, "category_type": c.category_type}
+                for c in custom_cats
+            ]
+
+    llm_result = None
+    if use_llm:
+        org_api_key = org.openai_api_key if org else None
+        llm_result = categorize_feedback(
+            text=feedback.text,
+            custom_categories=custom_categories if custom_categories else None,
+            org_api_key=org_api_key,
+        )
+
+    if llm_result:
+        _apply_llm_result(feedback, llm_result)
+    else:
+        _apply_keyword_analysis(feedback)
+        # Mark for LLM retry if org has AI enabled but LLM failed
+        if use_llm:
+            feedback.llm_analysis_pending = True
+
+
+def _apply_llm_result(feedback, result: dict) -> None:
+    """Apply LLM categorization result to a feedback item."""
+    feedback.sentiment_label = result.get("sentiment_label", "neutral")
+    feedback.sentiment_score = result.get("sentiment_score", 0.0)
+    feedback.is_urgent = result.get("is_urgent", False)
+
+    feedback.pain_point_category = result.get("pain_point_category")
+    feedback.pain_point_severity = result.get("pain_point_severity")
+    if feedback.pain_point_category:
+        feedback.extracted_issue = feedback.text[:100] + ('...' if len(feedback.text) > 100 else '')
+        feedback.pain_point_text = feedback.text[:200]
+
+    feedback.feature_request_category = result.get("feature_request_category")
+    feedback.feature_request_priority = result.get("feature_request_priority")
+    if feedback.feature_request_category:
+        feedback.feature_request_text = feedback.text[:200]
+
+    feedback.urgent_category = result.get("urgent_category")
+    feedback.urgent_response_time = result.get("urgent_response_time")
+
+    feedback.categorization_confidence = result.get("confidence", 0.5)
+    feedback.tags = result.get("tags", [])
+    feedback.churn_risk_score = result.get("churn_risk_score", 0)
+    feedback.suggested_action = result.get("suggested_action")
+
+    feedback.llm_analyzed = True
+    feedback.llm_analysis_pending = False
+
+
+def _apply_keyword_analysis(feedback) -> None:
+    """Apply traditional keyword-based analysis to a feedback item (fallback)."""
     sentiment_analyzer = get_sentiment_analyzer()
     tag_extractor = get_tag_extractor()
     pain_categorizer, feature_categorizer, urgent_categorizer = get_categorizers()
@@ -263,3 +337,78 @@ def _analyze_feedback_item(feedback) -> None:
 
     # Tag extraction
     feedback.tags = tag_extractor.extract_tags(feedback.text)
+
+    # Keyword fallback doesn't set LLM fields
+    feedback.llm_analyzed = False
+
+
+@shared_task
+def retry_llm_analysis() -> dict:
+    """
+    Periodic task: Retry LLM analysis for items that got keyword fallback.
+    Runs every 5 minutes via Celery Beat.
+
+    Returns:
+        dict with retry results
+    """
+    from src.models import FeedbackItem, Organization, CustomCategory
+
+    with get_db_session() as db:
+        pending = db.query(FeedbackItem).filter(
+            FeedbackItem.llm_analysis_pending == True,
+        ).limit(50).all()
+
+        if not pending:
+            return {"status": "idle", "retried": 0}
+
+        logger.info(f"Retrying LLM analysis for {len(pending)} items")
+
+        success_count = 0
+        failed_count = 0
+
+        # Group by org to minimize duplicate lookups
+        org_cache = {}
+        cat_cache = {}
+
+        for feedback in pending:
+            org_id = feedback.organization_id
+
+            if org_id not in org_cache:
+                org_cache[org_id] = db.query(Organization).filter(
+                    Organization.id == org_id
+                ).first()
+                custom_cats = db.query(CustomCategory).filter(
+                    CustomCategory.organization_id == org_id,
+                    CustomCategory.is_active == True,
+                ).all()
+                cat_cache[org_id] = [
+                    {"name": c.name, "category_type": c.category_type}
+                    for c in custom_cats
+                ]
+
+            org = org_cache[org_id]
+            if not org or not org.ai_analysis_enabled:
+                feedback.llm_analysis_pending = False
+                continue
+
+            llm_result = categorize_feedback(
+                text=feedback.text,
+                custom_categories=cat_cache[org_id] if cat_cache[org_id] else None,
+                org_api_key=org.openai_api_key,
+            )
+
+            if llm_result:
+                _apply_llm_result(feedback, llm_result)
+                success_count += 1
+            else:
+                failed_count += 1
+
+        db.commit()
+
+        logger.info(f"LLM retry: {success_count} upgraded, {failed_count} still pending")
+
+        return {
+            "status": "complete",
+            "retried": success_count,
+            "failed": failed_count,
+        }

@@ -121,17 +121,22 @@ export const RESPONSE_TIME_STYLES = {
   },
 } as const;
 
+// Format a raw category slug into title case (for custom categories)
+function formatCategoryName(slug: string): string {
+  return slug.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // Helper functions
 export function getPainPointLabel(category: string): string {
-  return PAIN_POINT_CATEGORIES[category as keyof typeof PAIN_POINT_CATEGORIES]?.label || category;
+  return PAIN_POINT_CATEGORIES[category as keyof typeof PAIN_POINT_CATEGORIES]?.label || formatCategoryName(category);
 }
 
 export function getFeatureRequestLabel(category: string): string {
-  return FEATURE_REQUEST_CATEGORIES[category as keyof typeof FEATURE_REQUEST_CATEGORIES]?.label || category;
+  return FEATURE_REQUEST_CATEGORIES[category as keyof typeof FEATURE_REQUEST_CATEGORIES]?.label || formatCategoryName(category);
 }
 
 export function getUrgentLabel(category: string): string {
-  return URGENT_CATEGORIES[category as keyof typeof URGENT_CATEGORIES]?.label || category;
+  return URGENT_CATEGORIES[category as keyof typeof URGENT_CATEGORIES]?.label || formatCategoryName(category);
 }
 
 export function getSeverityStyles(severity: string) {

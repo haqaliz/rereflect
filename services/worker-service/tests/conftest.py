@@ -27,7 +27,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
-from src.models import Base, User, Organization, FeedbackItem
+from src.models import Base, User, Organization, FeedbackItem, CustomCategory
 
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -61,6 +61,63 @@ def test_org(db):
     db.commit()
     db.refresh(org)
     return org
+
+
+@pytest.fixture
+def ai_enabled_org(db):
+    """Create an organization with AI analysis enabled."""
+    org = Organization(name="AI Corp", plan="business", ai_analysis_enabled=True)
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@pytest.fixture
+def ai_disabled_org(db):
+    """Create an organization with AI analysis disabled."""
+    org = Organization(name="No AI Corp", plan="pro", ai_analysis_enabled=False)
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@pytest.fixture
+def custom_categories(db, ai_enabled_org):
+    """Create custom categories for AI-enabled org."""
+    cats = [
+        CustomCategory(
+            organization_id=ai_enabled_org.id,
+            name="onboarding_issues",
+            description="Issues during user onboarding",
+            category_type="pain_point",
+        ),
+        CustomCategory(
+            organization_id=ai_enabled_org.id,
+            name="api_requests",
+            description="Requests for API features",
+            category_type="feature_request",
+        ),
+    ]
+    for c in cats:
+        db.add(c)
+    db.commit()
+    return cats
+
+
+@pytest.fixture
+def unanalyzed_feedback(db, ai_enabled_org):
+    """Create unanalyzed feedback for AI-enabled org."""
+    feedback = FeedbackItem(
+        organization_id=ai_enabled_org.id,
+        text="The app crashes every time I try to export data. This is really frustrating!",
+        source="support",
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
 
 
 @pytest.fixture

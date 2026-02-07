@@ -10,6 +10,7 @@ from .subscription import Subscription
 from .usage import UsageRecord
 from .team_invite import TeamInvite
 from .audit_log import AuditLog
+from .custom_category import CustomCategory
 
 __all__ = [
     "Base",
@@ -25,4 +26,5 @@ __all__ = [
     "UsageRecord",
     "TeamInvite",
     "AuditLog",
+    "CustomCategory",
 ]

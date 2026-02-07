@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, CreditCard, Users, Slack } from 'lucide-react';
+import { Settings, CreditCard, Users, Slack, Brain } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface SettingsTab {
@@ -40,6 +40,13 @@ const SETTINGS_TABS: SettingsTab[] = [
     icon: Slack,
     requiredRole: 'admin', // Admin or owner can access integrations
   },
+  {
+    value: 'ai',
+    label: 'AI',
+    href: '/settings/ai',
+    icon: Brain,
+    requiredRole: 'admin', // Admin or owner can access AI settings
+  },
 ];
 
 // Check if user has required role
@@ -74,7 +81,8 @@ export function SettingsTabs() {
 
   // Dynamic grid columns based on visible tabs
   const gridColsClass = visibleTabs.length === 2 ? 'grid-cols-2' :
-                        visibleTabs.length === 3 ? 'grid-cols-3' : 'grid-cols-4';
+                        visibleTabs.length === 3 ? 'grid-cols-3' :
+                        visibleTabs.length === 4 ? 'grid-cols-4' : 'grid-cols-5';
 
   return (
     <Tabs value={getActiveTab()} onValueChange={handleTabChange} className="w-full">

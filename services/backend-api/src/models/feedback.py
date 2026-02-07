@@ -46,6 +46,12 @@ class FeedbackItem(Base):
     # Confidence score for categorization (0.0-1.0)
     categorization_confidence = Column(Float, nullable=True)
 
+    # AI/LLM analysis fields
+    llm_analyzed = Column(Boolean, default=False, nullable=False)
+    llm_analysis_pending = Column(Boolean, default=False, nullable=False)
+    churn_risk_score = Column(Integer, nullable=True)  # 0-100
+    suggested_action = Column(Text, nullable=True)
+
     # Index for fast queries
     __table_args__ = (
         Index('ix_feedback_org_date', 'organization_id', 'created_at'),

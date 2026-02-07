@@ -107,6 +107,11 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.alerts.send_weekly_digests",
         "schedule": crontab(hour=9, minute=0, day_of_week=1),
     },
+    # Retry LLM analysis for items that fell back to keyword analysis
+    "retry-llm-analysis": {
+        "task": "src.tasks.analysis.retry_llm_analysis",
+        "schedule": 300.0,  # Every 5 minutes
+    },
 }
 
 
