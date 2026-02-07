@@ -186,9 +186,9 @@ Return ONLY valid JSON with this structure:
 
 
 def generate_insights(
-    feedback_texts: list[str],
-    org_api_key: str | None = None,
-) -> list[dict] | None:
+    feedback_texts: list,
+    org_api_key: Optional[str] = None,
+) -> Optional[list]:
     """
     Use GPT to generate weekly insights from a batch of feedback items.
 
