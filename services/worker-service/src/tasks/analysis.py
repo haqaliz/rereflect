@@ -7,11 +7,23 @@ Supports LLM-powered categorization (OpenAI) with keyword fallback.
 import logging
 from typing import List, Optional
 
+import redis
 from celery import shared_task
 
 from src.database import get_db_session
-from src.config import settings
+from src.config import settings, get_redis_url
 from src.openai_client import categorize_feedback
+
+# Redis client for distributed task locking
+_redis_client = None
+
+
+def _get_redis():
+    """Get or create Redis client for task locking."""
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis.from_url(get_redis_url(0))
+    return _redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -149,45 +161,59 @@ def process_unanalyzed_feedback() -> dict:
     """
     Periodic task: Process all unanalyzed feedback items.
     Runs every 30 seconds via Celery Beat.
-    Replaces the APScheduler job.
+    Uses a Redis lock to prevent concurrent execution across workers.
+    Commits after each item so overlapping tasks skip already-analyzed items.
 
     Returns:
         dict with processing results
     """
     from src.models import FeedbackItem
 
-    with get_db_session() as db:
-        # Find unanalyzed feedback
-        unanalyzed = db.query(FeedbackItem).filter(
-            FeedbackItem.sentiment_label == None
-        ).limit(settings.analysis_batch_size).all()
+    r = _get_redis()
+    lock = r.lock("lock:process_unanalyzed_feedback", timeout=300, blocking=False)
 
-        if not unanalyzed:
-            logger.debug("No unanalyzed feedback found")
-            return {"status": "idle", "processed": 0}
+    if not lock.acquire(blocking=False):
+        logger.debug("process_unanalyzed_feedback already running, skipping")
+        return {"status": "skipped", "processed": 0}
 
-        logger.info(f"Processing {len(unanalyzed)} unanalyzed feedback items")
+    try:
+        with get_db_session() as db:
+            # Find unanalyzed feedback
+            unanalyzed = db.query(FeedbackItem).filter(
+                FeedbackItem.sentiment_label == None
+            ).limit(settings.analysis_batch_size).all()
 
-        success_count = 0
-        failed_count = 0
+            if not unanalyzed:
+                logger.debug("No unanalyzed feedback found")
+                return {"status": "idle", "processed": 0}
 
-        for feedback in unanalyzed:
-            try:
-                _analyze_feedback_item(feedback, db)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Failed to analyze feedback {feedback.id}: {e}")
-                failed_count += 1
+            logger.info(f"Processing {len(unanalyzed)} unanalyzed feedback items")
 
-        db.commit()
+            success_count = 0
+            failed_count = 0
 
-        logger.info(f"Analysis complete: {success_count} successful, {failed_count} failed")
+            for feedback in unanalyzed:
+                try:
+                    _analyze_feedback_item(feedback, db)
+                    db.commit()
+                    success_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to analyze feedback {feedback.id}: {e}")
+                    db.rollback()
+                    failed_count += 1
 
-        return {
-            "status": "complete",
-            "processed": success_count,
-            "failed": failed_count,
-        }
+            logger.info(f"Analysis complete: {success_count} successful, {failed_count} failed")
+
+            return {
+                "status": "complete",
+                "processed": success_count,
+                "failed": failed_count,
+            }
+    finally:
+        try:
+            lock.release()
+        except redis.exceptions.LockNotOwnedError:
+            pass
 
 
 def _analyze_feedback_item(feedback, db=None) -> None:
@@ -406,68 +432,83 @@ def retry_llm_analysis() -> dict:
     """
     Periodic task: Retry LLM analysis for items that got keyword fallback.
     Runs every 5 minutes via Celery Beat.
+    Uses a Redis lock to prevent concurrent execution across workers.
 
     Returns:
         dict with retry results
     """
     from src.models import FeedbackItem, Organization, CustomCategory
 
-    with get_db_session() as db:
-        pending = db.query(FeedbackItem).filter(
-            FeedbackItem.llm_analysis_pending == True,
-        ).limit(50).all()
+    r = _get_redis()
+    lock = r.lock("lock:retry_llm_analysis", timeout=600, blocking=False)
 
-        if not pending:
-            return {"status": "idle", "retried": 0}
+    if not lock.acquire(blocking=False):
+        logger.debug("retry_llm_analysis already running, skipping")
+        return {"status": "skipped", "retried": 0}
 
-        logger.info(f"Retrying LLM analysis for {len(pending)} items")
+    try:
+        with get_db_session() as db:
+            pending = db.query(FeedbackItem).filter(
+                FeedbackItem.llm_analysis_pending == True,
+            ).limit(50).all()
 
-        success_count = 0
-        failed_count = 0
+            if not pending:
+                return {"status": "idle", "retried": 0}
 
-        # Group by org to minimize duplicate lookups
-        org_cache = {}
-        cat_cache = {}
+            logger.info(f"Retrying LLM analysis for {len(pending)} items")
 
-        for feedback in pending:
-            org_id = feedback.organization_id
+            success_count = 0
+            failed_count = 0
 
-            if org_id not in org_cache:
-                org_cache[org_id] = db.query(Organization).filter(
-                    Organization.id == org_id
-                ).first()
-                custom_cats = db.query(CustomCategory).filter(
-                    CustomCategory.organization_id == org_id,
-                    CustomCategory.is_active == True,
-                ).all()
-                cat_cache[org_id] = [
-                    {"name": c.name, "category_type": c.category_type}
-                    for c in custom_cats
-                ]
+            # Group by org to minimize duplicate lookups
+            org_cache = {}
+            cat_cache = {}
 
-            org = org_cache[org_id]
-            if not org or not org.ai_analysis_enabled:
-                feedback.llm_analysis_pending = False
-                continue
+            for feedback in pending:
+                org_id = feedback.organization_id
 
-            llm_result = categorize_feedback(
-                text=feedback.text,
-                custom_categories=cat_cache[org_id] if cat_cache[org_id] else None,
-                org_api_key=org.openai_api_key,
-            )
+                if org_id not in org_cache:
+                    org_cache[org_id] = db.query(Organization).filter(
+                        Organization.id == org_id
+                    ).first()
+                    custom_cats = db.query(CustomCategory).filter(
+                        CustomCategory.organization_id == org_id,
+                        CustomCategory.is_active == True,
+                    ).all()
+                    cat_cache[org_id] = [
+                        {"name": c.name, "category_type": c.category_type}
+                        for c in custom_cats
+                    ]
 
-            if llm_result:
-                _apply_llm_result(feedback, llm_result)
-                success_count += 1
-            else:
-                failed_count += 1
+                org = org_cache[org_id]
+                if not org or not org.ai_analysis_enabled:
+                    feedback.llm_analysis_pending = False
+                    db.commit()
+                    continue
 
-        db.commit()
+                llm_result = categorize_feedback(
+                    text=feedback.text,
+                    custom_categories=cat_cache[org_id] if cat_cache[org_id] else None,
+                    org_api_key=org.openai_api_key,
+                )
 
-        logger.info(f"LLM retry: {success_count} upgraded, {failed_count} still pending")
+                if llm_result:
+                    _apply_llm_result(feedback, llm_result)
+                    success_count += 1
+                else:
+                    failed_count += 1
 
-        return {
-            "status": "complete",
-            "retried": success_count,
-            "failed": failed_count,
-        }
+                db.commit()
+
+            logger.info(f"LLM retry: {success_count} upgraded, {failed_count} still pending")
+
+            return {
+                "status": "complete",
+                "retried": success_count,
+                "failed": failed_count,
+            }
+    finally:
+        try:
+            lock.release()
+        except redis.exceptions.LockNotOwnedError:
+            pass

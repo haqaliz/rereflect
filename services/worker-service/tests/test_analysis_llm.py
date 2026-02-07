@@ -263,8 +263,14 @@ class TestRetryLLMAnalysis:
             "confidence": 0.9,
         }
 
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = True
+        mock_redis = MagicMock()
+        mock_redis.lock.return_value = mock_lock
+
         with patch("src.tasks.analysis.get_db_session") as mock_db_ctx, \
-             patch("src.tasks.analysis.categorize_feedback", return_value=llm_result):
+             patch("src.tasks.analysis.categorize_feedback", return_value=llm_result), \
+             patch("src.tasks.analysis._get_redis", return_value=mock_redis):
             mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
             mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -279,7 +285,13 @@ class TestRetryLLMAnalysis:
         """Should return idle status when no items need retry."""
         from src.tasks.analysis import retry_llm_analysis
 
-        with patch("src.tasks.analysis.get_db_session") as mock_db_ctx:
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = True
+        mock_redis = MagicMock()
+        mock_redis.lock.return_value = mock_lock
+
+        with patch("src.tasks.analysis.get_db_session") as mock_db_ctx, \
+             patch("src.tasks.analysis._get_redis", return_value=mock_redis):
             mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
             mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -304,8 +316,14 @@ class TestRetryLLMAnalysis:
         db.add(feedback)
         db.commit()
 
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = True
+        mock_redis = MagicMock()
+        mock_redis.lock.return_value = mock_lock
+
         with patch("src.tasks.analysis.get_db_session") as mock_db_ctx, \
-             patch("src.tasks.analysis.categorize_feedback", return_value=None):
+             patch("src.tasks.analysis.categorize_feedback", return_value=None), \
+             patch("src.tasks.analysis._get_redis", return_value=mock_redis):
             mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
             mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
 
