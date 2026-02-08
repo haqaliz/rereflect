@@ -399,9 +399,9 @@ export default function AnalyticsPage() {
                   {/* Column headers */}
                   <div className="flex items-center py-1.5 px-2 mb-1 border-b border-border text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                     <span className="flex-1 min-w-0">Name</span>
-                    <span className="w-10 text-center shrink-0">Count</span>
-                    <span className="w-8 text-center shrink-0">Trend</span>
-                    <span className="w-14 text-center shrink-0">Sentiment</span>
+                    <span className="w-16 text-center shrink-0">Count</span>
+                    <span className="w-14 text-center shrink-0">Trend</span>
+                    <span className="w-20 text-center shrink-0">Sentiment</span>
                   </div>
                   <div className="space-y-3">
                     {data.top_pain_points.length > 0 && (
@@ -452,13 +452,13 @@ function TopItemRow({ item }: { item: { name: string; count: number; trend: stri
   return (
     <div className="flex items-center py-1.5 px-2 rounded-md hover:bg-muted/50">
       <span className="flex-1 min-w-0 text-sm truncate capitalize">{item.name.replace(/_/g, ' ')}</span>
-      <span className="w-10 text-center shrink-0">
+      <span className="w-16 text-center shrink-0">
         <Badge variant="secondary" className="text-xs tabular-nums">{item.count}</Badge>
       </span>
-      <span className="w-8 flex justify-center shrink-0">
+      <span className="w-14 flex justify-center shrink-0">
         <TrendIcon trend={item.trend} />
       </span>
-      <span className="w-14 text-center shrink-0">
+      <span className="w-20 text-center shrink-0">
         {item.avg_sentiment !== null ? (
           <Badge variant={item.avg_sentiment > 0.3 ? 'default' : item.avg_sentiment < -0.3 ? 'destructive' : 'secondary'} className="text-xs tabular-nums">
             {item.avg_sentiment.toFixed(2)}
