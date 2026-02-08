@@ -40,7 +40,8 @@ apiClient.interceptors.response.use(
         const pathname = window.location.pathname;
         const isPublicPage = pathname === '/login' ||
                              pathname === '/signup' ||
-                             pathname.startsWith('/invite');
+                             pathname.startsWith('/invite') ||
+                             pathname.startsWith('/shared');
         if (!isPublicPage) {
           window.location.href = '/login';
         }
@@ -49,5 +50,13 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// Public API client — no auth token, no 401 redirect
+export const publicApiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
 export default apiClient;

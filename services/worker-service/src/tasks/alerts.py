@@ -650,7 +650,7 @@ def check_volume_spikes() -> dict:
         dict with detection results
     """
     from sqlalchemy import func
-    from src.models import Organization, FeedbackItem, UserAlertPreference, User
+    from src.models import Organization, FeedbackItem, UserAlertPreference, User, Notification
     from src.notification_dispatch import dispatch_alert
 
     with get_db_session() as db:
@@ -660,6 +660,7 @@ def check_volume_spikes() -> dict:
             return {"status": "no_organizations", "alerts_sent": 0}
 
         total_alerts = 0
+        skipped_dedup = 0
         now = datetime.utcnow()
         last_24h = now - timedelta(hours=24)
         last_30d = now - timedelta(days=30)
@@ -708,6 +709,21 @@ def check_volume_spikes() -> dict:
                 if multiplier < min_threshold:
                     continue
 
+                # Deduplication: skip if we already sent a volume_spike alert
+                # for this org in the last 24h with the same or higher count
+                recent_alert = db.query(Notification).filter(
+                    Notification.organization_id == org.id,
+                    Notification.type == "volume_spike",
+                    Notification.created_at >= last_24h,
+                ).first()
+
+                if recent_alert:
+                    # Only re-alert if the count has meaningfully increased (>20%)
+                    prev_count = (recent_alert.metadata_ or {}).get("recent_count", 0)
+                    if prev_count and recent_count <= prev_count * 1.2:
+                        skipped_dedup += 1
+                        continue
+
                 dispatch_alert(
                     org_id=org.id,
                     alert_type="volume_spike",
@@ -729,6 +745,7 @@ def check_volume_spikes() -> dict:
             "status": "complete",
             "orgs_checked": len(organizations),
             "alerts_sent": total_alerts,
+            "skipped_dedup": skipped_dedup,
         }
 
 

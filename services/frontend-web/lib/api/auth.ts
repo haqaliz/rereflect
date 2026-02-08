@@ -30,6 +30,7 @@ export interface UserResponse {
   email: string;
   organization_id: number;
   role: string;
+  plan: string;
   created_at: string;
   is_system_admin: boolean;
 }

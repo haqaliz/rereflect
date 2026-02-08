@@ -31,6 +31,33 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 
+
+def _sqlite_date_trunc(part, value):
+    """SQLite polyfill for PostgreSQL's date_trunc function."""
+    from datetime import datetime as dt
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = dt.fromisoformat(value)
+    if part == "day":
+        return value.strftime("%Y-%m-%d 00:00:00")
+    elif part == "week":
+        # ISO week: Monday-based
+        from datetime import timedelta
+        weekday = value.weekday()  # 0=Mon
+        start = value - timedelta(days=weekday)
+        return start.strftime("%Y-%m-%d 00:00:00")
+    return value.strftime("%Y-%m-%d 00:00:00")
+
+
+# Register the polyfill once on the raw DBAPI connection
+from sqlalchemy import event
+
+@event.listens_for(engine, "connect")
+def _register_sqlite_functions(dbapi_conn, connection_record):
+    dbapi_conn.create_function("date_trunc", 2, _sqlite_date_trunc)
+
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

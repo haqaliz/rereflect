@@ -16,6 +16,8 @@ from .weekly_insight import WeeklyInsight
 from .changelog_entry import ChangelogEntry
 from .notification import Notification
 from .user_alert_preference import UserAlertPreference
+from .saved_view import SavedView
+from .shared_link import SharedLink
 
 __all__ = [
     "Base",
@@ -37,4 +39,6 @@ __all__ = [
     "ChangelogEntry",
     "Notification",
     "UserAlertPreference",
+    "SavedView",
+    "SharedLink",
 ]

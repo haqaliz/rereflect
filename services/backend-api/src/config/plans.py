@@ -28,6 +28,7 @@ PLANS = {
         "price_annual": 0,
         "feedback_limit": 250,
         "seat_limit": 2,
+        "saved_views_limit": 5,
         "data_retention_days": 30,
         "features": [
             "basic_dashboard",
@@ -47,6 +48,7 @@ PLANS = {
         "price_annual": 29000,  # $290 (17% off = ~$24/mo)
         "feedback_limit": 2500,
         "seat_limit": 10,
+        "saved_views_limit": 15,
         "data_retention_days": 365,
         "features": [
             "basic_dashboard",
@@ -56,6 +58,9 @@ PLANS = {
             "webhooks",
             "data_export",
             "trends_analytics",
+            "saved_views",
+            "pdf_export",
+            "dashboard_sharing",
             "priority_support",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
@@ -70,6 +75,7 @@ PLANS = {
         "price_annual": 99000,  # $990 (17% off = ~$82/mo)
         "feedback_limit": 25000,
         "seat_limit": 25,
+        "saved_views_limit": None,  # Unlimited
         "data_retention_days": 730,  # 2 years
         "features": [
             "basic_dashboard",
@@ -79,6 +85,9 @@ PLANS = {
             "webhooks",
             "data_export",
             "trends_analytics",
+            "saved_views",
+            "pdf_export",
+            "dashboard_sharing",
             "api_access",
             "advanced_analytics",
             "custom_categories",
@@ -96,6 +105,7 @@ PLANS = {
         "price_annual": None,
         "feedback_limit": None,  # No hard limit - pay as you go
         "seat_limit": None,  # Unlimited
+        "saved_views_limit": None,  # Unlimited
         "data_retention_days": None,  # Custom
         "features": [
             "basic_dashboard",
@@ -105,6 +115,9 @@ PLANS = {
             "webhooks",
             "data_export",
             "trends_analytics",
+            "saved_views",
+            "pdf_export",
+            "dashboard_sharing",
             "api_access",
             "advanced_analytics",
             "custom_categories",
@@ -136,6 +149,9 @@ FEATURE_PLANS = {
     "webhooks": "pro",
     "data_export": "pro",
     "trends_analytics": "pro",
+    "saved_views": "pro",
+    "pdf_export": "pro",
+    "dashboard_sharing": "pro",
     "priority_support": "pro",
     "api_access": "business",
     "advanced_analytics": "business",
@@ -186,6 +202,12 @@ def get_seat_limit(plan_id: str) -> Optional[int]:
     """Get seat limit for a plan. None means unlimited."""
     plan = get_plan(plan_id)
     return plan.get("seat_limit")
+
+
+def get_saved_views_limit(plan_id: str) -> Optional[int]:
+    """Get saved views limit for a plan. None means unlimited."""
+    plan = get_plan(plan_id)
+    return plan.get("saved_views_limit")
 
 
 def get_stripe_price_id(plan_id: str, billing_cycle: str) -> Optional[str]:

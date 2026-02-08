@@ -38,6 +38,7 @@ class UserResponse(BaseModel):
     email: str
     organization_id: int
     role: str
+    plan: str = "free"
     created_at: datetime
     weekly_digest_enabled: bool = True
     is_system_admin: bool = False

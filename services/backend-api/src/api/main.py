@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import auth, organizations, feedback, dashboard, analyze, integrations
 from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team, invites, audit_logs
-from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications
+from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications, analytics, saved_views, shared_links
 from src.seed import seed_admin_user
 import logging
 import os
@@ -93,6 +93,10 @@ app.include_router(anomalies.router)
 app.include_router(insights.router)
 app.include_router(changelog.router)
 app.include_router(notifications.router)
+app.include_router(analytics.router)
+app.include_router(saved_views.router)
+app.include_router(shared_links.router)
+app.include_router(shared_links.public_router)
 
 
 @app.get("/")

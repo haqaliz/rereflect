@@ -10,6 +10,7 @@ interface User {
   email: string;
   organization_id: number;
   role: string;
+  plan: string;
   is_system_admin: boolean;
 }
 
@@ -27,7 +28,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const publicRoutes = ['/', '/login', '/signup', '/privacy', '/terms', '/changelog'];
 
 // Public route prefixes (routes that start with these paths)
-const publicRoutePrefixes = ['/invite'];
+const publicRoutePrefixes = ['/invite', '/shared'];
 
 // Auth routes that should redirect to dashboard if already logged in
 const authRoutes = ['/login', '/signup'];

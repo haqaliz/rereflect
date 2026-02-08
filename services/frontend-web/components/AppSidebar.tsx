@@ -19,6 +19,8 @@ import {
   Users,
   Plug,
   Brain,
+  TrendingUp,
+  Share2,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -54,9 +56,19 @@ const mainNavItems = [
     href: '/feedbacks',
     icon: MessageSquare,
   },
+  {
+    title: 'Shared Links',
+    href: '/shared-links',
+    icon: Share2,
+  },
 ];
 
 const analysisNavItems = [
+  {
+    title: 'Analytics',
+    href: '/analytics',
+    icon: TrendingUp,
+  },
   {
     title: 'Pain Points',
     href: '/pain-points',

@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-07
+**Last Updated**: 2026-02-08
 
 ---
 
@@ -110,13 +110,13 @@
 - [x] Slack brand icon for channel settings
 - [x] Replace all native HTML selects with shadcn components
 
-### 3. Enhanced Analytics (Priority: MEDIUM)
+### 3. Enhanced Analytics (Priority: MEDIUM) - COMPLETE
 > *Proves ROI and enables data-driven product decisions*
 
-- [ ] Trends over time (sentiment/volume charts with date ranges)
-- [ ] Saved views and filters (quick access to common queries)
-- [ ] Export dashboard as PDF (for stakeholder reports)
-- [ ] Dashboard sharing (public link for read-only access)
+- [x] Trends over time (sentiment/volume charts with date ranges)
+- [x] Saved views and filters (quick access to common queries)
+- [x] Export dashboard as PDF (for stakeholder reports)
+- [x] Dashboard sharing (public link for read-only access)
 
 ### 4. Feedback Workflow (Priority: MEDIUM)
 > *Completes the feedback loop: collect → analyze → ACT. Focused scope, not project management.*
@@ -221,6 +221,16 @@
 
 ## Recent Completions (Feb 2026)
 
+- **Enhanced Analytics** (5 phases):
+  - Analytics trends API with 7d/30d/90d date ranges and auto granularity (daily/weekly)
+  - Analytics page with Metric Trends (line chart, dropdown metric selector), Feedback Volume (bar chart), Distribution (donut with Sentiment/Source tabs), Top Insights (table with column-aligned headers)
+  - Saved views (org-wide tab bar, plan-gated limits)
+  - PDF export with theme-aware colors (oklch support via browser color resolution)
+  - Dashboard sharing: token-based public links with optional password, expiration (24h/7d/30d/never), view counts
+  - Public shared view page (`/shared/[token]`) mirroring full analytics layout
+  - Shared links management page (`/shared-links`) with pagination, status filters, deactivation
+  - Plan gating: Free=7d only, Pro+ gets 30d/90d/export/sharing
+  - Volume spike notification deduplication (24h cooldown, re-alert only on >20% count increase)
 - **Full notification system** (10 phases):
   - DB models, migrations, and alert preferences
   - Notification API (list, detail, mark read, dismiss, restore, preferences, retention)

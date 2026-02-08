@@ -23,6 +23,7 @@ const pageTitles: Record<string, string> = {
   '/feedback-sources': 'Feedback Sources',
   '/feedback-sources/new': 'New Feedback Source',
   '/feedback-sources/pending': 'Pending Feedback',
+  '/analytics': 'Analytics',
   '/pain-points': 'Pain Points',
   '/feature-requests': 'Feature Requests',
   '/urgent-feedbacks': 'Urgent Feedbacks',
@@ -35,6 +36,7 @@ const pageTitles: Record<string, string> = {
   '/notifications': 'Notifications',
   '/settings/notifications': 'Notifications',
   '/settings/ai': 'AI',
+  '/shared-links': 'Shared Links',
 };
 
 export default function DashboardLayout({
