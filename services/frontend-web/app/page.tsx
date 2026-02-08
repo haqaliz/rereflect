@@ -7,7 +7,7 @@ import { Logo } from '@/components/Logo';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || '';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? '' : 'https://app.rereflect.ca');
 
 gsap.registerPlugin(ScrollTrigger);
 
