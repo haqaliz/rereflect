@@ -5,6 +5,7 @@ Pytest configuration and fixtures for backend tests.
 import os
 import pytest
 from typing import Generator
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -31,6 +32,13 @@ engine = create_engine(
 )
 
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(autouse=True)
+def _disable_emails():
+    """Prevent real emails from being sent during tests."""
+    with patch("src.services.email_service._send_email", return_value=True):
+        yield
 
 
 @pytest.fixture(scope="function")

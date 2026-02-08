@@ -7,6 +7,8 @@ import { Logo } from '@/components/Logo';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
+const APP_URL = 'https://app.rereflect.ca';
+
 gsap.registerPlugin(ScrollTrigger);
 
 export default function Home() {
@@ -214,12 +216,12 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
-            <Link href="/login">
+            <a href={`${APP_URL}/login`}>
               <button className="px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
                 Sign In
               </button>
-            </Link>
-            <Link href="/signup">
+            </a>
+            <a href={`${APP_URL}/signup`}>
               <button className="group relative px-5 py-2.5 text-sm font-semibold text-primary-foreground rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02]">
                 <div className="absolute inset-0 bg-gradient-to-r from-primary via-chart-5 to-primary bg-[length:200%_100%] animate-[shimmer_3s_ease-in-out_infinite]" />
                 <span className="relative flex items-center gap-1.5">
@@ -227,7 +229,7 @@ export default function Home() {
                   <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
                 </span>
               </button>
-            </Link>
+            </a>
           </div>
         </div>
       </nav>
@@ -256,7 +258,7 @@ export default function Home() {
               </p>
 
               <div className="hero-cta flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <Link href="/signup">
+                <a href={`${APP_URL}/signup`}>
                   <button className="group relative px-8 py-4 text-base font-semibold text-primary-foreground rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02]">
                     <div className="absolute inset-0 bg-gradient-to-r from-primary to-chart-5" />
                     <div className="absolute inset-0 bg-gradient-to-r from-chart-5 to-primary opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
@@ -265,15 +267,15 @@ export default function Home() {
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </span>
                   </button>
-                </Link>
-                <Link href="/login">
+                </a>
+                <a href={`${APP_URL}/login`}>
                   <button className="hero-cta group px-8 py-4 text-base font-semibold text-foreground bg-card border-2 border-border rounded-2xl transition-all duration-300 hover:border-primary/50 hover:shadow-lg hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
                       View Demo
                       <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                     </span>
                   </button>
-                </Link>
+                </a>
               </div>
 
               <div className="hero-trust mt-12 flex flex-wrap items-center justify-center lg:justify-start gap-6 text-sm text-muted-foreground">
@@ -577,11 +579,11 @@ export default function Home() {
                   <span>Email support</span>
                 </li>
               </ul>
-              <Link href="/signup" className="block">
+              <a href={`${APP_URL}/signup`} className="block">
                 <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
                   Get Started Free
                 </button>
-              </Link>
+              </a>
             </div>
 
             {/* Pro Plan */}
@@ -619,11 +621,11 @@ export default function Home() {
                   <span>Priority support</span>
                 </li>
               </ul>
-              <Link href="/signup" className="block">
+              <a href={`${APP_URL}/signup`} className="block">
                 <button className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-primary to-chart-5 text-white font-semibold hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300">
                   Start 14-Day Trial
                 </button>
-              </Link>
+              </a>
             </div>
 
             {/* Business Plan */}
@@ -658,11 +660,11 @@ export default function Home() {
                   <span>Custom categories</span>
                 </li>
               </ul>
-              <Link href="/signup" className="block">
+              <a href={`${APP_URL}/signup`} className="block">
                 <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
                   Start 14-Day Trial
                 </button>
-              </Link>
+              </a>
             </div>
 
             {/* Enterprise Plan */}
@@ -727,14 +729,14 @@ export default function Home() {
                 Join 500+ companies already making better decisions with AI-powered customer insights.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link href="/signup">
+                <a href={`${APP_URL}/signup`}>
                   <button className="group px-8 py-4 text-base font-semibold text-primary bg-white rounded-2xl transition-all duration-300 hover:shadow-2xl hover:shadow-white/25 hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
                       Start Your Free Trial
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </span>
                   </button>
-                </Link>
+                </a>
               </div>
             </div>
           </div>
