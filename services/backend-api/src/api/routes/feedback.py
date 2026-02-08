@@ -135,6 +135,10 @@ class FeedbackResponse(BaseModel):
     # Churn risk
     churn_risk_score: Optional[int] = None
     suggested_action: Optional[str] = None
+    # Workflow
+    workflow_status: str = "new"
+    assigned_to: Optional[int] = None
+    assigned_to_email: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -189,6 +193,18 @@ def create_feedback(
         usage.overage_feedback += 1
     db.commit()
 
+    # Auto-assign if enabled
+    try:
+        if current_org.auto_assignment_enabled:
+            from src.services.workflow_service import auto_assign_feedback
+            user_id = auto_assign_feedback(db, feedback, current_org.id)
+            if user_id:
+                feedback.assigned_to = user_id
+                db.commit()
+                db.refresh(feedback)
+    except Exception:
+        pass
+
     # Queue for analysis via Celery worker
     queue_analyze_feedback(feedback.id)
 
@@ -212,7 +228,9 @@ def list_feedback(
     urgent_response_time: Optional[str] = Query(None, description="Filter by urgent response time"),
     churn_risk_min: Optional[int] = Query(None, ge=0, le=100, description="Minimum churn risk score"),
     churn_risk_max: Optional[int] = Query(None, ge=0, le=100, description="Maximum churn risk score"),
-    sort_by: Optional[str] = Query(None, description="Sort by field: created_at, sentiment_score, text, churn_risk_score"),
+    workflow_status: Optional[str] = Query(None, description="Filter by workflow status: new, in_review, resolved, closed"),
+    assigned_to: Optional[int] = Query(None, description="Filter by assigned user ID"),
+    sort_by: Optional[str] = Query(None, description="Sort by field: created_at, sentiment_score, text, churn_risk_score, workflow_status"),
     sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
@@ -274,6 +292,12 @@ def list_feedback(
     if churn_risk_max is not None:
         query = query.filter(FeedbackItem.churn_risk_score <= churn_risk_max)
 
+    if workflow_status:
+        query = query.filter(FeedbackItem.workflow_status == workflow_status)
+
+    if assigned_to is not None:
+        query = query.filter(FeedbackItem.assigned_to == assigned_to)
+
     # Get total count
     total = query.count()
 
@@ -289,6 +313,7 @@ def list_feedback(
         'source': FeedbackItem.source,
         'id': FeedbackItem.id,
         'churn_risk_score': FeedbackItem.churn_risk_score,
+        'workflow_status': FeedbackItem.workflow_status,
     }
     sort_column = sort_column_map.get(sort_by, FeedbackItem.created_at)
     order_func = asc if sort_order == 'asc' else desc
@@ -302,6 +327,14 @@ def list_feedback(
     if source_ids:
         sources = db.query(FeedbackSource).filter(FeedbackSource.id.in_(source_ids)).all()
         source_map = {s.id: s.name for s in sources}
+
+    # Fetch assignee emails
+    from src.models.user import User
+    assignee_ids = [item.assigned_to for item in items if item.assigned_to]
+    assignee_map = {}
+    if assignee_ids:
+        users = db.query(User).filter(User.id.in_(assignee_ids)).all()
+        assignee_map = {u.id: u.email for u in users}
 
     # Build response with source_name populated
     response_items = []
@@ -331,6 +364,9 @@ def list_feedback(
             "categorization_confidence": item.categorization_confidence,
             "churn_risk_score": item.churn_risk_score,
             "suggested_action": item.suggested_action,
+            "workflow_status": item.workflow_status,
+            "assigned_to": item.assigned_to,
+            "assigned_to_email": assignee_map.get(item.assigned_to) if item.assigned_to else None,
         }
         response_items.append(FeedbackResponse(**item_dict))
 
@@ -369,6 +405,13 @@ def get_feedback(
         if source:
             source_name = source.name
 
+    # Get assignee email if assigned
+    assigned_to_email = None
+    if feedback.assigned_to:
+        from src.models.user import User
+        assignee_user = db.query(User).filter(User.id == feedback.assigned_to).first()
+        assigned_to_email = assignee_user.email if assignee_user else None
+
     return FeedbackResponse(
         id=feedback.id,
         organization_id=feedback.organization_id,
@@ -394,6 +437,9 @@ def get_feedback(
         categorization_confidence=feedback.categorization_confidence,
         churn_risk_score=feedback.churn_risk_score,
         suggested_action=feedback.suggested_action,
+        workflow_status=feedback.workflow_status,
+        assigned_to=feedback.assigned_to,
+        assigned_to_email=assigned_to_email,
     )
 
 

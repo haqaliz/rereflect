@@ -18,6 +18,9 @@ from .notification import Notification
 from .user_alert_preference import UserAlertPreference
 from .saved_view import SavedView
 from .shared_link import SharedLink
+from .feedback_note import FeedbackNote
+from .feedback_workflow_event import FeedbackWorkflowEvent
+from .assignment_rule import AssignmentRule
 
 __all__ = [
     "Base",
@@ -41,4 +44,7 @@ __all__ = [
     "UserAlertPreference",
     "SavedView",
     "SharedLink",
+    "FeedbackNote",
+    "FeedbackWorkflowEvent",
+    "AssignmentRule",
 ]

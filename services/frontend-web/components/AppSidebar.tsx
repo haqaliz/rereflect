@@ -21,6 +21,8 @@ import {
   Brain,
   TrendingUp,
   Share2,
+  KanbanSquare,
+  GitBranchPlus,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -55,6 +57,11 @@ const mainNavItems = [
     title: 'Feedbacks',
     href: '/feedbacks',
     icon: MessageSquare,
+  },
+  {
+    title: 'Workflow',
+    href: '/workflow',
+    icon: KanbanSquare,
   },
   {
     title: 'Shared Links',
@@ -97,6 +104,7 @@ const settingsNavItems = [
   { title: 'Team', href: '/settings/team', icon: Users },
   { title: 'Integrations', href: '/settings/integrations', icon: Plug, requiredRole: 'admin' as const },
   { title: 'AI', href: '/settings/ai', icon: Brain, requiredRole: 'admin' as const },
+  { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },
   { title: 'Billing', href: '/settings/billing', icon: CreditCard, requiredRole: 'owner' as const },
 ];
 
@@ -130,6 +138,9 @@ export function AppSidebar() {
   const isActive = (href: string) => {
     if (href === '/feedbacks') {
       return pathname === href || pathname.startsWith('/feedbacks/') || pathname.startsWith('/feedback-sources');
+    }
+    if (href === '/workflow') {
+      return pathname === href;
     }
     if (href === '/categories') {
       return pathname.startsWith('/categories/');

@@ -4,8 +4,10 @@ import * as React from "react"
 import {
   ColumnDef,
   ColumnFiltersState,
+  RowSelectionState,
   SortingState,
   VisibilityState,
+  PaginationState,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
@@ -41,6 +43,17 @@ interface DataTableProps<TData, TValue> {
   emptyTitle?: string
   emptyDescription?: string
   totalCount?: number
+  // Server-side mode
+  serverSide?: boolean
+  pageCount?: number
+  currentPage?: number
+  pageSize?: number
+  onPageChange?: (page: number) => void
+  onPageSizeChange?: (pageSize: number) => void
+  onSortingChange?: (sorting: SortingState) => void
+  // Controlled row selection
+  rowSelection?: RowSelectionState
+  onRowSelectionChange?: (selection: RowSelectionState) => void
 }
 
 export function DataTable<TData, TValue>({
@@ -57,31 +70,73 @@ export function DataTable<TData, TValue>({
   emptyTitle = "No items found",
   emptyDescription = "Try adjusting your filters",
   totalCount,
+  serverSide = false,
+  pageCount: externalPageCount,
+  currentPage = 1,
+  pageSize: externalPageSize = 20,
+  onPageChange,
+  onPageSizeChange,
+  onSortingChange: externalOnSortingChange,
+  rowSelection: externalRowSelection,
+  onRowSelectionChange: externalOnRowSelectionChange,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
-    []
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [internalRowSelection, setInternalRowSelection] = React.useState<RowSelectionState>({})
+
+  const isRowSelectionControlled = externalRowSelection !== undefined
+  const rowSelection = isRowSelectionControlled ? externalRowSelection : internalRowSelection
+
+  const handleRowSelectionChange = React.useCallback(
+    (updater: RowSelectionState | ((old: RowSelectionState) => RowSelectionState)) => {
+      const newSelection = typeof updater === 'function' ? updater(rowSelection) : updater
+      if (isRowSelectionControlled && externalOnRowSelectionChange) {
+        externalOnRowSelectionChange(newSelection)
+      } else {
+        setInternalRowSelection(newSelection)
+      }
+    },
+    [rowSelection, isRowSelectionControlled, externalOnRowSelectionChange]
   )
-  const [columnVisibility, setColumnVisibility] =
-    React.useState<VisibilityState>({})
-  const [rowSelection, setRowSelection] = React.useState({})
+
+  const handleSortingChange = React.useCallback((updater: SortingState | ((old: SortingState) => SortingState)) => {
+    const newSorting = typeof updater === 'function' ? updater(sorting) : updater
+    setSorting(newSorting)
+    if (serverSide && externalOnSortingChange) {
+      externalOnSortingChange(newSorting)
+    }
+  }, [sorting, serverSide, externalOnSortingChange])
 
   const table = useReactTable({
     data,
     columns,
-    onSortingChange: setSorting,
+    onSortingChange: handleSortingChange,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
+    ...(!serverSide && {
+      getPaginationRowModel: getPaginationRowModel(),
+      getSortedRowModel: getSortedRowModel(),
+      getFilteredRowModel: getFilteredRowModel(),
+    }),
+    ...(serverSide && {
+      manualPagination: true,
+      manualSorting: true,
+      pageCount: externalPageCount ?? -1,
+    }),
     onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
+    onRowSelectionChange: handleRowSelectionChange,
     state: {
       sorting,
       columnFilters,
       columnVisibility,
       rowSelection,
+      ...(serverSide && {
+        pagination: {
+          pageIndex: currentPage - 1,
+          pageSize: externalPageSize,
+        },
+      }),
     },
   })
 
@@ -89,23 +144,70 @@ export function DataTable<TData, TValue>({
   const selectedRows = table.getFilteredSelectedRowModel().rows.map(row => row.original)
   const selectedCount = selectedRows.length
 
+  const clearRowSelection = () => {
+    if (isRowSelectionControlled && externalOnRowSelectionChange) {
+      externalOnRowSelectionChange({})
+    } else {
+      setInternalRowSelection({})
+    }
+  }
+
   const handleAnalyze = () => {
     if (onAnalyze && selectedCount > 0) {
       onAnalyze(selectedRows)
-      // Clear selection after action
-      setRowSelection({})
+      clearRowSelection()
     }
   }
 
   const handleBulkDelete = () => {
     if (onBulkDelete && selectedCount > 0) {
       onBulkDelete(selectedRows)
-      // Clear selection after action
-      setRowSelection({})
+      clearRowSelection()
     }
   }
 
   const displayCount = totalCount ?? data.length
+  const effectivePageCount = serverSide
+    ? (externalPageCount ?? 1)
+    : table.getPageCount()
+  const effectivePageIndex = serverSide
+    ? currentPage - 1
+    : table.getState().pagination.pageIndex
+  const effectivePageSize = serverSide
+    ? externalPageSize
+    : table.getState().pagination.pageSize
+
+  const canPreviousPage = serverSide
+    ? currentPage > 1
+    : table.getCanPreviousPage()
+  const canNextPage = serverSide
+    ? currentPage < (externalPageCount ?? 1)
+    : table.getCanNextPage()
+
+  const handlePrevious = () => {
+    if (serverSide && onPageChange) {
+      onPageChange(currentPage - 1)
+    } else {
+      table.previousPage()
+    }
+  }
+
+  const handleNext = () => {
+    if (serverSide && onPageChange) {
+      onPageChange(currentPage + 1)
+    } else {
+      table.nextPage()
+    }
+  }
+
+  const handlePageSizeChange = (value: string) => {
+    const size = Number(value)
+    if (serverSide && onPageSizeChange) {
+      onPageSizeChange(size)
+    } else {
+      table.setPageSize(size)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -195,7 +297,6 @@ export function DataTable<TData, TValue>({
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
                   onClick={(e) => {
-                    // Don't navigate if clicking on checkbox or action buttons
                     const target = e.target as HTMLElement;
                     if (target.closest('button') || target.closest('input[type="checkbox"]') || target.closest('[role="checkbox"]')) {
                       return;
@@ -241,14 +342,14 @@ export function DataTable<TData, TValue>({
       <div className="flex items-center justify-between px-2">
         <div className="flex-1 text-sm text-muted-foreground">
           {table.getFilteredSelectedRowModel().rows.length} of{" "}
-          {table.getFilteredRowModel().rows.length} row(s) selected.
+          {displayCount} row(s) selected.
         </div>
         <div className="flex items-center space-x-6 lg:space-x-8">
           <div className="flex items-center space-x-2">
             <p className="text-sm font-medium">Rows per page</p>
             <Select
-              value={String(table.getState().pagination.pageSize)}
-              onValueChange={(value) => table.setPageSize(Number(value))}
+              value={String(effectivePageSize)}
+              onValueChange={handlePageSizeChange}
             >
               <SelectTrigger className="h-8 w-[70px]">
                 <SelectValue />
@@ -263,23 +364,23 @@ export function DataTable<TData, TValue>({
             </Select>
           </div>
           <div className="flex w-[100px] items-center justify-center text-sm font-medium">
-            Page {table.getState().pagination.pageIndex + 1} of{" "}
-            {table.getPageCount()}
+            Page {effectivePageIndex + 1} of{" "}
+            {effectivePageCount}
           </div>
           <div className="flex items-center space-x-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
+              onClick={handlePrevious}
+              disabled={!canPreviousPage}
             >
               Previous
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
+              onClick={handleNext}
+              disabled={!canNextPage}
             >
               Next
             </Button>

@@ -93,6 +93,12 @@ def analyze_single_feedback(self, feedback_id: int) -> dict:
         try:
             _analyze_feedback_item(feedback, db)
             db.commit()
+
+            # Auto-assign after analysis (so category-based rules can match)
+            org_id = feedback.organization_id
+            from src.tasks.workflow import auto_assign_feedback_batch
+            auto_assign_feedback_batch.delay(org_id, [feedback_id])
+
             logger.info(f"Successfully analyzed feedback {feedback_id}")
             return {
                 "status": "success",
@@ -147,6 +153,11 @@ def analyze_feedback_batch(self, org_id: int, feedback_ids: List[int]) -> dict:
                 failed_count += 1
 
         db.commit()
+
+        # Auto-assign after analysis (so category-based rules can match)
+        if success_count > 0:
+            from src.tasks.workflow import auto_assign_feedback_batch
+            auto_assign_feedback_batch.delay(org_id, feedback_ids)
 
         return {
             "status": "complete",

@@ -29,6 +29,7 @@ celery_app = Celery(
         "src.tasks.billing",
         "src.tasks.anomaly",
         "src.tasks.insights",
+        "src.tasks.workflow",
     ],
 )
 
@@ -138,6 +139,11 @@ celery_app.conf.beat_schedule = {
     "cleanup-expired-notifications": {
         "task": "src.tasks.alerts.cleanup_expired_notifications",
         "schedule": crontab(hour=3, minute=30),
+    },
+    # Auto-assign unassigned feedback every 60 seconds
+    "auto-assign-unassigned-feedback": {
+        "task": "src.tasks.workflow.auto_assign_unassigned_feedback",
+        "schedule": 60.0,
     },
 }
 

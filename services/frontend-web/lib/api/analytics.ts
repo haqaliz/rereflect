@@ -97,6 +97,8 @@ export interface SharedLinksFilter {
   search?: string;
   date_from?: string;
   date_to?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 // ─── Shared Links API ─────────────────────────────────────────
@@ -124,6 +126,8 @@ export const sharedLinksAPI = {
     if (filters.search) params.set('search', filters.search);
     if (filters.date_from) params.set('date_from', filters.date_from);
     if (filters.date_to) params.set('date_to', filters.date_to);
+    if (filters.sort_by) params.set('sort_by', filters.sort_by);
+    if (filters.sort_order) params.set('sort_order', filters.sort_order);
     const response = await apiClient.get(`/api/v1/shared-links/all?${params.toString()}`);
     return response.data;
   },

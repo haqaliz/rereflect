@@ -37,6 +37,8 @@ const pageTitles: Record<string, string> = {
   '/settings/notifications': 'Notifications',
   '/settings/ai': 'AI',
   '/shared-links': 'Shared Links',
+  '/workflow': 'Workflow',
+  '/settings/workflow': 'Workflow Settings',
 };
 
 export default function DashboardLayout({

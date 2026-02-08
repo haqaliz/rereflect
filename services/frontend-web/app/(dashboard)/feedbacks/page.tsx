@@ -39,6 +39,7 @@ import { createColumns } from './columns';
 function FeedbackPageContent() {
   const router = useRouter();
   const { searchQuery, sentimentFilter, urgentFilter, setSearchQuery, setSentimentFilter, setUrgentFilter } = useFeedbackPage();
+  const [workflowStatusFilter, setWorkflowStatusFilter] = useState('');
   const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -65,8 +66,11 @@ function FeedbackPageContent() {
     if (urgentFilter) {
       filters.is_urgent = urgentFilter === 'urgent';
     }
+    if (workflowStatusFilter) {
+      filters.workflow_status = workflowStatusFilter;
+    }
     return filters;
-  }, [sentimentFilter, urgentFilter]);
+  }, [sentimentFilter, urgentFilter, workflowStatusFilter]);
 
   // Fetch feedback with filters
   const fetchFeedback = useCallback(async (filters?: FeedbackFilters, isPolling = false) => {
@@ -141,7 +145,7 @@ function FeedbackPageContent() {
     if (!loading) {
       fetchFeedback(buildFilters(searchQuery));
     }
-  }, [sentimentFilter, urgentFilter]);
+  }, [sentimentFilter, urgentFilter, workflowStatusFilter]);
 
   const handleCreate = async () => {
     try {
@@ -331,6 +335,20 @@ function FeedbackPageContent() {
                   <SelectItem value="positive">Positive</SelectItem>
                   <SelectItem value="neutral">Neutral</SelectItem>
                   <SelectItem value="negative">Negative</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Workflow Status Filter */}
+              <Select value={workflowStatusFilter || "all"} onValueChange={(value) => setWorkflowStatusFilter(value === "all" ? "" : value)}>
+                <SelectTrigger className="h-10 w-[180px]">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="new">New</SelectItem>
+                  <SelectItem value="in_review">In Review</SelectItem>
+                  <SelectItem value="resolved">Resolved</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
                 </SelectContent>
               </Select>
 

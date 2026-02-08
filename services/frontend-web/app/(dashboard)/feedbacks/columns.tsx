@@ -24,6 +24,7 @@ import {
 import Link from "next/link"
 import { FeedbackItem } from "@/lib/api/feedback"
 import { getTagStyles, getCategoryBadgeStyle } from "@/lib/category-utils"
+import { getStatusColor, getStatusLabel } from "@/lib/workflow-utils"
 
 const getSentimentIcon = (sentiment: string) => {
   switch (sentiment) {
@@ -292,7 +293,7 @@ export const createColumns = (
     },
   },
   {
-    accessorKey: "is_urgent",
+    accessorKey: "workflow_status",
     header: ({ column }) => {
       return (
         <Button
@@ -301,6 +302,52 @@ export const createColumns = (
           className="h-8 px-2 lg:px-3"
         >
           Status
+          <ArrowUpDown className="ml-2 h-4 w-4" />
+        </Button>
+      )
+    },
+    cell: ({ row }) => {
+      const status = row.getValue("workflow_status") as string
+      const color = getStatusColor(status)
+      return (
+        <div className="flex items-center gap-1.5">
+          <div
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: color }}
+          />
+          <span className="text-sm font-medium">{getStatusLabel(status)}</span>
+        </div>
+      )
+    },
+  },
+  {
+    id: "assignee",
+    header: "Assignee",
+    cell: ({ row }) => {
+      const email = row.original.assigned_to_email
+      if (!email) {
+        return <span className="text-muted-foreground text-sm">Unassigned</span>
+      }
+      return (
+        <div className="flex items-center gap-1.5">
+          <div className="w-5 h-5 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
+            {email.charAt(0).toUpperCase()}
+          </div>
+          <span className="text-sm truncate max-w-[120px]">{email.split('@')[0]}</span>
+        </div>
+      )
+    },
+  },
+  {
+    accessorKey: "is_urgent",
+    header: ({ column }) => {
+      return (
+        <Button
+          variant="ghost"
+          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+          className="h-8 px-2 lg:px-3"
+        >
+          Urgency
           <ArrowUpDown className="ml-2 h-4 w-4" />
         </Button>
       )

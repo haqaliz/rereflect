@@ -430,6 +430,16 @@ body {
   background: var(--text-tertiary);
 }
 
+/* Auto-hide scrollbar: symmetric padding, visible on hover */
+.scrollbar-auto-hide {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable both-edges;
+}
+.scrollbar-auto-hide:hover {
+  scrollbar-color: var(--border-strong) transparent;
+}
+
 /* Hide native number input spinners */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {

@@ -24,6 +24,9 @@ class Organization(Base):
     # Alert configuration (org-wide defaults)
     default_alert_channels = Column(JSON, nullable=False, default={"dashboard": True, "email": False, "slack": False})
 
+    # Workflow settings
+    auto_assignment_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
+
     # Relationships
     subscription = relationship("Subscription", back_populates="organization", uselist=False)
     usage_records = relationship("UsageRecord", back_populates="organization")

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func, case, or_
+from sqlalchemy import func, case, or_, asc, desc
 from pydantic import BaseModel, Field
 
 from src.database.session import get_db
@@ -112,6 +112,8 @@ def list_all_shared_links(
     search: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_order: Optional[str] = Query("desc"),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
@@ -147,7 +149,15 @@ def list_all_shared_links(
             pass
 
     total = q.count()
-    links = q.order_by(SharedLink.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+
+    sort_map = {
+        "created_at": SharedLink.created_at,
+        "view_count": SharedLink.view_count,
+        "expires_at": SharedLink.expires_at,
+    }
+    sort_col = sort_map.get(sort_by, SharedLink.created_at)
+    order_fn = asc if sort_order == "asc" else desc
+    links = q.order_by(order_fn(sort_col)).offset((page - 1) * page_size).limit(page_size).all()
 
     return PaginatedSharedLinksResponse(
         items=[_to_response(l) for l in links],

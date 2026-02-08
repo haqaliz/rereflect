@@ -118,12 +118,19 @@
 - [x] Export dashboard as PDF (for stakeholder reports)
 - [x] Dashboard sharing (public link for read-only access)
 
-### 4. Feedback Workflow (Priority: MEDIUM)
+### 4. Feedback Workflow (Priority: MEDIUM) - COMPLETE
 > *Completes the feedback loop: collect → analyze → ACT. Focused scope, not project management.*
 
-- [ ] Status tracking (New → In Review → Resolved → Closed)
-- [ ] Feedback assignment (route to team member)
-- [ ] Internal notes (add team-only context to feedback)
+- [x] Status tracking (New → In Review → Resolved → Closed) with free-form transitions
+- [x] Feedback assignment (route to team member) with bulk assign/unassign
+- [x] Internal notes (markdown, author-only edit/delete)
+- [x] Workflow overview page (`/workflow`) with kanban (drag-and-drop) and table views
+- [x] Timeline log on feedback detail page (status changes, assignments, notes)
+- [x] Bulk actions (multi-select for status change + assign)
+- [x] Auto-assignment engine (category-based rules + round-robin fallback)
+- [x] Assignment rules management (`/settings/workflow`)
+- [x] 3 new notification types (feedback_assigned, status_changed, note_added)
+- [x] Status + Assignee columns on feedbacks list with filters
 
 **Deliberately excluded** (not aligned with core value):
 - ~~Comments on feedback items~~ (turns app into Slack)
@@ -221,6 +228,17 @@
 
 ## Recent Completions (Feb 2026)
 
+- **Feedback Workflow** (6 phases):
+  - DB schema: workflow_status + assigned_to on feedback_items, FeedbackNote, FeedbackWorkflowEvent, AssignmentRule models
+  - 14+ workflow API endpoints (status change, assign, overview, timeline, notes CRUD, assignment rules, auto-assign)
+  - Feedback detail page workflow section with status dropdown, assignee selector, notes, timeline
+  - Workflow overview page (`/workflow`) with kanban drag-and-drop + table view toggle
+  - Bulk actions bar for multi-select status change and assignment
+  - Auto-assignment engine: category-based rules (priority ordered) + round-robin fallback (fewest open items)
+  - Assignment rules settings page (`/settings/workflow`) with auto-assignment toggle
+  - 3 new notification types: feedback_assigned, status_changed, note_added (targeted per-user)
+  - Status + Assignee columns on feedbacks list with filter dropdowns
+  - Sidebar navigation: Workflow page + Workflow settings
 - **Enhanced Analytics** (5 phases):
   - Analytics trends API with 7d/30d/90d date ranges and auto granularity (daily/weekly)
   - Analytics page with Metric Trends (line chart, dropdown metric selector), Feedback Volume (bar chart), Distribution (donut with Sentiment/Source tabs), Top Insights (table with column-aligned headers)
@@ -278,6 +296,9 @@
 - Notification bell in header (not sidebar) with Radix popover for quick access
 - Per-type retention billing: each alert type has independent retention days, Stripe billed on total extra days
 - Digest scheduling: hourly Celery Beat, tasks filter users by preferred hour/day (no per-user cron)
+- Workflow notifications: direct DB insert from backend-api (no Celery round-trip for simple notification creation)
+- Workflow permissions: all roles (Owner/Admin/Member) can do everything; all plans have access
+- Auto-assignment: category rules checked first (by priority desc), round-robin fallback (member with fewest open items)
 
 ---
 

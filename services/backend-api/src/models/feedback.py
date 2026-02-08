@@ -52,9 +52,15 @@ class FeedbackItem(Base):
     churn_risk_score = Column(Integer, nullable=True)  # 0-100
     suggested_action = Column(Text, nullable=True)
 
+    # Workflow fields
+    workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+
     # Index for fast queries
     __table_args__ = (
         Index('ix_feedback_org_date', 'organization_id', 'created_at'),
+        Index('ix_feedback_org_status', 'organization_id', 'workflow_status'),
+        Index('ix_feedback_assigned', 'assigned_to'),
     )
 
     def __repr__(self):

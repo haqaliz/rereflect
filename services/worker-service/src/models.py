@@ -47,6 +47,9 @@ class Organization(Base):
     # Alert configuration
     default_alert_channels = Column(JSON, nullable=False, default={"dashboard": True, "email": False, "slack": False})
 
+    # Workflow
+    auto_assignment_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
+
 
 class Subscription(Base):
     """Subscription model - mirrors backend-api model (lightweight, no FKs)."""
@@ -134,8 +137,14 @@ class FeedbackItem(Base):
     churn_risk_score = Column(Integer, nullable=True)  # 0-100
     suggested_action = Column(Text, nullable=True)
 
+    # Workflow fields
+    workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
+    assigned_to = Column(Integer, nullable=True)
+
     __table_args__ = (
         Index('ix_feedback_org_date', 'organization_id', 'created_at'),
+        Index('ix_feedback_org_status', 'organization_id', 'workflow_status'),
+        Index('ix_feedback_assigned', 'assigned_to'),
     )
 
 
@@ -388,4 +397,42 @@ class UserAlertPreference(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "alert_type", name="uq_user_alert_type"),
+    )
+
+
+class AssignmentRule(Base):
+    """Assignment rule model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "assignment_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    rule_type = Column(String(50), nullable=False, default="category")
+    match_field = Column(String(100), nullable=False)
+    match_value = Column(String(255), nullable=False)
+    assign_to_user_id = Column(Integer, nullable=False)
+    priority = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('ix_assignment_rule_org', 'organization_id', 'is_active'),
+    )
+
+
+class FeedbackWorkflowEvent(Base):
+    """Workflow timeline event model - mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "feedback_workflow_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    feedback_id = Column(Integer, nullable=False)
+    organization_id = Column(Integer, nullable=False)
+    actor_id = Column(Integer, nullable=False)
+    event_type = Column(String(50), nullable=False)
+    old_value = Column(String, nullable=True)
+    new_value = Column(String, nullable=True)
+    metadata_ = Column("metadata", JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('ix_workflow_event_feedback', 'feedback_id', 'created_at'),
     )

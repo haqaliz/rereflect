@@ -47,6 +47,21 @@ const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; ha
     thresholdLabel: 'Volume multiplier threshold',
     thresholdUnit: 'x',
   },
+  feedback_assigned: {
+    label: 'Feedback Assigned',
+    description: 'Get notified when feedback is assigned to you',
+    hasThreshold: false,
+  },
+  status_changed: {
+    label: 'Status Changed',
+    description: 'Get notified when status changes on items assigned to you',
+    hasThreshold: false,
+  },
+  note_added: {
+    label: 'Note Added',
+    description: 'Get notified when a note is added to feedback you\'re involved with',
+    hasThreshold: false,
+  },
 };
 
 const DEFAULT_PREFERENCES: AlertPreference[] = [
@@ -54,6 +69,9 @@ const DEFAULT_PREFERENCES: AlertPreference[] = [
   { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: 50, retention_days: 30 },
   { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: null, retention_days: 30 },
   { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: 2.0, retention_days: 30 },
+  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, threshold_value: null, retention_days: 30 },
+  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, threshold_value: null, retention_days: 30 },
+  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, threshold_value: null, retention_days: 30 },
 ];
 
 const HOUR_OPTIONS = [

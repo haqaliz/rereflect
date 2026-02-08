@@ -41,6 +41,10 @@ export interface FeedbackItem {
   // Churn risk
   churn_risk_score: number | null;
   suggested_action: string | null;
+  // Workflow
+  workflow_status: string;
+  assigned_to: number | null;
+  assigned_to_email: string | null;
 }
 
 // Category type definitions
@@ -100,6 +104,8 @@ export interface FeedbackFilters {
   urgent_response_time?: string;
   churn_risk_min?: number;
   churn_risk_max?: number;
+  workflow_status?: string;
+  assigned_to?: number;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -124,6 +130,8 @@ export const feedbackAPI = {
     if (filters?.urgent_response_time) params.append('urgent_response_time', filters.urgent_response_time);
     if (filters?.churn_risk_min !== undefined) params.append('churn_risk_min', filters.churn_risk_min.toString());
     if (filters?.churn_risk_max !== undefined) params.append('churn_risk_max', filters.churn_risk_max.toString());
+    if (filters?.workflow_status) params.append('workflow_status', filters.workflow_status);
+    if (filters?.assigned_to !== undefined) params.append('assigned_to', filters.assigned_to.toString());
     if (filters?.sort_by) params.append('sort_by', filters.sort_by);
     if (filters?.sort_order) params.append('sort_order', filters.sort_order);
 
