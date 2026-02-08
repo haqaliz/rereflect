@@ -6,6 +6,7 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "worker-service/Dockerfile"
+watchPatterns = ["/services/worker-service/**", "/services/analysis-engine/**"]
 
 [deploy]
 # Worker services don't need health checks (no HTTP endpoint)
