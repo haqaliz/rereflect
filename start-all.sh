@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Master Startup Script - Starts All Services with tmux
-# Services: Redis (background), Celery Worker, Backend API, Frontend
-# Layout: 3 panes
+# Services: Redis (background), Celery Worker, Backend API, Frontend, Landing
+# Layout: 4 panes
 
 set -e
 
@@ -66,21 +66,24 @@ echo ""
 echo "Starting services in tmux session: $SESSION_NAME"
 echo ""
 
-# Create new tmux session (left pane - Worker)
+# Create new tmux session (top-left pane - Worker)
 tmux new-session -d -s $SESSION_NAME -c "$PROJECT_ROOT/services/worker-service"
+# Panes: {0=worker}
 
 # Split horizontally: creates right pane (API)
 tmux split-window -h -t $SESSION_NAME:0.0 -c "$PROJECT_ROOT/services/backend-api"
+# Panes: {0=worker(left), 1=api(right)}
 
-# Split right pane vertically: creates bottom-right (Frontend)
-tmux split-window -v -t $SESSION_NAME:0.1 -c "$PROJECT_ROOT/services/frontend-web"
+# Split left pane vertically: creates bottom-left (Landing)
+tmux split-window -v -t $SESSION_NAME:0.0 -c "$PROJECT_ROOT/services/landing-web"
+# Panes: {0=worker(top-left), 1=landing(bottom-left), 2=api(right)}
+# NOTE: old pane 1 (api) shifted to pane 2
 
-# After all splits, pane layout is:
-# 0.0 = left (Worker) - worker-service
-# 0.1 = top-right (API) - backend-api
-# 0.2 = bottom-right (Frontend) - frontend-web
+# Split right pane (now pane 2) vertically: creates bottom-right (Frontend)
+tmux split-window -v -t $SESSION_NAME:0.2 -c "$PROJECT_ROOT/services/frontend-web"
+# Panes: {0=worker(top-left), 1=landing(bottom-left), 2=api(top-right), 3=frontend(bottom-right)}
 
-# Start Celery Worker in left pane
+# Start Celery Worker in top-left pane (0)
 tmux send-keys -t $SESSION_NAME:0.0 "echo '═══════════════════════════════════════'" Enter
 tmux send-keys -t $SESSION_NAME:0.0 "echo '  ⚙️  CELERY WORKER + REDIS'" Enter
 tmux send-keys -t $SESSION_NAME:0.0 "echo '═══════════════════════════════════════'" Enter
@@ -89,20 +92,26 @@ tmux send-keys -t $SESSION_NAME:0.0 "[ ! -d venv ] && python3 -m venv venv; sour
 # Wait for worker to initialize
 sleep 2
 
-# Start Backend API in top-right pane
-tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.1 "echo '  🚀 BACKEND API (port 8000)'" Enter
-tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.1 "[ ! -d venv ] && python3 -m venv venv; source venv/bin/activate && python3 -m pip install -q -r requirements.txt && python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload" Enter
+# Start Backend API in top-right pane (2)
+tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "echo '  🚀 BACKEND API (port 8000)'" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.2 "[ ! -d venv ] && python3 -m venv venv; source venv/bin/activate && python3 -m pip install -q -r requirements.txt && python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload" Enter
 
-# Start Frontend in bottom-right pane
-tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.2 "echo '  🌐 FRONTEND (port 3000)'" Enter
-tmux send-keys -t $SESSION_NAME:0.2 "echo '═══════════════════════════════════════'" Enter
-tmux send-keys -t $SESSION_NAME:0.2 "npm install --silent && npm run dev" Enter
+# Start Landing Page in bottom-left pane (1)
+tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "echo '  🏠 LANDING PAGE (port 3001)'" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.1 "pnpm install --silent && pnpm dev" Enter
+
+# Start Frontend in bottom-right pane (3)
+tmux send-keys -t $SESSION_NAME:0.3 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.3 "echo '  🌐 FRONTEND APP (port 3000)'" Enter
+tmux send-keys -t $SESSION_NAME:0.3 "echo '═══════════════════════════════════════'" Enter
+tmux send-keys -t $SESSION_NAME:0.3 "pnpm install --silent && pnpm dev" Enter
 
 # Select the API pane as the active one
-tmux select-pane -t $SESSION_NAME:0.1
+tmux select-pane -t $SESSION_NAME:0.2
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -111,17 +120,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "  Layout:"
 echo "  ┌─────────────────┬─────────────────┐"
-echo "  │                 │  🚀 API         │"
-echo "  │  ⚙️  Worker      │  (port 8000)    │"
-echo "  │  (Celery+Beat)  ├─────────────────┤"
-echo "  │                 │  🌐 Frontend    │"
-echo "  │                 │  (port 3000)    │"
+echo "  │  ⚙️  Worker      │  🚀 API         │"
+echo "  │  (Celery+Beat)  │  (port 8000)    │"
+echo "  ├─────────────────┼─────────────────┤"
+echo "  │  🏠 Landing     │  🌐 Frontend    │"
+echo "  │  (port 3001)    │  (port 3000)    │"
 echo "  └─────────────────┴─────────────────┘"
 echo ""
 echo "  Services:"
 echo "    Redis:    localhost:6379 (background)"
 echo "    API:      http://localhost:8000"
 echo "    Docs:     http://localhost:8000/docs"
+echo "    Landing:  http://localhost:3001"
 echo "    Frontend: http://localhost:3000"
 echo ""
 echo "  tmux commands:"

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Logo } from '@/components/Logo';
+import { Logo } from '@rereflect/ui';
 import { ArrowLeft } from 'lucide-react';
 
 export default function PrivacyPolicyPage() {

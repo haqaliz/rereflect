@@ -33,10 +33,19 @@ fi
 # Stop frontend (port 3000)
 if lsof -Pi :3000 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
     echo "🛑 Stopping Frontend Web App (port 3000)..."
-    pkill -f "next dev" 2>/dev/null || lsof -ti:3000 | xargs kill -9 2>/dev/null
+    lsof -ti:3000 | xargs kill -9 2>/dev/null
     echo "✅ Frontend stopped"
 else
     echo "ℹ️  Frontend not running on port 3000"
+fi
+
+# Stop landing page (port 3001)
+if lsof -Pi :3001 -sTCP:LISTEN -t >/dev/null 2>&1 ; then
+    echo "🛑 Stopping Landing Page (port 3001)..."
+    lsof -ti:3001 | xargs kill -9 2>/dev/null
+    echo "✅ Landing page stopped"
+else
+    echo "ℹ️  Landing page not running on port 3001"
 fi
 
 # Stop Celery workers

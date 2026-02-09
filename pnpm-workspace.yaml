@@ -1,0 +1,4 @@
+packages:
+  - 'packages/*'
+  - 'services/frontend-web'
+  - 'services/landing-web'

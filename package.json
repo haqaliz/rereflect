@@ -1,5 +1,10 @@
 {
-  "dependencies": {
-    "@tanstack/react-table": "^8.21.3"
+  "name": "rereflect",
+  "private": true,
+  "scripts": {
+    "dev:landing": "pnpm --filter landing-web dev",
+    "dev:app": "pnpm --filter customer-feedback-frontend dev",
+    "build:landing": "pnpm --filter landing-web build",
+    "build:app": "pnpm --filter customer-feedback-frontend build"
   }
 }

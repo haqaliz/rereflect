@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Logo } from '@/components/Logo';
+import { Logo } from '@rereflect/ui';
 import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
-import { changelogAPI, type ChangelogEntry } from '@/lib/api/changelog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { getPublicChangelog, type ChangelogEntry } from '@/lib/changelog-api';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@rereflect/ui';
 
 const ENTRY_TYPES = [
   { value: '', label: 'All' },
@@ -55,7 +55,7 @@ export default function ChangelogPage() {
       if (offset === 0) setIsLoading(true);
       else setIsLoadingMore(true);
 
-      const data = await changelogAPI.getPublic({
+      const data = await getPublicChangelog({
         entry_type: selectedType || undefined,
         days: selectedDays || undefined,
         offset,

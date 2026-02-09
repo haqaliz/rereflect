@@ -1,12 +1,12 @@
-# Railway configuration for Frontend (Next.js)
+# Railway configuration for Landing Page (Static Next.js)
 # IMPORTANT: Set Root Directory to "/" (repo root) in Railway dashboard
-# IMPORTANT: Set Config File Path to "services/frontend-web/railway.toml"
+# IMPORTANT: Set Config File Path to "services/landing-web/railway.toml"
 # Docs: https://docs.railway.com/guides/build-configuration
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "services/frontend-web/Dockerfile"
-watchPatterns = ["/services/frontend-web/**", "/packages/ui/**"]
+dockerfilePath = "services/landing-web/Dockerfile"
+watchPatterns = ["/services/landing-web/**", "/packages/ui/**"]
 
 [deploy]
 healthcheckPath = "/"
