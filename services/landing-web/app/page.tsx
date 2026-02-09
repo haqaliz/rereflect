@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, X } from 'lucide-react';
+import { BarChart3, Brain, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, X, AlertTriangle, Workflow, Tags, Lightbulb, Rocket, Layers, Headphones } from 'lucide-react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+
 
 export default function Home() {
   const heroRef = useRef<HTMLDivElement>(null);
@@ -259,15 +260,14 @@ export default function Home() {
               </div>
 
               <h1 className="hero-title text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-foreground mb-6 leading-[1.1]">
-                Transform Customer
+                Turn Customer Feedback
                 <span className="block mt-2 bg-gradient-to-r from-primary via-chart-5 to-accent bg-clip-text text-transparent">
-                  Feedback into Action
+                  Into Features That Ship
                 </span>
               </h1>
 
               <p className="hero-subtitle text-lg md:text-xl text-muted-foreground mb-10 max-w-xl mx-auto lg:mx-0 leading-relaxed">
-                Automatically analyze sentiment, extract pain points, and discover feature requests.
-                Turn overwhelming feedback into clear, actionable insights.
+                Don&apos;t just analyze feedback — act on it. Automatically detect churn risk, assign work to your team, and track every insight from submission to resolution.
               </p>
 
               <div className="hero-cta flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
@@ -418,20 +418,20 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-primary to-chart-5 bg-clip-text text-transparent">50K+</div>
-              <div className="text-sm text-muted-foreground mt-2">Feedback Analyzed Daily</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-primary to-chart-5 bg-clip-text text-transparent">10K+</div>
+              <div className="text-sm text-muted-foreground mt-2">Insights Generated</div>
             </div>
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-5 to-accent bg-clip-text text-transparent">98%</div>
-              <div className="text-sm text-muted-foreground mt-2">Sentiment Accuracy</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-5 to-accent bg-clip-text text-transparent">120+</div>
+              <div className="text-sm text-muted-foreground mt-2">Features Shipped</div>
             </div>
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-accent to-chart-3 bg-clip-text text-transparent">500+</div>
-              <div className="text-sm text-muted-foreground mt-2">Companies Trust Us</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-accent to-chart-3 bg-clip-text text-transparent">60%</div>
+              <div className="text-sm text-muted-foreground mt-2">Avg Churn Reduction</div>
             </div>
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-3 to-primary bg-clip-text text-transparent">4.9</div>
-              <div className="text-sm text-muted-foreground mt-2">Average Rating</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-3 to-primary bg-clip-text text-transparent">4.2</div>
+              <div className="text-sm text-muted-foreground mt-2">Hours Saved Per Week</div>
             </div>
           </div>
         </div>
@@ -446,95 +446,95 @@ export default function Home() {
               <span className="text-sm font-semibold text-primary">Powerful Features</span>
             </div>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              Everything you need to understand
-              <span className="block text-primary">your customers</span>
+              Analyze feedback.
+              <span className="block text-primary">Then act on it.</span>
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              From sentiment analysis to churn prediction, our AI-powered platform gives you the tools to make data-driven decisions.
+              From AI-powered churn detection to workflow automation, close the loop on every piece of feedback — from insight to shipped feature.
             </p>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Feature Card 1 */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-primary/10 hover:border-primary/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
+            {/* Feature Card 1 - AI Churn Detection */}
+            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-1/10 hover:border-chart-1/30 hover:-translate-y-1">
+              <div className="absolute inset-0 bg-gradient-to-br from-chart-1/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
               <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-chart-5 flex items-center justify-center mb-6 shadow-lg shadow-primary/25 group-hover:scale-110 transition-transform duration-300">
-                  <MessageSquare className="w-7 h-7 text-white" />
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-1 to-chart-2 flex items-center justify-center mb-6 shadow-lg shadow-chart-1/25 group-hover:scale-110 transition-transform duration-300">
+                  <AlertTriangle className="w-7 h-7 text-white" />
                 </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Sentiment Analysis</h3>
+                <h3 className="text-xl font-bold text-foreground mb-3">AI Churn Detection</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Automatically detect positive, neutral, and negative sentiment with industry-leading 98% accuracy using advanced NLP models.
+                  Catch at-risk customers before they leave. Our AI scans every piece of feedback for frustration patterns, unresolved complaints, and churn signals — then alerts your team in real-time.
                 </p>
               </div>
             </div>
 
-            {/* Feature Card 2 */}
+            {/* Feature Card 2 - Workflow Automation */}
+            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-4/10 hover:border-chart-4/30 hover:-translate-y-1">
+              <div className="absolute inset-0 bg-gradient-to-br from-chart-4/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-4 to-chart-5 flex items-center justify-center mb-6 shadow-lg shadow-chart-4/25 group-hover:scale-110 transition-transform duration-300">
+                  <Workflow className="w-7 h-7 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-foreground mb-3">Workflow Automation</h3>
+                <p className="text-muted-foreground leading-relaxed">
+                  Route feedback to the right person instantly. Set category-based assignment rules, track status from &apos;New&apos; to &apos;Resolved&apos;, and close the loop with internal notes and timeline logs.
+                </p>
+              </div>
+            </div>
+
+            {/* Feature Card 3 - Smart Categorization */}
+            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-3/10 hover:border-chart-3/30 hover:-translate-y-1">
+              <div className="absolute inset-0 bg-gradient-to-br from-chart-3/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
+              <div className="relative">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-3 to-chart-4 flex items-center justify-center mb-6 shadow-lg shadow-chart-3/25 group-hover:scale-110 transition-transform duration-300">
+                  <Tags className="w-7 h-7 text-white" />
+                </div>
+                <h3 className="text-xl font-bold text-foreground mb-3">Smart Categorization</h3>
+                <p className="text-muted-foreground leading-relaxed">
+                  Let AI tag feedback automatically. Define custom categories (Billing, Performance, UX) and watch our engine sort thousands of items in seconds — no manual tagging required.
+                </p>
+              </div>
+            </div>
+
+            {/* Feature Card 4 - Weekly AI Insights */}
             <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-5/10 hover:border-chart-5/30 hover:-translate-y-1">
               <div className="absolute inset-0 bg-gradient-to-br from-chart-5/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
               <div className="relative">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-5 to-accent flex items-center justify-center mb-6 shadow-lg shadow-chart-5/25 group-hover:scale-110 transition-transform duration-300">
-                  <Brain className="w-7 h-7 text-white" />
+                  <Lightbulb className="w-7 h-7 text-white" />
                 </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Pain Point Detection</h3>
+                <h3 className="text-xl font-bold text-foreground mb-3">Weekly AI Insights</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Automatically extract and categorize customer pain points, prioritizing issues that impact user experience the most.
+                  Get a Friday morning email with what matters: sentiment spikes, emerging pain points, top feature requests, and AI-generated action items you can act on Monday.
                 </p>
               </div>
             </div>
 
-            {/* Feature Card 3 */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-accent/10 hover:border-accent/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-accent to-chart-3 flex items-center justify-center mb-6 shadow-lg shadow-accent/25 group-hover:scale-110 transition-transform duration-300">
-                  <Target className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Feature Requests</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Identify and prioritize feature requests from feedback, understanding what your customers want most.
-                </p>
-              </div>
-            </div>
-
-            {/* Feature Card 4 */}
+            {/* Feature Card 5 - Real-Time Notifications */}
             <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-destructive/10 hover:border-destructive/30 hover:-translate-y-1">
               <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
               <div className="relative">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-destructive to-chart-8 flex items-center justify-center mb-6 shadow-lg shadow-destructive/25 group-hover:scale-110 transition-transform duration-300">
                   <Bell className="w-7 h-7 text-white" />
                 </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Urgent Alerts</h3>
+                <h3 className="text-xl font-bold text-foreground mb-3">Real-Time Notifications</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Get instant notifications for critical feedback that needs immediate attention, preventing customer churn.
+                  Stay ahead of fires. Get Slack alerts when urgent feedback arrives, volume spikes happen, or sentiment drops — with smart deduplication to avoid alert fatigue.
                 </p>
               </div>
             </div>
 
-            {/* Feature Card 5 */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-3/10 hover:border-chart-3/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-chart-3/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
+            {/* Feature Card 6 - Dashboard Sharing */}
+            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-primary/10 hover:border-primary/30 hover:-translate-y-1">
+              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
               <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-3 to-chart-9 flex items-center justify-center mb-6 shadow-lg shadow-chart-3/25 group-hover:scale-110 transition-transform duration-300">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-chart-5 flex items-center justify-center mb-6 shadow-lg shadow-primary/25 group-hover:scale-110 transition-transform duration-300">
                   <BarChart3 className="w-7 h-7 text-white" />
                 </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Visual Analytics</h3>
+                <h3 className="text-xl font-bold text-foreground mb-3">Dashboard Sharing</h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Beautiful, interactive dashboards that make it easy to understand trends and share insights with your team.
-                </p>
-              </div>
-            </div>
-
-            {/* Feature Card 6 */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-accent/10 hover:border-accent/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-accent via-chart-5 to-primary flex items-center justify-center mb-6 shadow-lg shadow-accent/25 group-hover:scale-110 transition-transform duration-300">
-                  <TrendingUp className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Trend Analysis</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Track sentiment over time, identify emerging patterns, and measure the impact of your product changes.
+                  Share insights with stakeholders. Generate public links to your analytics dashboard (with optional password protection) and export reports as PDF with one click.
                 </p>
               </div>
             </div>
@@ -542,8 +542,77 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Use Cases Section */}
+      <section className="relative z-10 py-24 md:py-32 border-y border-border bg-card/30">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-16">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
+              <Brain className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold text-primary">Real Impact</span>
+            </div>
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
+              How teams use Rereflect
+              <span className="block text-primary">to ship faster</span>
+            </h2>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+              From startup founders to enterprise product teams, here&apos;s how Rereflect helps close the feedback loop.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6">
+            {/* Use Case 1 - SaaS Startup Founder */}
+            <div className="group relative bg-card rounded-3xl border-l-4 border-l-primary p-8 transition-all duration-300 hover:shadow-xl hover:shadow-primary/10">
+              <div className="flex items-start gap-4 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300">
+                  <Rocket className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">SaaS Startup Founder</h3>
+                  <p className="text-sm text-muted-foreground">Early-stage, 5-person team</p>
+                </div>
+              </div>
+              <blockquote className="text-muted-foreground italic leading-relaxed border-l-2 border-border pl-4">
+                &ldquo;We used to manually read every support ticket. Now Rereflect auto-categorizes feedback, flags churn risks, and routes urgent items to our eng team — saving us 10+ hours/week.&rdquo;
+              </blockquote>
+            </div>
+
+            {/* Use Case 2 - Product Manager */}
+            <div className="group relative bg-card rounded-3xl border-l-4 border-l-chart-5 p-8 transition-all duration-300 hover:shadow-xl hover:shadow-chart-5/10">
+              <div className="flex items-start gap-4 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-chart-5/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300">
+                  <Layers className="w-6 h-6 text-chart-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Product Manager</h3>
+                  <p className="text-sm text-muted-foreground">B2B SaaS, 50K users</p>
+                </div>
+              </div>
+              <blockquote className="text-muted-foreground italic leading-relaxed border-l-2 border-border pl-4">
+                &ldquo;Instead of guessing what to build next, I check Rereflect&apos;s AI-generated insights every Friday. It surfaces the top 3 feature requests and tells me which ones reduce churn the most.&rdquo;
+              </blockquote>
+            </div>
+
+            {/* Use Case 3 - Customer Success Lead */}
+            <div className="group relative bg-card rounded-3xl border-l-4 border-l-accent p-8 transition-all duration-300 hover:shadow-xl hover:shadow-accent/10">
+              <div className="flex items-start gap-4 mb-4">
+                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300">
+                  <Headphones className="w-6 h-6 text-accent" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Customer Success Lead</h3>
+                  <p className="text-sm text-muted-foreground">Enterprise, 200+ seats</p>
+                </div>
+              </div>
+              <blockquote className="text-muted-foreground italic leading-relaxed border-l-2 border-border pl-4">
+                &ldquo;Our team gets Slack alerts the moment a high-value customer leaves negative feedback. We follow up within an hour and have cut churn by 40% in 3 months.&rdquo;
+              </blockquote>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Pricing Section */}
-      <section ref={pricingRef} id="pricing" className="relative z-10 py-24 md:py-32 bg-card/30">
+      <section ref={pricingRef} id="pricing" className="relative z-10 py-24 md:py-32">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
@@ -819,6 +888,8 @@ export default function Home() {
               </ul>
             </div>
           </div>
+
+          {/* Footer Bottom */}
           <div className="pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
             <p>2025 Rereflect. All rights reserved.</p>
             <div className="flex gap-6">
