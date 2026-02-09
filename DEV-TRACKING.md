@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-08
+**Last Updated**: 2026-02-09
 
 ---
 
@@ -279,6 +279,14 @@
 - Email notifications for role changes
 - Email notifications for member removal
 - Resend template management script
+- **Landing Page Separation** (pnpm workspaces monorepo):
+  - Decoupled SEO-optimized landing page from authenticated dashboard
+  - Created `packages/ui` shared UI package with Logo, Select, theme, utilities
+  - New `services/landing-web` with Next.js 15 static export + nginx serving
+  - Updated `services/frontend-web` for standalone builds with workspace dependencies
+  - Railway deployment configuration with dynamic port handling
+  - Local dev: landing on port 3001, app on port 3000
+- **Auto-refresh polling** added to workflow page and feedback detail page (30s interval)
 
 ---
 
@@ -299,6 +307,9 @@
 - Workflow notifications: direct DB insert from backend-api (no Celery round-trip for simple notification creation)
 - Workflow permissions: all roles (Owner/Admin/Member) can do everything; all plans have access
 - Auto-assignment: category rules checked first (by priority desc), round-robin fallback (member with fewest open items)
+- Landing page separated into standalone service for independent SEO optimization and deployment
+- Monorepo architecture with pnpm workspaces for shared UI components and dependencies
+- Auto-refresh polling (30s) on workflow and feedback detail pages for real-time collaboration
 
 ---
 
