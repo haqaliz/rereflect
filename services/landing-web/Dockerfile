@@ -31,4 +31,4 @@ FROM nginx:alpine AS runner
 COPY --from=builder /app/services/landing-web/out /usr/share/nginx/html
 COPY services/landing-web/nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 3001
+EXPOSE 3000
