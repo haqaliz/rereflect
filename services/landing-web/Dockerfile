@@ -40,7 +40,7 @@ COPY services/landing-web/nginx.conf /etc/nginx/conf.d/default.conf
 RUN ls -la /usr/share/nginx/html && \
     nginx -t
 
-EXPOSE 3000
+EXPOSE 80
 
 # Start nginx in foreground
 CMD ["nginx", "-g", "daemon off;"]
