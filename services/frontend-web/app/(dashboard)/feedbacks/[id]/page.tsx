@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { analytics } from '@/lib/analytics';
@@ -90,11 +90,28 @@ export default function FeedbackDetailPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (feedbackId) {
       fetchFeedback();
     }
   }, [feedbackId]);
+
+  // Polling for auto-refresh (every 30 seconds)
+  useEffect(() => {
+    if (loading || !feedbackId) return;
+
+    pollingIntervalRef.current = setInterval(async () => {
+      await fetchFeedback();
+    }, 30000);
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [loading, feedbackId]);
 
   const fetchFeedback = async () => {
     try {

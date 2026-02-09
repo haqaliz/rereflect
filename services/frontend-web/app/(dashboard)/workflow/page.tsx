@@ -57,6 +57,7 @@ export default function WorkflowPage() {
   const [sentimentFilter, setSentimentFilter] = useState('');
 
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const buildFilters = useCallback((): WorkflowOverviewFilters => {
     const filters: WorkflowOverviewFilters = {};
@@ -127,6 +128,21 @@ export default function WorkflowPage() {
       }
     };
   }, [searchQuery]);
+
+  // Polling for auto-refresh (every 30 seconds)
+  useEffect(() => {
+    if (loading) return;
+
+    pollingIntervalRef.current = setInterval(async () => {
+      await fetchData();
+    }, 30000);
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, [loading, fetchData]);
 
   const handleStatusChange = async (id: number, newStatus: string) => {
     try {
