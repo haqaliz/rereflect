@@ -4,12 +4,8 @@ import { useEffect, useRef } from 'react';
 import { BarChart3, Brain, MessageSquare, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
-
-gsap.registerPlugin(ScrollTrigger);
 
 export default function Home() {
   const heroRef = useRef<HTMLDivElement>(null);
@@ -28,7 +24,18 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const ctx = gsap.context(() => {
+    // Lazy load GSAP for better initial page load performance
+    let ctx: any;
+
+    (async () => {
+      const [{ default: gsap }, { ScrollTrigger }] = await Promise.all([
+        import('gsap'),
+        import('gsap/ScrollTrigger')
+      ]);
+
+      gsap.registerPlugin(ScrollTrigger);
+
+      ctx = gsap.context(() => {
       // Hero animations
       const heroTl = gsap.timeline({ defaults: { ease: 'power3.out' } });
 
@@ -164,9 +171,15 @@ export default function Home() {
         }
       });
 
-    }, heroRef);
+      }, heroRef);
+    })(); // End async IIFE
 
-    return () => ctx.revert();
+    return () => {
+      // Cleanup: revert GSAP context if it was initialized
+      if (ctx) {
+        ctx.revert();
+      }
+    };
   }, []);
 
   return (
