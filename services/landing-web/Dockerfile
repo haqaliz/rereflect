@@ -32,15 +32,19 @@ FROM nginx:alpine AS runner
 # Copy static files
 COPY --from=builder /app/services/landing-web/out /usr/share/nginx/html
 
-# Remove default nginx config and add our custom config
+# Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
-COPY services/landing-web/nginx.conf /etc/nginx/conf.d/default.conf
 
-# Verify files were copied and test nginx config
-RUN ls -la /usr/share/nginx/html && \
-    nginx -t
+# Copy nginx config template and entrypoint script
+COPY services/landing-web/nginx.conf.template /etc/nginx/conf.d/default.conf.template
+COPY services/landing-web/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 
+# Verify files were copied
+RUN ls -la /usr/share/nginx/html
+
+# Railway will set PORT env var - expose it (defaults to 80 in script)
 EXPOSE 80
 
-# Start nginx in foreground
-CMD ["nginx", "-g", "daemon off;"]
+# Use custom entrypoint that handles PORT env var
+ENTRYPOINT ["/docker-entrypoint.sh"]

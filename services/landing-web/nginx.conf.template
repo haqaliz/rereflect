@@ -1,0 +1,29 @@
+# Production nginx configuration template for Railway deployment
+# This file uses envsubst to replace ${PORT} at runtime
+server {
+    listen ${PORT};
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Handle trailing slashes and clean URLs
+    location / {
+        try_files $uri $uri/ $uri.html /index.html;
+    }
+
+    # Cache static assets
+    location /_next/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location /images/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+}
