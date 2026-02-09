@@ -28,7 +28,19 @@ RUN pnpm build
 
 # Serve static files with nginx
 FROM nginx:alpine AS runner
+
+# Copy static files
 COPY --from=builder /app/services/landing-web/out /usr/share/nginx/html
+
+# Remove default nginx config and add our custom config
+RUN rm /etc/nginx/conf.d/default.conf
 COPY services/landing-web/nginx.conf /etc/nginx/conf.d/default.conf
 
+# Verify files were copied and test nginx config
+RUN ls -la /usr/share/nginx/html && \
+    nginx -t
+
 EXPOSE 3000
+
+# Start nginx in foreground
+CMD ["nginx", "-g", "daemon off;"]
