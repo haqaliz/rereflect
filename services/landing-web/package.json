@@ -13,7 +13,7 @@
     "@rereflect/ui": "workspace:*",
     "gsap": "^3.14.2",
     "lucide-react": "^0.562.0",
-    "next": "15.1.6",
+    "next": "15.1.11",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
