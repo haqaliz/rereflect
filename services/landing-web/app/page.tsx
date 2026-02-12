@@ -692,7 +692,7 @@ export default function Home() {
                 </li>
                 <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
                   <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Slack integration</span>
+                  <span>Slack, Intercom & more</span>
                 </li>
                 <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
                   <Check className="w-4 h-4 text-success-text shrink-0" />

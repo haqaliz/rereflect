@@ -140,7 +140,7 @@ FEATURE_NAMES = {
     "csv_import": "CSV Import",
     "sentiment_analysis": "Sentiment Analysis",
     "email_support": "Email Support",
-    "slack_integration": "Slack Integration",
+    "slack_integration": "Slack, Intercom & more",
     "webhooks": "Webhooks",
     "data_export": "Data Export",
     "trends_analytics": "Trends Analytics",
