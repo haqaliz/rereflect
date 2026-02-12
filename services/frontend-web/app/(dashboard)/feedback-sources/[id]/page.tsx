@@ -31,6 +31,7 @@ import {
   Slack,
   Webhook,
   MessageCircle,
+  MessageSquare,
   Mail,
   ArrowLeft,
   Loader2,
@@ -49,6 +50,7 @@ import {
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
   slack: Slack,
+  intercom: MessageSquare,
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,
@@ -57,6 +59,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
 // Source type colors
 const SOURCE_COLORS: Record<string, string> = {
   slack: 'text-[#4A154B]',
+  intercom: 'text-[#1F8DED]',
   webhook: 'text-blue-600',
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',

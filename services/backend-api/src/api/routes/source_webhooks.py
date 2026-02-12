@@ -1,5 +1,5 @@
 """
-Webhook endpoints for receiving events from external sources (Slack, Discord, generic webhooks).
+Webhook endpoints for receiving events from external sources (Slack, Intercom, generic webhooks).
 These endpoints handle signature verification and queue events for async processing.
 """
 
@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 
 # Environment variables
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
+INTERCOM_CLIENT_SECRET = os.environ.get("INTERCOM_CLIENT_SECRET", "")
 
 
 def verify_slack_signature(body: str, timestamp: str, signature: str, secret: str) -> bool:
@@ -234,3 +235,89 @@ async def handle_generic_webhook(
     except Exception as e:
         logger.error(f"Failed to queue webhook event: {e}")
         raise HTTPException(status_code=500, detail="Failed to process webhook")
+
+
+# ============================================================================
+# Intercom Webhook
+# ============================================================================
+
+INTERCOM_HANDLED_TOPICS = {
+    "conversation.user.created",
+    "conversation.user.replied",
+    "conversation.rating.added",
+}
+
+
+def verify_intercom_signature(body: bytes, signature: str, secret: str) -> bool:
+    """
+    Verify Intercom webhook HMAC-SHA1 signature.
+
+    Args:
+        body: Raw request body bytes
+        signature: X-Hub-Signature header value (e.g. "sha1=abc123...")
+        secret: Intercom client secret used as HMAC key
+
+    Returns:
+        True if signature is valid
+    """
+    if not secret:
+        logger.warning("INTERCOM_CLIENT_SECRET not configured, skipping signature verification")
+        return True
+
+    expected = "sha1=" + hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+@router.post("/intercom/events")
+async def handle_intercom_webhook(request: Request):
+    """
+    Handle incoming Intercom webhook events.
+
+    Verifies HMAC-SHA1 signature, parses the event topic,
+    and queues supported conversation events for async processing.
+    """
+    body = await request.body()
+
+    # Verify Intercom signature
+    signature = request.headers.get("X-Hub-Signature", "")
+    if not verify_intercom_signature(body, signature, INTERCOM_CLIENT_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # Parse payload
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    topic = payload.get("topic", "")
+
+    # Only handle supported conversation topics
+    if topic not in INTERCOM_HANDLED_TOPICS:
+        logger.info(f"Ignoring Intercom topic: {topic}")
+        return {"status": "ignored", "reason": f"unsupported_topic:{topic}"}
+
+    # Extract conversation ID as external event ID
+    conversation_id = payload.get("data", {}).get("item", {}).get("id")
+    if not conversation_id:
+        logger.warning("Missing conversation ID in Intercom event")
+        return {"status": "ignored", "reason": "missing_conversation_id"}
+
+    # Extract workspace_id (app_id) for source matching
+    workspace_id = payload.get("app_id")
+
+    # Queue for async processing
+    try:
+        task_id = queue_source_event(
+            source_type="intercom",
+            external_event_id=conversation_id,
+            event_type=topic,
+            event_data=payload.get("data", {}),
+            provider_context={
+                "conversation_id": conversation_id,
+                "workspace_id": workspace_id,
+            },
+        )
+        return {"status": "queued", "task_id": task_id}
+    except Exception as e:
+        logger.error(f"Failed to queue Intercom event: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process event")

@@ -14,6 +14,7 @@ import {
   Slack,
   Webhook,
   MessageCircle,
+  MessageSquare,
   Mail,
   Plus,
   Trash2,
@@ -33,6 +34,7 @@ import {
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
   slack: Slack,
+  intercom: MessageSquare,
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,
@@ -41,6 +43,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
 // Source type colors
 const SOURCE_COLORS: Record<string, string> = {
   slack: 'text-[#4A154B]',
+  intercom: 'text-[#1F8DED]',
   webhook: 'text-blue-600',
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
@@ -246,6 +249,9 @@ function FeedbackSourcesContent() {
                             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
                               {source.source_type === 'slack' && source.provider_config?.channel_name && (
                                 <span>#{source.provider_config.channel_name}</span>
+                              )}
+                              {source.source_type === 'intercom' && source.provider_config?.workspace_name && (
+                                <span>{source.provider_config.workspace_name}</span>
                               )}
                               {source.source_type === 'webhook' && source.webhook_url && (
                                 <span className="font-mono text-xs truncate max-w-[300px]">

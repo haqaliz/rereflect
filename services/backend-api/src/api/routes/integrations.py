@@ -1,5 +1,5 @@
 """
-Integrations API routes for managing Slack and other third-party integrations.
+Integrations API routes for managing Slack, Intercom, and other third-party integrations.
 """
 
 from typing import Optional, List
@@ -29,6 +29,11 @@ SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
 SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
 SLACK_REDIRECT_URI = os.environ.get("SLACK_REDIRECT_URI", "http://localhost:8000/api/v1/integrations/slack/oauth/callback")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+# Intercom OAuth Configuration
+INTERCOM_CLIENT_ID = os.environ.get("INTERCOM_CLIENT_ID", "")
+INTERCOM_CLIENT_SECRET = os.environ.get("INTERCOM_CLIENT_SECRET", "")
+INTERCOM_REDIRECT_URI = os.environ.get("INTERCOM_REDIRECT_URI", "http://localhost:8000/api/v1/integrations/intercom/oauth/callback")
 
 # OAuth state storage (in production, use Redis or database)
 oauth_states: dict = {}
@@ -731,3 +736,152 @@ def send_slack_message_oauth(access_token: str, channel_id: str, blocks: list, t
     except httpx.HTTPError as e:
         logger.error(f"Slack OAuth message failed: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ============================================================================
+# Intercom OAuth Endpoints
+# ============================================================================
+
+@router.get("/intercom/oauth/connect", response_model=OAuthConnectResponse, dependencies=[Depends(require_feature("intercom_integration"))])
+def intercom_oauth_connect(
+    name: str = Query(..., description="Name for the integration"),
+    current_org: Organization = Depends(get_current_org),
+):
+    """
+    Initiate Intercom OAuth flow.
+    Returns the authorization URL to redirect the user to.
+    """
+    if not INTERCOM_CLIENT_ID:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Intercom OAuth is not configured. Set INTERCOM_CLIENT_ID environment variable."
+        )
+
+    # Generate a secure state parameter
+    state = secrets.token_urlsafe(32)
+
+    # Store state with org info
+    oauth_states[state] = {
+        "organization_id": current_org.id,
+        "name": name,
+        "provider": "intercom",
+        "created_at": datetime.utcnow(),
+    }
+
+    # Build Intercom OAuth authorization URL
+    params = {
+        "client_id": INTERCOM_CLIENT_ID,
+        "state": state,
+        "redirect_uri": INTERCOM_REDIRECT_URI,
+    }
+
+    auth_url = f"https://app.intercom.com/oauth?{urllib.parse.urlencode(params)}"
+
+    logger.info(f"Generated Intercom OAuth URL for org {current_org.id}")
+
+    return OAuthConnectResponse(auth_url=auth_url, state=state)
+
+
+@router.get("/intercom/oauth/callback")
+def intercom_oauth_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Handle Intercom OAuth callback.
+    Exchanges the authorization code for an access token and creates the integration.
+    Redirects to frontend with success or error.
+    """
+    # Handle errors from Intercom
+    if error:
+        logger.error(f"Intercom OAuth error: {error}")
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/settings/integrations?oauth_error={urllib.parse.quote(error)}"
+        )
+
+    if not code or not state:
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/settings/integrations?oauth_error=missing_params"
+        )
+
+    # Validate state
+    state_data = oauth_states.pop(state, None)
+    if not state_data:
+        logger.error(f"Invalid or expired Intercom OAuth state: {state}")
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/settings/integrations?oauth_error=invalid_state"
+        )
+
+    organization_id = state_data["organization_id"]
+    integration_name = state_data["name"]
+
+    # Exchange code for access token
+    try:
+        with httpx.Client(timeout=30) as client:
+            response = client.post(
+                "https://api.intercom.io/auth/eagle/token",
+                json={
+                    "code": code,
+                    "client_id": INTERCOM_CLIENT_ID,
+                    "client_secret": INTERCOM_CLIENT_SECRET,
+                }
+            )
+            response.raise_for_status()
+            token_data = response.json()
+
+        access_token = token_data.get("token")
+
+        # Fetch workspace info
+        with httpx.Client(timeout=30) as client:
+            me_response = client.get(
+                "https://api.intercom.io/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            me_response.raise_for_status()
+            me_data = me_response.json()
+
+        workspace_name = me_data.get("app", {}).get("name", "Unknown Workspace")
+        workspace_id = me_data.get("app", {}).get("id_code", "")
+        admin_id = me_data.get("id", "")
+
+        logger.info(f"Intercom OAuth successful for workspace {workspace_name} ({workspace_id})")
+
+        # Create integration with OAuth token
+        integration = Integration(
+            organization_id=organization_id,
+            type="intercom",
+            name=integration_name,
+            config={
+                "integration_type": "oauth",
+                "workspace_id": workspace_id,
+                "workspace_name": workspace_name,
+                "admin_id": admin_id,
+            },
+            oauth_access_token=access_token,
+            triggers=["urgent"],
+            is_active=True,
+        )
+
+        db.add(integration)
+        db.commit()
+        db.refresh(integration)
+
+        logger.info(f"Created Intercom integration {integration.id} for org {organization_id}")
+
+        # Redirect to the new integration page
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/settings/integrations/{integration.id}?oauth_success=true"
+        )
+
+    except httpx.HTTPError as e:
+        logger.error(f"Intercom OAuth HTTP error: {e}")
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/settings/integrations?oauth_error=network_error"
+        )
+    except Exception as e:
+        logger.error(f"Intercom OAuth unexpected error: {e}")
+        return RedirectResponse(
+            url=f"{FRONTEND_URL}/settings/integrations?oauth_error=unexpected_error"
+        )

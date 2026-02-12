@@ -23,6 +23,7 @@ import {
   Slack,
   Webhook,
   MessageCircle,
+  MessageSquare,
   Mail,
   ArrowLeft,
   Loader2,
@@ -42,6 +43,7 @@ import {
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
   slack: Slack,
+  intercom: MessageSquare,
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,

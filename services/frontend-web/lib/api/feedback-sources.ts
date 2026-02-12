@@ -24,7 +24,7 @@ export interface FeedbackSource {
   id: number;
   organization_id: number;
   integration_id: number | null;
-  source_type: 'slack' | 'webhook' | 'discord' | 'email';
+  source_type: 'slack' | 'intercom' | 'webhook' | 'discord' | 'email';
   name: string | null;
   provider_config: Record<string, any>;
   triggers: TriggerConfig;
@@ -240,6 +240,13 @@ export const TRIGGER_OPTIONS: Record<string, { key: string; label: string; descr
     { key: 'reactions', label: 'Emoji Reactions', description: 'Messages with specific reactions', hasValues: true },
     { key: 'mentions.bot', label: 'Bot Mentions', description: 'When @Rereflect is mentioned' },
     { key: 'mentions.users', label: 'User Mentions', description: 'When specific users are mentioned', hasValues: true },
+    { key: 'keywords', label: 'Keywords', description: 'Messages containing keywords', hasValues: true },
+  ],
+  intercom: [
+    { key: 'all_messages', label: 'All Conversations', description: 'Capture every conversation event' },
+    { key: 'new_conversations', label: 'New Conversations', description: 'Only new customer conversations' },
+    { key: 'replies', label: 'Customer Replies', description: 'When customers reply to conversations' },
+    { key: 'ratings', label: 'Conversation Ratings', description: 'When customers rate conversations' },
     { key: 'keywords', label: 'Keywords', description: 'Messages containing keywords', hasValues: true },
   ],
   webhook: [

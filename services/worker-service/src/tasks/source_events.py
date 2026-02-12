@@ -130,6 +130,28 @@ def _find_matching_sources(
             else:
                 return []
 
+    # For Intercom events, match by workspace_id via the integration
+    elif source_type == "intercom":
+        workspace_id = provider_context.get("workspace_id")
+        if workspace_id:
+            integrations = db.query(Integration).filter(
+                Integration.type == "intercom",
+                Integration.is_active == True,
+            ).all()
+
+            matching_integration_ids = []
+            for integration in integrations:
+                config = integration.config or {}
+                if config.get("workspace_id") == workspace_id:
+                    matching_integration_ids.append(integration.id)
+
+            if matching_integration_ids:
+                query = query.filter(
+                    FeedbackSource.integration_id.in_(matching_integration_ids)
+                )
+            else:
+                return []
+
     # For webhook events, match by source_id directly
     elif source_type == "webhook":
         source_id = provider_context.get("source_id")

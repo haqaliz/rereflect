@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,17 +30,23 @@ import {
   Link as LinkIcon,
   Webhook,
   HelpCircle,
+  MessageSquare,
 } from 'lucide-react';
 
+type IntegrationType = 'slack' | 'intercom';
 type ConnectionMethod = 'oauth' | 'webhook';
 
-export default function NewIntegrationPage() {
+function NewIntegrationContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templateVariables, setTemplateVariables] = useState<TemplateVariable[]>([]);
   const [defaultTemplate, setDefaultTemplate] = useState('');
   const [copiedVar, setCopiedVar] = useState<string | null>(null);
+  const [integrationType, setIntegrationType] = useState<IntegrationType>(
+    (searchParams.get('type') as IntegrationType) || 'slack'
+  );
   const [connectionMethod, setConnectionMethod] = useState<ConnectionMethod>('oauth');
   const [oauthLoading, setOauthLoading] = useState(false);
 
@@ -77,10 +83,27 @@ export default function NewIntegrationPage() {
 
     try {
       const data = await integrationsAPI.getSlackOAuthUrl(form.name);
-      // Redirect to Slack OAuth
       window.location.href = data.auth_url;
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to initiate OAuth. Make sure SLACK_CLIENT_ID is configured.');
+      setOauthLoading(false);
+    }
+  };
+
+  const handleIntercomOAuth = async () => {
+    if (!form.name.trim()) {
+      setError('Please enter a name for the integration');
+      return;
+    }
+
+    setError(null);
+    setOauthLoading(true);
+
+    try {
+      const { auth_url } = await integrationsAPI.getIntercomOAuthUrl(form.name.trim());
+      window.location.href = auth_url;
+    } catch (err: any) {
+      setError(err.response?.data?.detail?.message || err.response?.data?.detail || 'Failed to start Intercom OAuth');
       setOauthLoading(false);
     }
   };
@@ -146,15 +169,76 @@ export default function NewIntegrationPage() {
             Back to Integrations
           </Link>
           <div className="flex items-center space-x-3">
-            <div className="p-3 bg-secondary rounded-xl">
-              <Slack className="w-8 h-8 text-primary" />
+            <div className={`p-3 rounded-xl ${integrationType === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
+              {integrationType === 'intercom' ? (
+                <MessageSquare className="w-8 h-8 text-[#1F8DED]" />
+              ) : (
+                <Slack className="w-8 h-8 text-primary" />
+              )}
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-foreground">New Slack Integration</h1>
-              <p className="text-muted-foreground">Connect Rereflect to a Slack channel</p>
+              <h1 className="text-3xl font-bold text-foreground">
+                {integrationType === 'intercom' ? 'New Intercom Integration' : 'New Slack Integration'}
+              </h1>
+              <p className="text-muted-foreground">
+                {integrationType === 'intercom'
+                  ? 'Connect Rereflect to your Intercom workspace'
+                  : 'Connect Rereflect to a Slack channel'}
+              </p>
             </div>
           </div>
         </div>
+
+        {/* Integration Type Selector */}
+        <Card className="animate-slide-up">
+          <CardHeader>
+            <CardTitle>Integration Type</CardTitle>
+            <CardDescription>Choose which service to connect</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => { setIntegrationType('slack'); setConnectionMethod('oauth'); setError(null); }}
+                className={`p-4 rounded-lg border-2 text-left transition-all ${
+                  integrationType === 'slack'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${integrationType === 'slack' ? 'bg-[#4A154B]/10' : 'bg-secondary'}`}>
+                    <Slack className="w-6 h-6 text-[#4A154B]" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">Slack</h4>
+                    <p className="text-xs text-muted-foreground">Get feedback alerts in your channels</p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setIntegrationType('intercom'); setConnectionMethod('oauth'); setError(null); }}
+                className={`p-4 rounded-lg border-2 text-left transition-all ${
+                  integrationType === 'intercom'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${integrationType === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
+                    <MessageSquare className="w-6 h-6 text-[#1F8DED]" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">Intercom</h4>
+                    <p className="text-xs text-muted-foreground">Analyze support conversations with AI</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Integration Name (always shown) */}
         <Card className="animate-slide-up">
@@ -173,67 +257,69 @@ export default function NewIntegrationPage() {
           </CardContent>
         </Card>
 
-        {/* Connection Method Selection */}
-        <Card className="animate-slide-up stagger-1">
-          <CardHeader>
-            <CardTitle>Connection Method</CardTitle>
-            <CardDescription>Choose how to connect to Slack</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* OAuth Option */}
-              <button
-                type="button"
-                onClick={() => setConnectionMethod('oauth')}
-                className={`p-4 rounded-lg border-2 text-left transition-all ${
-                  connectionMethod === 'oauth'
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/50'
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`p-2 rounded-lg ${connectionMethod === 'oauth' ? 'bg-primary/10' : 'bg-secondary'}`}>
-                    <LinkIcon className="w-5 h-5" />
+        {/* Connection Method Selection (Slack only) */}
+        {integrationType === 'slack' && (
+          <Card className="animate-slide-up stagger-1">
+            <CardHeader>
+              <CardTitle>Connection Method</CardTitle>
+              <CardDescription>Choose how to connect to Slack</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* OAuth Option */}
+                <button
+                  type="button"
+                  onClick={() => setConnectionMethod('oauth')}
+                  className={`p-4 rounded-lg border-2 text-left transition-all ${
+                    connectionMethod === 'oauth'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`p-2 rounded-lg ${connectionMethod === 'oauth' ? 'bg-primary/10' : 'bg-secondary'}`}>
+                      <LinkIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold">Connect with Slack</h4>
+                      <span className="text-xs text-green-600 dark:text-green-400">Recommended</span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-semibold">Connect with Slack</h4>
-                    <span className="text-xs text-green-600 dark:text-green-400">Recommended</span>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  One-click connection via Slack OAuth. No manual setup required.
-                </p>
-              </button>
+                  <p className="text-sm text-muted-foreground">
+                    One-click connection via Slack OAuth. No manual setup required.
+                  </p>
+                </button>
 
-              {/* Webhook Option */}
-              <button
-                type="button"
-                onClick={() => setConnectionMethod('webhook')}
-                className={`p-4 rounded-lg border-2 text-left transition-all ${
-                  connectionMethod === 'webhook'
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/50'
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <div className={`p-2 rounded-lg ${connectionMethod === 'webhook' ? 'bg-primary/10' : 'bg-secondary'}`}>
-                    <Webhook className="w-5 h-5" />
+                {/* Webhook Option */}
+                <button
+                  type="button"
+                  onClick={() => setConnectionMethod('webhook')}
+                  className={`p-4 rounded-lg border-2 text-left transition-all ${
+                    connectionMethod === 'webhook'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`p-2 rounded-lg ${connectionMethod === 'webhook' ? 'bg-primary/10' : 'bg-secondary'}`}>
+                      <Webhook className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold">Webhook URL</h4>
+                      <span className="text-xs text-muted-foreground">Manual setup</span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-semibold">Webhook URL</h4>
-                    <span className="text-xs text-muted-foreground">Manual setup</span>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Manually configure an Incoming Webhook from your Slack app.
-                </p>
-              </button>
-            </div>
-          </CardContent>
-        </Card>
+                  <p className="text-sm text-muted-foreground">
+                    Manually configure an Incoming Webhook from your Slack app.
+                  </p>
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* OAuth Flow */}
-        {connectionMethod === 'oauth' && (
+        {/* Slack OAuth Flow */}
+        {integrationType === 'slack' && connectionMethod === 'oauth' && (
           <Card className="animate-slide-up stagger-2">
             <CardHeader>
               <CardTitle>Connect to Slack</CardTitle>
@@ -274,8 +360,50 @@ export default function NewIntegrationPage() {
           </Card>
         )}
 
-        {/* Webhook Flow */}
-        {connectionMethod === 'webhook' && (
+        {/* Intercom OAuth Flow */}
+        {integrationType === 'intercom' && (
+          <Card className="animate-slide-up stagger-1">
+            <CardHeader>
+              <CardTitle>Connect to Intercom</CardTitle>
+              <CardDescription>
+                Click the button below to authorize Rereflect to access your Intercom conversations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                <h4 className="font-medium mb-2">What happens next:</h4>
+                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                  <li>You&apos;ll be redirected to Intercom to authorize access</li>
+                  <li>Grant Rereflect permission to read your conversations</li>
+                  <li>You&apos;ll be redirected back and the integration will be created</li>
+                </ol>
+              </div>
+
+              <Button
+                onClick={handleIntercomOAuth}
+                disabled={oauthLoading || !form.name}
+                className="w-full"
+                size="lg"
+              >
+                {oauthLoading ? (
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                ) : (
+                  <MessageSquare className="w-5 h-5 mr-2" />
+                )}
+                Connect to Intercom
+              </Button>
+
+              {!form.name && (
+                <p className="text-sm text-muted-foreground text-center">
+                  Enter an integration name above to continue
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Webhook Flow (Slack only) */}
+        {integrationType === 'slack' && connectionMethod === 'webhook' && (
           <form onSubmit={handleWebhookSubmit} className="space-y-6">
             {/* Webhook URL */}
             <Card className="animate-slide-up stagger-2">
@@ -448,5 +576,21 @@ export default function NewIntegrationPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function NewIntegrationPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen pattern-bg">
+        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+          </div>
+        </main>
+      </div>
+    }>
+      <NewIntegrationContent />
+    </Suspense>
   );
 }

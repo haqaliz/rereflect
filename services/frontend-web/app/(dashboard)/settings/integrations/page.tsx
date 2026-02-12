@@ -61,10 +61,10 @@ function IntegrationsContent() {
     const error = searchParams.get('oauth_error');
     if (error) {
       const errorMessages: Record<string, string> = {
-        'access_denied': 'You cancelled the Slack authorization.',
+        'access_denied': 'You cancelled the authorization.',
         'invalid_state': 'Session expired. Please try again.',
         'missing_params': 'Missing OAuth parameters. Please try again.',
-        'network_error': 'Network error connecting to Slack. Please try again.',
+        'network_error': 'Network error during authorization. Please try again.',
         'unexpected_error': 'An unexpected error occurred. Please try again.',
       };
       setOauthError(errorMessages[error] || `OAuth error: ${error}`);
@@ -173,15 +173,15 @@ function IntegrationsContent() {
         {/* Integrations List */}
         <Card className="animate-slide-up">
           <CardHeader className="border-b border-border">
-            <CardTitle>Slack Integrations</CardTitle>
+            <CardTitle>Active Integrations</CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
             {integrations.length === 0 ? (
               <div className="text-center py-12">
-                <Slack className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
+                <Settings2 className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold text-foreground mb-2">No integrations yet</h3>
                 <p className="text-muted-foreground mb-6">
-                  Connect Slack to receive feedback alerts in real-time
+                  Connect Slack, Intercom, or other services to receive feedback alerts
                 </p>
                 {isAdminOrOwner ? (
                   <Link href="/settings/integrations/new">
@@ -208,8 +208,12 @@ function IntegrationsContent() {
                         href={`/settings/integrations/${integration.id}`}
                         className="flex items-center gap-3 flex-1 group"
                       >
-                        <div className="p-2 bg-secondary rounded-lg">
-                          <Slack className="w-6 h-6" />
+                        <div className={`p-2 rounded-lg ${integration.type === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
+                          {integration.type === 'intercom' ? (
+                            <MessageSquare className="w-6 h-6 text-[#1F8DED]" />
+                          ) : (
+                            <Slack className="w-6 h-6" />
+                          )}
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
@@ -380,6 +384,29 @@ function IntegrationsContent() {
                       </div>
                       <p className="text-sm text-muted-foreground">
                         Send feedback data to your own endpoints
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                </div>
+              </Link>
+
+              {/* Intercom - Available */}
+              <Link href="/settings/integrations/new?type=intercom">
+                <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-[#1F8DED]/10 rounded-lg">
+                      <MessageSquare className="w-6 h-6 text-[#1F8DED]" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Intercom</span>
+                        <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                          Available
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Analyze support conversations with AI
                       </p>
                     </div>
                     <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />

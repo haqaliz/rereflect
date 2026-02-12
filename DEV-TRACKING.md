@@ -140,7 +140,7 @@
 ### 5. Additional Integrations (Priority: LOW)
 > *Expands feedback sources, but existing customers can use CSV/Slack*
 
-- [ ] Intercom API (pull support conversations)
+- [x] Intercom API (pull support conversations)
 - [ ] Zendesk API (pull support tickets)
 - [ ] Email forwarding (receive feedback via email)
 - [ ] HubSpot integration (sync with CRM)
@@ -287,6 +287,20 @@
   - Railway deployment configuration with dynamic port handling
   - Local dev: landing on port 3001, app on port 3000
 - **Auto-refresh polling** added to workflow page and feedback detail page (30s interval)
+- **Intercom Integration** (TDD, 50 tests):
+  - OAuth flow: connect + callback endpoints with state management
+  - Webhook receiver: HMAC-SHA1 signature verification, 3 topics (conversation.user.created, conversation.user.replied, conversation.rating.added)
+  - IntercomAdapter: check_triggers (all_conversations, new_conversations, replies, ratings, keywords), extract_content (HTML stripping), get_external_ids, fetch_context
+  - Write-back service: add_note_to_conversation, close_conversation (two-way sync)
+  - Plan gating: `intercom_integration` feature on Pro+ (same as Slack)
+  - Frontend: Intercom in Available Integrations, OAuth connect flow, integration type icons
+  - 23 backend tests + 27 worker adapter tests (all passing)
+  - **Feedback Sources**: Intercom as selectable source type in feedback sources wizard
+    - Backend: `/types` endpoint, valid_types, feature gating, integration validation, workspace_id/workspace_name copying
+    - Frontend: Intercom icon/color across all 4 feedback source pages (list, new, detail, pending)
+    - Frontend: Dynamic integration selection step (no longer hardcoded to Slack)
+    - Worker: Source matching by workspace_id via Integration (same pattern as Slack's team_id)
+    - Webhook: Extract app_id from Intercom payload as workspace_id for source matching
 
 ---
 
@@ -310,6 +324,7 @@
 - Landing page separated into standalone service for independent SEO optimization and deployment
 - Monorepo architecture with pnpm workspaces for shared UI components and dependencies
 - Auto-refresh polling (30s) on workflow and feedback detail pages for real-time collaboration
+- Intercom integration follows same pattern as Slack: OAuth flow, adapter, webhook receiver, Pro+ gating, HMAC-SHA1 verification, two-way sync (notes + close)
 
 ---
 

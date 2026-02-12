@@ -166,6 +166,13 @@ def list_source_types():
             available=True,
         ),
         SourceTypeInfo(
+            type="intercom",
+            name="Intercom",
+            description="Analyze support conversations with AI",
+            requires_integration=True,
+            available=True,
+        ),
+        SourceTypeInfo(
             type="webhook",
             name="Webhook",
             description="Receive data via HTTP POST requests",
@@ -252,7 +259,7 @@ def create_feedback_source(
     from src.config.plans import has_feature, get_plan_for_feature
 
     # Validate source type
-    valid_types = ["slack", "webhook", "discord", "email"]
+    valid_types = ["slack", "intercom", "webhook", "discord", "email"]
     if data.source_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid source type. Must be one of: {valid_types}")
 
@@ -270,6 +277,21 @@ def create_feedback_source(
                     "current_plan": plan,
                     "required_plan": required_plan,
                     "message": f"Slack integration requires the {required_plan.title()} plan or higher.",
+                    "upgrade_url": "/settings/billing"
+                }
+            )
+
+    if data.source_type == "intercom":
+        if not has_feature(plan, "intercom_integration"):
+            required_plan = get_plan_for_feature("intercom_integration")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "feature_not_available",
+                    "feature": "intercom_integration",
+                    "current_plan": plan,
+                    "required_plan": required_plan,
+                    "message": f"Intercom integration requires the {required_plan.title()} plan or higher.",
                     "upgrade_url": "/settings/billing"
                 }
             )
@@ -309,6 +331,19 @@ def create_feedback_source(
         if not integration:
             raise HTTPException(status_code=400, detail="Integration not found or not a Slack integration")
 
+    if data.source_type == "intercom":
+        if not data.integration_id:
+            raise HTTPException(status_code=400, detail="Intercom sources require an integration_id")
+
+        integration = db.query(Integration).filter(
+            Integration.id == data.integration_id,
+            Integration.organization_id == current_org.id,
+            Integration.type == "intercom",
+        ).first()
+
+        if not integration:
+            raise HTTPException(status_code=400, detail="Integration not found or not an Intercom integration")
+
     # Build provider_config
     provider_config = data.provider_config or {}
 
@@ -319,6 +354,15 @@ def create_feedback_source(
             provider_config["team_id"] = integration_config["team_id"]
         if integration_config.get("team_name"):
             provider_config["team_name"] = integration_config["team_name"]
+
+    # For Intercom sources, copy workspace_id from integration
+    if data.source_type == "intercom" and integration:
+        integration_config = integration.config or {}
+        if integration_config.get("workspace_id"):
+            provider_config["workspace_id"] = integration_config["workspace_id"]
+        if integration_config.get("workspace_name"):
+            provider_config["workspace_name"] = integration_config["workspace_name"]
+
     if data.source_type == "webhook":
         webhook_id = str(uuid.uuid4())
         provider_config["webhook_id"] = webhook_id

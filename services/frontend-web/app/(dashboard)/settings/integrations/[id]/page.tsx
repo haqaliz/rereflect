@@ -47,6 +47,7 @@ import {
   ChevronLeft,
   ChevronRight,
   HelpCircle,
+  MessageSquare,
 } from 'lucide-react';
 
 export default function IntegrationDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -232,8 +233,12 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
           </Link>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="p-3 bg-secondary rounded-xl">
-                <Slack className="w-8 h-8 text-primary" />
+              <div className={`p-3 rounded-xl ${integration.type === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
+                {integration.type === 'intercom' ? (
+                  <MessageSquare className="w-8 h-8 text-[#1F8DED]" />
+                ) : (
+                  <Slack className="w-8 h-8 text-primary" />
+                )}
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -248,18 +253,22 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                     </Badge>
                   )}
                 </div>
-                <p className="text-muted-foreground">Configure your Slack integration</p>
+                <p className="text-muted-foreground">
+                  {integration.type === 'intercom' ? 'Configure your Intercom integration' : 'Configure your Slack integration'}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={handleTest}
-                disabled={testing}
-              >
-                {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                Test
-              </Button>
+              {integration.type !== 'intercom' && (
+                <Button
+                  variant="outline"
+                  onClick={handleTest}
+                  disabled={testing}
+                >
+                  {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                  Test
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={handleDelete}
@@ -297,7 +306,9 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
               <div>
                 <h3 className="font-semibold">Integration Status</h3>
                 <p className="text-sm text-muted-foreground">
-                  {form.is_active ? 'Alerts are being sent to Slack' : 'Alerts are paused'}
+                  {form.is_active
+                    ? `Integration is active${integration?.type === 'intercom' ? '' : ' and sending alerts to Slack'}`
+                    : 'Integration is paused'}
                 </p>
               </div>
               <div className="flex items-center gap-3">

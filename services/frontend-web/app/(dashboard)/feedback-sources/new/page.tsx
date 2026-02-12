@@ -32,6 +32,7 @@ import {
   Slack,
   Webhook,
   MessageCircle,
+  MessageSquare,
   Mail,
   ArrowLeft,
   Loader2,
@@ -46,6 +47,7 @@ import {
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
   slack: Slack,
+  intercom: MessageSquare,
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,
@@ -54,6 +56,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
 // Source type colors
 const SOURCE_COLORS: Record<string, string> = {
   slack: 'text-[#4A154B]',
+  intercom: 'text-[#1F8DED]',
   webhook: 'text-blue-600',
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
@@ -66,12 +69,12 @@ function NewSourceContent() {
   const searchParams = useSearchParams();
   const initialType = searchParams.get('type');
 
-  // Determine initial step based on type - webhook goes to triggers, slack goes to integration
+  // Determine initial step based on type
   const getInitialStep = (): Step => {
     if (!initialType) return 'type';
-    // Webhook doesn't require integration, so skip to triggers
-    if (initialType === 'webhook') return 'triggers';
-    // Slack requires integration selection
+    // Types that don't require integration go to triggers
+    if (initialType === 'webhook' || initialType === 'discord' || initialType === 'email') return 'triggers';
+    // OAuth types (slack, intercom) require integration selection
     return 'integration';
   };
 
@@ -127,7 +130,7 @@ function NewSourceContent() {
 
   const currentTypeInfo = sourceTypes.find(t => t.type === selectedType);
   const availableIntegrations = integrations.filter(i =>
-    i.integration_type === 'oauth' && i.is_active
+    i.integration_type === 'oauth' && i.is_active && i.type === selectedType
   );
 
   const handleTypeSelect = (type: string) => {
@@ -422,86 +425,92 @@ function NewSourceContent() {
           </Card>
         )}
 
-        {/* Step: Integration Selection (for Slack) */}
-        {step === 'integration' && (
-          <Card className="animate-slide-up">
-            <CardHeader>
-              <CardTitle>Select Integration</CardTitle>
-              <CardDescription>
-                Choose an existing Slack integration or create a new one
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {availableIntegrations.length === 0 ? (
-                <div className="text-center py-8">
-                  <Slack className="w-12 h-12 mx-auto text-muted-foreground/50 mb-4" />
-                  <h3 className="font-semibold text-foreground mb-2">No Slack integrations found</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    You need to connect Slack first to receive feedback from it
-                  </p>
-                  <Link href="/settings/integrations/new">
-                    <Button>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Connect Slack
-                    </Button>
-                  </Link>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-3">
-                    {availableIntegrations.map(integration => (
-                      <button
-                        key={integration.id}
-                        onClick={() => handleIntegrationSelect(integration.id)}
-                        className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                          form.integration_id === integration.id
-                            ? 'border-primary bg-primary/5'
-                            : 'border-border hover:border-primary/50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-secondary rounded-lg">
-                            <Slack className="w-5 h-5 text-[#4A154B]" />
-                          </div>
-                          <div>
-                            <div className="font-semibold text-foreground">
-                              {integration.name || 'Unnamed Integration'}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {integration.team_name}
-                              {integration.channel_name && ` • #${integration.channel_name}`}
-                            </div>
-                          </div>
-                          {form.integration_id === integration.id && (
-                            <Check className="w-5 h-5 text-primary ml-auto" />
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+        {/* Step: Integration Selection */}
+        {step === 'integration' && (() => {
+          const TypeIcon = SOURCE_ICONS[selectedType] || Webhook;
+          const typeColor = SOURCE_COLORS[selectedType] || 'text-muted-foreground';
+          const typeName = selectedType.charAt(0).toUpperCase() + selectedType.slice(1);
 
-                  <div className="pt-4 border-t border-border">
-                    <Link href="/settings/integrations/new" className="text-sm text-primary hover:underline">
-                      + Add a new Slack integration
+          return (
+            <Card className="animate-slide-up">
+              <CardHeader>
+                <CardTitle>Select Integration</CardTitle>
+                <CardDescription>
+                  Choose an existing {typeName} integration or create a new one
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {availableIntegrations.length === 0 ? (
+                  <div className="text-center py-8">
+                    <TypeIcon className="w-12 h-12 mx-auto text-muted-foreground/50 mb-4" />
+                    <h3 className="font-semibold text-foreground mb-2">No {typeName} integrations found</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      You need to connect {typeName} first to receive feedback from it
+                    </p>
+                    <Link href="/settings/integrations/new">
+                      <Button>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Connect {typeName}
+                      </Button>
                     </Link>
                   </div>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      {availableIntegrations.map(integration => (
+                        <button
+                          key={integration.id}
+                          onClick={() => handleIntegrationSelect(integration.id)}
+                          className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                            form.integration_id === integration.id
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-secondary rounded-lg">
+                              <TypeIcon className={`w-5 h-5 ${typeColor}`} />
+                            </div>
+                            <div>
+                              <div className="font-semibold text-foreground">
+                                {integration.name || 'Unnamed Integration'}
+                              </div>
+                              <div className="text-sm text-muted-foreground">
+                                {integration.team_name}
+                                {integration.channel_name && ` • #${integration.channel_name}`}
+                              </div>
+                            </div>
+                            {form.integration_id === integration.id && (
+                              <Check className="w-5 h-5 text-primary ml-auto" />
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
 
-                  <div className="flex justify-between pt-4">
-                    <Button variant="outline" onClick={() => setStep('type')}>
-                      Back
-                    </Button>
-                    <Button
-                      onClick={() => setStep('triggers')}
-                      disabled={!form.integration_id}
-                    >
-                      Continue
-                    </Button>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        )}
+                    <div className="pt-4 border-t border-border">
+                      <Link href="/settings/integrations/new" className="text-sm text-primary hover:underline">
+                        + Add a new {typeName} integration
+                      </Link>
+                    </div>
+
+                    <div className="flex justify-between pt-4">
+                      <Button variant="outline" onClick={() => setStep('type')}>
+                        Back
+                      </Button>
+                      <Button
+                        onClick={() => setStep('triggers')}
+                        disabled={!form.integration_id}
+                      >
+                        Continue
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* Step: Trigger Configuration */}
         {step === 'triggers' && (
@@ -518,7 +527,7 @@ function NewSourceContent() {
                 <Label htmlFor="name">Source Name (optional)</Label>
                 <Input
                   id="name"
-                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : 'Product Feedback Webhook'}`}
+                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : 'Product Feedback Webhook'}`}
                   value={form.name}
                   onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                 />
