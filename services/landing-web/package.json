@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
+    "@intercom/messenger-js-sdk": "^0.0.18",
     "@rereflect/ui": "workspace:*",
     "gsap": "^3.14.2",
     "lucide-react": "^0.562.0",
