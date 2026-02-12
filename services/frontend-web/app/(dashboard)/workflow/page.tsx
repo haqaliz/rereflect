@@ -468,13 +468,11 @@ export default function WorkflowPage() {
 
         {/* Content */}
         {viewMode === 'kanban' ? (
-          <div className="animate-slide-up stagger-2">
-            <KanbanView
-              items={items}
-              onStatusChange={handleStatusChange}
-              statusCounts={statusCounts}
-            />
-          </div>
+          <KanbanView
+            items={items}
+            onStatusChange={handleStatusChange}
+            statusCounts={statusCounts}
+          />
         ) : (
           <Card className="animate-slide-up stagger-2 p-6">
             <DataTable

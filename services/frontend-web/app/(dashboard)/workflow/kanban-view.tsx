@@ -1,9 +1,34 @@
 'use client';
 
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { createPortal } from 'react-dom';
+import { DragDropContext, Droppable, Draggable, DropResult, DraggableProvided, DraggableStateSnapshot } from '@hello-pangea/dnd';
 import { WorkflowFeedbackItem } from '@/lib/api/workflow';
 import { WORKFLOW_STATUSES, getStatusColor, getStatusLabel } from '@/lib/workflow-utils';
 import { KanbanCard } from './kanban-card';
+
+function PortalAwareDraggableItem({
+  provided,
+  snapshot,
+  children,
+}: {
+  provided: DraggableProvided;
+  snapshot: DraggableStateSnapshot;
+  children: React.ReactNode;
+}) {
+  const child = (
+    <div
+      ref={provided.innerRef}
+      {...provided.draggableProps}
+      {...provided.dragHandleProps}
+      className={snapshot.isDragging ? 'opacity-90' : ''}
+    >
+      {children}
+    </div>
+  );
+
+  if (!snapshot.isDragging) return child;
+  return createPortal(child, document.body);
+}
 
 interface KanbanViewProps {
   items: WorkflowFeedbackItem[];
@@ -34,7 +59,7 @@ export function KanbanView({
 
   return (
     <DragDropContext onDragEnd={onDragEnd}>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto backdrop-blur-sm p-6 pb-2 rounded-lg" style={{ backgroundColor: 'color-mix(in oklch, var(--secondary) 20%, transparent)' }}>
         <div className="flex gap-4 pb-4" style={{ minWidth: 'max-content' }}>
           {WORKFLOW_STATUSES.map((status) => {
             const statusItems = getItemsForStatus(status);
@@ -69,7 +94,7 @@ export function KanbanView({
                       <div
                         ref={provided.innerRef}
                         {...provided.droppableProps}
-                        className="p-2 space-y-3 overflow-y-auto scrollbar-auto-hide h-[calc(100vh-440px)]"
+                        className="p-2 space-y-3 overflow-y-auto scrollbar-auto-hide h-[calc(100vh-500px)]"
                       >
                         {statusItems.map((item, index) => (
                           <Draggable
@@ -78,14 +103,12 @@ export function KanbanView({
                             index={index}
                           >
                             {(provided, snapshot) => (
-                              <div
-                                ref={provided.innerRef}
-                                {...provided.draggableProps}
-                                {...provided.dragHandleProps}
-                                className={snapshot.isDragging ? 'opacity-50' : ''}
+                              <PortalAwareDraggableItem
+                                provided={provided}
+                                snapshot={snapshot}
                               >
                                 <KanbanCard item={item} />
-                              </div>
+                              </PortalAwareDraggableItem>
                             )}
                           </Draggable>
                         ))}
