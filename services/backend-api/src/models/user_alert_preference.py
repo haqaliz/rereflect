@@ -13,6 +13,7 @@ class UserAlertPreference(Base):
     channel_email = Column(Boolean, default=False, nullable=False)
     channel_slack = Column(Boolean, default=True, nullable=False)
     channel_inapp = Column(Boolean, default=True, nullable=False)
+    channel_intercom = Column(Boolean, default=False, nullable=False)
     threshold_value = Column(Float, nullable=True)  # sentiment spike: 50.0 (%), volume spike: 2.0 (multiplier)
     retention_days = Column(Integer, default=30, nullable=False, server_default="30")
 

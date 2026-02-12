@@ -21,7 +21,6 @@ import {
   TemplateVariable,
 } from '@/lib/api/integrations';
 import {
-  Slack,
   ArrowLeft,
   Loader2,
   AlertCircle,
@@ -30,8 +29,9 @@ import {
   Link as LinkIcon,
   Webhook,
   HelpCircle,
-  MessageSquare,
 } from 'lucide-react';
+import { SlackIcon } from '@/components/icons/SlackIcon';
+import { IntercomIcon } from '@/components/icons/IntercomIcon';
 
 type IntegrationType = 'slack' | 'intercom';
 type ConnectionMethod = 'oauth' | 'webhook';
@@ -171,9 +171,9 @@ function NewIntegrationContent() {
           <div className="flex items-center space-x-3">
             <div className={`p-3 rounded-xl ${integrationType === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
               {integrationType === 'intercom' ? (
-                <MessageSquare className="w-8 h-8 text-[#1F8DED]" />
+                <IntercomIcon className="w-8 h-8" />
               ) : (
-                <Slack className="w-8 h-8 text-primary" />
+                <SlackIcon className="w-8 h-8" />
               )}
             </div>
             <div>
@@ -208,7 +208,7 @@ function NewIntegrationContent() {
               >
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded-lg ${integrationType === 'slack' ? 'bg-[#4A154B]/10' : 'bg-secondary'}`}>
-                    <Slack className="w-6 h-6 text-[#4A154B]" />
+                    <SlackIcon className="w-6 h-6" />
                   </div>
                   <div>
                     <h4 className="font-semibold">Slack</h4>
@@ -228,7 +228,7 @@ function NewIntegrationContent() {
               >
                 <div className="flex items-center gap-3">
                   <div className={`p-2 rounded-lg ${integrationType === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
-                    <MessageSquare className="w-6 h-6 text-[#1F8DED]" />
+                    <IntercomIcon className="w-6 h-6" />
                   </div>
                   <div>
                     <h4 className="font-semibold">Intercom</h4>
@@ -346,7 +346,7 @@ function NewIntegrationContent() {
                 {oauthLoading ? (
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                 ) : (
-                  <Slack className="w-5 h-5 mr-2" />
+                  <SlackIcon className="w-5 h-5 mr-2" />
                 )}
                 Connect to Slack
               </Button>
@@ -388,7 +388,7 @@ function NewIntegrationContent() {
                 {oauthLoading ? (
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                 ) : (
-                  <MessageSquare className="w-5 h-5 mr-2" />
+                  <IntercomIcon className="w-5 h-5 mr-2" />
                 )}
                 Connect to Intercom
               </Button>

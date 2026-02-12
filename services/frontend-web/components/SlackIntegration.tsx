@@ -30,7 +30,6 @@ import {
   FIELD_OPTIONS,
 } from '@/lib/api/integrations';
 import {
-  Slack,
   Plus,
   Trash2,
   Send,
@@ -43,6 +42,7 @@ import {
   ToggleLeft,
   ToggleRight,
 } from 'lucide-react';
+import { SlackIcon } from '@/components/icons/SlackIcon';
 
 export function SlackIntegration() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -217,7 +217,7 @@ export function SlackIntegration() {
         <CardHeader className="border-b border-border">
           <div className="flex items-center space-x-2">
             <div className="p-2 bg-secondary rounded-lg">
-              <Slack className="w-5 h-5 text-primary" />
+              <SlackIcon className="w-5 h-5 text-primary" />
             </div>
             <CardTitle>Slack Integration</CardTitle>
           </div>
@@ -237,7 +237,7 @@ export function SlackIntegration() {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <div className="p-2 bg-secondary rounded-lg">
-              <Slack className="w-5 h-5 text-primary" />
+              <SlackIcon className="w-5 h-5 text-primary" />
             </div>
             <CardTitle>Slack Integration</CardTitle>
           </div>
@@ -360,7 +360,7 @@ export function SlackIntegration() {
       <CardContent className="pt-6">
         {integrations.length === 0 ? (
           <div className="text-center py-8">
-            <Slack className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
+            <SlackIcon className="w-12 h-12 mx-auto text-muted-foreground/50 mb-3" />
             <h3 className="font-semibold text-foreground mb-1">No Slack integrations</h3>
             <p className="text-sm text-muted-foreground mb-4">
               Add a webhook to receive feedback alerts in Slack
@@ -376,7 +376,7 @@ export function SlackIntegration() {
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-secondary rounded-lg">
-                      <Slack className="w-5 h-5" />
+                      <SlackIcon className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">

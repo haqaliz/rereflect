@@ -33,7 +33,6 @@ import {
   TemplateVariable,
 } from '@/lib/api/integrations';
 import {
-  Slack,
   ArrowLeft,
   Loader2,
   AlertCircle,
@@ -47,8 +46,9 @@ import {
   ChevronLeft,
   ChevronRight,
   HelpCircle,
-  MessageSquare,
 } from 'lucide-react';
+import { SlackIcon } from '@/components/icons/SlackIcon';
+import { IntercomIcon } from '@/components/icons/IntercomIcon';
 
 export default function IntegrationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -235,9 +235,9 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
             <div className="flex items-center space-x-3">
               <div className={`p-3 rounded-xl ${integration.type === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
                 {integration.type === 'intercom' ? (
-                  <MessageSquare className="w-8 h-8 text-[#1F8DED]" />
+                  <IntercomIcon className="w-8 h-8" />
                 ) : (
-                  <Slack className="w-8 h-8 text-primary" />
+                  <SlackIcon className="w-8 h-8" />
                 )}
               </div>
               <div>

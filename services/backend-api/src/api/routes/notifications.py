@@ -70,6 +70,7 @@ class AlertPreferenceItem(BaseModel):
     channel_email: bool
     channel_slack: bool
     channel_inapp: bool
+    channel_intercom: bool = False
     threshold_value: Optional[float]
     retention_days: int = 30
 
@@ -84,6 +85,7 @@ class AlertPreferenceUpdate(BaseModel):
     channel_email: bool
     channel_slack: bool
     channel_inapp: bool
+    channel_intercom: bool = False
     threshold_value: Optional[float]
     retention_days: int = Field(30, ge=30, le=365)
 
@@ -294,6 +296,7 @@ def get_preferences(
                 channel_email=p.channel_email,
                 channel_slack=p.channel_slack,
                 channel_inapp=p.channel_inapp,
+                channel_intercom=p.channel_intercom,
                 threshold_value=p.threshold_value,
                 retention_days=p.retention_days,
             )
@@ -320,6 +323,7 @@ def update_preferences(
             pref.channel_email = item.channel_email
             pref.channel_slack = item.channel_slack
             pref.channel_inapp = item.channel_inapp
+            pref.channel_intercom = item.channel_intercom
             pref.threshold_value = item.threshold_value
             pref.retention_days = item.retention_days
         else:
@@ -330,6 +334,7 @@ def update_preferences(
                 channel_email=item.channel_email,
                 channel_slack=item.channel_slack,
                 channel_inapp=item.channel_inapp,
+                channel_intercom=item.channel_intercom,
                 threshold_value=item.threshold_value,
                 retention_days=item.retention_days,
             )

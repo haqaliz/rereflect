@@ -22,12 +22,15 @@ def run_migrations():
             ["alembic", "upgrade", "head"],
             capture_output=True,
             text=True,
+            timeout=60,
             cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         )
         if result.returncode == 0:
             logger.info("Migrations completed successfully")
         else:
             logger.error(f"Migration failed: {result.stderr}")
+    except subprocess.TimeoutExpired:
+        logger.error("Migration timed out after 60 seconds")
     except Exception as e:
         logger.error(f"Could not run migrations: {e}")
 

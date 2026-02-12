@@ -11,7 +11,6 @@ import {
   TRIGGER_OPTIONS,
 } from '@/lib/api/integrations';
 import {
-  Slack,
   Plus,
   Trash2,
   Send,
@@ -28,6 +27,8 @@ import {
   MessageSquare,
   Users,
 } from 'lucide-react';
+import { SlackIcon } from '@/components/icons/SlackIcon';
+import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 
@@ -210,9 +211,9 @@ function IntegrationsContent() {
                       >
                         <div className={`p-2 rounded-lg ${integration.type === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
                           {integration.type === 'intercom' ? (
-                            <MessageSquare className="w-6 h-6 text-[#1F8DED]" />
+                            <IntercomIcon className="w-6 h-6" />
                           ) : (
-                            <Slack className="w-6 h-6" />
+                            <SlackIcon className="w-6 h-6" />
                           )}
                         </div>
                         <div className="flex-1">
@@ -350,7 +351,7 @@ function IntegrationsContent() {
                 <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-[#4A154B]/10 rounded-lg">
-                      <Slack className="w-6 h-6 text-[#4A154B]" />
+                      <SlackIcon className="w-6 h-6" />
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
@@ -396,7 +397,7 @@ function IntegrationsContent() {
                 <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-[#1F8DED]/10 rounded-lg">
-                      <MessageSquare className="w-6 h-6 text-[#1F8DED]" />
+                      <IntercomIcon className="w-6 h-6" />
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">

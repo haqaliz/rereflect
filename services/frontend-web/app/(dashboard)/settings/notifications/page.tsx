@@ -12,15 +12,23 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import {
   Settings as SettingsIcon,
-  Bell,
   Mail,
   Monitor,
   Sliders,
   Clock,
   Save,
+  Settings2,
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
+import { IntercomIcon } from '@/components/icons/IntercomIcon';
 
 const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; hasThreshold: boolean; thresholdLabel?: string; thresholdUnit?: string }> = {
   urgent_feedback: {
@@ -65,13 +73,13 @@ const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; ha
 };
 
 const DEFAULT_PREFERENCES: AlertPreference[] = [
-  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: null, retention_days: 30 },
-  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: 50, retention_days: 30 },
-  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: null, retention_days: 30 },
-  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, threshold_value: 2.0, retention_days: 30 },
-  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, threshold_value: null, retention_days: 30 },
-  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, threshold_value: null, retention_days: 30 },
-  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, threshold_value: null, retention_days: 30 },
+  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
+  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
+  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
 ];
 
 const HOUR_OPTIONS = [
@@ -100,6 +108,13 @@ const RETENTION_OPTIONS = [
   { value: '365', label: '1yr' },
 ];
 
+const CHANNEL_CONFIG = [
+  { key: 'channel_inapp' as const, label: 'In-App', icon: Monitor },
+  { key: 'channel_slack' as const, label: 'Slack', icon: null, customIcon: 'slack' },
+  { key: 'channel_intercom' as const, label: 'Intercom', icon: null, customIcon: 'intercom' },
+  { key: 'channel_email' as const, label: 'Email', icon: Mail },
+];
+
 export default function NotificationsSettingsPage() {
   const router = useRouter();
   const { user } = useAuth();
@@ -113,6 +128,7 @@ export default function NotificationsSettingsPage() {
   const [retentionByType, setRetentionByType] = useState<Record<string, number>>({});
   const [hasChanges, setHasChanges] = useState(false);
   const [hasRetentionChanges, setHasRetentionChanges] = useState(false);
+  const [customizeAlertType, setCustomizeAlertType] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -237,6 +253,34 @@ export default function NotificationsSettingsPage() {
     }
   };
 
+  const getActiveChannels = (pref: AlertPreference): string[] => {
+    const channels: string[] = [];
+    if (pref.channel_inapp) channels.push('In-App');
+    if (pref.channel_slack) channels.push('Slack');
+    if (pref.channel_intercom) channels.push('Intercom');
+    if (pref.channel_email) channels.push('Email');
+    return channels;
+  };
+
+  const renderChannelIcon = (channelKey: string, size: string = 'w-4 h-4') => {
+    switch (channelKey) {
+      case 'channel_slack':
+        return <SlackIcon className={size} />;
+      case 'channel_intercom':
+        return <IntercomIcon className={size} />;
+      default:
+        return null;
+    }
+  };
+
+  // Get the currently editing preference
+  const editingPref = customizeAlertType
+    ? preferences.find(p => p.alert_type === customizeAlertType)
+    : null;
+  const editingConfig = customizeAlertType
+    ? ALERT_TYPE_CONFIG[customizeAlertType]
+    : null;
+
   // Compute total extra days and cost from retentionByType
   const totalExtraDays = Object.values(retentionByType).reduce((sum, days) => sum + Math.max(0, days - 30), 0);
   const totalMonthlyCost = totalExtraDays * 0.10;
@@ -299,24 +343,12 @@ export default function NotificationsSettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-6">
-            {/* Channel headers */}
-            <div className="hidden sm:grid grid-cols-[1fr,60px,60px,60px] gap-4 pb-3 px-4 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              <div>Alert Type</div>
-              <div className="text-center" title="In-App">
-                <Monitor className="w-4 h-4 mx-auto" />
-              </div>
-              <div className="text-center" title="Slack">
-                <SlackIcon className="w-4 h-4 mx-auto" />
-              </div>
-              <div className="text-center" title="Email">
-                <Mail className="w-4 h-4 mx-auto" />
-              </div>
-            </div>
-
             <div className="space-y-2">
               {preferences.map(pref => {
                 const config = ALERT_TYPE_CONFIG[pref.alert_type];
                 if (!config) return null;
+
+                const activeChannels = getActiveChannels(pref);
 
                 return (
                   <div
@@ -325,71 +357,119 @@ export default function NotificationsSettingsPage() {
                       pref.is_enabled ? 'bg-background border-border' : 'bg-muted/50 border-muted opacity-60'
                     }`}
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-[1fr,60px,60px,60px] gap-4 items-center">
-                      {/* Alert type info + enable toggle */}
-                      <div className="flex items-center justify-between sm:justify-start gap-3">
-                        <Switch
-                          checked={pref.is_enabled}
-                          onCheckedChange={(checked) => updatePref(pref.alert_type, 'is_enabled', checked)}
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-foreground">{config.label}</p>
-                          <p className="text-xs text-muted-foreground">{config.description}</p>
+                    <div className="flex items-center gap-3">
+                      <Switch
+                        checked={pref.is_enabled}
+                        onCheckedChange={(checked) => updatePref(pref.alert_type, 'is_enabled', checked)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground">{config.label}</p>
+                        <p className="text-xs text-muted-foreground">{config.description}</p>
+                      </div>
+
+                      {/* Active channel indicators */}
+                      {pref.is_enabled && activeChannels.length > 0 && (
+                        <div className="hidden sm:flex items-center gap-1.5">
+                          {pref.channel_inapp && (
+                            <div className="p-1 rounded bg-secondary" title="In-App">
+                              <Monitor className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                          )}
+                          {pref.channel_slack && (
+                            <div className="p-1 rounded bg-secondary" title="Slack">
+                              <SlackIcon className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+                          {pref.channel_intercom && (
+                            <div className="p-1 rounded bg-secondary" title="Intercom">
+                              <IntercomIcon className="w-3.5 h-3.5" />
+                            </div>
+                          )}
+                          {pref.channel_email && (
+                            <div className="p-1 rounded bg-secondary" title="Email">
+                              <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                            </div>
+                          )}
                         </div>
-                      </div>
+                      )}
 
-                      {/* Channel toggles */}
-                      <div className="flex sm:justify-center">
-                        <div className="sm:hidden text-xs text-muted-foreground mr-2">In-App</div>
-                        <Switch
-                          checked={pref.channel_inapp}
-                          onCheckedChange={(checked) => updatePref(pref.alert_type, 'channel_inapp', checked)}
-                          disabled={!pref.is_enabled}
-                        />
-                      </div>
-                      <div className="flex sm:justify-center">
-                        <div className="sm:hidden text-xs text-muted-foreground mr-2">Slack</div>
-                        <Switch
-                          checked={pref.channel_slack}
-                          onCheckedChange={(checked) => updatePref(pref.alert_type, 'channel_slack', checked)}
-                          disabled={!pref.is_enabled}
-                        />
-                      </div>
-                      <div className="flex sm:justify-center">
-                        <div className="sm:hidden text-xs text-muted-foreground mr-2">Email</div>
-                        <Switch
-                          checked={pref.channel_email}
-                          onCheckedChange={(checked) => updatePref(pref.alert_type, 'channel_email', checked)}
-                          disabled={!pref.is_enabled}
-                        />
-                      </div>
+                      {/* Customize button */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCustomizeAlertType(pref.alert_type)}
+                        disabled={!pref.is_enabled}
+                        className="flex items-center gap-1.5 shrink-0"
+                      >
+                        <Settings2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Customize</span>
+                      </Button>
                     </div>
-
-                    {/* Threshold input */}
-                    {config.hasThreshold && pref.is_enabled && (
-                      <div className="mt-3 flex items-center gap-2 pl-12">
-                        <span className="text-sm text-muted-foreground">{config.thresholdLabel}:</span>
-                        <Input
-                          type="number"
-                          className="w-24 h-8 text-sm"
-                          value={pref.threshold_value ?? ''}
-                          onChange={(e) => {
-                            const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                            updatePref(pref.alert_type, 'threshold_value', val);
-                          }}
-                          step={pref.alert_type === 'volume_spike' ? '0.5' : '5'}
-                          min={pref.alert_type === 'volume_spike' ? '1' : '0'}
-                          max={pref.alert_type === 'volume_spike' ? '10' : '100'}
-                        />
-                        <span className="text-sm text-muted-foreground">{config.thresholdUnit}</span>
-                      </div>
-                    )}
                   </div>
                 );
               })}
             </div>
           </CardContent>
         </Card>
+
+        {/* Customize Alert Dialog */}
+        <Dialog open={!!customizeAlertType} onOpenChange={(open) => !open && setCustomizeAlertType(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{editingConfig?.label}</DialogTitle>
+              <DialogDescription>{editingConfig?.description}</DialogDescription>
+            </DialogHeader>
+
+            {editingPref && editingConfig && (
+              <div className="space-y-6 pt-2">
+                {/* Channels */}
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-foreground">Notification Channels</p>
+                  {CHANNEL_CONFIG.map(channel => (
+                    <div key={channel.key} className="flex items-center justify-between py-1.5">
+                      <div className="flex items-center gap-2.5">
+                        {channel.customIcon === 'slack' ? (
+                          <SlackIcon className="w-5 h-5" />
+                        ) : channel.customIcon === 'intercom' ? (
+                          <IntercomIcon className="w-5 h-5" />
+                        ) : channel.icon ? (
+                          <channel.icon className="w-5 h-5 text-muted-foreground" />
+                        ) : null}
+                        <span className="text-sm text-foreground">{channel.label}</span>
+                      </div>
+                      <Switch
+                        checked={!!editingPref[channel.key]}
+                        onCheckedChange={(checked) => updatePref(editingPref.alert_type, channel.key, checked)}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Threshold */}
+                {editingConfig.hasThreshold && (
+                  <div className="space-y-2 pt-2 border-t border-border">
+                    <p className="text-sm font-medium text-foreground pt-2">{editingConfig.thresholdLabel}</p>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        className="w-28 h-9 text-sm"
+                        value={editingPref.threshold_value ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                          updatePref(editingPref.alert_type, 'threshold_value', val);
+                        }}
+                        step={editingPref.alert_type === 'volume_spike' ? '0.5' : '5'}
+                        min={editingPref.alert_type === 'volume_spike' ? '1' : '0'}
+                        max={editingPref.alert_type === 'volume_spike' ? '10' : '100'}
+                      />
+                      <span className="text-sm text-muted-foreground">{editingConfig.thresholdUnit}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Email Digests */}
         <Card className="animate-slide-up stagger-2">

@@ -29,10 +29,8 @@ import {
 } from '@/lib/api/feedback-sources';
 import { integrationsAPI, Integration } from '@/lib/api/integrations';
 import {
-  Slack,
   Webhook,
   MessageCircle,
-  MessageSquare,
   Mail,
   ArrowLeft,
   Loader2,
@@ -43,11 +41,13 @@ import {
   ChevronRight,
   Inbox,
 } from 'lucide-react';
+import { SlackIcon } from '@/components/icons/SlackIcon';
+import { IntercomIcon } from '@/components/icons/IntercomIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
-  slack: Slack,
-  intercom: MessageSquare,
+  slack: SlackIcon,
+  intercom: IntercomIcon,
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,

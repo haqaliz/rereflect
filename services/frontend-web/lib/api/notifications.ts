@@ -24,6 +24,7 @@ export interface AlertPreference {
   channel_email: boolean;
   channel_slack: boolean;
   channel_inapp: boolean;
+  channel_intercom: boolean;
   threshold_value: number | null;
   retention_days: number;
 }
