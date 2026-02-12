@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Montserrat, Merriweather, Ubuntu_Mono } from "next/font/google";
-import { IntercomProvider } from "@/components/IntercomProvider";
 import "./globals.css";
 
 const montserrat = Montserrat({
@@ -87,7 +86,6 @@ export default function RootLayout({
       </head>
       <body className={`${montserrat.variable} ${merriweather.variable} ${ubuntuMono.variable} antialiased font-sans`}>
         {children}
-        <IntercomProvider />
       </body>
     </html>
   );
