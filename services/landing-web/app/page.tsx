@@ -227,6 +227,12 @@ export default function Home() {
             >
               Pricing
             </a>
+            <Link
+              href="/integrations"
+              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Integrations
+            </Link>
           </div>
 
           <div className="flex items-center gap-3">
@@ -885,6 +891,11 @@ export default function Home() {
                     Pricing
                   </a>
                 </li>
+                <li>
+                  <Link href="/integrations" className="hover:text-foreground transition-colors">
+                    Integrations
+                  </Link>
+                </li>
               </ul>
             </div>
           </div>
@@ -894,6 +905,7 @@ export default function Home() {
             <p>2025 Rereflect. All rights reserved.</p>
             <div className="flex gap-6">
               <Link href="/changelog" className="hover:text-foreground transition-colors">Changelog</Link>
+              <Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link>
               <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
             </div>
