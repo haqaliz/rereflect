@@ -55,6 +55,7 @@ def _html_to_text(html: str) -> str:
 _FORWARDING_DELIMITERS = [
     re.compile(r"^\s*-{3,}\s*Forwarded message\s*-{3,}", re.IGNORECASE | re.MULTILINE),
     re.compile(r"^\s*-{3,}\s*Original Message\s*-{3,}", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^\s*Begin forwarded message\s*:", re.IGNORECASE | re.MULTILINE),
 ]
 
 # Header lines that follow forwarding delimiters (From:, Date:, Subject:, To:, Sent:, Cc:)

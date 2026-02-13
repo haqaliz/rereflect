@@ -104,6 +104,27 @@ class TestForwardingHeaderRemoval:
         assert "Please help me with this issue" in result
         assert "Original Message" not in result
 
+    def test_removes_apple_mail_forwarding_header(self):
+        """Should remove Apple Mail-style 'Begin forwarded message:' and the header block."""
+        text = (
+            "Begin forwarded message:\n"
+            "\n"
+            "From: DigitalOcean Support <support@digitalocean.com>\n"
+            "Subject: DigitalOcean monitoring triggered: CPU is running high\n"
+            "Date: February 12, 2026 at 7:11:45 PM GMT+3:30\n"
+            "To: aliz@foresightanalytics.ca\n"
+            "\n"
+            "CPU Utilization Percent is currently at 97.45%, above setting of 85.00% for the last 5m"
+        )
+        result = parse_email_body(None, text)
+        assert "CPU Utilization" in result
+        assert "97.45%" in result
+        assert "Begin forwarded message" not in result
+        assert "From: DigitalOcean" not in result
+        assert "Subject: DigitalOcean" not in result
+        assert "Date: February" not in result
+        assert "To: aliz" not in result
+
     def test_preserves_content_before_forwarding_header(self):
         """Should preserve any note added by the forwarder before the header."""
         text = (
