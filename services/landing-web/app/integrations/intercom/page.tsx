@@ -340,36 +340,35 @@ export default function IntercomIntegrationPage() {
       <section className="relative z-10 py-24 md:py-32">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
+              <ArrowRight className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold text-primary">Get Started</span>
+            </div>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              Setup in 5 steps
+              Set up in{' '}
+              <span className="bg-gradient-to-r from-primary via-chart-5 to-accent bg-clip-text text-transparent">
+                {integration.setupSteps.length} simple steps
+              </span>
             </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Connect your Intercom workspace to Rereflect in minutes.
-            </p>
           </div>
 
-          <div className="max-w-3xl mx-auto">
-            <div className="relative">
-              {/* Vertical connecting line */}
-              <div className="absolute left-[23px] top-12 bottom-12 w-0.5 bg-border" />
-
-              {/* Steps */}
-              <div className="space-y-8">
-                {integration.setupSteps.map((step) => (
-                  <div key={step.step} className="setup-step relative flex gap-6">
-                    <div className="relative z-10 w-12 h-12 rounded-full bg-gradient-to-br from-primary to-chart-5 flex items-center justify-center shrink-0 shadow-lg shadow-primary/25">
-                      <span className="text-lg font-bold text-white">{step.step}</span>
-                    </div>
-                    <div className="flex-1 pt-2">
-                      <h3 className="text-xl font-bold text-foreground mb-2">{step.title}</h3>
-                      <p className="text-muted-foreground leading-relaxed">
-                        {step.description}
-                      </p>
-                    </div>
+          <div className="max-w-2xl mx-auto space-y-8">
+            {integration.setupSteps.map((step, index) => (
+              <div key={step.step} className="setup-step flex gap-6">
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-chart-5 flex items-center justify-center text-white font-bold shrink-0">
+                    {step.step}
                   </div>
-                ))}
+                  {index < integration.setupSteps.length - 1 && (
+                    <div className="w-px flex-1 bg-border mt-3" />
+                  )}
+                </div>
+                <div className="pb-8">
+                  <h3 className="text-lg font-bold text-foreground mb-2">{step.title}</h3>
+                  <p className="text-muted-foreground leading-relaxed">{step.description}</p>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>

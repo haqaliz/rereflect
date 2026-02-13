@@ -335,47 +335,33 @@ export default function EmailIntegrationPage() {
           <div className="text-center mb-16">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
               <SettingsIcon className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">Setup Guide</span>
+              <span className="text-sm font-semibold text-primary">Get Started</span>
             </div>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              Get started in 2 minutes
+              Set up in{' '}
+              <span className="bg-gradient-to-r from-primary via-chart-5 to-accent bg-clip-text text-transparent">
+                {integration.setupSteps.length} simple steps
+              </span>
             </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Follow these steps to start forwarding customer emails to Rereflect
-            </p>
           </div>
 
-          <div className="max-w-3xl mx-auto space-y-6">
+          <div className="max-w-2xl mx-auto space-y-8">
             {integration.setupSteps.map((step, index) => (
-              <div
-                key={index}
-                className="flex gap-6 bg-card rounded-3xl border border-border p-8 transition-all duration-300 hover:shadow-lg hover:border-accent/30"
-              >
-                <div className="flex-shrink-0">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-chart-3 text-white font-bold">
+              <div key={step.step} className="flex gap-6">
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-chart-5 flex items-center justify-center text-white font-bold shrink-0">
                     {step.step}
                   </div>
                   {index < integration.setupSteps.length - 1 && (
-                    <div className="ml-5 mt-2 h-full border-l-2 border-dashed border-border" />
+                    <div className="w-px flex-1 bg-border mt-3" />
                   )}
                 </div>
-                <div className="flex-1 pb-8">
-                  <h3 className="text-xl font-bold text-foreground mb-2">{step.title}</h3>
+                <div className="pb-8">
+                  <h3 className="text-lg font-bold text-foreground mb-2">{step.title}</h3>
                   <p className="text-muted-foreground leading-relaxed">{step.description}</p>
                 </div>
               </div>
             ))}
-          </div>
-
-          <div className="text-center mt-12">
-            <a href={`${APP_URL}/settings/integrations`}>
-              <button className="group px-8 py-4 text-base font-semibold text-primary-foreground bg-gradient-to-r from-accent to-chart-3 rounded-2xl transition-all duration-300 hover:shadow-xl hover:shadow-accent/25 hover:scale-[1.02]">
-                <span className="flex items-center justify-center gap-2">
-                  Start Forwarding Emails
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </span>
-              </button>
-            </a>
           </div>
         </div>
       </section>
