@@ -53,8 +53,12 @@ def _verify_webhook_signature(body: bytes, headers: dict) -> bool:
 def _get_redis():
     """Get a Redis connection for rate limiting and dedup."""
     import redis
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-    return redis.from_url(redis_url)
+    host = os.environ.get("REDIS_HOST", "localhost")
+    port = int(os.environ.get("REDIS_PORT", "6379"))
+    password = os.environ.get("REDIS_PASSWORD", "")
+    if password:
+        return redis.from_url(f"redis://:{password}@{host}:{port}/0")
+    return redis.from_url(f"redis://{host}:{port}/0")
 
 
 def queue_source_event(
