@@ -24,6 +24,7 @@ TEMPLATE_WEEKLY_DIGEST = os.getenv("RESEND_TEMPLATE_WEEKLY_DIGEST")
 TEMPLATE_ROLE_CHANGE = os.getenv("RESEND_TEMPLATE_ROLE_CHANGE")
 TEMPLATE_MEMBER_REMOVED = os.getenv("RESEND_TEMPLATE_MEMBER_REMOVED")
 TEMPLATE_DAILY_ALERT_DIGEST = os.getenv("RESEND_TEMPLATE_DAILY_ALERT_DIGEST")
+TEMPLATE_ALERT_NOTIFICATION = os.getenv("RESEND_TEMPLATE_ALERT_NOTIFICATION")
 
 # Resend API endpoints
 RESEND_API_BASE = "https://api.resend.com"
@@ -102,6 +103,41 @@ def _send_email(to: str, subject: str, html: str) -> bool:
             },
             json={
                 "from": f"{FROM_NAME} <{FROM_EMAIL}>",
+                "to": [to],
+                "subject": subject,
+                "html": html,
+            },
+            timeout=30,
+        )
+
+        if response.status_code == 200:
+            email_id = response.json().get("id", "unknown")
+            logger.info(f"Email sent successfully to {to}: {email_id}")
+            return True
+        else:
+            logger.error(f"Failed to send email to {to}: {response.status_code} - {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to send email to {to}: {e}")
+        return False
+
+
+def _send_email_with_from(to: str, subject: str, html: str, from_email: str) -> bool:
+    """Send email with rendered HTML content using a custom from address."""
+    if not _is_email_enabled():
+        logger.warning(f"Email not sent (RESEND_API_KEY not configured): {subject} to {to}")
+        return False
+
+    try:
+        response = requests.post(
+            f"{RESEND_API_BASE}/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": from_email,
                 "to": [to],
                 "subject": subject,
                 "html": html,
@@ -290,4 +326,56 @@ def send_member_removed_email(
             "ORGANIZATION_NAME": organization_name,
             "REMOVED_BY_EMAIL": removed_by_email,
         },
+    )
+
+
+# Alert email subject lines per alert type
+ALERT_SUBJECTS = {
+    "urgent_feedback": "[Rereflect] Urgent feedback detected",
+    "sentiment_spike": "[Rereflect] Sentiment spike alert",
+    "churn_risk": "[Rereflect] Churn risk detected",
+    "volume_spike": "[Rereflect] Feedback volume spike",
+}
+
+ALERT_FROM_EMAIL = "Rereflect Alerts <alerts@rereflect.ca>"
+
+
+def send_alert_email(
+    to_email: str,
+    alert_type: str,
+    alert_data: dict,
+) -> bool:
+    """Send an alert notification email for a specific alert type."""
+    if not _is_email_enabled():
+        logger.warning(f"Alert email not sent (RESEND_API_KEY not configured) to {to_email}")
+        return False
+
+    if not TEMPLATE_ALERT_NOTIFICATION:
+        logger.warning(f"Alert email not sent (template_id not configured) to {to_email}")
+        return False
+
+    template = _get_template(TEMPLATE_ALERT_NOTIFICATION)
+    if not template:
+        logger.error(f"Alert email not sent (failed to fetch template) to {to_email}")
+        return False
+
+    html, _subject = template
+    dashboard_url = f"{APP_URL}/dashboard"
+    unsubscribe_url = f"{APP_URL}/settings/notifications"
+
+    rendered_html, _ = _render_template(html, "", {
+        "ALERT_TYPE": alert_type.replace("_", " ").title(),
+        "ALERT_TITLE": alert_data.get("title", ""),
+        "ALERT_DESCRIPTION": alert_data.get("description", ""),
+        "DASHBOARD_URL": dashboard_url,
+        "UNSUBSCRIBE_URL": unsubscribe_url,
+    })
+
+    subject = ALERT_SUBJECTS.get(alert_type, f"[Rereflect] {alert_type.replace('_', ' ').title()}")
+
+    return _send_email_with_from(
+        to=to_email,
+        subject=subject,
+        html=rendered_html,
+        from_email=ALERT_FROM_EMAIL,
     )

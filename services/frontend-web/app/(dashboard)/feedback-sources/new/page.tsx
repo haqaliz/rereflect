@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import {
   feedbackSourcesAPI,
+  FeedbackSource,
   SourceTypeInfo,
   CreateFeedbackSourceRequest,
   TRIGGER_OPTIONS,
@@ -40,6 +41,8 @@ import {
   Plus,
   ChevronRight,
   Inbox,
+  Copy,
+  CheckCircle,
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
@@ -62,7 +65,7 @@ const SOURCE_COLORS: Record<string, string> = {
   email: 'text-amber-600',
 };
 
-type Step = 'type' | 'integration' | 'triggers' | 'mapping' | 'confirm';
+type Step = 'type' | 'integration' | 'triggers' | 'mapping' | 'confirm' | 'email-setup';
 
 function NewSourceContent() {
   const router = useRouter();
@@ -81,6 +84,8 @@ function NewSourceContent() {
   const [step, setStep] = useState<Step>(getInitialStep());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createdSource, setCreatedSource] = useState<FeedbackSource | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Data
   const [sourceTypes, setSourceTypes] = useState<SourceTypeInfo[]>([]);
@@ -273,12 +278,27 @@ function NewSourceContent() {
         auto_import: form.auto_import,
       };
 
-      await feedbackSourcesAPI.create(data);
-      router.push('/feedback-sources');
+      const source = await feedbackSourcesAPI.create(data);
+
+      if (selectedType === 'email') {
+        setCreatedSource(source);
+        setStep('email-setup');
+      } else {
+        router.push('/feedback-sources');
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create feedback source');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const copyInboundAddress = () => {
+    const address = createdSource?.provider_config?.inbound_address;
+    if (address) {
+      navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -527,7 +547,7 @@ function NewSourceContent() {
                 <Label htmlFor="name">Source Name (optional)</Label>
                 <Input
                   id="name"
-                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : 'Product Feedback Webhook'}`}
+                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
                   value={form.name}
                   onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                 />
@@ -931,6 +951,67 @@ function NewSourceContent() {
                   {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   Create Source
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step: Email Setup (post-creation) */}
+        {step === 'email-setup' && createdSource && (
+          <Card className="animate-slide-up">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-green-100 dark:bg-green-950 rounded-full">
+                  <CheckCircle className="w-6 h-6 text-green-600" />
+                </div>
+                <div>
+                  <CardTitle>Email Source Created</CardTitle>
+                  <CardDescription>
+                    Set up email forwarding to start receiving feedback
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Inbound Address */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Your unique forwarding address</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={createdSource.provider_config?.inbound_address || ''}
+                    className="font-mono text-sm"
+                  />
+                  <Button variant="outline" onClick={copyInboundAddress}>
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Forwarding Instructions */}
+              <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                <h4 className="font-semibold text-foreground">Setup instructions</h4>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                  <li>Open your email client (Gmail, Outlook, etc.)</li>
+                  <li>Create a forwarding rule for your support inbox</li>
+                  <li>Set the destination to the address above</li>
+                  <li>Emails forwarded will appear as feedback items</li>
+                </ol>
+              </div>
+
+              <div className="p-3 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded-lg flex items-start gap-2 text-sm">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>
+                  Only the email body content is captured. Sender information is not stored for privacy.
+                </span>
+              </div>
+
+              <div className="flex justify-end pt-4 border-t border-border">
+                <Link href="/feedback-sources">
+                  <Button>
+                    Done
+                  </Button>
+                </Link>
               </div>
             </CardContent>
           </Card>

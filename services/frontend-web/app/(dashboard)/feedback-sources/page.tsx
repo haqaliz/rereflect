@@ -253,6 +253,11 @@ function FeedbackSourcesContent() {
                               {source.source_type === 'intercom' && source.provider_config?.workspace_name && (
                                 <span>{source.provider_config.workspace_name}</span>
                               )}
+                              {source.source_type === 'email' && source.provider_config?.inbound_address && (
+                                <span className="font-mono text-xs truncate max-w-[300px]">
+                                  {source.provider_config.inbound_address}
+                                </span>
+                              )}
                               {source.source_type === 'webhook' && source.webhook_url && (
                                 <span className="font-mono text-xs truncate max-w-[300px]">
                                   {source.webhook_url}

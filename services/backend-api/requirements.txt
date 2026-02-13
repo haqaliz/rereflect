@@ -21,6 +21,7 @@ stripe==8.0.0                # Stripe Python SDK
 
 # Email (Resend)
 resend==2.0.0                # Resend email API
+svix==1.41.0                 # Resend webhook signature verification
 
 # Google OAuth
 google-auth>=2.27.0          # Google ID token verification

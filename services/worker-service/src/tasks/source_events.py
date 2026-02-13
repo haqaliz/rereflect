@@ -152,6 +152,12 @@ def _find_matching_sources(
             else:
                 return []
 
+    # For email events, match by source_id directly (webhook handler already resolved)
+    elif source_type == "email":
+        source_id = provider_context.get("source_id")
+        if source_id:
+            query = query.filter(FeedbackSource.id == source_id)
+
     # For webhook events, match by source_id directly
     elif source_type == "webhook":
         source_id = provider_context.get("source_id")

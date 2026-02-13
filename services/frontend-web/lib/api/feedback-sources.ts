@@ -260,6 +260,10 @@ export const TRIGGER_OPTIONS: Record<string, { key: string; label: string; descr
     { key: 'mentions.bot', label: 'Bot Mentions', description: 'When bot is mentioned' },
     { key: 'keywords', label: 'Keywords', description: 'Messages containing keywords', hasValues: true },
   ],
+  email: [
+    { key: 'all_messages', label: 'All Emails', description: 'Process every forwarded email' },
+    { key: 'keywords', label: 'Keywords (optional)', description: 'Only emails containing keywords', hasValues: true },
+  ],
 };
 
 // ============ Default Field Mapping ============

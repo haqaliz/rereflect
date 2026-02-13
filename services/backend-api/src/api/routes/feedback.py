@@ -483,6 +483,12 @@ def bulk_delete_feedback(
             detail="No feedback IDs provided"
         )
 
+    # Nullify references in slack_alert_logs before deleting
+    from src.models.integration import SlackAlertLog
+    db.query(SlackAlertLog).filter(
+        SlackAlertLog.feedback_id.in_(feedback_ids)
+    ).update({SlackAlertLog.feedback_id: None}, synchronize_session=False)
+
     # Delete all feedback items that belong to the current organization
     deleted_count = db.query(FeedbackItem).filter(
         FeedbackItem.id.in_(feedback_ids),

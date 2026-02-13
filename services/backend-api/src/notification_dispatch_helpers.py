@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
+from src.services.email_service import send_alert_email
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,33 +37,49 @@ def _create_targeted_notifications(
     for uid in target_user_ids:
         pref = pref_map.get(uid)
 
-        # Default: enabled, inapp on
+        # Default: enabled, inapp on, email off
         is_enabled = pref.is_enabled if pref else True
         channel_inapp = pref.channel_inapp if pref else True
+        channel_email = pref.channel_email if pref else False
 
-        if not is_enabled or not channel_inapp:
+        if not is_enabled:
             continue
 
-        # Determine retention
-        if pref and pref.retention_days:
-            retention_days = pref.retention_days
-        else:
-            user = db.query(User).filter(User.id == uid).first()
-            retention_days = user.notification_retention_days if user else 30
+        # In-app notification
+        if channel_inapp:
+            # Determine retention
+            if pref and pref.retention_days:
+                retention_days = pref.retention_days
+            else:
+                user = db.query(User).filter(User.id == uid).first()
+                retention_days = user.notification_retention_days if user else 30
 
-        notification = Notification(
-            user_id=uid,
-            organization_id=org_id,
-            type=alert_type,
-            title=title,
-            message=message,
-            link=link,
-            metadata_=metadata,
-            created_at=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(days=retention_days),
-        )
-        db.add(notification)
-        count += 1
+            notification = Notification(
+                user_id=uid,
+                organization_id=org_id,
+                type=alert_type,
+                title=title,
+                message=message,
+                link=link,
+                metadata_=metadata,
+                created_at=datetime.utcnow(),
+                expires_at=datetime.utcnow() + timedelta(days=retention_days),
+            )
+            db.add(notification)
+            count += 1
+
+        # Email notification
+        if channel_email:
+            user = db.query(User).filter(User.id == uid).first()
+            if user:
+                send_alert_email(
+                    to_email=user.email,
+                    alert_type=alert_type,
+                    alert_data={
+                        "title": title,
+                        "description": message,
+                    },
+                )
 
     return count
 

@@ -191,7 +191,7 @@ def list_source_types():
             name="Email",
             description="Forward emails to become feedback",
             requires_integration=False,
-            available=False,  # Coming soon
+            available=True,
         ),
     ]
 
@@ -311,8 +311,24 @@ def create_feedback_source(
                 }
             )
 
+    # Email feature gating
+    if data.source_type == "email":
+        if not has_feature(plan, "email_integration"):
+            required_plan = get_plan_for_feature("email_integration")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "feature_not_available",
+                    "feature": "email_integration",
+                    "current_plan": plan,
+                    "required_plan": required_plan,
+                    "message": f"Email integration requires the {required_plan.title()} plan or higher.",
+                    "upgrade_url": "/settings/billing"
+                }
+            )
+
     # Check if type is available
-    unavailable_types = ["discord", "email"]
+    unavailable_types = ["discord"]
     if data.source_type in unavailable_types:
         raise HTTPException(status_code=400, detail=f"Source type '{data.source_type}' is coming soon")
 
@@ -366,6 +382,11 @@ def create_feedback_source(
     if data.source_type == "webhook":
         webhook_id = str(uuid.uuid4())
         provider_config["webhook_id"] = webhook_id
+
+    if data.source_type == "email":
+        # Generate unique inbound address: feedback-{8char_hash}@rereflect.ca
+        address_hash = uuid.uuid4().hex[:8]
+        provider_config["inbound_address"] = f"feedback-{address_hash}@rereflect.ca"
 
     # Create the source
     source = FeedbackSource(

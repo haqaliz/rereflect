@@ -58,7 +58,7 @@ class SlackAlertLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     integration_id = Column(Integer, ForeignKey("integrations.id"), nullable=False)
-    feedback_id = Column(Integer, ForeignKey("feedback_items.id"), nullable=True)  # NULL for digests
+    feedback_id = Column(Integer, ForeignKey("feedback_items.id", ondelete="SET NULL"), nullable=True)  # NULL for digests
 
     alert_type = Column(String(50), nullable=False)  # 'urgent', 'negative', 'batch', 'daily_digest', 'weekly_digest'
     status = Column(String(20), nullable=False)  # 'sent', 'failed', 'pending'

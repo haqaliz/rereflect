@@ -43,6 +43,7 @@ import {
   Check,
   Trash2,
   RefreshCw,
+  Info,
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
@@ -163,6 +164,15 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const copyWebhookUrl = () => {
     if (source?.webhook_url) {
       navigator.clipboard.writeText(source.webhook_url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const copyInboundAddress = () => {
+    const address = source?.provider_config?.inbound_address;
+    if (address) {
+      navigator.clipboard.writeText(address);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -446,6 +456,45 @@ requests.post(
                     </SyntaxHighlighter>
                   </TabsContent>
                 </Tabs>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Email Inbound Address (for email sources) */}
+        {source.source_type === 'email' && source.provider_config?.inbound_address && (
+          <Card className="animate-slide-up">
+            <CardHeader>
+              <CardTitle>Forwarding Address</CardTitle>
+              <CardDescription>Forward emails to this address to create feedback items</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={source.provider_config.inbound_address}
+                  className="font-mono text-sm"
+                />
+                <Button variant="outline" onClick={copyInboundAddress}>
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                </Button>
+              </div>
+
+              <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                <h4 className="font-semibold text-foreground text-sm">Setup instructions</h4>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
+                  <li>Open your email client (Gmail, Outlook, etc.)</li>
+                  <li>Create a forwarding rule for your support inbox</li>
+                  <li>Set the destination to the address above</li>
+                  <li>Emails forwarded will appear as feedback items</li>
+                </ol>
+              </div>
+
+              <div className="p-3 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded-lg flex items-start gap-2 text-sm">
+                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                <span>
+                  Only the email body content is captured. Sender information is not stored for privacy.
+                </span>
               </div>
             </CardContent>
           </Card>

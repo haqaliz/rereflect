@@ -3,12 +3,14 @@ Source adapters for handling provider-specific event processing.
 """
 
 from .base import BaseSourceAdapter
+from .email import EmailAdapter
 from .intercom import IntercomAdapter
 from .slack import SlackAdapter
 from .webhook import WebhookAdapter
 
 __all__ = [
     "BaseSourceAdapter",
+    "EmailAdapter",
     "IntercomAdapter",
     "SlackAdapter",
     "WebhookAdapter",
@@ -20,7 +22,7 @@ def get_adapter(source_type: str) -> BaseSourceAdapter:
     Get the appropriate adapter for a source type.
 
     Args:
-        source_type: The source type (slack, webhook, discord, etc.)
+        source_type: The source type (slack, webhook, email, etc.)
 
     Returns:
         An instance of the appropriate adapter
@@ -29,6 +31,7 @@ def get_adapter(source_type: str) -> BaseSourceAdapter:
         ValueError: If source type is not supported
     """
     adapters = {
+        "email": EmailAdapter,
         "intercom": IntercomAdapter,
         "slack": SlackAdapter,
         "webhook": WebhookAdapter,
