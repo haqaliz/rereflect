@@ -344,24 +344,24 @@ def run_changelog_sync():
     """Auto-sync changelog on startup. Called from main.py lifespan.
 
     Priority order:
-    1. Import from JSON file (exported during Docker build)
-    2. GitHub API if GITHUB_TOKEN and GITHUB_REPO are set
-    3. Local git log (for local development)
+    1. GitHub API if GITHUB_TOKEN and GITHUB_REPO are set (production)
+    2. Import from JSON file if present (fallback)
+    3. Local git log (local development)
     """
-    # Try JSON import first (exported during Docker build)
-    json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "changelog_commits.json")
-    if os.path.exists(json_path):
-        logger.info(f"Importing changelog from {json_path}...")
-        import_from_json(json_path)
-        return
-
-    # Try GitHub API
-    github_token = os.getenv("GITHUB_TOKEN")
-    github_repo = os.getenv("GITHUB_REPO")
+    # Try GitHub API (production)
+    github_token = os.getenv("GITHUB_TOKEN", "").strip('"\'')
+    github_repo = os.getenv("GITHUB_REPO", "").strip('"\'')
 
     if github_token and github_repo:
         logger.info(f"Syncing changelog from GitHub API ({github_repo})...")
         sync_from_github(github_repo, github_token, limit=100)
+        return
+
+    # Try JSON import (fallback)
+    json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "changelog_commits.json")
+    if os.path.exists(json_path):
+        logger.info(f"Importing changelog from {json_path}...")
+        import_from_json(json_path)
         return
 
     # Local dev fallback: try git log directly

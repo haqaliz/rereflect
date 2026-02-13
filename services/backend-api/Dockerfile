@@ -3,11 +3,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies (git needed for changelog export during build)
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -16,9 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
-
-# Export changelog from git history during build (JSON file used on startup)
-RUN python scripts/sync_changelog.py --export changelog_commits.json --all || echo "Changelog export skipped (no git history)"
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
