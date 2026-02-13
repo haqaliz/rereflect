@@ -2,7 +2,7 @@
 
 **Product**: Rereflect - AI-powered customer feedback analysis
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-02-13
 
 ---
 
@@ -36,23 +36,11 @@
 
 ## Signup Acquisition Channels
 
-### 1. Product Hunt Launch (Target: 30-50 signups)
+### 1. Product Hunt Launch (Target: 30-50 signups) - LAUNCHED
 
-**Prep checklist**:
-- [ ] Create compelling tagline (e.g., "Turn messy feedback into product decisions")
-- [ ] Record 2-min demo video showing pain point → solution
-- [ ] Prepare 5-10 screenshots with annotations
-- [ ] Write launch day post for social media
-- [ ] Line up 10+ supporters to upvote/comment at launch
-- [ ] Prepare founder responses for comments
+**Launched**: Tuesday, February 10, 2026
 
-**Best practices**:
-- Launch on Tuesday/Wednesday at 12:01 AM PST
-- Respond to every comment within 1 hour
-- Offer extended trial (30 days) for PH users
-- Post on Twitter/LinkedIn at 9 AM, 12 PM, 5 PM
-
-**Expected outcome**: 30-50 signups, 200-500 website visits
+**Status**: Live on Product Hunt — monitor results and engage with comments
 
 ---
 
@@ -122,7 +110,6 @@ Cheers,
 - "How to prioritize features using customer feedback"
 
 **Quick wins** (short-term):
-- [ ] Create a free "Feedback Analysis Template" (Notion/Sheets)
 - [ ] Write a Twitter thread on "5 feedback mistakes that kill startups"
 - [ ] Record a Loom: "How I analyze 500 feedbacks in 5 minutes"
 
@@ -131,7 +118,8 @@ Cheers,
 ### 5. Partnerships & Integrations (Target: 10-20 signups)
 
 **Integration directories**:
-- [ ] List on Slack App Directory (you have Slack integration!)
+- [ ] List on Slack App Directory (working Slack integration)
+- [ ] List on Intercom App Store (working Intercom integration)
 - [ ] Create integration pages for Intercom, Zendesk users searching
 
 **Partner with complementary tools**:
@@ -143,8 +131,8 @@ Cheers,
 
 ## Weekly Action Plan
 
-### Week 1: Foundation
-- [x] Set up analytics (Mixpanel - signup, login, CSV upload, dashboard view, feedback view tracking)
+### Week 1: Foundation - COMPLETE
+- [x] Set up analytics (Mixpanel - production only, signup/login/CSV/dashboard/feedback tracking)
 - [x] Create landing page with clear value prop
 - [x] Create Twitter/X account (@rereflectapp)
 - [x] Add Product Hunt badge + Twitter link to landing page
@@ -153,26 +141,27 @@ Cheers,
   - [x] SaaSHub
   - [x] AlternativeTo
   - [x] Uneed
-  - [x] Product Hunt (profile ready, launch pending)
-  - [x] Hacker News (Show HN post prepared)
-- [ ] Create feedback analysis template (lead magnet) - template ready, Gumroad paused
+  - [x] Product Hunt (launched Feb 10)
+  - [x] Hacker News (Show HN posted: news.ycombinator.com/item?id=46892290)
 
-### Week 2: Content & Community
+### Week 2: Launch & Directories - IN PROGRESS
+- [x] Product Hunt launch (Feb 10, Tuesday)
+- [x] Show HN post on Hacker News
+- [ ] List on Slack App Directory
+- [ ] List on Intercom App Store
 - [ ] Write 2 blog posts (SEO-focused)
-- [ ] Join 3 founder communities, start participating
 - [ ] Post first "building in public" update
 
-### Week 3: Outreach
+### Week 3: Content & Community
+- [ ] Join 3 founder communities, start participating
+- [ ] Write a Twitter thread on "5 feedback mistakes that kill startups"
+- [ ] Record a Loom: "How I analyze 500 feedbacks in 5 minutes"
+
+### Week 4: Outreach
 - [ ] Build list of 50 ICP prospects (see Outreach Playbook below)
 - [ ] Send first 20 personalized emails
 - [ ] Schedule 5+ demo calls
 - [ ] Follow up on community conversations
-
-### Week 4: Launch
-- [ ] Product Hunt launch (Tuesday or Wednesday, 12:01 AM PST)
-- [ ] Post "Show HN" on Hacker News (same week)
-- [ ] Announce on all channels
-- [ ] Follow up with all demo prospects
 - [ ] Start onboarding first users
 
 ---
@@ -307,11 +296,13 @@ Either way, wishing you continued growth with [Product]!
 
 | Platform | Status | Date Submitted | Link |
 |----------|--------|----------------|------|
-| Product Hunt | Profile ready, launch pending | Feb 2026 | producthunt.com/products/rereflect |
+| Product Hunt | Launched | Feb 10, 2026 | producthunt.com/products/rereflect |
+| Hacker News | Show HN posted | Feb 5, 2026 | news.ycombinator.com/item?id=46892290 |
 | SaaSHub | Submitted | Feb 2026 | saashub.com |
 | AlternativeTo | Submitted | Feb 2026 | alternativeto.net |
 | Uneed | Submitted | Feb 2026 | uneed.best |
-| Hacker News | Show HN post prepared | Pending | news.ycombinator.com |
+| Slack App Directory | Pending | - | api.slack.com/apps |
+| Intercom App Store | Pending | - | intercom.com/app-store |
 | BetaList | Skipped (paid only, $49+) | - | - |
 | There's An AI For That | Skipped (paid only, $49+) | - | - |
 
