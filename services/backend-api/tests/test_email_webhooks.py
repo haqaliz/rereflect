@@ -58,18 +58,26 @@ def _make_inbound_payload(
     text: str = "The dashboard is slow.",
     html: str = None,
     message_id: str = "<msg-001@mail.example.com>",
+    email_id: str = "email-001",
+    include_body: bool = True,
 ) -> dict:
-    """Build a Resend inbound email webhook payload (matches real Resend format)."""
+    """Build a Resend inbound email webhook payload (matches real Resend format).
+
+    Set include_body=False to simulate the real Resend webhook which only sends
+    metadata (no html/text). The body must then be fetched via the Resend API.
+    """
     data = {
         "from": from_addr,
         "to": [to],
         "subject": subject,
-        "text": text,
         "message_id": message_id,
+        "email_id": email_id,
     }
-    if html:
-        data["html"] = html
-    return {"created_at": "2026-01-01T00:00:00.000Z", "data": data}
+    if include_body:
+        data["text"] = text
+        if html:
+            data["html"] = html
+    return {"created_at": "2026-01-01T00:00:00.000Z", "data": data, "type": "email.received"}
 
 
 # ============================================================================
@@ -368,3 +376,211 @@ class TestWebhookSignatureVerification:
 
         result = _verify_webhook_signature(b'{"test": true}', {})
         assert result is True
+
+
+# ============================================================================
+# Resend API Fetch Tests (webhook has no body)
+# ============================================================================
+
+class TestEmailBodyFetchFromAPI:
+    """Tests for fetching email body via Resend API when webhook has no body."""
+
+    @patch("src.api.routes.email_webhooks._verify_webhook_signature", return_value=True)
+    @patch("src.api.routes.email_webhooks._get_redis")
+    @patch("src.api.routes.email_webhooks._fetch_email_content")
+    @patch("src.api.routes.email_webhooks.queue_source_event", return_value="task-api-fetch")
+    def test_fetches_body_from_api_when_webhook_has_no_body(
+        self,
+        mock_queue: MagicMock,
+        mock_fetch: MagicMock,
+        mock_redis: MagicMock,
+        mock_verify: MagicMock,
+        client: TestClient,
+        db: Session,
+        email_source: FeedbackSource,
+    ):
+        """When webhook payload has no html/text, should fetch from Resend API."""
+        mock_redis_instance = MagicMock()
+        mock_redis_instance.get.return_value = None
+        mock_redis_instance.incr.return_value = 1
+        mock_redis.return_value = mock_redis_instance
+
+        mock_fetch.return_value = {
+            "html": "<p>The checkout page is broken.</p>",
+            "text": "The checkout page is broken.",
+            "subject": "Product issue",
+        }
+
+        payload = _make_inbound_payload(
+            include_body=False,
+            email_id="recv-email-123",
+            message_id="<msg-api-fetch@mail.com>",
+        )
+        response = client.post(
+            "/api/v1/webhooks/email/inbound",
+            json=payload,
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "queued"
+        mock_fetch.assert_called_once_with("recv-email-123")
+        mock_queue.assert_called_once()
+
+    @patch("src.api.routes.email_webhooks._verify_webhook_signature", return_value=True)
+    @patch("src.api.routes.email_webhooks._get_redis")
+    @patch("src.api.routes.email_webhooks._fetch_email_content")
+    def test_empty_body_after_api_fetch_returns_skipped(
+        self,
+        mock_fetch: MagicMock,
+        mock_redis: MagicMock,
+        mock_verify: MagicMock,
+        client: TestClient,
+        db: Session,
+        email_source: FeedbackSource,
+    ):
+        """When API returns empty body too, should return skipped."""
+        mock_redis_instance = MagicMock()
+        mock_redis_instance.get.return_value = None
+        mock_redis_instance.incr.return_value = 1
+        mock_redis.return_value = mock_redis_instance
+
+        mock_fetch.return_value = {"html": None, "text": None}
+
+        payload = _make_inbound_payload(
+            include_body=False,
+            email_id="recv-email-empty",
+            message_id="<msg-empty@mail.com>",
+        )
+        response = client.post(
+            "/api/v1/webhooks/email/inbound",
+            json=payload,
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "skipped"
+        assert response.json()["reason"] == "empty_body"
+
+    @patch("src.api.routes.email_webhooks._verify_webhook_signature", return_value=True)
+    @patch("src.api.routes.email_webhooks._get_redis")
+    @patch("src.api.routes.email_webhooks._fetch_email_content")
+    def test_api_fetch_failure_returns_skipped(
+        self,
+        mock_fetch: MagicMock,
+        mock_redis: MagicMock,
+        mock_verify: MagicMock,
+        client: TestClient,
+        db: Session,
+        email_source: FeedbackSource,
+    ):
+        """When Resend API fails, should return skipped (empty body)."""
+        mock_redis_instance = MagicMock()
+        mock_redis_instance.get.return_value = None
+        mock_redis_instance.incr.return_value = 1
+        mock_redis.return_value = mock_redis_instance
+
+        mock_fetch.return_value = {}  # API failure
+
+        payload = _make_inbound_payload(
+            include_body=False,
+            email_id="recv-email-fail",
+            message_id="<msg-fail@mail.com>",
+        )
+        response = client.post(
+            "/api/v1/webhooks/email/inbound",
+            json=payload,
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "skipped"
+
+    @patch("src.api.routes.email_webhooks._verify_webhook_signature", return_value=True)
+    @patch("src.api.routes.email_webhooks._get_redis")
+    @patch("src.api.routes.email_webhooks.queue_source_event", return_value="task-inline")
+    def test_inline_body_skips_api_fetch(
+        self,
+        mock_queue: MagicMock,
+        mock_redis: MagicMock,
+        mock_verify: MagicMock,
+        client: TestClient,
+        db: Session,
+        email_source: FeedbackSource,
+    ):
+        """When webhook already has body, should NOT call Resend API."""
+        mock_redis_instance = MagicMock()
+        mock_redis_instance.get.return_value = None
+        mock_redis_instance.incr.return_value = 1
+        mock_redis.return_value = mock_redis_instance
+
+        payload = _make_inbound_payload(
+            text="Direct body text",
+            include_body=True,
+            message_id="<msg-inline@mail.com>",
+        )
+        with patch("src.api.routes.email_webhooks._fetch_email_content") as mock_fetch:
+            response = client.post(
+                "/api/v1/webhooks/email/inbound",
+                json=payload,
+            )
+            assert response.status_code == 200
+            assert response.json()["status"] == "queued"
+            mock_fetch.assert_not_called()
+
+
+# ============================================================================
+# _fetch_email_content Unit Tests
+# ============================================================================
+
+class TestFetchEmailContent:
+    """Unit tests for _fetch_email_content function."""
+
+    @patch("src.api.routes.email_webhooks.RESEND_API_KEY", "re_test_key")
+    @patch("src.api.routes.email_webhooks.requests.get")
+    def test_successful_fetch(self, mock_get: MagicMock):
+        """Should return email data on 200 response."""
+        from src.api.routes.email_webhooks import _fetch_email_content
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "html": "<p>Test content</p>",
+            "text": "Test content",
+            "subject": "Test",
+        }
+        mock_get.return_value = mock_response
+
+        result = _fetch_email_content("email-123")
+        assert result["html"] == "<p>Test content</p>"
+        assert result["text"] == "Test content"
+        mock_get.assert_called_once_with(
+            "https://api.resend.com/emails/receiving/email-123",
+            headers={"Authorization": "Bearer re_test_key"},
+            timeout=15,
+        )
+
+    @patch("src.api.routes.email_webhooks.RESEND_API_KEY", "re_test_key")
+    @patch("src.api.routes.email_webhooks.requests.get")
+    def test_api_error_returns_empty_dict(self, mock_get: MagicMock):
+        """Should return empty dict on non-200 response."""
+        from src.api.routes.email_webhooks import _fetch_email_content
+
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.text = "Not found"
+        mock_get.return_value = mock_response
+
+        result = _fetch_email_content("email-notfound")
+        assert result == {}
+
+    @patch("src.api.routes.email_webhooks.RESEND_API_KEY", None)
+    def test_missing_api_key_returns_empty_dict(self):
+        """Should return empty dict when RESEND_API_KEY is not configured."""
+        from src.api.routes.email_webhooks import _fetch_email_content
+
+        result = _fetch_email_content("email-123")
+        assert result == {}
+
+    @patch("src.api.routes.email_webhooks.RESEND_API_KEY", "re_test_key")
+    @patch("src.api.routes.email_webhooks.requests.get", side_effect=Exception("Connection timeout"))
+    def test_network_error_returns_empty_dict(self, mock_get: MagicMock):
+        """Should return empty dict on network errors."""
+        from src.api.routes.email_webhooks import _fetch_email_content
+
+        result = _fetch_email_content("email-123")
+        assert result == {}
