@@ -343,21 +343,32 @@ def sync_from_github(repo, token, limit=100):
 def run_changelog_sync():
     """Auto-sync changelog on startup. Called from main.py lifespan.
 
-    Uses GitHub API if GITHUB_TOKEN and GITHUB_REPO are set.
-    Falls back to git log if running locally with .git available.
+    Priority order:
+    1. Import from JSON file (exported during Docker build)
+    2. GitHub API if GITHUB_TOKEN and GITHUB_REPO are set
+    3. Local git log (for local development)
     """
+    # Try JSON import first (exported during Docker build)
+    json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "changelog_commits.json")
+    if os.path.exists(json_path):
+        logger.info(f"Importing changelog from {json_path}...")
+        import_from_json(json_path)
+        return
+
+    # Try GitHub API
     github_token = os.getenv("GITHUB_TOKEN")
     github_repo = os.getenv("GITHUB_REPO")
 
     if github_token and github_repo:
         logger.info(f"Syncing changelog from GitHub API ({github_repo})...")
         sync_from_github(github_repo, github_token, limit=100)
-    else:
-        # Local dev fallback: try git log directly
-        try:
-            sync_direct(limit=50)
-        except Exception as e:
-            logger.warning(f"Changelog sync skipped (no git or GitHub config): {e}")
+        return
+
+    # Local dev fallback: try git log directly
+    try:
+        sync_direct(limit=50)
+    except Exception as e:
+        logger.warning(f"Changelog sync skipped (no git or GitHub config): {e}")
 
 
 def main():

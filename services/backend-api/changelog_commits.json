@@ -1,0 +1,754 @@
+[
+  {
+    "commit_hash": "231711080d5e10b96cec3091fb35079e77335dd2",
+    "title": "Add Apple Mail forwarding header support to email parser",
+    "description": "Add \"Begin forwarded message:\" pattern to forwarding delimiters so",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-13T04:09:22"
+  },
+  {
+    "commit_hash": "765d632cb78d773a70f3bebb191787486e3baf10",
+    "title": "Fetch email body from Resend API (webhook only sends metadata)",
+    "description": "Resend's email.received webhook does not include html/text body content,",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-13T03:55:16"
+  },
+  {
+    "commit_hash": "7869a675c91908fcdfde6b4708a207d59580560c",
+    "title": "Use REDIS_HOST/PORT/PASSWORD env vars for webhook Redis connection",
+    "description": "The _get_redis() function was hardcoded to redis://localhost:6379 which",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-13T03:44:36"
+  },
+  {
+    "commit_hash": "fa0e045d8be259a66efd412c74e777ae0931feb5",
+    "title": "Add email forwarding integration with inbound webhook processing",
+    "description": "Implement end-to-end email forwarding: Resend inbound webhook receives",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-13T03:32:59"
+  },
+  {
+    "commit_hash": "582e1daad02daa19693b4035778b6219f668e58f",
+    "title": "Add Intercom messenger widget to landing page",
+    "description": "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-13T01:14:38"
+  },
+  {
+    "commit_hash": "ff80030940669ddee70072c5d02f50be5bc00f10",
+    "title": "Fix kanban drag position offset and add glassmorphism styling",
+    "description": "Portal-render dragged cards to document.body to fix mouse position",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-13T00:56:18"
+  },
+  {
+    "commit_hash": "6d604d8f2709f3e0b2b2ab0417aba5d05b9a9009",
+    "title": "Update plan feature label to \"Slack, Intercom & more\"",
+    "description": "Update the integration feature display name in billing API and landing",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-12T15:16:11"
+  },
+  {
+    "commit_hash": "02f07ed2bafa7217a34e1e68ba02b3993ba3aedd",
+    "title": "Add Intercom notification channel and custom brand icons",
+    "description": "Add channel_intercom support to notification preferences (backend model,",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-12T13:27:59"
+  },
+  {
+    "commit_hash": "2b16fce6df6cb3c8e7895cfc5f8aa86272ba4332",
+    "title": "Add Intercom integration with OAuth, webhooks, and feedback sources",
+    "description": "Full Intercom integration spanning backend, worker, and frontend:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-12T03:40:41"
+  },
+  {
+    "commit_hash": "f73e926167d2aaec0277037e3be50c09c9e21fe6",
+    "title": "Revamp landing page with workflow, AI features, and use cases",
+    "description": "- Update hero: \"Turn Customer Feedback Into Features That Ship\"",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-10T01:23:33"
+  },
+  {
+    "commit_hash": "7629e783d5bfba16b6aaa1927fce5272d24cc398",
+    "title": "Optimize landing page performance (fonts + GSAP lazy loading)",
+    "description": "Based on Lighthouse audit recommendations:",
+    "entry_type": "improvement",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T05:13:38"
+  },
+  {
+    "commit_hash": "666ef11a5bdc2ca65ac491ca3fbf6fa558dcfdb7",
+    "title": "Add auto-refresh polling to workflow and feedback detail pages",
+    "description": "Add 30-second polling to keep data fresh without manual refresh:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:56:24"
+  },
+  {
+    "commit_hash": "e0fbb28b7800a09456fdaa512495a91d3a9ac682",
+    "title": "Use dynamic port configuration with envsubst for Railway",
+    "description": "Railway dynamically assigns the PORT environment variable.",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:50:45"
+  },
+  {
+    "commit_hash": "aa60df37121b9a1c291a7b0cb1e4c4ed52622be5",
+    "title": "Use port 80 for nginx in Railway deployment",
+    "description": "Railway expects services to listen on standard ports internally",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:45:57"
+  },
+  {
+    "commit_hash": "dfe6b9d5a627cc2a025053d9a9f2a9e762d05803",
+    "title": "Improve nginx configuration and healthcheck for Railway",
+    "description": "Added explicit nginx startup and configuration verification:",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:41:59"
+  },
+  {
+    "commit_hash": "51e1696fd3902817bcc8c6c89f4557dbd14c4900",
+    "title": "Change landing-web nginx to listen on port 3000 for Railway",
+    "description": "Railway expects services to listen on port 3000 by default.",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:38:20"
+  },
+  {
+    "commit_hash": "fa3b2d894a6d5a188fd94a9bd574a940746d0eeb",
+    "title": "Downgrade landing-web to Next.js 15.1.6 for stable static export",
+    "description": "Next.js 16.x has a known bug with static exports causing build failures:",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:30:11"
+  },
+  {
+    "commit_hash": "ec1167a6a98d8bf86b7bac9ade8c80747f6ba504",
+    "title": "Separate landing page into standalone service with pnpm workspaces",
+    "description": "Major architectural refactor to decouple SEO-optimized landing page from",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T04:17:35"
+  },
+  {
+    "commit_hash": "4d134eea663a0c63ecaf2b5c33e3f438bba3aa2e",
+    "title": "Add watch paths to Railway services to avoid unnecessary builds",
+    "description": "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T03:05:54"
+  },
+  {
+    "commit_hash": "8a1da35a2d2dd862310bb235acf39f6b4500d319",
+    "title": "Complete feedback workflow with kanban board, auto-assignment, and worker integration",
+    "description": "Full workflow system: status tracking (New/In Review/Resolved/Closed), assignment with bulk",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-09T02:50:41"
+  },
+  {
+    "commit_hash": "2c232d3fd1fa35cc1cde37272580eca594a1bf28",
+    "title": "Widen Top Insights column widths for proper header spacing",
+    "description": "Count w-10\u2192w-16, Trend w-8\u2192w-14, Sentiment w-14\u2192w-20 in both headers",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-08T21:34:45"
+  },
+  {
+    "commit_hash": "111d36789d0df3b745dc83684b35322861f6efe6",
+    "title": "Default landing page links to app.rereflect.ca in production builds",
+    "description": "Use NODE_ENV to determine environment instead of relying solely on",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-08T19:42:35"
+  },
+  {
+    "commit_hash": "cf60a4941a665147f49e7b706ebd1a4820df3dca",
+    "title": "Complete enhanced analytics with trends, saved views, PDF export, and dashboard sharing",
+    "description": "Full implementation of Phase 2 Priority 3 (Enhanced Analytics):",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-08T19:20:38"
+  },
+  {
+    "commit_hash": "8d31dd2d12cd91d7538d72091f10e8ccb12419f5",
+    "title": "Point landing page login/signup links to app.rereflect.ca and mock emails in tests",
+    "description": "Landing page links now use absolute URLs to app.rereflect.ca instead of",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-08T03:38:36"
+  },
+  {
+    "commit_hash": "27c227b2e7d6eaa835f7b3b935dd97cfa135b93c",
+    "title": "Complete notification system with alerts, preferences, and in-app center",
+    "description": "Full notification system spanning backend, worker, and frontend:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-08T03:19:37"
+  },
+  {
+    "commit_hash": "907bbf8e35eeefb18c79c22a0ad6a074937872e5",
+    "title": "Auto-sync changelog from GitHub API on startup",
+    "description": "Adds automatic changelog sync on every deploy. On startup, the app",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-08T00:01:04"
+  },
+  {
+    "commit_hash": "5831cb769b196164a9cb9066563f5f4ca5ca0f75",
+    "title": "Add public changelog page with admin management",
+    "description": "- Public /changelog page with type filters, date range, load more pagination",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T23:10:48"
+  },
+  {
+    "commit_hash": "7f912c569f7b0df0eefd356aabad4010b5548d6c",
+    "title": "Add churn risk display to feedback detail page",
+    "description": "Shows churn risk card with score percentage and risk level badge,",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T23:10:33"
+  },
+  {
+    "commit_hash": "82812b3f820fe35ab5dfdbf812ed3fcbc76fe0d9",
+    "title": "Add Redis distributed lock to prevent duplicate worker processing",
+    "description": "Prevents concurrent Celery workers from processing the same feedback",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T23:10:25"
+  },
+  {
+    "commit_hash": "c648dc8979d3cad2b33c1542acae7df04638b886",
+    "title": "Use Optional[] syntax for Python 3.9 compatibility in generate_insights",
+    "description": "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T21:17:39"
+  },
+  {
+    "commit_hash": "d7b6b4d1b93bed580fdca8a0fba830df0b91ed61",
+    "title": "Add suggested actions display and weekly AI insights (Phase 4)",
+    "description": "- WeeklyInsight model + Alembic migration for storing AI-generated insights",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T21:08:16"
+  },
+  {
+    "commit_hash": "c155c1f3a2072f1b56214a66d9eb310e71194189",
+    "title": "Add anomaly detection with alert configuration and dashboard banner (Phase 3)",
+    "description": "Implements sentiment spike detection using statistical analysis (2\u03c3/3\u03c3 thresholds),",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T19:32:46"
+  },
+  {
+    "commit_hash": "28ff164b15f88fdecd57052579398b2178f7609a",
+    "title": "Add churn risk scoring with dashboard summary and dedicated page (Phase 2)",
+    "description": "- Add keyword-based heuristic churn risk scoring (0-100) as LLM fallback",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T19:14:30"
+  },
+  {
+    "commit_hash": "cdc52cc1f4174141b8cf461aaf0e15ec8bdb4676",
+    "title": "Add openai package to worker-service requirements.txt",
+    "description": "The openai package was installed locally but missing from requirements.txt,",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T18:59:23"
+  },
+  {
+    "commit_hash": "2d8a1e4389655ff1898f7f37c938b39cc4ab2f16",
+    "title": "Add LLM-powered categorization with custom categories (Phase 1)",
+    "description": "Integrate OpenAI GPT-4o-mini for intelligent feedback categorization with",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T18:38:50"
+  },
+  {
+    "commit_hash": "fad036a50bc63454fbc6d3758ca9ec50b9d57265",
+    "title": "Update Next.js build artifacts",
+    "description": "Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>",
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T17:48:12"
+  },
+  {
+    "commit_hash": "cfef16b9e976a480e6a080e0769c3e218c1fcf8a",
+    "title": "Add weekly email digest with opt-in/out preferences",
+    "description": "Implement the weekly email digest feature end-to-end:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-07T17:46:48"
+  },
+  {
+    "commit_hash": "9e4a0a2ca4d195a34121b53e1bd0d9fb1f790f1a",
+    "title": "Replace Twitter icon with X icon in footer",
+    "description": null,
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-05T01:29:49"
+  },
+  {
+    "commit_hash": "af063c06725e20bbb68390db050daae18032451f",
+    "title": "Use sentiment_label instead of sentiment in analytics tracking",
+    "description": null,
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-05T01:23:20"
+  },
+  {
+    "commit_hash": "42e94836eede4e333e684028deecc5fe97d75dad",
+    "title": "Update Twitter handle to @rereflectapp",
+    "description": null,
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-05T01:03:18"
+  },
+  {
+    "commit_hash": "af1176eba70ce7f2e00ad5a3f7ee8065f311819a",
+    "title": "Add Twitter/X and Product Hunt links to landing page",
+    "description": "- Add Twitter icon import from lucide-react",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-05T01:02:07"
+  },
+  {
+    "commit_hash": "c150324a7a1522d8437aecd3fa99bd505f5fc841",
+    "title": "Add analytics tracking for feedback detail view",
+    "description": "Track when users view individual feedback analysis to measure",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T19:59:41"
+  },
+  {
+    "commit_hash": "9339a7e8b0ee245d22ac6b06a299df5f0f6a4312",
+    "title": "Add NEXT_PUBLIC_MIXPANEL_TOKEN to Dockerfile build args",
+    "description": "The Mixpanel token wasn't being passed to the Next.js build,",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T19:45:11"
+  },
+  {
+    "commit_hash": "b6704d61d119c55dbb4b673a3a85c3a0025f8e32",
+    "title": "Add Mixpanel analytics integration",
+    "description": "- Add mixpanel-browser dependency",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T19:21:12"
+  },
+  {
+    "commit_hash": "72c1e149416d9fd7f2a27440f827fe05d75e5beb",
+    "title": "Add email notifications for role changes and member removal",
+    "description": "- Add send_role_change_email and send_member_removed_email functions",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T18:07:59"
+  },
+  {
+    "commit_hash": "151830a0cb618f9afd144cfc6a08777c7925210a",
+    "title": "Add Google OAuth build arg and prevent auth flash",
+    "description": "- Add NEXT_PUBLIC_GOOGLE_CLIENT_ID and NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T16:25:25"
+  },
+  {
+    "commit_hash": "bedb1c26907bdbf9e905ff3724eaa5834dfbcf04",
+    "title": "trigger rebuild for Google OAuth env var",
+    "description": null,
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T15:42:14"
+  },
+  {
+    "commit_hash": "a62d2e483494538031cad07d7c0da121d1a192dd",
+    "title": "Handle missing Google OAuth config gracefully",
+    "description": "- Conditionally render GoogleOAuthProvider only when client ID is set",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T15:03:17"
+  },
+  {
+    "commit_hash": "2311b6b42e2b013feef1430a8e9180502f5f7a62",
+    "title": "Switch to access token flow and full-width custom Google button",
+    "description": "- Replace ID token verification with access token flow via Google userinfo API",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T14:40:50"
+  },
+  {
+    "commit_hash": "fee70b18153c872d40161da9fe4df90115bcd146",
+    "title": "Add Google Sign-In authentication",
+    "description": "Backend:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-04T13:39:46"
+  },
+  {
+    "commit_hash": "0d1510f23ce192bbfbdbe314639c21c1d7100920",
+    "title": "Add route protection for billing and integrations pages",
+    "description": "- Redirect non-owners from /settings/billing to /settings/preferences",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T19:00:35"
+  },
+  {
+    "commit_hash": "7ef763a97e1bfbae0d7055283224d5f64397665b",
+    "title": "Add missing closing bracket for isAdminOrOwner wrapper",
+    "description": "Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T18:51:40"
+  },
+  {
+    "commit_hash": "8e651147a44664bc6eda0f09867157a2a13050bc",
+    "title": "Hide Actions column and tabs for member role",
+    "description": "- Hide Actions column in Members table for non-admin/owner users",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T18:35:10"
+  },
+  {
+    "commit_hash": "37c8c44b87b033d2d5da7f66cb9f210d89de60b0",
+    "title": "Add role-based access control to Settings pages",
+    "description": "Billing page (Owner only):",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T18:06:58"
+  },
+  {
+    "commit_hash": "7c20862cf939165c31cb509489b5accb8185059b",
+    "title": "Add frontend role-based access control on Team page",
+    "description": "- Use useAuth hook instead of manual JWT parsing",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T17:00:37"
+  },
+  {
+    "commit_hash": "69e0ffeb64ab5a62cb3fdafe7def3becd8ab95bf",
+    "title": "Seed script no longer auto-promotes users to owner",
+    "description": "Changed seed logic to only run when database has ZERO users.",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T16:52:56"
+  },
+  {
+    "commit_hash": "c5d68c15c492941ca9fe6a6390c93da6777dd727",
+    "title": "Show actual user role in preferences instead of hardcoded \"Administrator\"",
+    "description": "The Account Information section was always showing \"Administrator\" regardless",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T16:51:08"
+  },
+  {
+    "commit_hash": "eec952e4b212a5aacbecea88cd27fe6abeb3594b",
+    "title": "Allow all roles to view team invites list",
+    "description": "Removed require_admin_or_owner dependency from GET /team/invites endpoint.",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T16:42:49"
+  },
+  {
+    "commit_hash": "38104d87b9de2c15eaad65f6a77e4ea64cde624f",
+    "title": "Allow invite page access without authentication",
+    "description": "The invite acceptance page was redirecting to login because:",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T16:32:22"
+  },
+  {
+    "commit_hash": "27a792f59e342e6e2af044f4d1e3e12cf4553aa8",
+    "title": "Add Rereflect icon to public assets",
+    "description": "Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T13:13:11"
+  },
+  {
+    "commit_hash": "efd8a5f8a59cba10a37f466b27f229c1328a767e",
+    "title": "Add Settings tabs and invite acceptance page",
+    "description": "- Refactor Settings page into tabbed layout (Preferences, Billing, Team, Integrations)",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T03:23:19"
+  },
+  {
+    "commit_hash": "8e2f9ad460e28bccc5ab06bd20a5f92a19b6a151",
+    "title": "Add Resend email integration for team invites",
+    "description": "- Add email_service.py that fetches templates from Resend API",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-03T03:21:09"
+  },
+  {
+    "commit_hash": "98706f112db6ed174306ee96dfaa4d8b73a7e794",
+    "title": "Implement Audit Logging & Ownership Transfer (Phase 4)",
+    "description": "Backend:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-02T20:58:49"
+  },
+  {
+    "commit_hash": "728c821fa801d527fc3b4ea72fe0cb2f5f79510b",
+    "title": "Implement Team Invitations & Management UI (Phases 2 & 3)",
+    "description": "Backend (Phase 2):",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-02T20:41:26"
+  },
+  {
+    "commit_hash": "cb12b1f9522b533ac78a25ba00766c108afe25cd",
+    "title": "Implement Team Management RBAC (Phase 1)",
+    "description": "- Add role field with owner/admin/member hierarchy to User model",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-02T20:24:44"
+  },
+  {
+    "commit_hash": "d60bf2b6eccced122ad7458a62c66be9d3864877",
+    "title": "Add sonner toast notifications for billing page",
+    "description": "- Install sonner toast library",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-02T15:16:35"
+  },
+  {
+    "commit_hash": "f6569b9cc7dc66aabe886b663db93a34bf130fbf",
+    "title": "Add Stripe billing integration with subscription management",
+    "description": "- Add billing API routes for plans, subscriptions, checkout, and invoices",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-02T02:44:54"
+  },
+  {
+    "commit_hash": "b8a87f6639cbfabec2286c25f8001e0c76e157ea",
+    "title": "Add auto-refresh polling for feedbacks page",
+    "description": "Automatically refreshes feedback list every 30 seconds so new items",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T22:51:09"
+  },
+  {
+    "commit_hash": "8dd5232d080bc9f77b38ab264218de72e77d25c9",
+    "title": "Add webhook code examples with syntax highlighting",
+    "description": "- Add Tabs component (shadcn/ui) for language switching",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T22:37:31"
+  },
+  {
+    "commit_hash": "e1ebbed79c011ff545cbb4e48aab98c67d6b5057",
+    "title": "Display feedback source info in list and detail views",
+    "description": "- Add source_id, source_name, source_metadata to API response",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T22:08:35"
+  },
+  {
+    "commit_hash": "844a08029a5f43cdf685658b48613887bfe3afd5",
+    "title": "Export get_celery_app from background module",
+    "description": "The Slack webhook handler was failing with 500 errors because",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T21:49:21"
+  },
+  {
+    "commit_hash": "85781441bb0532ddbdf8bc1dd1b8c4e4c9aa5164",
+    "title": "Trigger worker rebuild",
+    "description": null,
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T19:19:05"
+  },
+  {
+    "commit_hash": "7f7fbd0292f92e51e2e1547dc351e335a9a1ddcb",
+    "title": "Copy team_id from integration when creating Slack source",
+    "description": "The worker task filters Slack sources by team_id from provider_config,",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T18:53:50"
+  },
+  {
+    "commit_hash": "1b29ba96fc87596fbfa5eb6198dd62fd85156509",
+    "title": "Add httpx dependency for Slack adapter",
+    "description": "Required for making HTTP requests to Slack API in the worker service.",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T18:33:43"
+  },
+  {
+    "commit_hash": "31994b96698e9ab4aa45b09bc1d6fdd1c0f83d16",
+    "title": "Add inbound feedback sources for Slack and webhooks",
+    "description": "Implement source-agnostic system to receive messages from external sources",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T18:27:23"
+  },
+  {
+    "commit_hash": "e5bc11692021781779742d3688233ea3ac869680",
+    "title": "Update logo color to coral",
+    "description": "Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>",
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T16:41:22"
+  },
+  {
+    "commit_hash": "9fe3edc8e82d388c39a5a04ee13a311d53662257",
+    "title": "Add Slack OAuth integration alongside webhook support",
+    "description": "- Add OAuth 2.0 flow for Slack integration (connect, callback endpoints)",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-02-01T16:39:40"
+  },
+  {
+    "commit_hash": "1df5ab06eaabef6a25c89ecc297b227ea470cbac",
+    "title": "Remove deprecated Pi deployment infrastructure",
+    "description": "Now using Railway for production deployment.",
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T21:27:05"
+  },
+  {
+    "commit_hash": "f04041ca00b21dd3613201e4c5ead0e0b3e2ade3",
+    "title": "Add middleware for multi-domain routing",
+    "description": "- rereflect.ca: Public pages only (landing, terms, privacy, login, signup)",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T20:35:28"
+  },
+  {
+    "commit_hash": "737634a0f5e47df14bdde0301e33de7ffd80f4ba",
+    "title": "Use shell to expand PORT env var in Dockerfile",
+    "description": "- Remove startCommand from railway.toml (wasn't expanding $PORT)",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T19:24:50"
+  },
+  {
+    "commit_hash": "94ac1cf7b9ad6ce536e775b80b6ffef571200569",
+    "title": "Increase healthcheck timeout for migrations",
+    "description": "- Extend timeout from 30s to 120s to allow migrations to complete",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T19:17:09"
+  },
+  {
+    "commit_hash": "a96c1c11ba2f98ac78f56389033efc0a82120d67",
+    "title": "Add auto-migration on backend startup",
+    "description": "Runs Alembic migrations before seeding admin user.",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T19:09:10"
+  },
+  {
+    "commit_hash": "a6326b74aa18b4c0f1813df26790d21a794f40d4",
+    "title": "Correct User type to match API response (number ids)",
+    "description": "The backend returns numeric IDs, not strings.",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T18:56:32"
+  },
+  {
+    "commit_hash": "537a8ac4e74355b49924601670256075460c47b9",
+    "title": "Add Railway deployment configuration",
+    "description": "- Add railway.toml for backend-api, worker-service, and frontend-web",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-01-31T02:04:02"
+  },
+  {
+    "commit_hash": "16d9efc806b0b209ebcd816b091fa270068c771d",
+    "title": "Add authentication redirects, legal pages, and landing page improvements",
+    "description": "- Add AuthContext with useAuth hook for centralized auth state management",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-01-25T18:34:36"
+  },
+  {
+    "commit_hash": "33e0cae3797a9af9e622157edb63108fd9d11731",
+    "title": "Python 3.9 compatibility and local dev startup fixes",
+    "description": "- Replace `str | None` type hints with `Optional[str]` for Python 3.9 compatibility",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-25T16:49:47"
+  },
+  {
+    "commit_hash": "2ae4d2e2931cc4e9e8a89596cdf788e75d8a45b4",
+    "title": "Remove --no-cache from deploy to speed up Pi builds",
+    "description": "The --no-cache flag caused Docker builds to timeout after 10 minutes",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-06T04:25:30"
+  },
+  {
+    "commit_hash": "464ed77c2e8c6ddabc1281d10ad3d3470b12c576",
+    "title": "Test CI/CD pipeline",
+    "description": null,
+    "entry_type": "chore",
+    "is_breaking": false,
+    "committed_at": "2026-01-06T04:03:48"
+  },
+  {
+    "commit_hash": "2cb2c87960d79d9f1613b46bad4aca29794a7f97",
+    "title": "Add trailing slashes to API endpoints to prevent 307 redirects",
+    "description": "FastAPI routes with trailing slashes cause 307 redirects when called",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-06T02:07:25"
+  },
+  {
+    "commit_hash": "f731141b5f75bfe79004ac48372353aa5ccb6c1c",
+    "title": "Add ROOT_PATH support for reverse proxy",
+    "description": null,
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-05T14:14:32"
+  },
+  {
+    "commit_hash": "b64fef7b594557116d978674fe10d69119eff2c7",
+    "title": "Add automated deployment with webhook and SSL support",
+    "description": "- Add webhook-server.py: GitHub webhook listener for auto-deploy on push",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2026-01-04T13:50:11"
+  },
+  {
+    "commit_hash": "30084f37c788b47aa00e38bb23503daacba0eb72",
+    "title": "Include backend Python models in git tracking",
+    "description": "The gitignore had 'models/' which was intended for ML/AI model files",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-04T13:27:34"
+  },
+  {
+    "commit_hash": "1227b2ea531cf098109ec6f2a25ab41a907a42c4",
+    "title": "Include frontend lib folder in git tracking",
+    "description": "The .gitignore had `lib/` which was ignoring the entire lib folder,",
+    "entry_type": "fix",
+    "is_breaking": false,
+    "committed_at": "2026-01-04T13:04:44"
+  },
+  {
+    "commit_hash": "abd9e02b422b608bc730ddbc3086b9dbd671df2f",
+    "title": "Complete Week 2-3 implementation with Sunset Horizon theme",
+    "description": "Backend:",
+    "entry_type": "feature",
+    "is_breaking": false,
+    "committed_at": "2025-12-29T04:08:46"
+  }
+]
