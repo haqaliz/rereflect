@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-09
+**Last Updated**: 2026-02-13
 
 ---
 
@@ -141,8 +141,8 @@
 > *Expands feedback sources, but existing customers can use CSV/Slack*
 
 - [x] Intercom API (pull support conversations)
+- [x] Email forwarding (receive feedback via email)
 - [ ] Zendesk API (pull support tickets)
-- [ ] Email forwarding (receive feedback via email)
 - [ ] HubSpot integration (sync with CRM)
 
 ---
@@ -287,6 +287,16 @@
   - Railway deployment configuration with dynamic port handling
   - Local dev: landing on port 3001, app on port 3000
 - **Auto-refresh polling** added to workflow page and feedback detail page (30s interval)
+- **Email Forwarding Integration**:
+  - Resend inbound webhook endpoint (`/api/v1/webhooks/email/inbound`) with signature verification
+  - Email parser: strips forwarding headers (Apple Mail, Gmail, Outlook, Thunderbird), extracts original sender/subject/body
+  - Lazy body fetching from Resend API (webhook only sends metadata)
+  - EmailAdapter in worker-service: check_triggers (all_emails, specific_senders, keyword_match), extract_content (HTML→text), fetch_context
+  - Feedback source type: `email` with `all_emails` trigger
+  - Frontend: email source type in feedback sources wizard (new, detail, list pages)
+  - Redis connection fix for webhook → Celery task queuing (REDIS_HOST/PORT/PASSWORD env vars)
+  - Comprehensive tests: email parser (Apple Mail, Gmail, Outlook headers), webhook endpoint, adapter
+- **Changelog Sync Fix**: Fixed GITHUB_TOKEN env var (had literal `"` prefix breaking all GitHub API calls), added `.strip()` resilience for quoted env vars
 - **Intercom Integration** (TDD, 50 tests):
   - OAuth flow: connect + callback endpoints with state management
   - Webhook receiver: HMAC-SHA1 signature verification, 3 topics (conversation.user.created, conversation.user.replied, conversation.rating.added)
@@ -313,7 +323,7 @@
 - Phase 2 prioritizes AI/Notifications over Integrations (differentiator focus)
 - Collaboration features scoped down to "Feedback Workflow" (status, assignment, notes only)
 - Excluded @mentions, comments, activity feed (avoids becoming project management tool)
-- Changelog auto-syncs via GitHub API at startup (idempotent, no manual intervention)
+- Changelog auto-syncs via GitHub API at startup (idempotent, strips quoted env vars for resilience)
 - `is_system_admin` boolean on User model for system-level access (separate from org roles)
 - Notification bell in header (not sidebar) with Radix popover for quick access
 - Per-type retention billing: each alert type has independent retention days, Stripe billed on total extra days
@@ -325,6 +335,7 @@
 - Monorepo architecture with pnpm workspaces for shared UI components and dependencies
 - Auto-refresh polling (30s) on workflow and feedback detail pages for real-time collaboration
 - Intercom integration follows same pattern as Slack: OAuth flow, adapter, webhook receiver, Pro+ gating, HMAC-SHA1 verification, two-way sync (notes + close)
+- Email forwarding: Resend inbound webhooks, lazy body fetch from API, parser strips forwarding headers from all major mail clients
 
 ---
 
