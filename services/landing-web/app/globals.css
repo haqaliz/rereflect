@@ -1,2 +1,7 @@
 @import '@rereflect/ui/styles/globals.css';
 /* Fonts loaded via next/font/google in layout.tsx for optimal performance */
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

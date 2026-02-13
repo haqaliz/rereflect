@@ -2,7 +2,7 @@
 
 **Product**: Rereflect - AI-powered customer feedback analysis
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-13
+**Last Updated**: 2026-02-14
 
 ---
 
@@ -118,9 +118,9 @@ Cheers,
 ### 5. Partnerships & Integrations (Target: 10-20 signups)
 
 **Integration directories**:
-- [ ] List on Slack App Directory (working Slack integration)
-- [ ] List on Intercom App Store (working Intercom integration)
-- [ ] Create integration pages for Intercom, Zendesk users searching
+- [ ] List on Slack App Directory (blocked: needs 5 workspace installs)
+- [x] List on Intercom App Store (approved Feb 14, 2026)
+- [x] Create integration pages for Slack, Intercom, Email, Zendesk, HubSpot
 
 **Partner with complementary tools**:
 - Customer success platforms (co-marketing)
@@ -144,13 +144,14 @@ Cheers,
   - [x] Product Hunt (launched Feb 10)
   - [x] Hacker News (Show HN posted: news.ycombinator.com/item?id=46892290)
 
-### Week 2: Launch & Directories - IN PROGRESS
+### Week 2: Launch & Directories - COMPLETE
 - [x] Product Hunt launch (Feb 10, Tuesday)
 - [x] Show HN post on Hacker News
-- [ ] List on Slack App Directory
-- [ ] List on Intercom App Store
-- [ ] Write 2 blog posts (SEO-focused)
-- [ ] Post first "building in public" update
+- [~] List on Slack App Directory (submitted, blocked: needs 5 workspace installs)
+- [x] List on Intercom App Store (approved Feb 14!)
+- [x] Build integration marketing pages (Slack, Intercom, Email, Zendesk, HubSpot)
+- [x] Write 2 blog posts (SEO-focused): /blog/how-to-organize-customer-feedback, /blog/customer-feedback-analysis-manual-vs-ai
+- [x] Post first "building in public" update (X/Twitter thread)
 
 ### Week 3: Content & Community
 - [ ] Join 3 founder communities, start participating
@@ -301,8 +302,8 @@ Either way, wishing you continued growth with [Product]!
 | SaaSHub | Submitted | Feb 2026 | saashub.com |
 | AlternativeTo | Submitted | Feb 2026 | alternativeto.net |
 | Uneed | Submitted | Feb 2026 | uneed.best |
-| Slack App Directory | Pending | - | api.slack.com/apps |
-| Intercom App Store | Pending | - | intercom.com/app-store |
+| Slack App Directory | Blocked (needs 5 installs) | Feb 14, 2026 | api.slack.com/apps |
+| Intercom App Store | Approved | Feb 14, 2026 | intercom.com/app-store/?app_package_code=rereflect |
 | BetaList | Skipped (paid only, $49+) | - | - |
 | There's An AI For That | Skipped (paid only, $49+) | - | - |
 
