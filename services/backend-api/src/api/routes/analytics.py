@@ -97,6 +97,12 @@ def get_trends(
     db: Session = Depends(get_db),
 ):
     """Return time-series analytics for the organization."""
+    from src.services.cache_service import cache_get, cache_set
+
+    cache_key = f"analytics:{current_org.id}:{range}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
 
     cfg = RANGE_CONFIG[range]
     org_plan = current_org.plan or "free"
@@ -269,7 +275,7 @@ def get_trends(
             )
         )
 
-    return AnalyticsTrendsResponse(
+    result = AnalyticsTrendsResponse(
         data_points=data_points,
         sentiment_distribution=sentiment_distribution,
         source_distribution=source_distribution,
@@ -279,3 +285,6 @@ def get_trends(
         date_range=f"Last {days} days",
         granularity=granularity,
     )
+
+    cache_set(cache_key, result.dict(), ttl_seconds=600)  # 10 min TTL
+    return result

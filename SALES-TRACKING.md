@@ -2,7 +2,7 @@
 
 **Product**: Rereflect - AI-powered customer feedback analysis
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-14
+**Last Updated**: 2026-02-15
 
 ---
 
@@ -110,7 +110,7 @@ Cheers,
 - "How to prioritize features using customer feedback"
 
 **Quick wins** (short-term):
-- [ ] Write a Twitter thread on "5 feedback mistakes that kill startups"
+- [x] Write a Twitter thread on "5 feedback mistakes that kill startups"
 - [ ] Record a Loom: "How I analyze 500 feedbacks in 5 minutes"
 
 ---
@@ -153,9 +153,9 @@ Cheers,
 - [x] Write 2 blog posts (SEO-focused): /blog/how-to-organize-customer-feedback, /blog/customer-feedback-analysis-manual-vs-ai
 - [x] Post first "building in public" update (X/Twitter thread)
 
-### Week 3: Content & Community
-- [ ] Join 3 founder communities, start participating
-- [ ] Write a Twitter thread on "5 feedback mistakes that kill startups"
+### Week 3: Content & Community - IN PROGRESS
+- [x] Join 3 founder communities, start participating (Indie Hackers, r/SaaS, r/startups)
+- [x] Write a Twitter thread on "5 feedback mistakes that kill startups"
 - [ ] Record a Loom: "How I analyze 500 feedbacks in 5 minutes"
 
 ### Week 4: Outreach

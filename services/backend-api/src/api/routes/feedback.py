@@ -1,7 +1,7 @@
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc, cast, func
 from sqlalchemy.dialects.postgresql import JSONB
 from src.database.session import get_db
@@ -205,6 +205,11 @@ def create_feedback(
     except Exception:
         pass
 
+    # Invalidate dashboard/analytics cache for this org
+    from src.services.cache_service import cache_invalidate
+    cache_invalidate(f"dashboard:{current_org.id}:*")
+    cache_invalidate(f"analytics:{current_org.id}:*")
+
     # Queue for analysis via Celery worker
     queue_analyze_feedback(feedback.id)
 
@@ -318,34 +323,55 @@ def list_feedback(
     sort_column = sort_column_map.get(sort_by, FeedbackItem.created_at)
     order_func = asc if sort_order == 'asc' else desc
 
+    # Eager load relationships to avoid N+1 queries
+    query = query.options(
+        joinedload(FeedbackItem.feedback_source),
+        joinedload(FeedbackItem.assigned_user),
+    )
+
     # Get items
     items = query.order_by(order_func(sort_column)).offset(offset).limit(page_size).all()
 
-    # Fetch source names for items that have source_id
-    source_ids = [item.source_id for item in items if item.source_id]
+    # Build response using eager-loaded relationships (with fallback to batch queries)
     source_map = {}
+    assignee_map = {}
+
+    # Fallback: batch query if relationships return None for items that should have data
+    source_ids = [item.source_id for item in items if item.source_id and not item.feedback_source]
     if source_ids:
         sources = db.query(FeedbackSource).filter(FeedbackSource.id.in_(source_ids)).all()
         source_map = {s.id: s.name for s in sources}
 
-    # Fetch assignee emails
     from src.models.user import User
-    assignee_ids = [item.assigned_to for item in items if item.assigned_to]
-    assignee_map = {}
+    assignee_ids = [item.assigned_to for item in items if item.assigned_to and not item.assigned_user]
     if assignee_ids:
         users = db.query(User).filter(User.id.in_(assignee_ids)).all()
         assignee_map = {u.id: u.email for u in users}
 
-    # Build response with source_name populated
     response_items = []
     for item in items:
+        # Use eager-loaded relationship first, fallback to map
+        source_name = None
+        if item.source_id:
+            if item.feedback_source:
+                source_name = item.feedback_source.name
+            else:
+                source_name = source_map.get(item.source_id)
+
+        assigned_to_email = None
+        if item.assigned_to:
+            if item.assigned_user:
+                assigned_to_email = item.assigned_user.email
+            else:
+                assigned_to_email = assignee_map.get(item.assigned_to)
+
         item_dict = {
             "id": item.id,
             "organization_id": item.organization_id,
             "text": item.text,
             "source": item.source,
             "source_id": item.source_id,
-            "source_name": source_map.get(item.source_id) if item.source_id else None,
+            "source_name": source_name,
             "source_metadata": item.source_metadata,
             "sentiment_score": item.sentiment_score,
             "sentiment_label": item.sentiment_label,
@@ -366,7 +392,7 @@ def list_feedback(
             "suggested_action": item.suggested_action,
             "workflow_status": item.workflow_status,
             "assigned_to": item.assigned_to,
-            "assigned_to_email": assignee_map.get(item.assigned_to) if item.assigned_to else None,
+            "assigned_to_email": assigned_to_email,
         }
         response_items.append(FeedbackResponse(**item_dict))
 

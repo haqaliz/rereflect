@@ -54,6 +54,7 @@ class UrgentFeedback(BaseModel):
     text: str
     sentiment_label: Optional[str]
     created_at: datetime
+    is_urgent: bool = True
     category: Optional[str] = None
     response_time: Optional[str] = None
 
@@ -97,6 +98,12 @@ def get_dashboard(
     db: Session = Depends(get_db)
 ):
     """Get dashboard analytics for the current organization."""
+    from src.services.cache_service import cache_get, cache_set
+
+    cache_key = f"dashboard:{current_org.id}:{days}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
 
     # Calculate date range
     end_date = datetime.utcnow()
@@ -208,20 +215,47 @@ def get_dashboard(
     ]
 
     # Top categories (count tags across all feedback)
-    from collections import Counter
-    all_feedback_with_tags = base_query.filter(
-        FeedbackItem.tags.isnot(None)
-    ).all()
+    # Use SQL aggregation where possible, fall back to Python for non-PostgreSQL
+    top_categories = []
+    try:
+        tag_subquery = db.query(
+            func.json_array_elements_text(FeedbackItem.tags).label('tag'),
+        ).filter(
+            FeedbackItem.organization_id == current_org.id,
+            FeedbackItem.created_at >= start_date,
+            FeedbackItem.tags.isnot(None),
+        ).subquery()
 
-    tag_counter = Counter()
-    for item in all_feedback_with_tags:
-        if item.tags:
-            tag_counter.update(item.tags)
+        tag_rows = db.query(
+            tag_subquery.c.tag,
+            func.count().label('cnt'),
+        ).group_by(
+            tag_subquery.c.tag,
+        ).order_by(
+            func.count().desc(),
+        ).limit(10).all()
 
-    top_categories = [
-        TopCategory(tag=tag, count=count)
-        for tag, count in tag_counter.most_common(10)
-    ]
+        top_categories = [
+            TopCategory(tag=row.tag, count=row.cnt)
+            for row in tag_rows
+        ]
+    except Exception:
+        db.rollback()
+        # Fallback for non-PostgreSQL databases (e.g., SQLite in tests)
+        from collections import Counter
+        all_feedback_with_tags = base_query.filter(
+            FeedbackItem.tags.isnot(None)
+        ).all()
+
+        tag_counter = Counter()
+        for item in all_feedback_with_tags:
+            if item.tags:
+                tag_counter.update(item.tags)
+
+        top_categories = [
+            TopCategory(tag=tag, count=count)
+            for tag, count in tag_counter.most_common(10)
+        ]
 
     # Urgent items (show only last 5) - include category info
     urgent_query = base_query.filter(
@@ -236,6 +270,7 @@ def get_dashboard(
             text=item.text,
             sentiment_label=item.sentiment_label,
             created_at=item.created_at,
+            is_urgent=item.is_urgent,
             category=item.urgent_category,
             response_time=item.urgent_response_time
         )
@@ -305,7 +340,7 @@ def get_dashboard(
         for item in top_churn_query.all()
     ]
 
-    return DashboardResponse(
+    result = DashboardResponse(
         sentiment=SentimentStats(
             positive_count=positive_count,
             neutral_count=neutral_count,
@@ -325,3 +360,6 @@ def get_dashboard(
         total_feedback=total_feedback,
         date_range=f"Last {days} days"
     )
+
+    cache_set(cache_key, result.dict(), ttl_seconds=300)  # 5 min TTL
+    return result

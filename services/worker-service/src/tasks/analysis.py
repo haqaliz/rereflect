@@ -27,6 +27,29 @@ def _get_redis():
 
 logger = logging.getLogger(__name__)
 
+# Redis client for cache invalidation (DB 2 = application cache)
+_redis_cache_client = None
+
+
+def _get_cache_redis():
+    """Get or create Redis client for cache invalidation."""
+    global _redis_cache_client
+    if _redis_cache_client is None:
+        _redis_cache_client = redis.from_url(get_redis_url(2))
+    return _redis_cache_client
+
+
+def _invalidate_org_cache(org_id: int):
+    """Invalidate dashboard and analytics cache for an organization."""
+    try:
+        r = _get_cache_redis()
+        for key in r.scan_iter(match=f"dashboard:{org_id}:*"):
+            r.delete(key)
+        for key in r.scan_iter(match=f"analytics:{org_id}:*"):
+            r.delete(key)
+    except Exception as e:
+        logger.warning(f"Cache invalidation failed for org {org_id}: {e}")
+
 
 def get_sentiment_analyzer():
     """Get SentimentAnalyzer with lazy import."""
@@ -94,6 +117,9 @@ def analyze_single_feedback(self, feedback_id: int) -> dict:
             _analyze_feedback_item(feedback, db)
             db.commit()
 
+            # Invalidate dashboard/analytics cache after analysis
+            _invalidate_org_cache(feedback.organization_id)
+
             # Auto-assign after analysis (so category-based rules can match)
             org_id = feedback.organization_id
             from src.tasks.workflow import auto_assign_feedback_batch
@@ -153,6 +179,10 @@ def analyze_feedback_batch(self, org_id: int, feedback_ids: List[int]) -> dict:
                 failed_count += 1
 
         db.commit()
+
+        # Invalidate dashboard/analytics cache after batch analysis
+        if success_count > 0:
+            _invalidate_org_cache(org_id)
 
         # Auto-assign after analysis (so category-based rules can match)
         if success_count > 0:

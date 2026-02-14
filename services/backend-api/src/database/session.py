@@ -11,7 +11,10 @@ DATABASE_URL = os.getenv(
     "postgresql:///customer_feedback_saas"
 )
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    echo=os.getenv("SQL_ECHO", "false").lower() == "true",
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

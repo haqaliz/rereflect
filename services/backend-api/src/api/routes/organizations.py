@@ -63,6 +63,11 @@ def update_my_organization(
 
     # Update fields
     if data.name is not None:
+        if not data.name.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Organization name cannot be empty"
+            )
         current_org.name = data.name
 
     if data.plan is not None:

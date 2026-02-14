@@ -321,7 +321,7 @@ class TestIntercomWebhook:
             external_event_id="conv_100",
             event_type="conversation.user.created",
             event_data=payload["data"],
-            provider_context={"conversation_id": "conv_100"},
+            provider_context={"conversation_id": "conv_100", "workspace_id": None},
         )
 
     @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")

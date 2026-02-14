@@ -183,11 +183,11 @@
 
 ## Technical Debt
 
-- [ ] Add comprehensive test coverage
-- [ ] Performance optimization (caching)
-- [ ] Database query optimization
-- [ ] Error tracking (Sentry)
-- [ ] Monitoring dashboard (DataDog)
+- [x] Add comprehensive test coverage (billing/Stripe tests + Vitest frontend setup)
+- [x] Performance optimization (Redis server-side caching + React Query client-side caching)
+- [x] Database query optimization (4 indexes, eager loading, SQL tag aggregation)
+- [ ] Error tracking (Sentry) — deferred (cost)
+- [ ] Monitoring dashboard (DataDog) — deferred (cost)
 
 ---
 
@@ -311,6 +311,13 @@
     - Frontend: Dynamic integration selection step (no longer hardcoded to Slack)
     - Worker: Source matching by workspace_id via Integration (same pattern as Slack's team_id)
     - Webhook: Extract app_id from Intercom payload as workspace_id for source matching
+- **Technical Debt Resolution** (4 phases):
+  - Phase 1 — DB Query Optimization: 4 compound indexes (org+sentiment, org+urgent, org+pain_cat, org+feature_cat), SQLAlchemy relationships for eager loading (feedback_source, assigned_user), SQL-level tag aggregation with json_array_elements_text (Python fallback for SQLite), SQL_ECHO env var
+  - Phase 2 — Server Caching: Redis cache service (DB 2, lazy init, graceful fallback), dashboard caching (5min TTL), analytics caching (10min TTL), cache invalidation on feedback create/analyze/status-change, HTTP Cache-Control headers on read endpoints
+  - Phase 3 — Client Caching: React Query (TanStack Query v5) with QueryProvider, dashboard/feedbacks/workflow pages migrated to useQuery, refetchInterval replaces setInterval polling, refetchIntervalInBackground: false
+  - Phase 4 — Test Coverage: Billing/Stripe test suite (test_billing.py, 15+ test cases covering checkout, webhooks, portal, usage limits, feature gating), Vitest configured with jsdom + @testing-library/react, StatCard + ThemeContext tests, frontend test scripts (npm run test/test:watch/test:coverage)
+  - Alembic migration: 9232cfa0634d_add_critical_feedback_indexes
+  - PRD: PRD-TECHNICAL-DEBT.md
 
 ---
 
@@ -336,6 +343,10 @@
 - Auto-refresh polling (30s) on workflow and feedback detail pages for real-time collaboration
 - Intercom integration follows same pattern as Slack: OAuth flow, adapter, webhook receiver, Pro+ gating, HMAC-SHA1 verification, two-way sync (notes + close)
 - Email forwarding: Resend inbound webhooks, lazy body fetch from API, parser strips forwarding headers from all major mail clients
+- Technical debt: Sentry skipped due to $29/mo cost, deferred until paying customers cover it
+- Redis cache uses DB 2 (DB 0=Celery, DB 1=sessions, DB 2=cache, DB 3=rate limiting)
+- React Query (TanStack Query v5) with staleTime 5min, gcTime 30min for client-side caching
+- Vitest + @testing-library/react for frontend unit tests
 
 ---
 

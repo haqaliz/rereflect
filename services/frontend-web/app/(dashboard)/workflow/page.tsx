@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { workflowAPI, WorkflowFeedbackItem, WorkflowOverviewFilters } from '@/lib/api/workflow';
 import apiClient from '@/lib/api-client';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -34,20 +35,15 @@ type ViewMode = 'kanban' | 'table';
 
 export default function WorkflowPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
-  const [items, setItems] = useState<WorkflowFeedbackItem[]>([]);
-  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
 
   // Server-side state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searching, setSearching] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
   const [sortBy, setSortBy] = useState<string | undefined>(undefined);
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -56,98 +52,72 @@ export default function WorkflowPage() {
   const [assigneeFilter, setAssigneeFilter] = useState('');
   const [sentimentFilter, setSentimentFilter] = useState('');
 
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setCurrentPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const buildFilters = useCallback((): WorkflowOverviewFilters => {
     const filters: WorkflowOverviewFilters = {};
-    if (searchQuery) filters.search = searchQuery;
+    if (debouncedSearch) filters.search = debouncedSearch;
     if (statusFilter) filters.workflow_status = statusFilter;
     if (assigneeFilter) filters.assigned_to = parseInt(assigneeFilter, 10);
     if (sentimentFilter) filters.sentiment = sentimentFilter;
     if (sortBy) filters.sort_by = sortBy;
     filters.sort_order = sortOrder;
     return filters;
-  }, [searchQuery, statusFilter, assigneeFilter, sentimentFilter, sortBy, sortOrder]);
+  }, [debouncedSearch, statusFilter, assigneeFilter, sentimentFilter, sortBy, sortOrder]);
 
-  const fetchData = useCallback(async (page?: number, size?: number) => {
-    try {
+  // Fetch workflow data with React Query
+  const {
+    data: workflowData,
+    isLoading: loading,
+  } = useQuery({
+    queryKey: ['workflow', currentPage, pageSize, viewMode, buildFilters()],
+    queryFn: async () => {
       const token = localStorage.getItem('access_token');
       if (!token) {
         router.push('/login');
-        return;
+        throw new Error('No token');
       }
 
-      const effectivePage = page ?? currentPage;
-      const effectiveSize = viewMode === 'kanban' ? 100 : (size ?? pageSize);
+      const effectiveSize = viewMode === 'kanban' ? 100 : pageSize;
       const filters = buildFilters();
 
       const [overviewResponse, membersResponse] = await Promise.all([
-        workflowAPI.getOverview(effectivePage, effectiveSize, filters),
+        workflowAPI.getOverview(currentPage, effectiveSize, filters),
         apiClient.get('/api/v1/team/members'),
       ]);
 
-      setItems(overviewResponse.items);
-      setStatusCounts(overviewResponse.status_counts);
-      setTotalCount(overviewResponse.total);
-      setTotalPages(overviewResponse.total_pages);
-      setTeamMembers(membersResponse.data.members || membersResponse.data || []);
-    } catch (err) {
-      console.error('Failed to load workflow data:', err);
-    } finally {
-      setLoading(false);
-      setSearching(false);
-    }
-  }, [router, currentPage, pageSize, viewMode, buildFilters]);
+      return {
+        items: overviewResponse.items,
+        statusCounts: overviewResponse.status_counts,
+        totalCount: overviewResponse.total,
+        totalPages: overviewResponse.total_pages,
+        teamMembers: membersResponse.data.members || membersResponse.data || [],
+      };
+    },
+    staleTime: 5 * 60 * 1000, // 5 min
+    gcTime: 30 * 60 * 1000, // 30 min
+    refetchInterval: 30000, // Poll every 30 seconds
+    refetchIntervalInBackground: false, // Don't poll in background tabs
+  });
 
-  // Initial load
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  // Refetch when filters, page, sort, or view mode change
-  useEffect(() => {
-    if (!loading) {
-      fetchData();
-    }
-  }, [statusFilter, assigneeFilter, sentimentFilter, currentPage, pageSize, sortBy, sortOrder, viewMode]);
-
-  // Debounced search
-  useEffect(() => {
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    setSearching(true);
-    searchTimeoutRef.current = setTimeout(() => {
-      setCurrentPage(1);
-      fetchData(1);
-    }, 300);
-    return () => {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
-    };
-  }, [searchQuery]);
-
-  // Polling for auto-refresh (every 30 seconds)
-  useEffect(() => {
-    if (loading) return;
-
-    pollingIntervalRef.current = setInterval(async () => {
-      await fetchData();
-    }, 30000);
-
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, [loading, fetchData]);
+  const items = workflowData?.items || [];
+  const statusCounts = workflowData?.statusCounts || {};
+  const totalCount = workflowData?.totalCount || 0;
+  const totalPages = workflowData?.totalPages || 1;
+  const teamMembers = workflowData?.teamMembers || [];
+  const searching = searchQuery !== debouncedSearch;
 
   const handleStatusChange = async (id: number, newStatus: string) => {
     try {
       await workflowAPI.changeStatus([id], newStatus);
-      await fetchData();
+      queryClient.invalidateQueries({ queryKey: ['workflow'] });
     } catch (err) {
       console.error('Failed to change status:', err);
     }
@@ -158,7 +128,7 @@ export default function WorkflowPage() {
     try {
       await workflowAPI.changeStatus(selectedIds, status);
       setSelectedIds([]);
-      await fetchData();
+      queryClient.invalidateQueries({ queryKey: ['workflow'] });
     } catch (err) {
       console.error('Failed to bulk change status:', err);
     }
@@ -169,7 +139,7 @@ export default function WorkflowPage() {
     try {
       await workflowAPI.assign(selectedIds, userId);
       setSelectedIds([]);
-      await fetchData();
+      queryClient.invalidateQueries({ queryKey: ['workflow'] });
     } catch (err) {
       console.error('Failed to bulk assign:', err);
     }
@@ -442,7 +412,7 @@ export default function WorkflowPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Assignees</SelectItem>
-                  {teamMembers.map((member) => (
+                  {teamMembers.map((member: TeamMember) => (
                     <SelectItem key={member.id} value={member.id.toString()}>
                       {member.email.split('@')[0]}
                     </SelectItem>

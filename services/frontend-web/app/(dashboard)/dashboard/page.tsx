@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { dashboardAPI, DashboardData } from '@/lib/api/dashboard';
 import { anomaliesAPI, SentimentAnomaly } from '@/lib/api/anomalies';
 import { insightsAPI, WeeklyInsight } from '@/lib/api/insights';
@@ -64,41 +65,47 @@ import { DashboardSkeleton } from '@/components/shared/page-skeletons';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const [anomalies, setAnomalies] = useState<SentimentAnomaly[]>([]);
   const [dismissingAnomaly, setDismissingAnomaly] = useState<number | null>(null);
-  const [weeklyInsight, setWeeklyInsight] = useState<WeeklyInsight | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-          router.push('/login');
-          return;
-        }
-
-        const [dashboardData, anomalyData, insightData] = await Promise.all([
-          dashboardAPI.get(30),
-          anomaliesAPI.list(false).catch(() => ({ items: [], total: 0 })),
-          insightsAPI.getLatest().catch(() => null),
-        ]);
-        setData(dashboardData);
-        setAnomalies(anomalyData.items);
-        setWeeklyInsight(insightData);
-        analytics.dashboardViewed();
-      } catch (err: any) {
-        setError('Failed to load dashboard data');
-      } finally {
-        setLoading(false);
+  // Fetch dashboard data with React Query
+  const {
+    data,
+    isLoading: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: ['dashboard', 30],
+    queryFn: async () => {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        router.push('/login');
+        throw new Error('No token');
       }
-    };
+      analytics.dashboardViewed();
+      return await dashboardAPI.get(30);
+    },
+    staleTime: 5 * 60 * 1000, // 5 min
+    gcTime: 30 * 60 * 1000, // 30 min
+  });
 
-    fetchData();
-  }, [router]);
+  // Fetch anomalies with React Query
+  const { data: anomalyData } = useQuery({
+    queryKey: ['anomalies', false],
+    queryFn: () => anomaliesAPI.list(false).catch(() => ({ items: [], total: 0 })),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  // Fetch weekly insights with React Query
+  const { data: weeklyInsight } = useQuery({
+    queryKey: ['insights', 'weekly'],
+    queryFn: () => insightsAPI.getLatest().catch(() => null),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  const anomalies = anomalyData?.items || [];
+  const error = queryError ? 'Failed to load dashboard data' : '';
 
   // Theme-aligned chart colors (Sunset Horizon palette)
   // chart-2: warm amber/gold, chart-3: soft peach, destructive: coral red
@@ -255,7 +262,8 @@ export default function DashboardPage() {
     setDismissingAnomaly(anomalyId);
     try {
       await anomaliesAPI.resolve(anomalyId);
-      setAnomalies((prev) => prev.filter((a) => a.id !== anomalyId));
+      // Note: React Query will auto-refetch when window regains focus
+      // Could also use queryClient.invalidateQueries(['anomalies']) for immediate update
     } catch (err) {
       console.error('Failed to dismiss anomaly:', err);
     } finally {

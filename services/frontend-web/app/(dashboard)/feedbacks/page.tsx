@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
+import { useState, useRef, useCallback, Suspense, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { feedbackAPI, FeedbackItem, CSVImportResponse, FeedbackFilters } from '@/lib/api/feedback';
 import { analytics } from '@/lib/analytics';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -38,11 +39,9 @@ import { createColumns } from './columns';
 
 function FeedbackPageContent() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { searchQuery, sentimentFilter, urgentFilter, setSearchQuery, setSentimentFilter, setUrgentFilter } = useFeedbackPage();
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState('');
-  const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -54,14 +53,20 @@ function FeedbackPageContent() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<CSVImportResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Build filters object from current state
-  const buildFilters = useCallback((search?: string): FeedbackFilters => {
+  const buildFilters = useCallback((): FeedbackFilters => {
     const filters: FeedbackFilters = {};
-    if (search) filters.search = search;
+    if (debouncedSearch) filters.search = debouncedSearch;
     if (sentimentFilter) filters.sentiment = sentimentFilter;
     if (urgentFilter) {
       filters.is_urgent = urgentFilter === 'urgent';
@@ -70,89 +75,39 @@ function FeedbackPageContent() {
       filters.workflow_status = workflowStatusFilter;
     }
     return filters;
-  }, [sentimentFilter, urgentFilter, workflowStatusFilter]);
+  }, [debouncedSearch, sentimentFilter, urgentFilter, workflowStatusFilter]);
 
-  // Fetch feedback with filters
-  const fetchFeedback = useCallback(async (filters?: FeedbackFilters, isPolling = false) => {
-    try {
+  // Fetch feedback with React Query
+  const {
+    data: feedbackResponse,
+    isLoading: loading,
+    dataUpdatedAt,
+  } = useQuery({
+    queryKey: ['feedback', buildFilters()],
+    queryFn: async () => {
       const token = localStorage.getItem('access_token');
       if (!token) {
         router.push('/login');
-        return;
+        throw new Error('No token');
       }
+      return await feedbackAPI.list(1, 100, buildFilters());
+    },
+    staleTime: 5 * 60 * 1000, // 5 min
+    gcTime: 30 * 60 * 1000, // 30 min
+    refetchInterval: 30000, // Poll every 30 seconds
+    refetchIntervalInBackground: false, // Don't poll in background tabs
+  });
 
-      const response = await feedbackAPI.list(1, 100, filters);
-      setFeedbackList(response.items);
-      if (!isPolling) {
-        setLastUpdated(new Date());
-      }
-    } catch (err) {
-      console.error('Failed to load feedback:', err);
-    }
-  }, [router]);
-
-  // Initial load
-  useEffect(() => {
-    const initialLoad = async () => {
-      await fetchFeedback(buildFilters(searchQuery));
-      setLastUpdated(new Date());
-      setLoading(false);
-    };
-    initialLoad();
-  }, []);
-
-  // Polling for auto-refresh (every 30 seconds)
-  useEffect(() => {
-    if (loading) return;
-
-    pollingIntervalRef.current = setInterval(async () => {
-      await fetchFeedback(buildFilters(searchQuery), true);
-      setLastUpdated(new Date());
-    }, 30000);
-
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, [loading, fetchFeedback, buildFilters, searchQuery]);
-
-  // Debounced search - triggers backend query
-  useEffect(() => {
-    // Clear previous timeout
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-
-    // Set searching state
-    setSearching(true);
-
-    // Debounce the search
-    searchTimeoutRef.current = setTimeout(async () => {
-      await fetchFeedback(buildFilters(searchQuery));
-      setSearching(false);
-    }, 300);
-
-    return () => {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
-    };
-  }, [searchQuery, buildFilters, fetchFeedback]);
-
-  // Immediately fetch when filters change (no debounce needed for dropdowns)
-  useEffect(() => {
-    if (!loading) {
-      fetchFeedback(buildFilters(searchQuery));
-    }
-  }, [sentimentFilter, urgentFilter, workflowStatusFilter]);
+  const feedbackList = feedbackResponse?.items || [];
+  const searching = searchQuery !== debouncedSearch;
+  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
 
   const handleCreate = async () => {
     try {
       await feedbackAPI.create({ text: newFeedbackText, source: 'manual' });
       setNewFeedbackText('');
       setShowCreateModal(false);
-      await fetchFeedback(buildFilters(searchQuery));
+      queryClient.invalidateQueries({ queryKey: ['feedback'] });
     } catch (err) {
       console.error('Failed to create feedback:', err);
     }
@@ -163,7 +118,7 @@ function FeedbackPageContent() {
     if (idsToAnalyze.length === 0) return;
     try {
       await feedbackAPI.analyze(idsToAnalyze);
-      await fetchFeedback(buildFilters(searchQuery));
+      queryClient.invalidateQueries({ queryKey: ['feedback'] });
       setSelectedIds([]);
     } catch (err) {
       console.error('Failed to analyze feedback:', err);
@@ -186,7 +141,7 @@ function FeedbackPageContent() {
       setNewFeedbackText('');
       setEditingFeedback(null);
       setShowEditModal(false);
-      await fetchFeedback(buildFilters(searchQuery));
+      queryClient.invalidateQueries({ queryKey: ['feedback'] });
     } catch (err) {
       console.error('Failed to update feedback:', err);
     }
@@ -203,7 +158,7 @@ function FeedbackPageContent() {
       await feedbackAPI.delete(deletingFeedback.id);
       setDeletingFeedback(null);
       setShowDeleteModal(false);
-      await fetchFeedback(buildFilters(searchQuery));
+      queryClient.invalidateQueries({ queryKey: ['feedback'] });
     } catch (err) {
       console.error('Failed to delete feedback:', err);
     }
@@ -219,7 +174,7 @@ function FeedbackPageContent() {
     try {
       await feedbackAPI.bulkDelete(idsToDelete);
       setSelectedIds([]);
-      await fetchFeedback(buildFilters(searchQuery));
+      queryClient.invalidateQueries({ queryKey: ['feedback'] });
     } catch (err) {
       console.error('Failed to bulk delete feedback:', err);
       alert('Failed to delete feedback items. Please try again.');
@@ -243,7 +198,7 @@ function FeedbackPageContent() {
       const result = await feedbackAPI.importCSV(file);
       setImportResult(result);
       analytics.csvUploaded(result.imported_count);
-      await fetchFeedback(buildFilters(searchQuery));
+      queryClient.invalidateQueries({ queryKey: ['feedback'] });
     } catch (err: any) {
       console.error('Failed to import CSV:', err);
       setImportResult({

@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from src.api.routes import auth, organizations, feedback, dashboard, analyze, integrations
 from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team, invites, audit_logs
 from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications, analytics, saved_views, shared_links, workflow, email_webhooks
@@ -75,6 +77,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Cache-Control header middleware for read-only endpoints
+CACHE_CONTROL_RULES = {
+    "/api/v1/dashboard": "private, max-age=60",
+    "/api/v1/analytics": "private, max-age=120",
+    "/api/v1/categories": "private, max-age=300",
+    "/api/v1/feedback-sources": "private, max-age=300",
+}
+
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        if request.method == "GET" and response.status_code == 200:
+            path = request.url.path
+            for prefix, header_value in CACHE_CONTROL_RULES.items():
+                if path.startswith(prefix):
+                    response.headers["Cache-Control"] = header_value
+                    break
+        return response
+
+
+app.add_middleware(CacheControlMiddleware)
 
 # Include routers
 app.include_router(auth.router)

@@ -170,6 +170,11 @@ def change_status(
 
     db.commit()
 
+    # Invalidate dashboard/analytics cache for this org
+    from src.services.cache_service import cache_invalidate
+    cache_invalidate(f"dashboard:{current_org.id}:*")
+    cache_invalidate(f"analytics:{current_org.id}:*")
+
     # Dispatch notifications (fire-and-forget)
     try:
         from src.notification_dispatch_helpers import dispatch_status_changed

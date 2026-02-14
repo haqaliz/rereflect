@@ -3,6 +3,10 @@ Pytest configuration and fixtures for backend tests.
 """
 
 import os
+
+# Disable Redis caching during tests to prevent stale data interference
+os.environ["CACHE_ENABLED"] = "false"
+
 import pytest
 from typing import Generator
 from unittest.mock import patch

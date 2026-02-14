@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, Index, JSON
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
 
@@ -56,11 +57,19 @@ class FeedbackItem(Base):
     workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
 
+    # Relationships for eager loading
+    feedback_source = relationship("FeedbackSource", backref="feedback_items", lazy="select")
+    assigned_user = relationship("User", foreign_keys=[assigned_to], backref="assigned_feedback_items", lazy="select")
+
     # Index for fast queries
     __table_args__ = (
         Index('ix_feedback_org_date', 'organization_id', 'created_at'),
         Index('ix_feedback_org_status', 'organization_id', 'workflow_status'),
         Index('ix_feedback_assigned', 'assigned_to'),
+        Index('ix_feedback_org_sentiment', 'organization_id', 'sentiment_label'),
+        Index('ix_feedback_org_urgent', 'organization_id', 'is_urgent'),
+        Index('ix_feedback_org_pain_cat', 'organization_id', 'pain_point_category'),
+        Index('ix_feedback_org_feature_cat', 'organization_id', 'feature_request_category'),
     )
 
     def __repr__(self):
