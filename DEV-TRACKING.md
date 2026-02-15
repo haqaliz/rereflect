@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-13
+**Last Updated**: 2026-02-16
 
 ---
 
@@ -173,11 +173,17 @@
 - [ ] Custom webhooks (trigger on events)
 - [ ] Auto-routing rules
 
-### Predictive Analytics
-- [ ] Churn prediction model
-- [ ] Feature impact prediction
-- [ ] Customer lifetime value estimation
-- [ ] Revenue impact scoring
+### Predictive Analytics — COMPLETE
+- [x] Improved churn prediction (9-factor: sentiment, urgency, churn keywords, frustration keywords, sentiment trend, feedback frequency, resolution time, pain severity, feature request density)
+- [x] Customer health score (weighted aggregate: churn_risk 35%, sentiment 25%, resolution 25%, frequency 15%)
+- [x] Customer health dashboard widget (top 5 at-risk, expandable with LLM analysis)
+- [x] Weekly LLM churn insights (GPT-4 deep-dive for customers with health_score < 40, Celery Beat Mondays 7AM)
+- [x] Plan gating (enhanced_churn_prediction, customer_health_scores, churn_llm_insights → Pro+)
+- [x] Feedbacks filterable by customer_email (from dashboard widget click-through)
+- [x] Cache invalidation on all feedback mutation paths (create, delete, update, CSV import, approve pending, integration sync, source events)
+- [ ] Feature impact prediction — deferred (requires longitudinal data)
+- [ ] Customer lifetime value estimation — deferred (requires Stripe customer mapping)
+- [ ] Revenue impact scoring — deferred (depends on CLV)
 
 ---
 
@@ -228,6 +234,14 @@
 
 ## Recent Completions (Feb 2026)
 
+- **Predictive Analytics** (4 phases, PRD-PREDICTIVE-ANALYTICS.md):
+  - Phase 1 — Enhanced Churn Scoring: `customer_email` column + index on feedback_items, email extraction from source_metadata + CSV import + all adapters, 9-factor churn risk scoring (up from 4), backfill script for existing data
+  - Phase 2 — Customer Health Score: `CustomerHealth` model with 3 indexes, `health_score_service.py` (4-component weighted scoring), health recomputation after each analysis, dashboard API returns top 5 at-risk customers, expandable dashboard widget with score badges + component breakdown + LLM analysis
+  - Phase 3 — Weekly LLM Deep-Dive: `generate_churn_insights` Celery task, `CHURN_ANALYSIS_PROMPT` for GPT-4, Celery Beat schedule (Mondays 7AM UTC), stores `llm_analysis` on CustomerHealth records
+  - Phase 4 — Plan Gating & Integration: 3 feature IDs (enhanced_churn_prediction, customer_health_scores, churn_llm_insights) gated to Pro+, `customer_email` filter on feedbacks list endpoint, dashboard widget click-through to filtered feedbacks
+  - Comprehensive cache invalidation audit: all 11 feedback mutation points now invalidate `dashboard:*` + `analytics:*` cache keys (backend routes + worker tasks)
+  - Diverse sample CSV: 1000 rows, 50 unique customers across 4 risk profiles, all categories represented
+  - Alembic migrations: customer_email column, customer_health_scores table
 - **Feedback Workflow** (6 phases):
   - DB schema: workflow_status + assigned_to on feedback_items, FeedbackNote, FeedbackWorkflowEvent, AssignmentRule models
   - 14+ workflow API endpoints (status change, assign, overview, timeline, notes CRUD, assignment rules, auto-assign)
@@ -344,6 +358,12 @@
 - Intercom integration follows same pattern as Slack: OAuth flow, adapter, webhook receiver, Pro+ gating, HMAC-SHA1 verification, two-way sync (notes + close)
 - Email forwarding: Resend inbound webhooks, lazy body fetch from API, parser strips forwarding headers from all major mail clients
 - Technical debt: Sentry skipped due to $29/mo cost, deferred until paying customers cover it
+- Predictive analytics: hybrid approach — algorithmic scoring for real-time + weekly GPT-4 for at-risk customers (cost-effective)
+- Customer health score: churn-heavy weights (35% churn, 25% sentiment, 25% resolution, 15% frequency)
+- Health score recomputation: inline after each analysis task (not a separate Celery task — fast enough)
+- LLM churn insights: capped at customers with health_score < 40, Monday 7AM UTC (before weekly digest at 8:30AM)
+- Feature impact prediction / CLV / revenue scoring deferred — insufficient data currently
+- Worker-service cache invalidation: lightweight cache.py utility connecting to Redis DB 2 (same as backend-api cache_service)
 - Redis cache uses DB 2 (DB 0=Celery, DB 1=sessions, DB 2=cache, DB 3=rate limiting)
 - React Query (TanStack Query v5) with staleTime 5min, gcTime 30min for client-side caching
 - Vitest + @testing-library/react for frontend unit tests
