@@ -38,6 +38,7 @@ class Integration(Base):
     last_used_at = Column(DateTime, nullable=True)
     error_count = Column(Integer, default=0)
     last_error = Column(Text, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
