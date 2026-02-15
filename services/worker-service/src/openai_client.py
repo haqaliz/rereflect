@@ -165,6 +165,29 @@ def categorize_feedback(
         return None
 
 
+CHURN_ANALYSIS_PROMPT = """You are a customer success analyst. Analyze the following feedback data for a single customer and provide a concise churn risk analysis.
+
+Customer email: {customer_email}
+Health score: {health_score}/100 (lower = higher risk)
+Risk level: {risk_level}
+Component scores:
+- Churn risk: {churn_risk_component}/100
+- Sentiment: {sentiment_component}/100
+- Resolution time: {resolution_component}/100
+- Feedback frequency: {frequency_component}/100
+
+Recent feedback items (most recent first):
+{feedback_items}
+
+Return ONLY valid JSON with this structure:
+{{
+  "analysis": "2-3 sentence summary of why this customer is at risk and what the key drivers are",
+  "recommended_actions": ["action 1", "action 2", "action 3"],
+  "risk_drivers": ["driver 1", "driver 2"],
+  "estimated_urgency": "immediate" | "this_week" | "this_month"
+}}"""
+
+
 INSIGHTS_PROMPT = """You are a customer feedback analyst. Analyze the following batch of customer feedback items and generate 3-5 actionable insights for the product team.
 
 Each insight should identify a pattern, trend, or actionable recommendation based on the feedback.
@@ -247,4 +270,74 @@ def generate_insights(
         return None
     except Exception as e:
         logger.error(f"Unexpected error generating insights: {e}")
+        return None
+
+
+def generate_churn_analysis(
+    customer_email: str,
+    health_score: int,
+    risk_level: str,
+    churn_risk_component: int,
+    sentiment_component: int,
+    resolution_component: int,
+    frequency_component: int,
+    feedback_texts: list,
+    org_api_key: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Use GPT to generate a churn risk analysis for a single at-risk customer.
+
+    Returns:
+        Dict with analysis, recommended_actions, risk_drivers, estimated_urgency.
+    """
+    client = _get_client(org_api_key)
+    if not client:
+        logger.warning("No OpenAI API key configured, skipping churn analysis")
+        return None
+
+    formatted = "\n".join(f"{i+1}. \"{text[:400]}\"" for i, text in enumerate(feedback_texts[:20]))
+
+    prompt = CHURN_ANALYSIS_PROMPT.format(
+        customer_email=customer_email,
+        health_score=health_score,
+        risk_level=risk_level,
+        churn_risk_component=churn_risk_component,
+        sentiment_component=sentiment_component,
+        resolution_component=resolution_component,
+        frequency_component=frequency_component,
+        feedback_items=formatted,
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=500,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            logger.error("OpenAI returned empty content for churn analysis")
+            return None
+
+        result = json.loads(content)
+
+        # Validate structure
+        return {
+            "analysis": str(result.get("analysis", ""))[:500],
+            "recommended_actions": [str(a)[:200] for a in result.get("recommended_actions", [])[:5]],
+            "risk_drivers": [str(d)[:200] for d in result.get("risk_drivers", [])[:5]],
+            "estimated_urgency": result.get("estimated_urgency", "this_month"),
+        }
+
+    except (APIError, RateLimitError, APITimeoutError) as e:
+        logger.error(f"OpenAI API error generating churn analysis: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse OpenAI churn analysis response: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error generating churn analysis: {e}")
         return None

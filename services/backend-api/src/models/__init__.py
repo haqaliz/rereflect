@@ -21,6 +21,7 @@ from .shared_link import SharedLink
 from .feedback_note import FeedbackNote
 from .feedback_workflow_event import FeedbackWorkflowEvent
 from .assignment_rule import AssignmentRule
+from .customer_health import CustomerHealth
 
 __all__ = [
     "Base",
@@ -47,4 +48,5 @@ __all__ = [
     "FeedbackNote",
     "FeedbackWorkflowEvent",
     "AssignmentRule",
+    "CustomerHealth",
 ]

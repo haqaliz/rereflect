@@ -120,6 +120,11 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.anomaly.detect_sentiment_anomalies",
         "schedule": crontab(minute=0),  # Top of every hour
     },
+    # Generate churn insights for at-risk customers: Every Monday at 7 AM UTC
+    "generate-churn-insights": {
+        "task": "src.tasks.insights.generate_churn_insights",
+        "schedule": crontab(hour=7, minute=0, day_of_week=1),
+    },
     # Generate weekly AI insights: Every Monday at 8:30 AM UTC (before digest at 9 AM)
     "generate-weekly-insights": {
         "task": "src.tasks.insights.generate_weekly_insights",

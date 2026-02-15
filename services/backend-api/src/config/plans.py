@@ -64,6 +64,9 @@ PLANS = {
             "pdf_export",
             "dashboard_sharing",
             "priority_support",
+            "enhanced_churn_prediction",
+            "customer_health_scores",
+            "churn_llm_insights",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -96,6 +99,9 @@ PLANS = {
             "advanced_analytics",
             "custom_categories",
             "dedicated_support",
+            "enhanced_churn_prediction",
+            "customer_health_scores",
+            "churn_llm_insights",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -133,6 +139,9 @@ PLANS = {
             "dedicated_csm",
             "audit_logs",
             "custom_retention",
+            "enhanced_churn_prediction",
+            "customer_health_scores",
+            "churn_llm_insights",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -171,6 +180,9 @@ FEATURE_PLANS = {
     "dedicated_csm": "enterprise",
     "audit_logs": "enterprise",
     "custom_retention": "enterprise",
+    "enhanced_churn_prediction": "pro",
+    "customer_health_scores": "pro",
+    "churn_llm_insights": "pro",
 }
 
 

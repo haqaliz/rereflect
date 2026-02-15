@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
+import { customerHealthAPI, CustomerHealthData } from '@/lib/api/customer-health';
 import { analytics } from '@/lib/analytics';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -59,7 +60,8 @@ import {
   Webhook,
   PenLine,
   User,
-  ExternalLink
+  ExternalLink,
+  HeartPulse
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -85,6 +87,7 @@ export default function FeedbackDetailPage() {
   const feedbackId = Number(params.id);
 
   const [feedback, setFeedback] = useState<FeedbackItem | null>(null);
+  const [customerHealth, setCustomerHealth] = useState<CustomerHealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
@@ -97,6 +100,17 @@ export default function FeedbackDetailPage() {
       fetchFeedback();
     }
   }, [feedbackId]);
+
+  // Fetch customer health when feedback has customer_email
+  useEffect(() => {
+    if (!feedback?.customer_email) {
+      setCustomerHealth(null);
+      return;
+    }
+    customerHealthAPI.getByEmail(feedback.customer_email)
+      .then(setCustomerHealth)
+      .catch(() => setCustomerHealth(null)); // 404 or 403 = silently skip
+  }, [feedback?.customer_email]);
 
   // Polling for auto-refresh (every 30 seconds)
   useEffect(() => {
@@ -372,6 +386,37 @@ export default function FeedbackDetailPage() {
                       </span>
                     )}
                   </div>
+                  {customerHealth && (() => {
+                    const score = customerHealth.health_score;
+                    const getHealthColor = (s: number) => {
+                      if (s >= 70) return 'var(--chart-2)';
+                      if (s >= 50) return 'var(--chart-3)';
+                      if (s >= 30) return 'var(--chart-1)';
+                      return 'var(--destructive)';
+                    };
+                    const getRiskLabel = (level: string) => {
+                      switch (level) {
+                        case 'healthy': return 'Healthy';
+                        case 'moderate': return 'Moderate';
+                        case 'at_risk': return 'At Risk';
+                        case 'critical': return 'Critical';
+                        default: return level;
+                      }
+                    };
+                    const healthColor = getHealthColor(score);
+                    return (
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <HeartPulse className="w-3.5 h-3.5" style={{ color: healthColor }} />
+                        <Badge
+                          variant="outline"
+                          style={getCategoryBadgeStyle(healthColor)}
+                        >
+                          {score} · {getRiskLabel(customerHealth.risk_level)}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{feedback.customer_email}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

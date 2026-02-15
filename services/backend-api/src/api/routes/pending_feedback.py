@@ -142,6 +142,11 @@ def _create_feedback_from_pending(
     db.commit()
     db.refresh(feedback)
 
+    # Invalidate dashboard/analytics cache for this org
+    from src.services.cache_service import cache_invalidate
+    cache_invalidate(f"dashboard:{pending.organization_id}:*")
+    cache_invalidate(f"analytics:{pending.organization_id}:*")
+
     # Queue for analysis
     try:
         queue_analyze_feedback(feedback.id)

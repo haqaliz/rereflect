@@ -9,11 +9,11 @@ from contextlib import contextmanager
 
 from src.config import settings
 
-# Create engine
+# Create engine (pool sized for parallel analysis workers)
 engine = create_engine(
     settings.database_url,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=10,
+    max_overflow=15,
     pool_pre_ping=True,
 )
 

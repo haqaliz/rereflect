@@ -135,6 +135,8 @@ class FeedbackResponse(BaseModel):
     # Churn risk
     churn_risk_score: Optional[int] = None
     suggested_action: Optional[str] = None
+    # Customer
+    customer_email: Optional[str] = None
     # Workflow
     workflow_status: str = "new"
     assigned_to: Optional[int] = None
@@ -233,6 +235,7 @@ def list_feedback(
     urgent_response_time: Optional[str] = Query(None, description="Filter by urgent response time"),
     churn_risk_min: Optional[int] = Query(None, ge=0, le=100, description="Minimum churn risk score"),
     churn_risk_max: Optional[int] = Query(None, ge=0, le=100, description="Maximum churn risk score"),
+    customer_email: Optional[str] = Query(None, description="Filter by customer email"),
     workflow_status: Optional[str] = Query(None, description="Filter by workflow status: new, in_review, resolved, closed"),
     assigned_to: Optional[int] = Query(None, description="Filter by assigned user ID"),
     sort_by: Optional[str] = Query(None, description="Sort by field: created_at, sentiment_score, text, churn_risk_score, workflow_status"),
@@ -296,6 +299,9 @@ def list_feedback(
 
     if churn_risk_max is not None:
         query = query.filter(FeedbackItem.churn_risk_score <= churn_risk_max)
+
+    if customer_email:
+        query = query.filter(FeedbackItem.customer_email == customer_email)
 
     if workflow_status:
         query = query.filter(FeedbackItem.workflow_status == workflow_status)
@@ -390,6 +396,7 @@ def list_feedback(
             "categorization_confidence": item.categorization_confidence,
             "churn_risk_score": item.churn_risk_score,
             "suggested_action": item.suggested_action,
+            "customer_email": item.customer_email,
             "workflow_status": item.workflow_status,
             "assigned_to": item.assigned_to,
             "assigned_to_email": assigned_to_email,
@@ -463,6 +470,7 @@ def get_feedback(
         categorization_confidence=feedback.categorization_confidence,
         churn_risk_score=feedback.churn_risk_score,
         suggested_action=feedback.suggested_action,
+        customer_email=feedback.customer_email,
         workflow_status=feedback.workflow_status,
         assigned_to=feedback.assigned_to,
         assigned_to_email=assigned_to_email,
@@ -490,6 +498,10 @@ def delete_feedback(
 
     db.delete(feedback)
     db.commit()
+
+    from src.services.cache_service import cache_invalidate
+    cache_invalidate(f"dashboard:{current_org.id}:*")
+    cache_invalidate(f"analytics:{current_org.id}:*")
 
     return None
 
@@ -522,6 +534,10 @@ def bulk_delete_feedback(
     ).delete(synchronize_session=False)
 
     db.commit()
+
+    from src.services.cache_service import cache_invalidate
+    cache_invalidate(f"dashboard:{current_org.id}:*")
+    cache_invalidate(f"analytics:{current_org.id}:*")
 
     return {
         "deleted_count": deleted_count,
@@ -574,6 +590,10 @@ def update_feedback(
     # Re-analyze the feedback
     analyze_single_feedback(feedback, db)
     db.refresh(feedback)
+
+    from src.services.cache_service import cache_invalidate
+    cache_invalidate(f"dashboard:{current_org.id}:*")
+    cache_invalidate(f"analytics:{current_org.id}:*")
 
     return feedback
 
@@ -655,6 +675,12 @@ async def import_csv(
             source_column = fieldnames_lower[col]
             break
 
+    email_column = None
+    for col in ['customer_email', 'email', 'user_email', 'author_email']:
+        if col in fieldnames_lower:
+            email_column = fieldnames_lower[col]
+            break
+
     # Import feedback items
     total_rows = 0
     imported_count = 0
@@ -685,11 +711,19 @@ async def import_csv(
                     failed_count += 1
                     continue
 
+            # Get customer email if column exists
+            customer_email_val = None
+            if email_column and row.get(email_column):
+                email_val = row.get(email_column).strip().lower()
+                if '@' in email_val:
+                    customer_email_val = email_val
+
             # Create feedback item
             feedback = FeedbackItem(
                 organization_id=current_org.id,
                 text=feedback_text,
-                source=source
+                source=source,
+                customer_email=customer_email_val,
             )
 
             db.add(feedback)
@@ -730,6 +764,11 @@ async def import_csv(
         feedback_ids = [f.id for f in recent_feedback]
         if feedback_ids:
             queue_analyze_batch(current_org.id, feedback_ids)
+
+    if imported_count > 0:
+        from src.services.cache_service import cache_invalidate
+        cache_invalidate(f"dashboard:{current_org.id}:*")
+        cache_invalidate(f"analytics:{current_org.id}:*")
 
     return CSVImportResponse(
         total_rows=total_rows,

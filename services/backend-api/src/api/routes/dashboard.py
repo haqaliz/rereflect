@@ -75,6 +75,21 @@ class ChurnRiskItem(BaseModel):
     created_at: datetime
 
 
+class CustomerHealthSummary(BaseModel):
+    customer_email: str
+    customer_name: Optional[str] = None
+    health_score: int
+    risk_level: str
+    feedback_count: int
+    last_feedback_at: Optional[datetime] = None
+    churn_risk_component: int
+    sentiment_component: int
+    resolution_component: int
+    frequency_component: int
+    llm_analysis: Optional[str] = None
+    llm_analyzed_at: Optional[datetime] = None
+
+
 class DashboardResponse(BaseModel):
     sentiment: SentimentStats
     pain_points: List[PainPoint]
@@ -86,6 +101,7 @@ class DashboardResponse(BaseModel):
     urgent_categories: List[CategoryCount]
     churn_risk_summary: ChurnRiskSummary
     top_churn_risks: List[ChurnRiskItem]
+    at_risk_customers: List[CustomerHealthSummary]
     total_feedback: int
     date_range: str
 
@@ -340,6 +356,33 @@ def get_dashboard(
         for item in top_churn_query.all()
     ]
 
+    # At-risk customers (top 5 lowest health scores) — Pro+ only
+    from src.config.plans import has_feature
+    at_risk_customers = []
+    if has_feature(current_org.plan or "free", "customer_health_scores"):
+        from src.models.customer_health import CustomerHealth
+        at_risk_query = db.query(CustomerHealth).filter(
+            CustomerHealth.organization_id == current_org.id,
+        ).order_by(CustomerHealth.health_score.asc()).limit(5).all()
+
+        at_risk_customers = [
+            CustomerHealthSummary(
+                customer_email=c.customer_email,
+                customer_name=c.customer_name,
+                health_score=c.health_score,
+                risk_level=c.risk_level,
+                feedback_count=c.feedback_count,
+                last_feedback_at=c.last_feedback_at,
+                churn_risk_component=c.churn_risk_component,
+                sentiment_component=c.sentiment_component,
+                resolution_component=c.resolution_component,
+                frequency_component=c.frequency_component,
+                llm_analysis=c.llm_analysis,
+                llm_analyzed_at=c.llm_analyzed_at,
+            )
+            for c in at_risk_query
+        ]
+
     result = DashboardResponse(
         sentiment=SentimentStats(
             positive_count=positive_count,
@@ -357,6 +400,7 @@ def get_dashboard(
         urgent_categories=urgent_categories,
         churn_risk_summary=churn_risk_summary,
         top_churn_risks=top_churn_risks,
+        at_risk_customers=at_risk_customers,
         total_feedback=total_feedback,
         date_range=f"Last {days} days"
     )

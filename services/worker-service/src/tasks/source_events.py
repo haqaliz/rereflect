@@ -85,6 +85,14 @@ def process_source_event(
                 results.append(result)
 
             db.commit()
+
+            # Invalidate dashboard/analytics cache for affected orgs
+            from src.cache import cache_invalidate
+            org_ids = {s.organization_id for s in sources}
+            for org_id in org_ids:
+                cache_invalidate(f"dashboard:{org_id}:*")
+                cache_invalidate(f"analytics:{org_id}:*")
+
             return {"status": "processed", "results": results}
 
         except Exception as e:

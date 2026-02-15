@@ -60,6 +60,21 @@ export interface ChurnRiskItem {
   created_at: string;
 }
 
+export interface CustomerHealthSummary {
+  customer_email: string;
+  customer_name: string | null;
+  health_score: number;
+  risk_level: string;
+  feedback_count: number;
+  last_feedback_at: string | null;
+  churn_risk_component: number;
+  sentiment_component: number;
+  resolution_component: number;
+  frequency_component: number;
+  llm_analysis: string | null;
+  llm_analyzed_at: string | null;
+}
+
 export interface DashboardData {
   sentiment: SentimentStats;
   pain_points: PainPoint[];
@@ -71,6 +86,7 @@ export interface DashboardData {
   urgent_categories: CategoryCount[];
   churn_risk_summary: ChurnRiskSummary;
   top_churn_risks: ChurnRiskItem[];
+  at_risk_customers: CustomerHealthSummary[];
   total_feedback: number;
   date_range: string;
 }

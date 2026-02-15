@@ -106,6 +106,11 @@ def sync_integration(self, integration_id: int) -> dict:
             integration.last_synced_at = datetime.utcnow()
             db.commit()
 
+            # Invalidate dashboard/analytics cache for this org
+            from src.cache import cache_invalidate
+            cache_invalidate(f"dashboard:{integration.organization_id}:*")
+            cache_invalidate(f"analytics:{integration.organization_id}:*")
+
             # Queue analysis for new items
             if feedback_ids:
                 analyze_feedback_batch.delay(

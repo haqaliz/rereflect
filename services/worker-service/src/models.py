@@ -101,6 +101,7 @@ class FeedbackItem(Base):
     organization_id = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
     source = Column(String, nullable=True)  # intercom, zendesk, manual, slack, webhook, etc
+    customer_email = Column(String(255), nullable=True)
 
     # Source tracking for inbound integrations
     source_id = Column(Integer, nullable=True)  # FK to feedback_sources
@@ -197,6 +198,7 @@ class Integration(Base):
     last_used_at = Column(DateTime, nullable=True)
     error_count = Column(Integer, default=0)
     last_error = Column(Text, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -416,6 +418,39 @@ class AssignmentRule(Base):
 
     __table_args__ = (
         Index('ix_assignment_rule_org', 'organization_id', 'is_active'),
+    )
+
+
+class CustomerHealth(Base):
+    """Aggregate health score per customer (identified by email) within an organization."""
+    __tablename__ = "customer_health_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    customer_name = Column(String(255), nullable=True)
+
+    health_score = Column(Integer, nullable=False, default=50)
+
+    churn_risk_component = Column(Integer, default=50)
+    sentiment_component = Column(Integer, default=50)
+    resolution_component = Column(Integer, default=50)
+    frequency_component = Column(Integer, default=50)
+
+    feedback_count = Column(Integer, default=0)
+    last_feedback_at = Column(DateTime, nullable=True)
+    risk_level = Column(String(20), default="unknown")
+
+    llm_analysis = Column(Text, nullable=True)
+    llm_analyzed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),
+        Index('ix_customer_health_org_score', 'organization_id', 'health_score'),
+        Index('ix_customer_health_risk', 'organization_id', 'risk_level'),
     )
 
 

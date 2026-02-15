@@ -7,6 +7,7 @@ interface FeedbackPageState {
   searchQuery: string;
   sentimentFilter: string;
   urgentFilter: string;
+  churnRiskFilter: string;
   currentPage: number;
 }
 
@@ -14,6 +15,7 @@ interface FeedbackPageContextType extends FeedbackPageState {
   setSearchQuery: (query: string) => void;
   setSentimentFilter: (filter: string) => void;
   setUrgentFilter: (filter: string) => void;
+  setChurnRiskFilter: (filter: string) => void;
   setCurrentPage: (page: number) => void;
   resetFilters: () => void;
 }
@@ -22,6 +24,7 @@ const defaultState: FeedbackPageState = {
   searchQuery: '',
   sentimentFilter: '',
   urgentFilter: '',
+  churnRiskFilter: '',
   currentPage: 1,
 };
 
@@ -38,10 +41,11 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
   const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   // Update URL with current filters
-  const updateURL = useCallback((sentimentFilter: string, urgentFilter: string) => {
+  const updateURL = useCallback((sentimentFilter: string, urgentFilter: string, churnRiskFilter: string) => {
     const params = new URLSearchParams();
     if (sentimentFilter) params.set('sentiment', sentimentFilter);
     if (urgentFilter) params.set('urgent', urgentFilter);
+    if (churnRiskFilter) params.set('churn_risk', churnRiskFilter);
 
     const queryString = params.toString();
     const newUrl = queryString ? `${pathname}?${queryString}` : pathname;
@@ -58,13 +62,15 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
     // Check URL params first (they take priority)
     const sentimentParam = searchParams.get('sentiment');
     const urgentParam = searchParams.get('urgent');
+    const churnRiskParam = searchParams.get('churn_risk');
 
-    if (sentimentParam || urgentParam) {
+    if (sentimentParam || urgentParam || churnRiskParam) {
       // URL params present - use them and ignore localStorage
       setState({
         ...defaultState,
         sentimentFilter: sentimentParam || '',
         urgentFilter: urgentParam || '',
+        churnRiskFilter: churnRiskParam || '',
       });
     } else {
       // No URL params - fall back to localStorage
@@ -74,8 +80,8 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(stored);
           setState(parsed);
           // Sync localStorage state to URL
-          if (parsed.sentimentFilter || parsed.urgentFilter) {
-            updateURL(parsed.sentimentFilter || '', parsed.urgentFilter || '');
+          if (parsed.sentimentFilter || parsed.urgentFilter || parsed.churnRiskFilter) {
+            updateURL(parsed.sentimentFilter || '', parsed.urgentFilter || '', parsed.churnRiskFilter || '');
           }
         } catch (err) {
           console.error('Failed to parse stored feedback page state:', err);
@@ -95,9 +101,9 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
   // Sync filter changes to URL (after initial load)
   useEffect(() => {
     if (initialLoadDone) {
-      updateURL(state.sentimentFilter, state.urgentFilter);
+      updateURL(state.sentimentFilter, state.urgentFilter, state.churnRiskFilter);
     }
-  }, [state.sentimentFilter, state.urgentFilter, initialLoadDone, updateURL]);
+  }, [state.sentimentFilter, state.urgentFilter, state.churnRiskFilter, initialLoadDone, updateURL]);
 
   const setSearchQuery = (query: string) => {
     setState(prev => ({ ...prev, searchQuery: query, currentPage: 1 }));
@@ -109,6 +115,10 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
 
   const setUrgentFilter = (filter: string) => {
     setState(prev => ({ ...prev, urgentFilter: filter, currentPage: 1 }));
+  };
+
+  const setChurnRiskFilter = (filter: string) => {
+    setState(prev => ({ ...prev, churnRiskFilter: filter, currentPage: 1 }));
   };
 
   const setCurrentPage = (page: number) => {
@@ -126,6 +136,7 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
         setSearchQuery,
         setSentimentFilter,
         setUrgentFilter,
+        setChurnRiskFilter,
         setCurrentPage,
         resetFilters,
       }}

@@ -5,6 +5,7 @@ Supports LLM-powered categorization (OpenAI) with keyword fallback.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional
 
 import redis
@@ -197,13 +198,43 @@ def analyze_feedback_batch(self, org_id: int, feedback_ids: List[int]) -> dict:
         }
 
 
+def _analyze_single_by_id(feedback_id: int) -> dict:
+    """
+    Analyze a single feedback item by ID in its own DB session.
+    Designed to run inside a thread pool — each thread gets an independent session.
+    """
+    with get_db_session() as db:
+        from src.models import FeedbackItem
+
+        feedback = db.query(FeedbackItem).filter(
+            FeedbackItem.id == feedback_id,
+            FeedbackItem.sentiment_label == None,
+        ).first()
+
+        if not feedback:
+            return {"id": feedback_id, "status": "skipped"}
+
+        try:
+            _analyze_feedback_item(feedback, db)
+            db.commit()
+            return {"id": feedback_id, "status": "success"}
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to analyze feedback {feedback_id}: {e}")
+            return {"id": feedback_id, "status": "failed", "error": str(e)}
+
+
+# Max parallel OpenAI calls (keep reasonable to avoid rate limits)
+ANALYSIS_WORKERS = 8
+
+
 @shared_task
 def process_unanalyzed_feedback() -> dict:
     """
     Periodic task: Process all unanalyzed feedback items.
     Runs every 30 seconds via Celery Beat.
     Uses a Redis lock to prevent concurrent execution across workers.
-    Commits after each item so overlapping tasks skip already-analyzed items.
+    Processes items in parallel using a thread pool for ~5-8x speedup.
 
     Returns:
         dict with processing results
@@ -211,45 +242,59 @@ def process_unanalyzed_feedback() -> dict:
     from src.models import FeedbackItem
 
     r = _get_redis()
-    lock = r.lock("lock:process_unanalyzed_feedback", timeout=300, blocking=False)
+    lock = r.lock("lock:process_unanalyzed_feedback", timeout=600, blocking=False)
 
     if not lock.acquire(blocking=False):
         logger.debug("process_unanalyzed_feedback already running, skipping")
         return {"status": "skipped", "processed": 0}
 
     try:
+        # Collect IDs in main thread, then process in parallel
         with get_db_session() as db:
-            # Find unanalyzed feedback
-            unanalyzed = db.query(FeedbackItem).filter(
-                FeedbackItem.sentiment_label == None
-            ).limit(settings.analysis_batch_size).all()
+            feedback_ids = [
+                row.id for row in db.query(FeedbackItem.id).filter(
+                    FeedbackItem.sentiment_label == None
+                ).limit(settings.analysis_batch_size).all()
+            ]
 
-            if not unanalyzed:
-                logger.debug("No unanalyzed feedback found")
-                return {"status": "idle", "processed": 0}
+        if not feedback_ids:
+            logger.debug("No unanalyzed feedback found")
+            return {"status": "idle", "processed": 0}
 
-            logger.info(f"Processing {len(unanalyzed)} unanalyzed feedback items")
+        logger.info(f"Processing {len(feedback_ids)} unanalyzed feedback items ({ANALYSIS_WORKERS} workers)")
 
-            success_count = 0
-            failed_count = 0
+        success_count = 0
+        failed_count = 0
 
-            for feedback in unanalyzed:
-                try:
-                    _analyze_feedback_item(feedback, db)
-                    db.commit()
+        with ThreadPoolExecutor(max_workers=ANALYSIS_WORKERS) as executor:
+            futures = {
+                executor.submit(_analyze_single_by_id, fid): fid
+                for fid in feedback_ids
+            }
+
+            for future in as_completed(futures):
+                result = future.result()
+                if result["status"] == "success":
                     success_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to analyze feedback {feedback.id}: {e}")
-                    db.rollback()
+                elif result["status"] == "failed":
                     failed_count += 1
 
-            logger.info(f"Analysis complete: {success_count} successful, {failed_count} failed")
+        # Invalidate cache for affected orgs
+        if success_count > 0:
+            with get_db_session() as db:
+                org_ids = db.query(FeedbackItem.organization_id).filter(
+                    FeedbackItem.id.in_(feedback_ids),
+                ).distinct().all()
+                for (org_id,) in org_ids:
+                    _invalidate_org_cache(org_id)
 
-            return {
-                "status": "complete",
-                "processed": success_count,
-                "failed": failed_count,
-            }
+        logger.info(f"Analysis complete: {success_count} successful, {failed_count} failed")
+
+        return {
+            "status": "complete",
+            "processed": success_count,
+            "failed": failed_count,
+        }
     finally:
         try:
             lock.release()
@@ -300,10 +345,26 @@ def _analyze_feedback_item(feedback, db=None) -> None:
     if llm_result:
         _apply_llm_result(feedback, llm_result)
     else:
-        _apply_keyword_analysis(feedback)
+        _apply_keyword_analysis(feedback, db)
         # Mark for LLM retry if org has AI enabled but LLM failed
         if use_llm:
             feedback.llm_analysis_pending = True
+
+    # Extract and set customer_email from source_metadata
+    if not feedback.customer_email:
+        email = _extract_customer_email(feedback)
+        if email:
+            feedback.customer_email = email
+
+    # Update customer health score after analysis
+    if feedback.customer_email and db is not None:
+        try:
+            from src.services.health_score_service import update_customer_health
+            update_customer_health(feedback.organization_id, feedback.customer_email, db)
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to update customer health for {feedback.customer_email}: {e}")
 
 
 def _apply_llm_result(feedback, result: dict) -> None:
@@ -335,7 +396,7 @@ def _apply_llm_result(feedback, result: dict) -> None:
     feedback.llm_analysis_pending = False
 
 
-def _apply_keyword_analysis(feedback) -> None:
+def _apply_keyword_analysis(feedback, db=None) -> None:
     """Apply traditional keyword-based analysis to a feedback item (fallback)."""
     sentiment_analyzer = get_sentiment_analyzer()
     tag_extractor = get_tag_extractor()
@@ -405,35 +466,56 @@ def _apply_keyword_analysis(feedback) -> None:
     # Tag extraction
     feedback.tags = tag_extractor.extract_tags(feedback.text)
 
-    # Keyword fallback: compute heuristic churn risk score
-    feedback.churn_risk_score = _compute_heuristic_churn_risk(feedback)
+    # Keyword fallback: compute heuristic churn risk score (9-factor with db)
+    feedback.churn_risk_score = _compute_heuristic_churn_risk(feedback, db)
     feedback.suggested_action = _compute_heuristic_suggestion(feedback)
 
     # Keyword fallback doesn't set LLM fields
     feedback.llm_analyzed = False
 
 
-def _compute_heuristic_churn_risk(feedback) -> int:
-    """Compute a churn risk score (0-100) using heuristics when LLM is unavailable."""
+def _extract_customer_email(feedback) -> Optional[str]:
+    """Extract customer email from source_metadata."""
+    if feedback.customer_email:
+        return feedback.customer_email
+    meta = feedback.source_metadata
+    if not meta or not isinstance(meta, dict):
+        return None
+    for key in ['author_email', 'email', 'sender_email', 'from_email', 'user_email']:
+        val = meta.get(key)
+        if val and isinstance(val, str) and '@' in val:
+            return val.lower().strip()
+    return None
+
+
+def _compute_heuristic_churn_risk(feedback, db=None) -> int:
+    """
+    Compute a churn risk score (0-100) using 9-factor heuristics.
+    Original 4 factors (50pts) + 5 new customer-level factors (50pts).
+    New factors require customer_email + db session; graceful fallback to 4-factor.
+    """
+    from datetime import timedelta
+    from sqlalchemy import func as sa_func
+
     score = 0
     text_lower = feedback.text.lower()
 
-    # Sentiment-based scoring (0-40 points)
+    # --- Original 4 factors (50 pts) ---
+
+    # Sentiment (0-15 pts)
     if feedback.sentiment_score is not None:
-        if feedback.sentiment_score < -0.7:
-            score += 40
-        elif feedback.sentiment_score < -0.5:
-            score += 30
-        elif feedback.sentiment_score < -0.3:
-            score += 20
-        elif feedback.sentiment_score < 0:
+        if feedback.sentiment_score < -0.5:
+            score += 15
+        elif feedback.sentiment_score < -0.2:
             score += 10
+        elif feedback.sentiment_score < 0:
+            score += 5
 
-    # Urgency (0-20 points)
+    # Urgency (0-10 pts)
     if feedback.is_urgent:
-        score += 20
+        score += 10
 
-    # Churn-signal keywords (0-25 points)
+    # Churn keywords (0-15 pts)
     churn_keywords = [
         'cancel', 'canceling', 'cancellation',
         'switch', 'switching', 'alternative', 'competitor',
@@ -442,15 +524,146 @@ def _compute_heuristic_churn_risk(feedback) -> int:
         'unsubscribe', 'downgrade', 'not renewing',
     ]
     churn_matches = sum(1 for kw in churn_keywords if kw in text_lower)
-    score += min(churn_matches * 10, 25)
+    score += min(churn_matches * 5, 15)
 
-    # Frustration keywords (0-15 points)
+    # Frustration keywords (0-10 pts)
     frustration_keywords = [
         'frustrated', 'frustrating', 'terrible', 'awful', 'horrible',
         'worst', 'useless', 'waste', 'disappointed', 'unacceptable',
     ]
     frustration_matches = sum(1 for kw in frustration_keywords if kw in text_lower)
-    score += min(frustration_matches * 5, 15)
+    score += min(frustration_matches * 5, 10)
+
+    # --- New 5 factors (50 pts) — require customer_email + db ---
+    customer_email = getattr(feedback, 'customer_email', None)
+    if not customer_email or db is None:
+        return min(score, 100)
+
+    from src.models import FeedbackItem
+    from datetime import datetime
+    now = datetime.utcnow()
+    org_id = feedback.organization_id
+
+    # Sentiment trend (0-15 pts) — declining over last 5 feedbacks
+    try:
+        recent_scores = db.query(FeedbackItem.sentiment_score).filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.sentiment_score.isnot(None),
+            FeedbackItem.id != feedback.id,
+        ).order_by(FeedbackItem.created_at.desc()).limit(5).all()
+
+        if len(recent_scores) >= 2:
+            scores_list = [r.sentiment_score for r in recent_scores]
+            if scores_list[0] < scores_list[-1]:
+                decline = scores_list[-1] - scores_list[0]
+                if decline > 0.5:
+                    score += 15
+                elif decline > 0.3:
+                    score += 10
+                elif decline > 0.1:
+                    score += 5
+    except Exception:
+        pass
+
+    # Feedback frequency (0-10 pts) — more complaints recently
+    try:
+        last_7d = db.query(sa_func.count(FeedbackItem.id)).filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.created_at >= now - timedelta(days=7),
+        ).scalar() or 0
+
+        last_30d = db.query(sa_func.count(FeedbackItem.id)).filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.created_at >= now - timedelta(days=30),
+        ).scalar() or 0
+
+        avg_weekly = (last_30d / 4.0) if last_30d > 0 else 0
+        if avg_weekly > 0 and last_7d > avg_weekly * 2:
+            score += 10
+        elif avg_weekly > 0 and last_7d > avg_weekly * 1.5:
+            score += 5
+    except Exception:
+        pass
+
+    # Resolution time (0-10 pts) — slow resolution
+    try:
+        from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+        resolved_events = db.query(
+            FeedbackWorkflowEvent.feedback_id,
+            FeedbackWorkflowEvent.created_at,
+        ).filter(
+            FeedbackWorkflowEvent.organization_id == org_id,
+            FeedbackWorkflowEvent.event_type == 'status_changed',
+            FeedbackWorkflowEvent.new_value == 'resolved',
+        ).join(
+            FeedbackItem, FeedbackItem.id == FeedbackWorkflowEvent.feedback_id,
+        ).filter(
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.created_at >= now - timedelta(days=60),
+        ).all()
+
+        if resolved_events:
+            feedback_ids = [e.feedback_id for e in resolved_events]
+            create_dates = {
+                row.id: row.created_at
+                for row in db.query(FeedbackItem.id, FeedbackItem.created_at).filter(
+                    FeedbackItem.id.in_(feedback_ids),
+                ).all()
+            }
+            total_days = 0
+            count = 0
+            for event in resolved_events:
+                created = create_dates.get(event.feedback_id)
+                if created:
+                    delta = (event.created_at - created).total_seconds() / 86400
+                    total_days += delta
+                    count += 1
+            if count > 0:
+                avg_days = total_days / count
+                if avg_days > 7:
+                    score += 10
+                elif avg_days > 3:
+                    score += 5
+    except Exception:
+        pass
+
+    # Pain point severity (0-10 pts)
+    try:
+        critical_count = db.query(sa_func.count(FeedbackItem.id)).filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.pain_point_severity.in_(["critical", "major"]),
+            FeedbackItem.created_at >= now - timedelta(days=30),
+        ).scalar() or 0
+        if critical_count >= 3:
+            score += 10
+        elif critical_count >= 1:
+            score += 5
+    except Exception:
+        pass
+
+    # Feature request density (0-5 pts)
+    try:
+        total_30d = db.query(sa_func.count(FeedbackItem.id)).filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.created_at >= now - timedelta(days=30),
+        ).scalar() or 0
+
+        feature_count = db.query(sa_func.count(FeedbackItem.id)).filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.customer_email == customer_email,
+            FeedbackItem.feature_request_category.isnot(None),
+            FeedbackItem.created_at >= now - timedelta(days=30),
+        ).scalar() or 0
+
+        if total_30d > 0 and (feature_count / total_30d) > 0.5:
+            score += 5
+    except Exception:
+        pass
 
     return min(score, 100)
 

@@ -41,6 +41,8 @@ export interface FeedbackItem {
   // Churn risk
   churn_risk_score: number | null;
   suggested_action: string | null;
+  // Customer
+  customer_email: string | null;
   // Workflow
   workflow_status: string;
   assigned_to: number | null;

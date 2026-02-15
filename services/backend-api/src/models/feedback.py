@@ -53,6 +53,9 @@ class FeedbackItem(Base):
     churn_risk_score = Column(Integer, nullable=True)  # 0-100
     suggested_action = Column(Text, nullable=True)
 
+    # Customer identification (extracted from source_metadata)
+    customer_email = Column(String(255), nullable=True, index=True)
+
     # Workflow fields
     workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
     assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)

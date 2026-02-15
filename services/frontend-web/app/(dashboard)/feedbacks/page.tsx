@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Select,
   SelectContent,
@@ -19,7 +20,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  Plus,
   Sparkles,
   AlertTriangle,
   Check,
@@ -28,7 +28,7 @@ import {
   Upload,
   FileText,
   Inbox,
-  RefreshCw
+  RefreshCw,
 } from 'lucide-react';
 import Link from 'next/link';
 import { FeedbackPageProvider, useFeedbackPage } from '@/contexts/FeedbackPageContext';
@@ -40,16 +40,17 @@ import { createColumns } from './columns';
 function FeedbackPageContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { searchQuery, sentimentFilter, urgentFilter, setSearchQuery, setSentimentFilter, setUrgentFilter } = useFeedbackPage();
+  const { searchQuery, sentimentFilter, urgentFilter, churnRiskFilter, currentPage, setSearchQuery, setSentimentFilter, setUrgentFilter, setChurnRiskFilter, setCurrentPage } = useFeedbackPage();
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [pageSize, setPageSize] = useState(20);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [newFeedbackText, setNewFeedbackText] = useState('');
   const [editingFeedback, setEditingFeedback] = useState<FeedbackItem | null>(null);
   const [deletingFeedback, setDeletingFeedback] = useState<FeedbackItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [showImportModal, setShowImportModal] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<CSVImportResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,8 +75,27 @@ function FeedbackPageContent() {
     if (workflowStatusFilter) {
       filters.workflow_status = workflowStatusFilter;
     }
+    if (churnRiskFilter) {
+      switch (churnRiskFilter) {
+        case 'low':
+          filters.churn_risk_min = 0;
+          filters.churn_risk_max = 39;
+          break;
+        case 'medium':
+          filters.churn_risk_min = 40;
+          filters.churn_risk_max = 70;
+          break;
+        case 'high':
+          filters.churn_risk_min = 71;
+          filters.churn_risk_max = 100;
+          break;
+        case 'at_risk':
+          filters.churn_risk_min = 40;
+          break;
+      }
+    }
     return filters;
-  }, [debouncedSearch, sentimentFilter, urgentFilter, workflowStatusFilter]);
+  }, [debouncedSearch, sentimentFilter, urgentFilter, workflowStatusFilter, churnRiskFilter]);
 
   // Fetch feedback with React Query
   const {
@@ -83,14 +103,14 @@ function FeedbackPageContent() {
     isLoading: loading,
     dataUpdatedAt,
   } = useQuery({
-    queryKey: ['feedback', buildFilters()],
+    queryKey: ['feedback', currentPage, pageSize, buildFilters()],
     queryFn: async () => {
       const token = localStorage.getItem('access_token');
       if (!token) {
         router.push('/login');
         throw new Error('No token');
       }
-      return await feedbackAPI.list(1, 100, buildFilters());
+      return await feedbackAPI.list(currentPage, pageSize, buildFilters());
     },
     staleTime: 5 * 60 * 1000, // 5 min
     gcTime: 30 * 60 * 1000, // 30 min
@@ -101,17 +121,6 @@ function FeedbackPageContent() {
   const feedbackList = feedbackResponse?.items || [];
   const searching = searchQuery !== debouncedSearch;
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
-
-  const handleCreate = async () => {
-    try {
-      await feedbackAPI.create({ text: newFeedbackText, source: 'manual' });
-      setNewFeedbackText('');
-      setShowCreateModal(false);
-      queryClient.invalidateQueries({ queryKey: ['feedback'] });
-    } catch (err) {
-      console.error('Failed to create feedback:', err);
-    }
-  };
 
   const handleAnalyze = async (selectedItems?: FeedbackItem[]) => {
     const idsToAnalyze = selectedItems ? selectedItems.map(item => item.id) : selectedIds;
@@ -187,10 +196,9 @@ function FeedbackPageContent() {
     );
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const importFile = async (file: File) => {
+    if (!file.name.endsWith('.csv')) return;
+    setShowImportDialog(false);
     setImporting(true);
     setImportResult(null);
 
@@ -213,6 +221,18 @@ function FeedbackPageContent() {
         fileInputRef.current.value = '';
       }
     }
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) importFile(file);
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    setIsDragging(false);
+    const file = event.dataTransfer.files[0];
+    if (file) importFile(file);
   };
 
 
@@ -245,10 +265,7 @@ function FeedbackPageContent() {
               className="hidden"
             />
             <Button
-              onClick={() => {
-                setShowImportModal(true);
-                fileInputRef.current?.click();
-              }}
+              onClick={() => setShowImportDialog(true)}
               variant="outline"
               className="flex items-center space-x-2"
             >
@@ -257,21 +274,13 @@ function FeedbackPageContent() {
             </Button>
             <Link href="/feedback-sources">
               <Button
-                variant="outline"
+                variant="default"
                 className="flex items-center space-x-2"
               >
                 <Inbox className="w-5 h-5" />
                 <span>Sources</span>
               </Button>
             </Link>
-            <Button
-              onClick={() => setShowCreateModal(true)}
-              variant="default"
-              className="flex items-center space-x-2"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Add Feedback</span>
-            </Button>
           </div>
         </div>
 
@@ -318,6 +327,20 @@ function FeedbackPageContent() {
                   <SelectItem value="non-urgent">Non-Urgent</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* Churn Risk Filter */}
+              <Select value={churnRiskFilter || "all"} onValueChange={(value) => setChurnRiskFilter(value === "all" ? "" : value)}>
+                <SelectTrigger className="h-10 w-[180px]">
+                  <SelectValue placeholder="All Risk Levels" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Risk Levels</SelectItem>
+                  <SelectItem value="low">Low Risk (0-39)</SelectItem>
+                  <SelectItem value="medium">Medium Risk (40-70)</SelectItem>
+                  <SelectItem value="high">High Risk (71-100)</SelectItem>
+                  <SelectItem value="at_risk">At Risk (40+)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </Card>
@@ -337,56 +360,102 @@ function FeedbackPageContent() {
             emptyIcon={MessageSquare}
             emptyTitle="No feedback found"
             emptyDescription="Try adjusting your filters or add new feedback"
+            serverSide
+            totalCount={feedbackResponse?.total ?? 0}
+            pageCount={feedbackResponse?.total_pages ?? 1}
+            currentPage={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
           />
         </Card>
       </main>
 
-      {/* Create Modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+      {/* Import CSV Dialog */}
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <div className="flex items-center space-x-3 mb-2">
               <div className="p-2.5 bg-secondary rounded-xl">
-                <Plus className="w-5 h-5 text-primary" />
+                <Upload className="w-5 h-5 text-primary" />
               </div>
-              <DialogTitle className="text-2xl">Add New Feedback</DialogTitle>
+              <DialogTitle className="text-2xl">Import CSV</DialogTitle>
             </div>
             <DialogDescription>
-              Create a new feedback entry to be analyzed by the system.
+              Upload a CSV file with your customer feedback. Each row will be automatically analyzed.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="feedback-text" className="text-sm font-semibold uppercase tracking-wide">
-                Feedback Text
-              </Label>
-              <Textarea
-                id="feedback-text"
-                rows={6}
-                value={newFeedbackText}
-                onChange={(e) => setNewFeedbackText(e.target.value)}
-                placeholder="Enter customer feedback here..."
-                className="resize-none"
-              />
+          <div className="space-y-5 py-4">
+            {/* Drop Zone */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`
+                relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
+                ${isDragging
+                  ? 'border-primary bg-primary/5 scale-[1.02]'
+                  : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                }
+              `}
+            >
+              <div className="flex flex-col items-center space-y-3">
+                <div className={`p-3 rounded-full transition-colors ${isDragging ? 'bg-primary/10' : 'bg-muted'}`}>
+                  <Upload className={`w-6 h-6 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {isDragging ? 'Drop your CSV file here' : 'Drag & drop your CSV file here'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">or click to browse</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Example CSV Format */}
+            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <FileText className="w-4 h-4 text-muted-foreground" />
+                Example CSV Format
+              </p>
+              <div className="rounded-md border border-border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-xs font-mono h-8">feedback_text</TableHead>
+                      <TableHead className="text-xs font-mono h-8">source</TableHead>
+                      <TableHead className="text-xs font-mono h-8">customer_email</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="text-xs py-2">The checkout flow is confusing...</TableCell>
+                      <TableCell className="text-xs py-2">survey</TableCell>
+                      <TableCell className="text-xs py-2">jane@acme.com</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="text-xs py-2">Love the new dashboard!</TableCell>
+                      <TableCell className="text-xs py-2">intercom</TableCell>
+                      <TableCell className="text-xs py-2">tom@startup.io</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="space-y-1.5 text-xs text-muted-foreground">
+                <p>
+                  <span className="font-medium text-foreground">feedback_text</span> is required — also accepts: <span className="font-mono">text, feedback, comment, message, description, review</span>
+                </p>
+                <p>
+                  <span className="font-medium text-foreground">source</span> and <span className="font-medium text-foreground">customer_email</span> are optional
+                </p>
+                <p className="flex items-center gap-1.5 pt-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  All imported feedback is automatically analyzed by AI
+                </p>
+              </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button
-              onClick={() => setShowCreateModal(false)}
-              variant="outline"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreate}
-              variant="default"
-              disabled={!newFeedbackText.trim()}
-              className="flex items-center space-x-2"
-            >
-              <Plus className="w-5 h-5" />
-              <span>Create Feedback</span>
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
