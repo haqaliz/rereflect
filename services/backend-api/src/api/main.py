@@ -6,7 +6,7 @@ from starlette.responses import Response
 from src.api.routes import auth, organizations, feedback, dashboard, analyze, integrations
 from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team, invites, audit_logs
 from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications, analytics, saved_views, shared_links, workflow, email_webhooks
-from src.api.routes import customer_health
+from src.api.routes import customer_health, activity_feed, dashboard_layout
 from src.seed import seed_admin_user
 import logging
 import os
@@ -130,6 +130,8 @@ app.include_router(shared_links.public_router)
 app.include_router(workflow.router)
 app.include_router(email_webhooks.router)
 app.include_router(customer_health.router)
+app.include_router(activity_feed.router)
+app.include_router(dashboard_layout.router)
 
 
 @app.get("/")

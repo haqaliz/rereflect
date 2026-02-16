@@ -1,2 +1,20 @@
 @import '@rereflect/ui/styles/globals.css';
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Merriweather:wght@400;700&family=Ubuntu+Mono:wght@400;700&display=swap');
+
+/* React Grid Layout - Theme overrides */
+.react-grid-item > .react-resizable-handle {
+  z-index: 20 !important;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  width: 8px !important;
+  height: 8px !important;
+  border-right: 2px solid var(--muted-foreground) !important;
+  border-bottom: 2px solid var(--muted-foreground) !important;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: var(--primary) !important;
+  opacity: 0.15 !important;
+  border-radius: var(--radius) !important;
+}

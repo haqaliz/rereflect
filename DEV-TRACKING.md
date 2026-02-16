@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-16
+**Last Updated**: 2026-02-17
 
 ---
 
@@ -31,6 +31,7 @@
 - [x] Feature requests list
 - [x] Urgent feedback alerts
 - [x] Responsive design
+- [x] Dashboard v2: Drag-and-drop widget grid (react-grid-layout v2)
 
 ### Feedback Management - COMPLETE
 - [x] CSV import with parsing
@@ -325,6 +326,22 @@
     - Frontend: Dynamic integration selection step (no longer hardcoded to Slack)
     - Worker: Source matching by workspace_id via Integration (same pattern as Slack's team_id)
     - Webhook: Extract app_id from Intercom payload as workspace_id for source matching
+- **Dashboard v2 — Customizable Widget Grid**:
+  - Drag-and-drop grid layout with react-grid-layout v2 (12/6/1-col responsive breakpoints)
+  - 20 widgets across 6 categories: Overview (stat cards, NPS gauge), Charts (sentiment donut, pain points bar, 3 trend lines), Lists (pain points, feature requests, urgent feedback, top categories), Risk (churn summary, at-risk customers), Activity (activity feed, team activity), Intelligence (AI insights, anomaly alerts)
+  - Widget registry with definitions (min/max/default sizes, plan gating, icons)
+  - Widget catalog drawer for add/remove in edit mode
+  - Per-user layout persistence (all 3 breakpoints saved to server via `UserDashboardLayout` model)
+  - Debounced save with flush-on-exit (500ms debounce, immediate flush when clicking "Done")
+  - Layout reset to defaults (DELETE endpoint)
+  - v2 server format: saves lg/md/sm layouts (fixes breakpoint-aware persistence)
+  - Activity feed backend endpoint (synthesized from recent feedback by severity)
+  - Fixed sentiment trend data (backend `data` field aligned with frontend)
+  - Empty state placeholders on all widgets (icons + descriptive messages)
+  - NPS gauge widget with semicircle SVG, score color coding, delta badge, description
+  - Anomaly alerts as read-only history widget with relative timestamps
+  - Top categories with CSS grid auto-fill (responsive card layout, min 180px)
+  - Alembic migration: `user_dashboard_layouts` table
 - **Technical Debt Resolution** (4 phases):
   - Phase 1 — DB Query Optimization: 4 compound indexes (org+sentiment, org+urgent, org+pain_cat, org+feature_cat), SQLAlchemy relationships for eager loading (feedback_source, assigned_user), SQL-level tag aggregation with json_array_elements_text (Python fallback for SQLite), SQL_ECHO env var
   - Phase 2 — Server Caching: Redis cache service (DB 2, lazy init, graceful fallback), dashboard caching (5min TTL), analytics caching (10min TTL), cache invalidation on feedback create/analyze/status-change, HTTP Cache-Control headers on read endpoints

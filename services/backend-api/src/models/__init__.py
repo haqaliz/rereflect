@@ -22,6 +22,7 @@ from .feedback_note import FeedbackNote
 from .feedback_workflow_event import FeedbackWorkflowEvent
 from .assignment_rule import AssignmentRule
 from .customer_health import CustomerHealth
+from .dashboard_layout import UserDashboardLayout
 
 __all__ = [
     "Base",
@@ -49,4 +50,5 @@ __all__ = [
     "FeedbackWorkflowEvent",
     "AssignmentRule",
     "CustomerHealth",
+    "UserDashboardLayout",
 ]
