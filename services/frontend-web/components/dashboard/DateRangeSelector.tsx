@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@/lib/utils';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { type DateRange, useDateRange } from './hooks/useDateRange';
 
 const presets: { label: string; value: DateRange }[] = [
@@ -15,24 +15,18 @@ export function DateRangeSelector() {
   const { dateRange, setDateRange } = useDateRange();
 
   return (
-    <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50 border border-border">
-      {presets.map((preset) => {
-        const isActive = dateRange === preset.value;
-        return (
-          <button
+    <Tabs value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+      <TabsList className="h-8">
+        {presets.map((preset) => (
+          <TabsTrigger
             key={preset.value}
-            onClick={() => setDateRange(preset.value)}
-            className={cn(
-              'px-3 py-1.5 text-xs font-medium rounded-md transition-all duration-200',
-              isActive
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            )}
+            value={preset.value}
+            className="text-xs px-2 h-6"
           >
             {preset.label}
-          </button>
-        );
-      })}
-    </div>
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }

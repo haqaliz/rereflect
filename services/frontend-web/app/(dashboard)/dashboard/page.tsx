@@ -16,14 +16,14 @@ function DashboardContent() {
         {/* Page Title + Date Range */}
         <div className="animate-fade-in">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-4xl font-bold text-text-primary">Dashboard</h2>
-            <div className="flex items-center gap-4">
-              <DateRangeSelector />
+            <div className="flex items-center gap-3">
+              <h2 className="text-4xl font-bold text-text-primary">Dashboard</h2>
               <div className="flex items-center space-x-2 text-text-tertiary text-sm font-mono">
                 <Clock className="w-4 h-4" />
                 <span>Last {days}d</span>
               </div>
             </div>
+            <DateRangeSelector />
           </div>
           <p className="text-text-secondary text-lg">Real-time customer feedback analytics and insights</p>
         </div>

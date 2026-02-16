@@ -40,7 +40,7 @@ export function WidgetCatalog({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[400px] sm:max-w-[400px] p-0">
+      <SheetContent side="right" className="w-[420px] sm:max-w-[420px] p-0">
         <SheetHeader className="p-6 pb-4 border-b border-border">
           <SheetTitle>Widget Catalog</SheetTitle>
           <SheetDescription>Add widgets to your dashboard</SheetDescription>
@@ -86,7 +86,7 @@ export function WidgetCatalog({
                                 </Badge>
                               )}
                             </div>
-                            <p className="text-xs text-muted-foreground truncate mt-0.5">
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                               {widget.description}
                             </p>
                             <p className="text-[10px] text-muted-foreground/70 mt-0.5">
