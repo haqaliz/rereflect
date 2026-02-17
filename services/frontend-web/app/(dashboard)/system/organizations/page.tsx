@@ -26,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import {
   Building2,
@@ -37,6 +38,7 @@ import {
   Users,
   Shield,
   ExternalLink,
+  Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
@@ -69,6 +71,10 @@ export default function AdminOrganizationsPage() {
   // Detail dialog
   const [detailOrg, setDetailOrg] = useState<AdminOrgDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+
+  // Delete dialog
+  const [deletingOrg, setDeletingOrg] = useState<AdminOrg | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const PAGE_SIZE = 50;
 
@@ -122,6 +128,23 @@ export default function AdminOrganizationsPage() {
       toast.error('Failed to load organization details');
     } finally {
       setIsLoadingDetail(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingOrg) return;
+    setIsDeleting(true);
+    try {
+      await adminOrgsAPI.delete(deletingOrg.id);
+      setOrgs(prev => prev.filter(o => o.id !== deletingOrg.id));
+      setTotal(prev => prev - 1);
+      toast.success(`Deleted ${deletingOrg.name}`);
+      setDeletingOrg(null);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      toast.error(axiosErr?.response?.data?.detail || 'Failed to delete organization');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -225,6 +248,17 @@ export default function AdminOrganizationsPage() {
                               <ExternalLink className="w-4 h-4" />
                             </Link>
                           </Button>
+                          {org.user_count === 0 && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setDeletingOrg(org)}
+                              title="Delete organization"
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -262,6 +296,27 @@ export default function AdminOrganizationsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingOrg} onOpenChange={(open) => !open && setDeletingOrg(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Organization</DialogTitle>
+            <DialogDescription>This action cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <p className="text-muted-foreground">
+            Are you sure you want to delete <span className="font-medium text-foreground">{deletingOrg?.name}</span>?
+            This will remove all associated data (feedback, integrations, subscriptions, etc.) and cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingOrg(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              Delete Organization
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Detail Dialog */}
       <Dialog open={isLoadingDetail || !!detailOrg} onOpenChange={(open) => {

@@ -14,6 +14,25 @@ from src.database.session import get_db
 from src.api.dependencies import require_system_admin
 from src.models.organization import Organization
 from src.models.user import User
+from src.models.feedback import FeedbackItem
+from src.models.feedback_note import FeedbackNote
+from src.models.feedback_source import FeedbackSource
+from src.models.feedback_source_event import FeedbackSourceEvent
+from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+from src.models.notification import Notification
+from src.models.audit_log import AuditLog
+from src.models.saved_view import SavedView
+from src.models.shared_link import SharedLink
+from src.models.team_invite import TeamInvite
+from src.models.assignment_rule import AssignmentRule
+from src.models.pending_feedback import PendingFeedback
+from src.models.usage import UsageRecord
+from src.models.subscription import Subscription
+from src.models.integration import Integration
+from src.models.customer_health import CustomerHealth
+from src.models.custom_category import CustomCategory
+from src.models.anomaly import SentimentAnomaly
+from src.models.weekly_insight import WeeklyInsight
 
 router = APIRouter(prefix="/api/v1/admin/organizations", tags=["admin-organizations"])
 
@@ -144,3 +163,42 @@ def get_organization(org_id: int, db: Session = Depends(get_db)):
             for u in users
         ],
     )
+
+
+@router.delete("/{org_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_system_admin)])
+def delete_organization(org_id: int, db: Session = Depends(get_db)):
+    """Delete an organization that has no users. Removes all related data."""
+    org = db.query(Organization).filter(Organization.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    user_count = db.query(func.count(User.id)).filter(User.organization_id == org_id).scalar()
+    if user_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete organization with {user_count} user(s). Remove all users first.",
+        )
+
+    # Clean up all related records
+    db.query(FeedbackNote).filter(FeedbackNote.organization_id == org_id).delete()
+    db.query(FeedbackWorkflowEvent).filter(FeedbackWorkflowEvent.organization_id == org_id).delete()
+    db.query(FeedbackSourceEvent).filter(FeedbackSourceEvent.organization_id == org_id).delete()
+    db.query(FeedbackItem).filter(FeedbackItem.organization_id == org_id).delete()
+    db.query(FeedbackSource).filter(FeedbackSource.organization_id == org_id).delete()
+    db.query(PendingFeedback).filter(PendingFeedback.organization_id == org_id).delete()
+    db.query(Notification).filter(Notification.organization_id == org_id).delete()
+    db.query(AuditLog).filter(AuditLog.organization_id == org_id).delete()
+    db.query(SavedView).filter(SavedView.organization_id == org_id).delete()
+    db.query(SharedLink).filter(SharedLink.organization_id == org_id).delete()
+    db.query(TeamInvite).filter(TeamInvite.organization_id == org_id).delete()
+    db.query(AssignmentRule).filter(AssignmentRule.organization_id == org_id).delete()
+    db.query(CustomerHealth).filter(CustomerHealth.organization_id == org_id).delete()
+    db.query(CustomCategory).filter(CustomCategory.organization_id == org_id).delete()
+    db.query(SentimentAnomaly).filter(SentimentAnomaly.organization_id == org_id).delete()
+    db.query(UsageRecord).filter(UsageRecord.organization_id == org_id).delete()
+    db.query(Subscription).filter(Subscription.organization_id == org_id).delete()
+    db.query(Integration).filter(Integration.organization_id == org_id).delete()
+    db.query(WeeklyInsight).filter(WeeklyInsight.organization_id == org_id).delete()
+
+    db.delete(org)
+    db.commit()

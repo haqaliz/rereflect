@@ -47,4 +47,8 @@ export const adminOrgsAPI = {
     const response = await apiClient.get(`/api/v1/admin/organizations/${id}`);
     return response.data;
   },
+
+  delete: async (id: number): Promise<void> => {
+    await apiClient.delete(`/api/v1/admin/organizations/${id}`);
+  },
 };
