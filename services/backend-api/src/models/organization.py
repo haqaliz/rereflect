@@ -27,6 +27,9 @@ class Organization(Base):
     # Workflow settings
     auto_assignment_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
 
+    # Promo tracking
+    promo_code_used = Column(String(50), nullable=True)
+
     # Relationships
     subscription = relationship("Subscription", back_populates="organization", uselist=False)
     usage_records = relationship("UsageRecord", back_populates="organization")

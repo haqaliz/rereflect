@@ -23,6 +23,7 @@ import {
   Share2,
   KanbanSquare,
   GitBranchPlus,
+  Tag,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -256,6 +257,18 @@ export function AppSidebar() {
                       <Link href="/system/changelog">
                         <FileText className="w-4 h-4" />
                         <span>Changelog</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive('/system/promo-codes')}
+                      tooltip="Promo Codes"
+                    >
+                      <Link href="/system/promo-codes">
+                        <Tag className="w-4 h-4" />
+                        <span>Promo Codes</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

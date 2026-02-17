@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { authAPI } from '@/lib/api/auth';
 import { useAuth } from '@/contexts/AuthContext';
 import { Mail, Lock, Building2, ArrowRight, Sparkles, CheckCircle2, Zap, Shield, Loader2, ArrowLeft } from 'lucide-react';
@@ -12,11 +12,29 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
-import { analytics } from '@/lib/analytics';
+import { analytics, trackEvent } from '@/lib/analytics';
 import gsap from 'gsap';
 
+const VALID_PROMO_CODES = ['EARLYPRO3'];
+
 export default function SignupPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SignupPageContent />
+    </Suspense>
+  );
+}
+
+function SignupPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,6 +46,24 @@ export default function SignupPage() {
   // Google OAuth state
   const [googleCredential, setGoogleCredential] = useState<string | null>(null);
   const [showOrgNameInput, setShowOrgNameInput] = useState(false);
+
+  // Promo code state
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+
+  // Read promo query param and store in localStorage
+  useEffect(() => {
+    const promo = searchParams.get('promo');
+    if (promo && VALID_PROMO_CODES.includes(promo)) {
+      setPromoCode(promo);
+      localStorage.setItem('rereflect_promo', promo);
+    } else {
+      // Check localStorage for a previously stored promo
+      const stored = localStorage.getItem('rereflect_promo');
+      if (stored && VALID_PROMO_CODES.includes(stored)) {
+        setPromoCode(stored);
+      }
+    }
+  }, [searchParams]);
 
   // Redirect to dashboard if already authenticated
   useEffect(() => {
@@ -43,7 +79,7 @@ export default function SignupPage() {
     const ctx = gsap.context(() => {
       // Set initial visible state for all animated elements
       gsap.set(['.brand-logo', '.brand-badge', '.brand-title', '.brand-subtitle', '.brand-benefit', '.brand-footer'], { opacity: 1, y: 0, x: 0, scale: 1 });
-      gsap.set(['.form-logo', '.form-title', '.form-subtitle', '.form-field', '.form-button', '.form-footer'], { opacity: 1, y: 0, scale: 1 });
+      gsap.set(['.form-logo', '.form-title', '.form-subtitle', '.promo-banner', '.form-field', '.form-button', '.form-footer'], { opacity: 1, y: 0, scale: 1 });
 
       // Branding side animations
       const brandTl = gsap.timeline({ defaults: { ease: 'power3.out' } });
@@ -61,6 +97,7 @@ export default function SignupPage() {
         .fromTo('.form-logo', { scale: 0.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5 })
         .fromTo('.form-title', { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.6 }, '-=0.2')
         .fromTo('.form-subtitle', { y: 15, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5 }, '-=0.3')
+        .fromTo('.promo-banner', { y: 15, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5 }, '-=0.2')
         .fromTo('.form-field', { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, stagger: 0.1 }, '-=0.2')
         .fromTo('.form-button', { y: 15, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, '-=0.1')
         .fromTo('.form-footer', { opacity: 0 }, { opacity: 1, duration: 0.3 }, '-=0.1');
@@ -103,6 +140,10 @@ export default function SignupPage() {
       });
       localStorage.setItem('access_token', response.access_token);
       analytics.signup('email'); // Track email signup
+      const storedPromo = localStorage.getItem('rereflect_promo');
+      if (storedPromo) {
+        trackEvent("Promo Signup", { promo_code: storedPromo, method: "email" });
+      }
       router.push('/dashboard');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -133,6 +174,10 @@ export default function SignupPage() {
       });
       localStorage.setItem('access_token', response.access_token);
       analytics.signup('google'); // Track Google signup
+      const storedPromo = localStorage.getItem('rereflect_promo');
+      if (storedPromo) {
+        trackEvent("Promo Signup", { promo_code: storedPromo, method: "google" });
+      }
       router.push('/dashboard');
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } } };
@@ -283,6 +328,22 @@ export default function SignupPage() {
               </Link>
             </p>
           </div>
+
+          {promoCode && (
+            <div className="promo-banner mb-6 bg-primary/10 border border-primary/20 rounded-xl p-4 animate-fade-in">
+              <div className="flex items-start gap-3">
+                <Sparkles className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-foreground">
+                    You&apos;ve been invited! 3 months of Pro free
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    2,500 feedback/mo &middot; Slack &amp; Intercom &middot; Trends Analytics &middot; Priority Support
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {error && (
             <Alert variant="destructive" className="mb-6 animate-fade-in">

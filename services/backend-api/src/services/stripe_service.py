@@ -51,6 +51,7 @@ class StripeService:
         success_url: str,
         cancel_url: str,
         trial_days: Optional[int] = None,
+        promo_code: Optional[str] = None,
     ) -> str:
         """
         Create a Stripe Checkout session for subscription.
@@ -77,6 +78,14 @@ class StripeService:
             "allow_promotion_codes": True,
             "billing_address_collection": "required",
         }
+
+        # Apply promo code if provided
+        if promo_code:
+            promo_codes = stripe.PromotionCode.list(code=promo_code, active=True, limit=1)
+            if promo_codes.data:
+                session_params["discounts"] = [{"promotion_code": promo_codes.data[0].id}]
+                session_params.pop("allow_promotion_codes", None)  # Can't use both
+                session_params["payment_method_collection"] = "if_required"
 
         # Add trial if specified
         if trial_days and trial_days > 0:
@@ -312,6 +321,47 @@ class StripeService:
             import logging
             logging.getLogger(__name__).error(f"Retention addon error: {e}")
             return False
+
+    def list_promotion_codes(self, limit: int = 50, active: Optional[bool] = None) -> list:
+        """List all promotion codes from Stripe."""
+        params = {"limit": limit, "expand": ["data.coupon"]}
+        if active is not None:
+            params["active"] = active
+        result = stripe.PromotionCode.list(**params)
+        return result.data
+
+    def get_promotion_code(self, promo_code_id: str):
+        """Get promotion code details from Stripe."""
+        try:
+            return stripe.PromotionCode.retrieve(promo_code_id, expand=["coupon"])
+        except stripe.error.StripeError:
+            return None
+
+    def create_coupon_and_promo(self, coupon_params: dict, promo_params: dict):
+        """Create a coupon and associated promotion code."""
+        coupon = stripe.Coupon.create(**coupon_params)
+        promo = stripe.PromotionCode.create(coupon=coupon.id, **promo_params)
+        return promo
+
+    def deactivate_promotion_code(self, promo_code_id: str) -> bool:
+        """Deactivate a promotion code."""
+        try:
+            stripe.PromotionCode.modify(promo_code_id, active=False)
+            return True
+        except stripe.error.StripeError:
+            return False
+
+    def delete_promotion_code(self, promo_code_id: str, coupon_id: str) -> bool:
+        """Deactivate a promotion code and delete its coupon."""
+        try:
+            stripe.PromotionCode.modify(promo_code_id, active=False)
+        except stripe.error.StripeError:
+            return False
+        try:
+            stripe.Coupon.delete(coupon_id)
+        except stripe.error.StripeError:
+            pass
+        return True
 
     def verify_webhook_signature(
         self,

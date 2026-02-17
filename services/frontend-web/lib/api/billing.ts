@@ -100,6 +100,7 @@ export interface CreateCheckoutRequest {
   billing_cycle: 'monthly' | 'annual';
   success_url?: string;
   cancel_url?: string;
+  promo_code?: string;
 }
 
 export interface CreatePortalRequest {

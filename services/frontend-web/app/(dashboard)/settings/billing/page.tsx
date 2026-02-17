@@ -37,6 +37,7 @@ import {
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { analytics } from '@/lib/analytics';
 
 function BillingPageContent() {
   const router = useRouter();
@@ -81,6 +82,10 @@ function BillingPageContent() {
         const isSuccess = searchParams.get('success') === 'true';
 
         if (isSuccess) {
+          // Clear promo data from localStorage after successful checkout
+          localStorage.removeItem('rereflect_promo');
+          localStorage.removeItem('rereflect_promo_dismissed');
+
           // Sync subscription from Stripe to update local database
           try {
             const syncRes = await billingAPI.syncSubscription();
@@ -135,11 +140,18 @@ function BillingPageContent() {
   const handleCheckout = async (plan: string) => {
     setCheckoutLoading(plan);
     try {
+      const promoCode = localStorage.getItem('rereflect_promo') || undefined;
+
+      if (promoCode) {
+        analytics.promoCheckoutStarted(promoCode, plan);
+      }
+
       const result = await billingAPI.createCheckout({
         plan,
         billing_cycle: billingCycle,
         success_url: `${window.location.origin}/settings/billing?success=true`,
         cancel_url: `${window.location.origin}/settings/billing?canceled=true`,
+        promo_code: promoCode,
       });
       window.location.href = result.checkout_url;
     } catch (err) {

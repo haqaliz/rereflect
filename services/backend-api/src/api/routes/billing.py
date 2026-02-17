@@ -96,6 +96,7 @@ class CheckoutRequest(BaseModel):
     billing_cycle: str  # monthly, annual
     success_url: str
     cancel_url: str
+    promo_code: Optional[str] = None
 
 
 class CheckoutResponse(BaseModel):
@@ -546,6 +547,7 @@ def create_checkout(
             success_url=request.success_url,
             cancel_url=request.cancel_url,
             trial_days=trial_days,
+            promo_code=request.promo_code,
         )
     except ValueError as e:
         raise HTTPException(
@@ -808,6 +810,28 @@ async def _handle_checkout_completed(data: dict, db: Session):
 
     # Update organization plan
     org.plan = plan
+
+    # Extract and store promo code if one was used
+    import stripe as stripe_lib
+    stripe_service_inst = get_stripe_service()
+    stripe_lib.api_key = stripe_service_inst.api_key
+
+    try:
+        # Retrieve the full checkout session with line_items to get discount info
+        full_session = stripe_lib.checkout.Session.retrieve(
+            data.get("id"),
+            expand=["total_details.breakdown"],
+        )
+        discounts = full_session.get("total_details", {}).get("breakdown", {}).get("discounts", [])
+        if discounts:
+            discount = discounts[0].get("discount", {})
+            promo = discount.get("promotion_code")
+            if promo:
+                # promotion_code is an ID, retrieve the actual code string
+                promo_obj = stripe_lib.PromotionCode.retrieve(promo)
+                org.promo_code_used = promo_obj.code
+    except stripe_lib.error.StripeError:
+        pass  # Non-critical: don't fail checkout over promo tracking
 
     db.commit()
 

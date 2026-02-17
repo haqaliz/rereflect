@@ -106,6 +106,15 @@ export const analytics = {
     trackEvent("Subscription Created", { plan });
   },
 
+  // Promo
+  promoSignup: (promoCode: string, method: "email" | "google") => {
+    trackEvent("Promo Signup", { promo_code: promoCode, method });
+  },
+
+  promoCheckoutStarted: (promoCode: string, plan: string) => {
+    trackEvent("Promo Checkout Started", { promo_code: promoCode, plan });
+  },
+
   // Feature usage
   featureUsed: (feature: string) => {
     trackEvent("Feature Used", { feature });
