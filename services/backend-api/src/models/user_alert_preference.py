@@ -7,7 +7,7 @@ class UserAlertPreference(Base):
     __tablename__ = "user_alert_preferences"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     alert_type = Column(String(50), nullable=False)  # "urgent_feedback", "sentiment_spike", "churn_risk", "volume_spike"
     is_enabled = Column(Boolean, default=True, nullable=False)
     channel_email = Column(Boolean, default=False, nullable=False)

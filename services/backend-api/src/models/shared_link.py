@@ -18,7 +18,7 @@ class SharedLink(Base):
     config = Column(JSON, nullable=True)  # Optional frozen page state
     password_hash = Column(String, nullable=True)  # bcrypt hash, nullable = no password
     expires_at = Column(DateTime, nullable=True)  # null = never expires
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     view_count = Column(Integer, default=0, nullable=False)

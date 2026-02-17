@@ -16,7 +16,7 @@ class TeamInvite(Base):
     email = Column(String, nullable=False, index=True)
     role = Column(String, nullable=False)  # 'admin' or 'member'
     token = Column(String, unique=True, nullable=False, index=True)
-    invited_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     status = Column(String, nullable=False, default='pending')  # pending, accepted, expired, canceled
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=False)

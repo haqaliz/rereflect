@@ -10,7 +10,7 @@ class FeedbackWorkflowEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     feedback_id = Column(Integer, ForeignKey("feedback_items.id", ondelete="CASCADE"), nullable=False)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
-    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     event_type = Column(String(50), nullable=False)  # status_changed, assigned, unassigned, note_added, note_edited, note_deleted
     old_value = Column(String(255), nullable=True)
     new_value = Column(String(255), nullable=True)

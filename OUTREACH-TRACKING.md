@@ -90,7 +90,7 @@ Offering 3 months free Pro to early adopters who share feedback. Want to give it
 ```
 Hey [Name], just bumping this in case it got buried. No pressure at all!
 
-If feedback management isn't a pain point right now, totally get it. But the offer for 3 months free Pro stands if you ever want to try it: rereflect.ca
+If feedback management isn't a pain point right now, totally get it. But the offer for 3 months free Pro stands if you ever want to try it: app.rereflect.ca/signup?promo=EARLYPRO3
 ```
 
 ### Template D: Post-Interest Reply (move to email)
@@ -172,13 +172,20 @@ Ali
 ## Engineering Tasks (Required)
 
 ### Stripe: 3-Month Free Pro Promo Code
-- [ ] Create Stripe coupon: 100% off for 3 months on Pro plan ($29/mo)
-- [ ] Create promo code: `EARLYPRO3` linked to the coupon
-- [ ] Add promo code redemption to checkout/signup flow
-- [ ] Test: user signs up → enters promo → gets Pro for 3 months → auto-bills after
+- [x] Create Stripe coupon: 100% off for 3 months on Pro plan ($29/mo)
+- [x] Create promo code: `EARLYPRO3` linked to the coupon (50 max redemptions, first-time only)
+- [x] Add promo code redemption to checkout/signup flow
+- [x] Promo-aware signup page: `app.rereflect.ca/signup?promo=EARLYPRO3`
+- [x] Dashboard activation banner for promo users
+- [x] Auto-apply promo at Stripe Checkout (no card required)
+- [x] Promo analytics tracking (Mixpanel: Promo Signup, Promo Checkout Started)
+- [x] Admin promo management UI at `/system/promo-codes` (create, list, deactivate, delete)
+- [ ] Test end-to-end: signup → activate Pro → verify 3 months free → auto-downgrade
+
+**Live link**: https://app.rereflect.ca/signup?promo=EARLYPRO3
 
 ### Optional Improvements
-- [ ] Create a direct signup link with promo auto-applied (e.g., `app.rereflect.ca/signup?promo=EARLYPRO3`)
+- [x] Create a direct signup link with promo auto-applied
 - [ ] Add a "Redeem promo code" field in billing settings
 - [ ] Set up Calendly or Cal.com for demo booking link
 

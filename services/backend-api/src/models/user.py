@@ -34,7 +34,7 @@ class User(Base):
 
     # Team management fields
     last_active_at = Column(DateTime, nullable=True)
-    invited_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     joined_at = Column(DateTime, nullable=True)
 
     # Relationships

@@ -58,7 +58,7 @@ class FeedbackItem(Base):
 
     # Workflow fields
     workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
-    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_to = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships for eager loading
     feedback_source = relationship("FeedbackSource", backref="feedback_items", lazy="select")

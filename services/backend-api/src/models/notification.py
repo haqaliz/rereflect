@@ -8,7 +8,7 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
     type = Column(String(50), nullable=False)  # "urgent_feedback", "sentiment_spike", "churn_risk", "volume_spike"
     title = Column(String(500), nullable=False)

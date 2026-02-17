@@ -16,7 +16,7 @@ class AuditLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     user_email = Column(String, nullable=False)
     action = Column(String, nullable=False, index=True)  # user_invited, user_joined, user_removed, role_changed, ownership_transferred
     target_type = Column(String, nullable=True)  # user, invite, etc.

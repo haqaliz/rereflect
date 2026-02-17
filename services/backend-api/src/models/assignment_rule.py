@@ -12,7 +12,7 @@ class AssignmentRule(Base):
     rule_type = Column(String(50), nullable=False, default="category")
     match_field = Column(String(100), nullable=False)  # pain_point_category, feature_request_category, urgent_category, source, sentiment_label
     match_value = Column(String(255), nullable=False)
-    assign_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assign_to_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     priority = Column(Integer, nullable=False, default=0)  # Higher = checked first
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

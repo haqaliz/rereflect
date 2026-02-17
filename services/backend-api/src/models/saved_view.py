@@ -15,7 +15,7 @@ class SavedView(Base):
     name = Column(String(100), nullable=False)
     page = Column(String(50), nullable=False)  # e.g. "analytics"
     config = Column(JSON, nullable=False)  # Full serialized page state
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     position = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
