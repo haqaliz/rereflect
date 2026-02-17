@@ -15,15 +15,6 @@ from src.models.organization import Organization
 from src.models.user import User
 from src.models.team_invite import TeamInvite
 from src.models.audit_log import AuditLog
-from src.models.notification import Notification
-from src.models.saved_view import SavedView
-from src.models.shared_link import SharedLink
-from src.models.user_alert_preference import UserAlertPreference
-from src.models.assignment_rule import AssignmentRule
-from src.models.feedback_workflow_event import FeedbackWorkflowEvent
-from src.models.feedback_note import FeedbackNote
-from src.models.feedback import FeedbackItem
-from src.models.dashboard_layout import UserDashboardLayout
 from src.api.dependencies import (
     get_current_user,
     get_current_org,
@@ -32,6 +23,7 @@ from src.api.dependencies import (
     check_seat_limit,
 )
 from src.services.audit_service import log_action
+from src.services.user_service import cleanup_and_delete_user
 from src.services.email_service import (
     send_team_invite_email,
     send_role_change_email,
@@ -340,24 +332,7 @@ def remove_member(
     removed_user_email = target_user.email
     removed_user_role = target_user.role
 
-    # Clean up related records before deleting the user
-    # 1. Delete user-owned records (personal data)
-    db.query(Notification).filter(Notification.user_id == removed_user_id).delete()
-    db.query(UserAlertPreference).filter(UserAlertPreference.user_id == removed_user_id).delete()
-    db.query(SavedView).filter(SavedView.created_by_id == removed_user_id).delete()
-    db.query(AssignmentRule).filter(AssignmentRule.assign_to_user_id == removed_user_id).delete()
-    db.query(UserDashboardLayout).filter(UserDashboardLayout.user_id == removed_user_id).delete()
-
-    # 2. Nullify references in preserved records (history/shared data)
-    db.query(AuditLog).filter(AuditLog.user_id == removed_user_id).update({"user_id": None})
-    db.query(FeedbackWorkflowEvent).filter(FeedbackWorkflowEvent.actor_id == removed_user_id).update({"actor_id": None})
-    db.query(FeedbackNote).filter(FeedbackNote.author_id == removed_user_id).update({"author_id": None})
-    db.query(SharedLink).filter(SharedLink.created_by_id == removed_user_id).update({"created_by_id": None})
-    db.query(TeamInvite).filter(TeamInvite.invited_by_id == removed_user_id).update({"invited_by_id": None})
-    db.query(FeedbackItem).filter(FeedbackItem.assigned_to == removed_user_id).update({"assigned_to": None})
-    db.query(User).filter(User.invited_by_id == removed_user_id).update({"invited_by_id": None})
-
-    db.delete(target_user)
+    cleanup_and_delete_user(db, target_user)
     db.commit()
 
     # Create audit log

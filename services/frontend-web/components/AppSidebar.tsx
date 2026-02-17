@@ -24,6 +24,7 @@ import {
   KanbanSquare,
   GitBranchPlus,
   Tag,
+  Building2,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -257,6 +258,30 @@ export function AppSidebar() {
                       <Link href="/system/changelog">
                         <FileText className="w-4 h-4" />
                         <span>Changelog</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive('/system/users')}
+                      tooltip="Users"
+                    >
+                      <Link href="/system/users">
+                        <Users className="w-4 h-4" />
+                        <span>Users</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive('/system/organizations')}
+                      tooltip="Organizations"
+                    >
+                      <Link href="/system/organizations">
+                        <Building2 className="w-4 h-4" />
+                        <span>Organizations</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
