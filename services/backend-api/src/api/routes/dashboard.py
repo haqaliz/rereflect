@@ -555,6 +555,43 @@ def get_dashboard(
     return result
 
 
+@router.get("/comparison", response_model=ComparisonData)
+def get_comparison(
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Get period-over-period comparison deltas."""
+    from src.services.cache_service import cache_get, cache_set
+
+    cache_key = f"dashboard_comparison:{current_org.id}:{days}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=days)
+    prev_end = start_date
+    prev_start = prev_end - timedelta(days=days)
+
+    current = _query_period_counts(db, current_org.id, start_date, end_date)
+    prev = _query_period_counts(db, current_org.id, prev_start, prev_end)
+
+    result = ComparisonData(
+        total_feedback_delta_pct=_calc_delta_pct(current["total"], prev["total"]),
+        positive_delta_pct=_calc_delta_pct(current["positive"], prev["positive"]),
+        neutral_delta_pct=_calc_delta_pct(current["neutral"], prev["neutral"]),
+        negative_delta_pct=_calc_delta_pct(current["negative"], prev["negative"]),
+        urgent_delta_pct=_calc_delta_pct(current["urgent"], prev["urgent"]),
+        pain_points_delta_pct=_calc_delta_pct(current["pain_points"], prev["pain_points"]),
+        feature_requests_delta_pct=_calc_delta_pct(current["feature_requests"], prev["feature_requests"]),
+        churn_high_delta_pct=_calc_delta_pct(current["churn_high"], prev["churn_high"]),
+    )
+
+    cache_set(cache_key, result.dict(), ttl_seconds=300)
+    return result
+
+
 def _get_granularity(days: int) -> str:
     """Return adaptive granularity based on day range."""
     if days <= 14:
