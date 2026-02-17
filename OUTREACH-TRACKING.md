@@ -180,7 +180,11 @@ Ali
 - [x] Auto-apply promo at Stripe Checkout (no card required)
 - [x] Promo analytics tracking (Mixpanel: Promo Signup, Promo Checkout Started)
 - [x] Admin promo management UI at `/system/promo-codes` (create, list, deactivate, delete)
-- [ ] Test end-to-end: signup → activate Pro → verify 3 months free → auto-downgrade
+- [x] System admin user management (`/system/users`): list/search/filter, edit org+role+system admin, delete with FK cleanup
+- [x] System admin org management (`/system/organizations`): list/search, detail view, delete empty orgs
+- [x] FK constraint fixes for user/org deletion (migration + 11 model updates)
+- [x] Auto-migration on deploy (Dockerfile runs `alembic upgrade head`)
+- [x] Test end-to-end: signup → activate Pro → verify 3 months free → auto-downgrade (11 tests in test_promo_flow.py)
 
 **Live link**: https://app.rereflect.ca/signup?promo=EARLYPRO3
 

@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-18
 
 ---
 
@@ -301,6 +301,13 @@
   - Updated `services/frontend-web` for standalone builds with workspace dependencies
   - Railway deployment configuration with dynamic port handling
   - Local dev: landing on port 3001, app on port 3000
+- **System Admin Management** (Users + Organizations):
+  - Admin Users page (`/system/users`): list/search/filter by org, edit (org transfer, role, system admin toggle), delete with full FK cleanup (12+ related tables)
+  - Admin Organizations page (`/system/organizations`): list/search, detail dialog with member list, delete empty orgs (cleans up 20 related tables)
+  - Shared `user_service.py` for user deletion cleanup (used by both team.py and admin_users.py)
+  - FK constraint migration: 5 columns made nullable, ondelete SET NULL/CASCADE added across 11 models
+  - Dynamic FK constraint name lookup via `information_schema` (handles mixed naming conventions)
+  - Auto-migration on deploy: Dockerfile runs `alembic upgrade head` before uvicorn
 - **Auto-refresh polling** added to workflow page and feedback detail page (30s interval)
 - **Email Forwarding Integration**:
   - Resend inbound webhook endpoint (`/api/v1/webhooks/email/inbound`) with signature verification
