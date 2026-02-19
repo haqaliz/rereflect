@@ -125,6 +125,16 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.insights.generate_churn_insights",
         "schedule": crontab(hour=7, minute=0, day_of_week=1),
     },
+    # Generate retention insights for moderate customers: Every Monday at 7:15 AM (bi-weekly)
+    "generate-retention-insights": {
+        "task": "src.tasks.insights.generate_retention_insights",
+        "schedule": crontab(hour=7, minute=15, day_of_week=1),
+    },
+    # Generate growth insights for healthy customers: Every Monday at 7:30 AM (monthly)
+    "generate-growth-insights": {
+        "task": "src.tasks.insights.generate_growth_insights",
+        "schedule": crontab(hour=7, minute=30, day_of_week=1),
+    },
     # Generate weekly AI insights: Every Monday at 8:30 AM UTC (before digest at 9 AM)
     "generate-weekly-insights": {
         "task": "src.tasks.insights.generate_weekly_insights",

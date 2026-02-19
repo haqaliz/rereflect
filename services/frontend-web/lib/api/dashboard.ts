@@ -73,6 +73,9 @@ export interface CustomerHealthSummary {
   frequency_component: number;
   llm_analysis: string | null;
   llm_analyzed_at: string | null;
+  llm_analysis_summary: string | null;
+  llm_analysis_type: string | null;
+  llm_urgency: string | null;
 }
 
 export interface DashboardData {

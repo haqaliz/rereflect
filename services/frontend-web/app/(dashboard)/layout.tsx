@@ -36,6 +36,7 @@ const pageTitles: Record<string, string> = {
   '/notifications': 'Notifications',
   '/settings/notifications': 'Notifications',
   '/settings/ai': 'AI',
+  '/customers': 'Customers',
   '/shared-links': 'Shared Links',
   '/workflow': 'Workflow',
   '/settings/workflow': 'Workflow Settings',
@@ -65,6 +66,10 @@ export default function DashboardLayout({
     // Check for feedback source detail page
     if (pathname.match(/^\/feedback-sources\/\d+$/)) {
       return 'Source Details';
+    }
+    // Check for customer detail page
+    if (pathname.startsWith('/customers/')) {
+      return 'Customer Profile';
     }
     // Check for category page
     if (pathname.startsWith('/categories/')) {

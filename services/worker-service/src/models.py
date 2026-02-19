@@ -441,8 +441,15 @@ class CustomerHealth(Base):
     last_feedback_at = Column(DateTime, nullable=True)
     risk_level = Column(String(20), default="unknown")
 
-    llm_analysis = Column(Text, nullable=True)
+    llm_analysis = Column(Text, nullable=True)  # Legacy pipe-separated text (transition period)
     llm_analyzed_at = Column(DateTime, nullable=True)
+
+    # Structured LLM analysis (JSON)
+    llm_analysis_data = Column(JSON, nullable=True)
+    llm_raw_response = Column(JSON, nullable=True)
+
+    is_archived = Column(Boolean, default=False, server_default="false")
+    confidence_level = Column(String(20), default="low")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -451,6 +458,25 @@ class CustomerHealth(Base):
         Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),
         Index('ix_customer_health_org_score', 'organization_id', 'health_score'),
         Index('ix_customer_health_risk', 'organization_id', 'risk_level'),
+    )
+
+
+class CustomerAnalysisAction(Base):
+    """Action item from LLM analysis for a customer health record."""
+    __tablename__ = "customer_analysis_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_health_id = Column(Integer, nullable=False)
+    organization_id = Column(Integer, nullable=False)
+    action_text = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, server_default="pending")  # pending, completed, dismissed
+    completed_by = Column(Integer, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_analysis_action_health_status', 'customer_health_id', 'status'),
+        Index('ix_analysis_action_org', 'organization_id'),
     )
 
 

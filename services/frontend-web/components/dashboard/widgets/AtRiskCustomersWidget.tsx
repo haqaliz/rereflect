@@ -106,13 +106,20 @@ export function AtRiskCustomersWidget({ customers }: AtRiskCustomersWidgetProps)
                         <p className="text-sm font-bold font-mono text-foreground">{customer.frequency_component}</p>
                       </div>
                     </div>
-                    {customer.llm_analysis && (
+                    {(customer.llm_analysis_summary || customer.llm_analysis) && (
                       <div className="mt-3 p-3 rounded-lg" style={{ backgroundColor: 'color-mix(in oklch, var(--chart-4) 10%, transparent)' }}>
                         <p className="text-xs font-semibold text-muted-foreground mb-1 flex items-center gap-1.5">
                           <Lightbulb className="w-3.5 h-3.5" style={{ color: 'var(--chart-4)' }} />
                           AI Analysis
+                          {customer.llm_analysis_type && (
+                            <span className="text-xs font-normal opacity-60 capitalize">
+                              ({customer.llm_analysis_type.replace('_', ' ')})
+                            </span>
+                          )}
                         </p>
-                        <p className="text-sm text-foreground leading-relaxed">{customer.llm_analysis}</p>
+                        <p className="text-sm text-foreground leading-relaxed">
+                          {customer.llm_analysis_summary || customer.llm_analysis}
+                        </p>
                       </div>
                     )}
                     <button
@@ -120,10 +127,10 @@ export function AtRiskCustomersWidget({ customers }: AtRiskCustomersWidgetProps)
                       style={{ color: 'var(--primary)' }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push(`/feedbacks?search=${encodeURIComponent(customer.customer_email)}`);
+                        router.push(`/customers/${encodeURIComponent(customer.customer_email)}`);
                       }}
                     >
-                      View feedback
+                      View Profile
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>

@@ -102,6 +102,7 @@ PLANS = {
             "enhanced_churn_prediction",
             "customer_health_scores",
             "churn_llm_insights",
+            "ai_analysis_actions",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -142,6 +143,7 @@ PLANS = {
             "enhanced_churn_prediction",
             "customer_health_scores",
             "churn_llm_insights",
+            "ai_analysis_actions",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -183,6 +185,7 @@ FEATURE_PLANS = {
     "enhanced_churn_prediction": "pro",
     "customer_health_scores": "pro",
     "churn_llm_insights": "pro",
+    "ai_analysis_actions": "business",
 }
 
 

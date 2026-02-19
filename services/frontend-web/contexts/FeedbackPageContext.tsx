@@ -8,6 +8,7 @@ interface FeedbackPageState {
   sentimentFilter: string;
   urgentFilter: string;
   churnRiskFilter: string;
+  customerEmailFilter: string;
   currentPage: number;
 }
 
@@ -16,6 +17,7 @@ interface FeedbackPageContextType extends FeedbackPageState {
   setSentimentFilter: (filter: string) => void;
   setUrgentFilter: (filter: string) => void;
   setChurnRiskFilter: (filter: string) => void;
+  setCustomerEmailFilter: (filter: string) => void;
   setCurrentPage: (page: number) => void;
   resetFilters: () => void;
 }
@@ -25,6 +27,7 @@ const defaultState: FeedbackPageState = {
   sentimentFilter: '',
   urgentFilter: '',
   churnRiskFilter: '',
+  customerEmailFilter: '',
   currentPage: 1,
 };
 
@@ -41,11 +44,12 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
   const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   // Update URL with current filters
-  const updateURL = useCallback((sentimentFilter: string, urgentFilter: string, churnRiskFilter: string) => {
+  const updateURL = useCallback((sentimentFilter: string, urgentFilter: string, churnRiskFilter: string, customerEmailFilter: string) => {
     const params = new URLSearchParams();
     if (sentimentFilter) params.set('sentiment', sentimentFilter);
     if (urgentFilter) params.set('urgent', urgentFilter);
     if (churnRiskFilter) params.set('churn_risk', churnRiskFilter);
+    if (customerEmailFilter) params.set('customer_email', customerEmailFilter);
 
     const queryString = params.toString();
     const newUrl = queryString ? `${pathname}?${queryString}` : pathname;
@@ -63,14 +67,16 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
     const sentimentParam = searchParams.get('sentiment');
     const urgentParam = searchParams.get('urgent');
     const churnRiskParam = searchParams.get('churn_risk');
+    const customerEmailParam = searchParams.get('customer_email');
 
-    if (sentimentParam || urgentParam || churnRiskParam) {
+    if (sentimentParam || urgentParam || churnRiskParam || customerEmailParam) {
       // URL params present - use them and ignore localStorage
       setState({
         ...defaultState,
         sentimentFilter: sentimentParam || '',
         urgentFilter: urgentParam || '',
         churnRiskFilter: churnRiskParam || '',
+        customerEmailFilter: customerEmailParam || '',
       });
     } else {
       // No URL params - fall back to localStorage
@@ -80,8 +86,8 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(stored);
           setState(parsed);
           // Sync localStorage state to URL
-          if (parsed.sentimentFilter || parsed.urgentFilter || parsed.churnRiskFilter) {
-            updateURL(parsed.sentimentFilter || '', parsed.urgentFilter || '', parsed.churnRiskFilter || '');
+          if (parsed.sentimentFilter || parsed.urgentFilter || parsed.churnRiskFilter || parsed.customerEmailFilter) {
+            updateURL(parsed.sentimentFilter || '', parsed.urgentFilter || '', parsed.churnRiskFilter || '', parsed.customerEmailFilter || '');
           }
         } catch (err) {
           console.error('Failed to parse stored feedback page state:', err);
@@ -101,9 +107,9 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
   // Sync filter changes to URL (after initial load)
   useEffect(() => {
     if (initialLoadDone) {
-      updateURL(state.sentimentFilter, state.urgentFilter, state.churnRiskFilter);
+      updateURL(state.sentimentFilter, state.urgentFilter, state.churnRiskFilter, state.customerEmailFilter);
     }
-  }, [state.sentimentFilter, state.urgentFilter, state.churnRiskFilter, initialLoadDone, updateURL]);
+  }, [state.sentimentFilter, state.urgentFilter, state.churnRiskFilter, state.customerEmailFilter, initialLoadDone, updateURL]);
 
   const setSearchQuery = (query: string) => {
     setState(prev => ({ ...prev, searchQuery: query, currentPage: 1 }));
@@ -119,6 +125,10 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
 
   const setChurnRiskFilter = (filter: string) => {
     setState(prev => ({ ...prev, churnRiskFilter: filter, currentPage: 1 }));
+  };
+
+  const setCustomerEmailFilter = (filter: string) => {
+    setState(prev => ({ ...prev, customerEmailFilter: filter, currentPage: 1 }));
   };
 
   const setCurrentPage = (page: number) => {
@@ -137,6 +147,7 @@ export function FeedbackPageProvider({ children }: { children: ReactNode }) {
         setSentimentFilter,
         setUrgentFilter,
         setChurnRiskFilter,
+        setCustomerEmailFilter,
         setCurrentPage,
         resetFilters,
       }}

@@ -7,6 +7,7 @@ from src.api.routes import auth, organizations, feedback, dashboard, analyze, in
 from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team, invites, audit_logs
 from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications, analytics, saved_views, shared_links, workflow, email_webhooks
 from src.api.routes import customer_health, activity_feed, dashboard_layout, admin_promo, admin_users, admin_orgs
+from src.api.routes import customers
 from src.seed import seed_admin_user
 import logging
 import os
@@ -135,6 +136,7 @@ app.include_router(dashboard_layout.router)
 app.include_router(admin_promo.router)
 app.include_router(admin_users.router)
 app.include_router(admin_orgs.router)
+app.include_router(customers.router)
 
 
 @app.get("/")

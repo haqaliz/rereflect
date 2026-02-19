@@ -29,6 +29,8 @@ import {
   FileText,
   Inbox,
   RefreshCw,
+  X,
+  User,
 } from 'lucide-react';
 import Link from 'next/link';
 import { FeedbackPageProvider, useFeedbackPage } from '@/contexts/FeedbackPageContext';
@@ -40,7 +42,7 @@ import { createColumns } from './columns';
 function FeedbackPageContent() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { searchQuery, sentimentFilter, urgentFilter, churnRiskFilter, currentPage, setSearchQuery, setSentimentFilter, setUrgentFilter, setChurnRiskFilter, setCurrentPage } = useFeedbackPage();
+  const { searchQuery, sentimentFilter, urgentFilter, churnRiskFilter, customerEmailFilter, currentPage, setSearchQuery, setSentimentFilter, setUrgentFilter, setChurnRiskFilter, setCustomerEmailFilter, setCurrentPage } = useFeedbackPage();
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState('');
   const [pageSize, setPageSize] = useState(20);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -69,6 +71,7 @@ function FeedbackPageContent() {
     const filters: FeedbackFilters = {};
     if (debouncedSearch) filters.search = debouncedSearch;
     if (sentimentFilter) filters.sentiment = sentimentFilter;
+    if (customerEmailFilter) filters.customer_email = customerEmailFilter;
     if (urgentFilter) {
       filters.is_urgent = urgentFilter === 'urgent';
     }
@@ -95,7 +98,7 @@ function FeedbackPageContent() {
       }
     }
     return filters;
-  }, [debouncedSearch, sentimentFilter, urgentFilter, workflowStatusFilter, churnRiskFilter]);
+  }, [debouncedSearch, sentimentFilter, customerEmailFilter, urgentFilter, workflowStatusFilter, churnRiskFilter]);
 
   // Fetch feedback with React Query
   const {
@@ -283,6 +286,23 @@ function FeedbackPageContent() {
             </Link>
           </div>
         </div>
+
+        {/* Customer email filter chip */}
+        {customerEmailFilter && (
+          <div className="mb-4 animate-fade-in">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-sm">
+              <User className="w-3.5 h-3.5 text-primary" />
+              <span className="text-muted-foreground">Customer:</span>
+              <span className="font-medium text-foreground">{customerEmailFilter}</span>
+              <button
+                onClick={() => setCustomerEmailFilter('')}
+                className="ml-1 p-0.5 rounded-full hover:bg-primary/20 transition-colors"
+              >
+                <X className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <Card className="mb-6 animate-slide-up stagger-1">

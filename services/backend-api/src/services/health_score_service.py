@@ -81,6 +81,14 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
     if latest and latest.source_metadata and isinstance(latest.source_metadata, dict):
         customer_name = latest.source_metadata.get('author_name') or latest.source_metadata.get('name')
 
+    # Confidence level based on feedback count
+    if feedback_count <= 2:
+        confidence_level = "low"
+    elif feedback_count <= 9:
+        confidence_level = "medium"
+    else:
+        confidence_level = "high"
+
     return {
         "health_score": health_score,
         "churn_risk_component": churn_component,
@@ -91,14 +99,17 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
         "feedback_count": feedback_count,
         "last_feedback_at": last_feedback,
         "customer_name": customer_name,
+        "confidence_level": confidence_level,
     }
 
 
 def update_customer_health(org_id: int, customer_email: str, db: Session) -> None:
-    """Compute and upsert customer health score."""
+    """Compute and upsert customer health score, recording history on significant changes."""
     from src.models.customer_health import CustomerHealth
+    from src.models.customer_health_history import CustomerHealthHistory
 
     result = compute_health_score(org_id, customer_email, db)
+    new_score = result["health_score"]
 
     existing = db.query(CustomerHealth).filter(
         CustomerHealth.organization_id == org_id,
@@ -106,7 +117,8 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
     ).first()
 
     if existing:
-        existing.health_score = result["health_score"]
+        old_score = existing.health_score
+        existing.health_score = new_score
         existing.churn_risk_component = result["churn_risk_component"]
         existing.sentiment_component = result["sentiment_component"]
         existing.resolution_component = result["resolution_component"]
@@ -115,13 +127,18 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
         existing.feedback_count = result["feedback_count"]
         existing.last_feedback_at = result["last_feedback_at"]
         existing.customer_name = result["customer_name"]
+        existing.confidence_level = result["confidence_level"]
+        existing.is_archived = False  # Unarchive when new feedback arrives
         existing.updated_at = datetime.utcnow()
+
+        # Record history if score changed by ≥ 2 points
+        should_record = abs(new_score - old_score) >= 2
     else:
         health = CustomerHealth(
             organization_id=org_id,
             customer_email=customer_email,
             customer_name=result["customer_name"],
-            health_score=result["health_score"],
+            health_score=new_score,
             churn_risk_component=result["churn_risk_component"],
             sentiment_component=result["sentiment_component"],
             resolution_component=result["resolution_component"],
@@ -129,8 +146,66 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             feedback_count=result["feedback_count"],
             last_feedback_at=result["last_feedback_at"],
             risk_level=result["risk_level"],
+            confidence_level=result["confidence_level"],
+            is_archived=False,
         )
         db.add(health)
+        db.flush()  # Get the id before creating history
+        existing = health
+        should_record = True  # Always record first entry
+
+    # Insert history record if warranted
+    if should_record:
+        history = CustomerHealthHistory(
+            customer_health_id=existing.id,
+            organization_id=org_id,
+            health_score=new_score,
+            churn_risk_component=result["churn_risk_component"],
+            sentiment_component=result["sentiment_component"],
+            resolution_component=result["resolution_component"],
+            frequency_component=result["frequency_component"],
+            risk_level=result["risk_level"],
+        )
+        db.add(history)
+
+
+def compute_sentiment_trend(org_id: int, customer_email: str, db: Session) -> dict:
+    """Compare avg sentiment last 7d vs previous 7d to determine trend direction."""
+    from src.models.feedback import FeedbackItem
+
+    now = datetime.utcnow()
+
+    recent = db.query(func.avg(FeedbackItem.sentiment_score)).filter(
+        FeedbackItem.organization_id == org_id,
+        FeedbackItem.customer_email == customer_email,
+        FeedbackItem.sentiment_score.isnot(None),
+        FeedbackItem.created_at >= now - timedelta(days=7),
+    ).scalar()
+
+    previous = db.query(func.avg(FeedbackItem.sentiment_score)).filter(
+        FeedbackItem.organization_id == org_id,
+        FeedbackItem.customer_email == customer_email,
+        FeedbackItem.sentiment_score.isnot(None),
+        FeedbackItem.created_at >= now - timedelta(days=14),
+        FeedbackItem.created_at < now - timedelta(days=7),
+    ).scalar()
+
+    # If no data in either period, return stable
+    if previous is None or previous == 0:
+        return {"direction": "stable", "change_percent": 0}
+
+    if recent is None:
+        recent = 0.0
+
+    change = ((recent - previous) / abs(previous)) * 100
+    if change > 5:
+        direction = "improving"
+    elif change < -5:
+        direction = "declining"
+    else:
+        direction = "stable"
+
+    return {"direction": direction, "change_percent": round(change, 1)}
 
 
 def _compute_churn_component(db, org_id, customer_email, now) -> int:

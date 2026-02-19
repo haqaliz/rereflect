@@ -61,6 +61,12 @@ const mainNavItems = [
     icon: MessageSquare,
   },
   {
+    title: 'Customers',
+    href: '/customers',
+    icon: Users,
+    proBadge: true,
+  },
+  {
     title: 'Workflow',
     href: '/workflow',
     icon: KanbanSquare,
@@ -141,6 +147,9 @@ export function AppSidebar() {
     if (href === '/feedbacks') {
       return pathname === href || pathname.startsWith('/feedbacks/') || pathname.startsWith('/feedback-sources');
     }
+    if (href === '/customers') {
+      return pathname === href || pathname.startsWith('/customers/');
+    }
     if (href === '/workflow') {
       return pathname === href;
     }
@@ -181,6 +190,11 @@ export function AppSidebar() {
                     <Link href={item.href}>
                       <item.icon className="w-4 h-4" />
                       <span>{item.title}</span>
+                      {item.proBadge && user?.plan === 'free' && (
+                        <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary leading-none">
+                          Pro
+                        </span>
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

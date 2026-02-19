@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index, JSON
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
 
@@ -26,12 +27,34 @@ class CustomerHealth(Base):
     last_feedback_at = Column(DateTime, nullable=True)
     risk_level = Column(String(20), default="unknown")  # healthy, moderate, at_risk, critical
 
+    # Confidence level based on feedback count
+    confidence_level = Column(String(20), default="low")  # low (<3), medium (3-9), high (10+)
+
+    # Soft archive when all feedback deleted
+    is_archived = Column(Boolean, default=False, server_default="false")
+
     # LLM analysis (weekly, for at-risk customers)
-    llm_analysis = Column(Text, nullable=True)
+    llm_analysis = Column(Text, nullable=True)  # Legacy pipe-separated text (transition period)
     llm_analyzed_at = Column(DateTime, nullable=True)
+
+    # Structured LLM analysis (JSON)
+    llm_analysis_data = Column(JSON, nullable=True)  # {analysis, recommended_actions, risk_drivers, estimated_urgency, analysis_type}
+    llm_raw_response = Column(JSON, nullable=True)  # Raw OpenAI response for debugging
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # ORM relationships
+    history = relationship(
+        "CustomerHealthHistory",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    analysis_actions = relationship(
+        "CustomerAnalysisAction",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),

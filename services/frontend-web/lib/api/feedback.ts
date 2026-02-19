@@ -106,6 +106,7 @@ export interface FeedbackFilters {
   urgent_response_time?: string;
   churn_risk_min?: number;
   churn_risk_max?: number;
+  customer_email?: string;
   workflow_status?: string;
   assigned_to?: number;
   sort_by?: string;
@@ -132,6 +133,7 @@ export const feedbackAPI = {
     if (filters?.urgent_response_time) params.append('urgent_response_time', filters.urgent_response_time);
     if (filters?.churn_risk_min !== undefined) params.append('churn_risk_min', filters.churn_risk_min.toString());
     if (filters?.churn_risk_max !== undefined) params.append('churn_risk_max', filters.churn_risk_max.toString());
+    if (filters?.customer_email) params.append('customer_email', filters.customer_email);
     if (filters?.workflow_status) params.append('workflow_status', filters.workflow_status);
     if (filters?.assigned_to !== undefined) params.append('assigned_to', filters.assigned_to.toString());
     if (filters?.sort_by) params.append('sort_by', filters.sort_by);

@@ -91,6 +91,9 @@ class CustomerHealthSummary(BaseModel):
     frequency_component: int
     llm_analysis: Optional[str] = None
     llm_analyzed_at: Optional[datetime] = None
+    llm_analysis_summary: Optional[str] = None
+    llm_analysis_type: Optional[str] = None
+    llm_urgency: Optional[str] = None
 
 
 class ComparisonData(BaseModel):
@@ -482,6 +485,9 @@ def get_dashboard(
                 frequency_component=c.frequency_component,
                 llm_analysis=c.llm_analysis,
                 llm_analyzed_at=c.llm_analyzed_at,
+                llm_analysis_summary=(c.llm_analysis_data or {}).get("analysis") if c.llm_analysis_data else None,
+                llm_analysis_type=(c.llm_analysis_data or {}).get("analysis_type") if c.llm_analysis_data else None,
+                llm_urgency=(c.llm_analysis_data or {}).get("estimated_urgency") if c.llm_analysis_data else None,
             )
             for c in at_risk_query
         ]

@@ -413,7 +413,17 @@ export default function FeedbackDetailPage() {
                         >
                           {score} · {getRiskLabel(customerHealth.risk_level)}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">{feedback.customer_email}</span>
+                        {user?.plan !== 'free' ? (
+                          <Link
+                            href={`/customers/${encodeURIComponent(feedback.customer_email!)}`}
+                            className="text-xs text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {feedback.customer_email}
+                          </Link>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{feedback.customer_email}</span>
+                        )}
                       </div>
                     );
                   })()}

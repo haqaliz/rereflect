@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-18
+**Last Updated**: 2026-02-19
 
 ---
 
@@ -182,6 +182,8 @@
 - [x] Plan gating (enhanced_churn_prediction, customer_health_scores, churn_llm_insights → Pro+)
 - [x] Feedbacks filterable by customer_email (from dashboard widget click-through)
 - [x] Cache invalidation on all feedback mutation paths (create, delete, update, CSV import, approve pending, integration sync, source events)
+- [x] Customer 360 page (`/customers` list + `/customers/[email]` profile)
+- [x] Enhanced AI Analysis System (structured JSON storage, 3-tier analysis, interactive action items)
 - [ ] Feature impact prediction — deferred (requires longitudinal data)
 - [ ] Customer lifetime value estimation — deferred (requires Stripe customer mapping)
 - [ ] Revenue impact scoring — deferred (depends on CLV)
@@ -349,6 +351,24 @@
   - Anomaly alerts as read-only history widget with relative timestamps
   - Top categories with CSS grid auto-fill (responsive card layout, min 180px)
   - Alembic migration: `user_dashboard_layouts` table
+- **Customer 360 — Customer List & Profile Pages** (PRD-CUSTOMER-360.md):
+  - Customer list page (`/customers`): sortable DataTable with health score, risk level, confidence, trend, feedback count, last active; server-side pagination/search/filter; risk distribution bar; stat cards; free plan blur gating
+  - Customer profile page (`/customers/[email]`): health score overview, 4-component progress bars (churn risk, sentiment, resolution, frequency) with shadcn tooltips, health score history chart, activity timeline, recent feedbacks list, AI analysis section
+  - Health score history: `CustomerHealthHistory` model with daily snapshots, backfill script, Recharts line chart with time range selector (7d/30d/90d)
+  - Activity timeline: synthesized from feedback creation, status changes, health score changes, LLM analysis, action completions
+  - Customer link on feedback detail page (clickable email → customer profile)
+  - Sidebar navigation: Customers page with Users icon
+  - Backend: full customers API (`/api/v1/customers/`) with list, profile, activity, analyze, batch-analyze endpoints
+  - Alembic migrations: customer_health_scores new columns, customer_health_history table
+  - 11 backend tests + 8 frontend tests (Vitest + React Testing Library)
+- **Enhanced AI Analysis System** (PRD plan, 5 phases):
+  - Phase 1 — Schema: `llm_analysis_data` (JSON) + `llm_raw_response` (JSON) columns on customer_health_scores, `customer_analysis_actions` table with audit trail, data migration from pipe-separated text to structured JSON
+  - Phase 2 — Worker: 3-tier analysis prompts (churn_risk for <40, retention for 40-69, growth_opportunity for 70+), structured JSON storage, action item creation, immediate urgency alert dispatch
+  - Phase 3 — Tiered Schedule: at-risk weekly (Mon 7AM), moderate bi-weekly (Mon 7:15AM), healthy monthly (Mon 7:30AM)
+  - Phase 4 — API: structured response fields, `PATCH /actions/{id}` endpoint for action CRUD, 24h re-analyze cooldown, system admin gated batch-analyze, activity timeline includes action completions
+  - Phase 5 — Frontend: risk-adaptive AI card styling (red/amber/green by analysis type), interactive action checklist (Business+), read-only analysis (Pro), risk driver badges, urgency indicator, "Re-analyze All" button (system admin), dashboard widget updated for structured display
+  - Plan gating: `ai_analysis_actions` feature on Business+ plans
+  - Breadcrumb fix: layout handles `/customers/*` routes, removed duplicate page-level breadcrumb
 - **Technical Debt Resolution** (4 phases):
   - Phase 1 — DB Query Optimization: 4 compound indexes (org+sentiment, org+urgent, org+pain_cat, org+feature_cat), SQLAlchemy relationships for eager loading (feedback_source, assigned_user), SQL-level tag aggregation with json_array_elements_text (Python fallback for SQLite), SQL_ECHO env var
   - Phase 2 — Server Caching: Redis cache service (DB 2, lazy init, graceful fallback), dashboard caching (5min TTL), analytics caching (10min TTL), cache invalidation on feedback create/analyze/status-change, HTTP Cache-Control headers on read endpoints
@@ -386,6 +406,11 @@
 - Customer health score: churn-heavy weights (35% churn, 25% sentiment, 25% resolution, 15% frequency)
 - Health score recomputation: inline after each analysis task (not a separate Celery task — fast enough)
 - LLM churn insights: capped at customers with health_score < 40, Monday 7AM UTC (before weekly digest at 8:30AM)
+- Customer 360: separate list page + profile page (not inline dashboard expansion), server-side pagination for scalability
+- Enhanced AI Analysis: structured JSON column (not separate table) for analysis data, legacy `llm_analysis` kept during transition period
+- Three-tier analysis: different prompts per health tier (churn_risk/retention/growth_opportunity), tiered scheduling to balance API costs
+- Action items: reset on re-analysis (archive old pending, create new), Business+ only for interactivity
+- On-demand analysis: 1 feedback minimum (batch/scheduled requires 2), 24h cooldown on re-analyze
 - Feature impact prediction / CLV / revenue scoring deferred — insufficient data currently
 - Worker-service cache invalidation: lightweight cache.py utility connecting to Redis DB 2 (same as backend-api cache_service)
 - Redis cache uses DB 2 (DB 0=Celery, DB 1=sessions, DB 2=cache, DB 3=rate limiting)

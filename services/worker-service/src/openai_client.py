@@ -188,6 +188,64 @@ Return ONLY valid JSON with this structure:
 }}"""
 
 
+RETENTION_ANALYSIS_PROMPT = """You are a customer success analyst. Analyze the following feedback data for a customer with moderate health and provide a retention analysis.
+
+Customer email: {customer_email}
+Health score: {health_score}/100 (40-69 = moderate zone)
+Risk level: {risk_level}
+Component scores:
+- Churn risk: {churn_risk_component}/100
+- Sentiment: {sentiment_component}/100
+- Resolution time: {resolution_component}/100
+- Feedback frequency: {frequency_component}/100
+
+Recent feedback items (most recent first):
+{feedback_items}
+
+Focus on:
+- Trajectory analysis: is this customer trending toward at-risk or healthy?
+- Early warning signs that could push them toward at-risk
+- What actions would solidify them as a healthy customer
+- Any patterns in their feedback that reveal unmet needs
+
+Return ONLY valid JSON with this structure:
+{{
+  "analysis": "2-3 sentence summary of the customer's trajectory and key retention factors",
+  "recommended_actions": ["action 1", "action 2", "action 3"],
+  "risk_drivers": ["early warning sign 1", "early warning sign 2"],
+  "estimated_urgency": "this_week" | "this_month"
+}}"""
+
+
+GROWTH_ANALYSIS_PROMPT = """You are a customer success analyst. Analyze the following feedback data for a healthy customer and identify growth and advocacy opportunities.
+
+Customer email: {customer_email}
+Health score: {health_score}/100 (70+ = healthy zone)
+Risk level: {risk_level}
+Component scores:
+- Churn risk: {churn_risk_component}/100
+- Sentiment: {sentiment_component}/100
+- Resolution time: {resolution_component}/100
+- Feedback frequency: {frequency_component}/100
+
+Recent feedback items (most recent first):
+{feedback_items}
+
+Focus on:
+- What strengths and positive signals does this customer exhibit?
+- Expansion opportunities (upsell, feature adoption, increased usage)
+- Advocacy potential (testimonials, referrals, case studies)
+- Minor risks to watch that could erode satisfaction
+
+Return ONLY valid JSON with this structure:
+{{
+  "analysis": "2-3 sentence summary of customer strengths and growth opportunities",
+  "recommended_actions": ["action 1", "action 2", "action 3"],
+  "risk_drivers": ["minor risk to watch 1", "minor risk to watch 2"],
+  "estimated_urgency": "this_month"
+}}"""
+
+
 INSIGHTS_PROMPT = """You are a customer feedback analyst. Analyze the following batch of customer feedback items and generate 3-5 actionable insights for the product team.
 
 Each insight should identify a pattern, trend, or actionable recommendation based on the feedback.
@@ -340,4 +398,105 @@ def generate_churn_analysis(
         return None
     except Exception as e:
         logger.error(f"Unexpected error generating churn analysis: {e}")
+        return None
+
+
+# Prompt map for multi-tier analysis
+_ANALYSIS_PROMPTS = {
+    "churn_risk": CHURN_ANALYSIS_PROMPT,
+    "retention": RETENTION_ANALYSIS_PROMPT,
+    "growth_opportunity": GROWTH_ANALYSIS_PROMPT,
+}
+
+
+def generate_customer_analysis(
+    analysis_type: str,
+    customer_email: str,
+    health_score: int,
+    risk_level: str,
+    churn_risk_component: int,
+    sentiment_component: int,
+    resolution_component: int,
+    frequency_component: int,
+    feedback_texts: list,
+    org_api_key: Optional[str] = None,
+) -> Optional[dict]:
+    """
+    Generic customer analysis using the appropriate prompt for the analysis type.
+
+    Args:
+        analysis_type: One of "churn_risk", "retention", "growth_opportunity"
+
+    Returns:
+        Dict with analysis, recommended_actions, risk_drivers, estimated_urgency, analysis_type,
+        plus raw_response for storage.
+    """
+    prompt_template = _ANALYSIS_PROMPTS.get(analysis_type)
+    if not prompt_template:
+        logger.error(f"Unknown analysis type: {analysis_type}")
+        return None
+
+    client = _get_client(org_api_key)
+    if not client:
+        logger.warning("No OpenAI API key configured, skipping customer analysis")
+        return None
+
+    formatted = "\n".join(f"{i+1}. \"{text[:400]}\"" for i, text in enumerate(feedback_texts[:20]))
+
+    prompt = prompt_template.format(
+        customer_email=customer_email,
+        health_score=health_score,
+        risk_level=risk_level,
+        churn_risk_component=churn_risk_component,
+        sentiment_component=sentiment_component,
+        resolution_component=resolution_component,
+        frequency_component=frequency_component,
+        feedback_items=formatted,
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=500,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            logger.error(f"OpenAI returned empty content for {analysis_type} analysis")
+            return None
+
+        result = json.loads(content)
+
+        # Build validated structured result
+        structured = {
+            "analysis": str(result.get("analysis", ""))[:500],
+            "recommended_actions": [str(a)[:200] for a in result.get("recommended_actions", [])[:5]],
+            "risk_drivers": [str(d)[:200] for d in result.get("risk_drivers", [])[:5]],
+            "estimated_urgency": result.get("estimated_urgency", "this_month"),
+            "analysis_type": analysis_type,
+        }
+
+        # Include raw response for debugging storage
+        raw_response = {
+            "model": settings.openai_model,
+            "raw_content": content,
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens if response.usage else None,
+                "completion_tokens": response.usage.completion_tokens if response.usage else None,
+            },
+        }
+
+        return {**structured, "_raw_response": raw_response}
+
+    except (APIError, RateLimitError, APITimeoutError) as e:
+        logger.error(f"OpenAI API error generating {analysis_type} analysis: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse OpenAI {analysis_type} analysis response: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error generating {analysis_type} analysis: {e}")
         return None
