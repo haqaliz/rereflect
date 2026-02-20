@@ -90,11 +90,11 @@
 - [x] Customer health API endpoint (list all customers, paginated, filterable)
 - [x] Plan gate: `/customers` page requires `customer_health_scores` feature (Pro+)
 
-#### M1.3 — Customer Sentiment Alerts (1 week)
-- [ ] New alert type: `customer_health_drop` — triggers when health score drops by X points or crosses threshold
-- [ ] Alert preferences: configurable threshold (e.g., "alert when score drops below 50" or "drops by 20+ points")
-- [ ] Notification: in-app + email + Slack (uses existing notification dispatch)
-- [ ] Trigger in health score recomputation: compare new vs previous score
+#### M1.3 — Customer Sentiment Alerts (1 week) — COMPLETE
+- [x] New alert type: `customer_health_drop` — triggers when health score drops by X points or crosses threshold
+- [x] Alert preferences: configurable threshold (e.g., "alert when score drops below 50" or "drops by 20+ points")
+- [x] Notification: in-app + email + Slack (uses existing notification dispatch)
+- [x] Trigger in health score recomputation: compare new vs previous score
 
 #### M1.4 — Churn Prediction Accuracy (1 week)
 - [ ] AI explainability on churn risk: show factor breakdown on feedback detail ("Churn risk: 72 — Sentiment trend -15, Frustration keywords +10, ...")

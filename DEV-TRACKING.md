@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-19
+**Last Updated**: 2026-02-20
 
 ---
 
@@ -376,6 +376,17 @@
   - Phase 4 — Test Coverage: Billing/Stripe test suite (test_billing.py, 15+ test cases covering checkout, webhooks, portal, usage limits, feature gating), Vitest configured with jsdom + @testing-library/react, StatCard + ThemeContext tests, frontend test scripts (npm run test/test:watch/test:coverage)
   - Alembic migration: 9232cfa0634d_add_critical_feedback_indexes
   - PRD: PRD-TECHNICAL-DEBT.md
+- **Customer Sentiment Alerts** (M1.3, PRD-CUSTOMER-SENTIMENT-ALERTS.md):
+  - New alert type `customer_health_drop` with 3 trigger conditions: threshold crossing (score < 50), point drop (≥ 15pts), risk level downgrade
+  - Recovery alerts on risk level upgrades (green positive notifications)
+  - `dispatch_health_drop_alert()` in worker-service with Redis 24h dedup per customer, risk level changes bypass cooldown
+  - Auto-triggers LLM analysis when health drop detected and analysis is stale (>24h)
+  - Preferences API: dual thresholds (`threshold_value` + `drop_threshold`) per user, validation (1-99 / 5-50)
+  - Slack Block Kit card with score change, risk level badge, top risk drivers, Customer 360 CTA button
+  - Email via existing daily digest pipeline (no new Resend template)
+  - Frontend: alert preferences row with dual threshold inputs, notification list/bell/detail with red (drop) / green (recovery) styling, score change display, risk badges, component breakdown
+  - Plan gated to Pro+ (reuses `customer_health_scores` feature)
+  - 90 TDD tests across 5 test files (backend alerts, preferences API, worker dispatch, frontend preferences UI, notification display)
 
 ---
 
@@ -416,6 +427,9 @@
 - Redis cache uses DB 2 (DB 0=Celery, DB 1=sessions, DB 2=cache, DB 3=rate limiting)
 - React Query (TanStack Query v5) with staleTime 5min, gcTime 30min for client-side caching
 - Vitest + @testing-library/react for frontend unit tests
+- Customer sentiment alerts: 3 trigger conditions (threshold + drop + risk change), recovery alerts on risk upgrade, 24h Redis dedup bypassed for risk transitions
+- Health drop email: daily digest pipeline (no dedicated template), consistent with existing alert email pattern
+- Health drop dedup: Redis DB 2 key `health_alert_cooldown:{org_id}:{email}` with 86400s TTL, re-alerts only if score dropped further
 
 ---
 
