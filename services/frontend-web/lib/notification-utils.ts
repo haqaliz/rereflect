@@ -6,6 +6,7 @@ import {
   UserCheck,
   ArrowRightLeft,
   MessageSquarePlus,
+  HeartPulse,
 } from 'lucide-react';
 
 export const TYPE_ICONS: Record<string, typeof AlertTriangle> = {
@@ -16,6 +17,7 @@ export const TYPE_ICONS: Record<string, typeof AlertTriangle> = {
   feedback_assigned: UserCheck,
   status_changed: ArrowRightLeft,
   note_added: MessageSquarePlus,
+  customer_health_drop: HeartPulse,
 };
 
 export const TYPE_COLORS: Record<string, string> = {
@@ -26,6 +28,7 @@ export const TYPE_COLORS: Record<string, string> = {
   feedback_assigned: 'text-blue-500',
   status_changed: 'text-purple-500',
   note_added: 'text-green-500',
+  customer_health_drop: 'text-destructive',
 };
 
 export function timeAgo(dateString: string): string {

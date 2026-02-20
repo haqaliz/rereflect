@@ -628,3 +628,13 @@ def analyze_customer_health(org_id: int, customer_email: str) -> dict:
             return {"status": "complete", "analysis_type": analysis_type}
 
         return {"status": "no_result"}
+
+
+@shared_task(name="src.tasks.insights.generate_churn_insights_for_customer")
+def generate_churn_insights_for_customer(org_id: int, customer_email: str) -> dict:
+    """
+    On-demand task: Run LLM churn analysis for a single customer.
+    Triggered automatically when a health drop alert fires and analysis is stale (>24h).
+    Delegates to analyze_customer_health for the actual analysis logic.
+    """
+    return analyze_customer_health(org_id, customer_email)

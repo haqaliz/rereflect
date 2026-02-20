@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-02-16
+**Last Updated**: 2026-02-20
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -75,20 +75,20 @@
 
 **Goal**: Every customer with an email has a visible health profile. Churn predictions are accurate and actionable.
 
-#### M1.1 — Frontend Gaps (1 week)
+#### M1.1 — Frontend Gaps (1 week) — COMPLETE
 - [x] Feedback detail: customer health badge (score circle + risk level when `customer_email` exists)
 - [x] Feedbacks list: churn risk indicator column (color-coded dot/bar, sortable)
 - [x] Churn risk filter on feedbacks list (filter by risk level: low/medium/high/critical)
 
-#### M1.2 — Customer 360 Page (2 weeks)
-- [ ] `/customers` page: sortable table (email, name, health score, risk level, feedback count, last active, sentiment trend)
-- [ ] Customer search + filters (risk level, health score range, last active, feedback count)
-- [ ] Risk distribution chart (pie/bar: healthy/moderate/at-risk/critical breakdown)
-- [ ] `/customers/[email]` profile page: health score timeline chart, all feedbacks, sentiment trend over time, component breakdown
-- [ ] LLM summary section on customer profile (latest churn analysis)
-- [ ] "View all feedbacks" link from profile to filtered feedbacks list
-- [ ] Customer health API endpoint (list all customers, paginated, filterable)
-- [ ] Plan gate: `/customers` page requires `customer_health_scores` feature (Pro+)
+#### M1.2 — Customer 360 Page (2 weeks) — COMPLETE
+- [x] `/customers` page: sortable table (email, name, health score, risk level, feedback count, last active, sentiment trend)
+- [x] Customer search + filters (risk level, health score range, last active, feedback count)
+- [x] Risk distribution chart (pie/bar: healthy/moderate/at-risk/critical breakdown)
+- [x] `/customers/[email]` profile page: health score timeline chart, all feedbacks, sentiment trend over time, component breakdown
+- [x] LLM summary section on customer profile (latest churn analysis)
+- [x] "View all feedbacks" link from profile to filtered feedbacks list
+- [x] Customer health API endpoint (list all customers, paginated, filterable)
+- [x] Plan gate: `/customers` page requires `customer_health_scores` feature (Pro+)
 
 #### M1.3 — Customer Sentiment Alerts (1 week)
 - [ ] New alert type: `customer_health_drop` — triggers when health score drops by X points or crosses threshold

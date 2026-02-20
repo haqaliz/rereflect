@@ -18,6 +18,19 @@ from src.api.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
+# Alert types that are always returned in preferences (with defaults when no DB record)
+DEFAULT_ALERT_TYPES = [
+    "urgent_feedback",
+    "sentiment_spike",
+    "churn_risk",
+    "volume_spike",
+    "customer_health_drop",
+]
+
+# Internal alert type key used to store drop_threshold for customer_health_drop
+_DROP_THRESHOLD_KEY = "customer_health_drop_drop_threshold"
+_DEFAULT_DROP_THRESHOLD = 15
+
 
 # ── Pydantic Schemas ─────────────────────────────────────────────────────────
 
@@ -73,6 +86,7 @@ class AlertPreferenceItem(BaseModel):
     channel_intercom: bool = False
     threshold_value: Optional[float]
     retention_days: int = 30
+    drop_threshold: Optional[int] = None  # customer_health_drop only (default 15)
 
 
 class AlertPreferencesResponse(BaseModel):
@@ -86,8 +100,9 @@ class AlertPreferenceUpdate(BaseModel):
     channel_slack: bool
     channel_inapp: bool
     channel_intercom: bool = False
-    threshold_value: Optional[float]
+    threshold_value: Optional[float] = None
     retention_days: int = Field(30, ge=30, le=365)
+    drop_threshold: Optional[int] = None  # customer_health_drop only (range 5-50)
 
     @validator("threshold_value")
     def validate_threshold(cls, v, values):
@@ -100,6 +115,19 @@ class AlertPreferenceUpdate(BaseModel):
         elif alert_type == "volume_spike":
             if v < 1.0 or v > 10.0:
                 raise ValueError("Volume threshold must be between 1.0 and 10.0")
+        elif alert_type == "customer_health_drop":
+            if v < 1 or v > 99:
+                raise ValueError("Health drop threshold must be between 1 and 99")
+        return v
+
+    @validator("drop_threshold")
+    def validate_drop_threshold(cls, v, values):
+        if v is None:
+            return v
+        alert_type = values.get("alert_type")
+        if alert_type == "customer_health_drop":
+            if v < 5 or v > 50:
+                raise ValueError("drop_threshold must be between 5 and 50")
         return v
 
 
@@ -288,21 +316,52 @@ def get_preferences(
         UserAlertPreference.user_id == current_user.id,
     ).all()
 
-    return AlertPreferencesResponse(
-        preferences=[
-            AlertPreferenceItem(
-                alert_type=p.alert_type,
-                is_enabled=p.is_enabled,
-                channel_email=p.channel_email,
-                channel_slack=p.channel_slack,
-                channel_inapp=p.channel_inapp,
-                channel_intercom=p.channel_intercom,
-                threshold_value=p.threshold_value,
-                retention_days=p.retention_days,
-            )
-            for p in prefs
-        ]
+    pref_by_type = {p.alert_type: p for p in prefs}
+
+    # Fetch drop_threshold from secondary preference row
+    drop_threshold_pref = pref_by_type.get(_DROP_THRESHOLD_KEY)
+    stored_drop_threshold = (
+        int(drop_threshold_pref.threshold_value)
+        if drop_threshold_pref and drop_threshold_pref.threshold_value
+        else _DEFAULT_DROP_THRESHOLD
     )
+
+    result_prefs = []
+
+    # Build list of all alert types, ensuring customer_health_drop is always present
+    seen_types = set()
+    for p in prefs:
+        if p.alert_type in (_DROP_THRESHOLD_KEY,):
+            continue  # Internal-only, don't expose
+        seen_types.add(p.alert_type)
+        dt = stored_drop_threshold if p.alert_type == "customer_health_drop" else None
+        result_prefs.append(AlertPreferenceItem(
+            alert_type=p.alert_type,
+            is_enabled=p.is_enabled,
+            channel_email=p.channel_email,
+            channel_slack=p.channel_slack,
+            channel_inapp=p.channel_inapp,
+            channel_intercom=p.channel_intercom,
+            threshold_value=p.threshold_value,
+            retention_days=p.retention_days,
+            drop_threshold=dt,
+        ))
+
+    # Inject customer_health_drop default if no DB record
+    if "customer_health_drop" not in seen_types:
+        result_prefs.append(AlertPreferenceItem(
+            alert_type="customer_health_drop",
+            is_enabled=True,
+            channel_email=False,
+            channel_slack=True,
+            channel_inapp=True,
+            channel_intercom=False,
+            threshold_value=50.0,
+            retention_days=30,
+            drop_threshold=_DEFAULT_DROP_THRESHOLD,
+        ))
+
+    return AlertPreferencesResponse(preferences=result_prefs)
 
 
 @router.put("/preferences", response_model=AlertPreferencesResponse)
@@ -339,6 +398,27 @@ def update_preferences(
                 retention_days=item.retention_days,
             )
             db.add(pref)
+
+        # For customer_health_drop: persist drop_threshold as a secondary preference row
+        if item.alert_type == "customer_health_drop" and item.drop_threshold is not None:
+            drop_pref = db.query(UserAlertPreference).filter(
+                UserAlertPreference.user_id == current_user.id,
+                UserAlertPreference.alert_type == _DROP_THRESHOLD_KEY,
+            ).first()
+            if drop_pref:
+                drop_pref.threshold_value = float(item.drop_threshold)
+            else:
+                drop_pref = UserAlertPreference(
+                    user_id=current_user.id,
+                    alert_type=_DROP_THRESHOLD_KEY,
+                    is_enabled=True,
+                    channel_email=False,
+                    channel_slack=False,
+                    channel_inapp=False,
+                    threshold_value=float(item.drop_threshold),
+                    retention_days=30,
+                )
+                db.add(drop_pref)
 
     db.commit()
 

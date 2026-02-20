@@ -26,6 +26,7 @@ export interface AlertPreference {
   channel_inapp: boolean;
   channel_intercom: boolean;
   threshold_value: number | null;
+  drop_threshold?: number | null;
   retention_days: number;
 }
 

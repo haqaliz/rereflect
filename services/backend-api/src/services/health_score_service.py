@@ -6,12 +6,19 @@ Higher score = healthier customer.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+# Risk level ordering: lower index = healthier
+RISK_LEVEL_ORDER = {"healthy": 0, "moderate": 1, "at_risk": 2, "critical": 3}
+
+# Default alert thresholds
+DEFAULT_ALERT_THRESHOLD = 50.0  # absolute threshold: alert when score drops below this
+DEFAULT_DROP_THRESHOLD = 15     # point-drop threshold: alert when score drops by this many pts
 
 # Weight distribution (churn-heavy as per PRD)
 WEIGHTS = {
@@ -118,6 +125,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
 
     if existing:
         old_score = existing.health_score
+        old_risk_level = existing.risk_level
         existing.health_score = new_score
         existing.churn_risk_component = result["churn_risk_component"]
         existing.sentiment_component = result["sentiment_component"]
@@ -133,6 +141,24 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
 
         # Record history if score changed by ≥ 2 points
         should_record = abs(new_score - old_score) >= 2
+
+        # Check if health drop alert should fire
+        _check_health_drop_alert(
+            org_id=org_id,
+            customer_email=customer_email,
+            customer_name=result["customer_name"],
+            old_score=old_score,
+            new_score=new_score,
+            old_risk_level=old_risk_level,
+            new_risk_level=result["risk_level"],
+            components={
+                "churn_risk": result["churn_risk_component"],
+                "sentiment": result["sentiment_component"],
+                "resolution": result["resolution_component"],
+                "frequency": result["frequency_component"],
+            },
+            db=db,
+        )
     else:
         health = CustomerHealth(
             organization_id=org_id,
@@ -332,3 +358,114 @@ def _compute_frequency_component(db, org_id, customer_email, now) -> int:
         return 30
     else:
         return 10
+
+
+def _check_health_drop_alert(
+    org_id: int,
+    customer_email: str,
+    customer_name: Optional[str],
+    old_score: int,
+    new_score: int,
+    old_risk_level: str,
+    new_risk_level: str,
+    components: Dict[str, int],
+    db: Session,
+) -> None:
+    """
+    Check if a health drop alert should fire and dispatch it.
+
+    Alert conditions (any one triggers):
+    1. Score crosses below absolute threshold (default 50)
+    2. Score drops by >= drop_threshold (default 15 points)
+    3. Risk level downgrade (healthy→moderate, moderate→at_risk, at_risk→critical)
+    4. Risk level upgrade (recovery alert)
+
+    Called only for existing customers (not new ones).
+    """
+    old_order = RISK_LEVEL_ORDER.get(old_risk_level, 0)
+    new_order = RISK_LEVEL_ORDER.get(new_risk_level, 0)
+
+    is_risk_downgrade = new_order > old_order
+    is_risk_upgrade = new_order < old_order
+
+    # Recovery alert: risk level improved
+    if is_risk_upgrade:
+        try:
+            _do_dispatch_health_drop_alert(
+                org_id=org_id,
+                customer_email=customer_email,
+                customer_name=customer_name,
+                old_score=old_score,
+                new_score=new_score,
+                old_risk_level=old_risk_level,
+                new_risk_level=new_risk_level,
+                components=components,
+                is_recovery=True,
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch recovery alert for {customer_email}: {e}")
+        return
+
+    # Drop conditions
+    threshold_crossed = new_score < DEFAULT_ALERT_THRESHOLD and old_score >= DEFAULT_ALERT_THRESHOLD
+    large_drop = (old_score - new_score) >= DEFAULT_DROP_THRESHOLD
+
+    should_alert = threshold_crossed or large_drop or is_risk_downgrade
+
+    if should_alert:
+        try:
+            _do_dispatch_health_drop_alert(
+                org_id=org_id,
+                customer_email=customer_email,
+                customer_name=customer_name,
+                old_score=old_score,
+                new_score=new_score,
+                old_risk_level=old_risk_level,
+                new_risk_level=new_risk_level,
+                components=components,
+                is_recovery=False,
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch health drop alert for {customer_email}: {e}")
+
+
+def dispatch_health_drop_alert(
+    org_id: int,
+    customer_email: str,
+    customer_name: Optional[str],
+    old_score: int,
+    new_score: int,
+    old_risk_level: str,
+    new_risk_level: str,
+    components: Dict[str, int],
+    is_recovery: bool = False,
+) -> None:
+    """
+    Dispatch a health drop (or recovery) alert for a customer.
+
+    Routes to the notification_dispatch_helpers backend implementation.
+    Defined at module level so tests can mock it by patching
+    src.services.health_score_service.dispatch_health_drop_alert.
+    """
+    from src.notification_dispatch_helpers import dispatch_health_drop_alert_impl
+    dispatch_health_drop_alert_impl(
+        org_id=org_id,
+        customer_email=customer_email,
+        customer_name=customer_name,
+        old_score=old_score,
+        new_score=new_score,
+        old_risk_level=old_risk_level,
+        new_risk_level=new_risk_level,
+        components=components,
+        is_recovery=is_recovery,
+    )
+
+
+def _do_dispatch_health_drop_alert(**kwargs) -> None:
+    """
+    Internal forwarder that calls dispatch_health_drop_alert.
+    Using this indirection allows tests to patch dispatch_health_drop_alert
+    at the module level while _check_health_drop_alert calls this function.
+    """
+    import src.services.health_score_service as _mod
+    _mod.dispatch_health_drop_alert(**kwargs)

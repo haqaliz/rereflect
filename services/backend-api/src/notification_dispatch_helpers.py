@@ -130,6 +130,108 @@ def dispatch_feedback_assigned(org_id: int, actor, assignee, feedbacks: list):
         logger.error(f"Failed to dispatch feedback_assigned notification: {e}")
 
 
+def dispatch_health_drop_alert_impl(
+    org_id: int,
+    customer_email: str,
+    customer_name,
+    old_score: int,
+    new_score: int,
+    old_risk_level: str,
+    new_risk_level: str,
+    components: dict,
+    is_recovery: bool = False,
+) -> None:
+    """
+    Backend-api side implementation of health drop alert dispatch.
+    Creates in-app Notification records and flags email/slack channels
+    based on user preferences for the 'customer_health_drop' alert type.
+    Delegates dedup and Slack to the worker-service notification_dispatch
+    when called from the Celery context; when called inline (from health_score_service)
+    this creates in-app notifications synchronously.
+    """
+    from src.database.session import SessionLocal
+    from src.models.notification import Notification
+    from src.models.user import User
+    from src.models.user_alert_preference import UserAlertPreference
+    from datetime import timedelta
+    from urllib.parse import quote
+
+    RISK_LEVEL_ORDER = {"healthy": 0, "moderate": 1, "at_risk": 2, "critical": 3}
+
+    old_order = RISK_LEVEL_ORDER.get(old_risk_level, 0)
+    new_order = RISK_LEVEL_ORDER.get(new_risk_level, 0)
+
+    try:
+        db = SessionLocal()
+        users = db.query(User).filter(User.organization_id == org_id).all()
+        if not users:
+            db.close()
+            return
+
+        user_ids = [u.id for u in users]
+        prefs = db.query(UserAlertPreference).filter(
+            UserAlertPreference.user_id.in_(user_ids),
+            UserAlertPreference.alert_type == "customer_health_drop",
+        ).all()
+        pref_by_user = {p.user_id: p for p in prefs}
+
+        customer_link = f"/customers/{quote(customer_email, safe='')}"
+
+        if is_recovery:
+            title = f"Customer health improved: {customer_email}"
+            message = (
+                f"Health score recovered from {old_score} to {new_score} "
+                f"({old_risk_level} → {new_risk_level})."
+            )
+        else:
+            sorted_drivers = sorted(components.items(), key=lambda x: x[1])
+            top_drivers = [k for k, _ in sorted_drivers[:2]]
+            drivers_text = ", ".join(d.replace("_", " ").title() for d in top_drivers)
+            title = f"Customer health drop: {customer_email}"
+            message = (
+                f"Health score dropped from {old_score} to {new_score} "
+                f"({old_risk_level} → {new_risk_level}). "
+                f"Top risk drivers: {drivers_text}."
+            )
+
+        notification_metadata = {
+            "customer_email": customer_email,
+            "customer_name": customer_name,
+            "old_score": old_score,
+            "new_score": new_score,
+            "old_risk_level": old_risk_level,
+            "new_risk_level": new_risk_level,
+            "is_recovery": is_recovery,
+            "components": components,
+        }
+
+        for user in users:
+            pref = pref_by_user.get(user.id)
+            is_enabled = pref.is_enabled if pref else True
+            if not is_enabled:
+                continue
+            channel_inapp = pref.channel_inapp if pref else True
+            if channel_inapp:
+                retention_days = pref.retention_days if pref else 30
+                notification = Notification(
+                    user_id=user.id,
+                    organization_id=org_id,
+                    type="customer_health_drop",
+                    title=title,
+                    message=message,
+                    link=customer_link,
+                    metadata_=notification_metadata,
+                    created_at=datetime.utcnow(),
+                    expires_at=datetime.utcnow() + timedelta(days=retention_days),
+                )
+                db.add(notification)
+
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error(f"dispatch_health_drop_alert_impl failed for {customer_email}: {e}")
+
+
 def dispatch_note_added(org_id: int, actor, feedback, note):
     """Dispatch note_added notifications to assigned user + previous note authors."""
     from src.database.session import SessionLocal

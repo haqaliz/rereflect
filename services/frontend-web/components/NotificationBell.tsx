@@ -111,7 +111,8 @@ export function NotificationBell() {
           ) : (
             notifications.map(notification => {
               const Icon = TYPE_ICONS[notification.type] || Bell;
-              const iconColor = TYPE_COLORS[notification.type] || 'text-muted-foreground';
+              const isRecovery = notification.type === 'customer_health_drop' && notification.metadata?.is_recovery === true;
+              const iconColor = isRecovery ? 'text-green-500' : (TYPE_COLORS[notification.type] || 'text-muted-foreground');
 
               return (
                 <div
@@ -124,7 +125,7 @@ export function NotificationBell() {
                   {!notification.is_read && (
                     <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary rounded-r" />
                   )}
-                  <div className={`mt-0.5 ${iconColor}`}>
+                  <div data-testid={`popover-notif-icon-${notification.id}`} className={`mt-0.5 ${iconColor}`}>
                     <Icon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">

@@ -30,7 +30,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 
-const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; hasThreshold: boolean; thresholdLabel?: string; thresholdUnit?: string }> = {
+const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; hasThreshold: boolean; thresholdLabel?: string; thresholdUnit?: string; hasDualThreshold?: boolean; planGate?: string[] }> = {
   urgent_feedback: {
     label: 'Urgent Feedback',
     description: 'Get notified when urgent or churn-risk feedback is detected',
@@ -70,6 +70,13 @@ const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; ha
     description: 'Get notified when a note is added to feedback you\'re involved with',
     hasThreshold: false,
   },
+  customer_health_drop: {
+    label: 'Customer Health Drop',
+    description: 'Alert when a customer\'s health score drops significantly or their risk level worsens',
+    hasThreshold: false,
+    hasDualThreshold: true,
+    planGate: ['pro', 'business', 'enterprise'],
+  },
 };
 
 const DEFAULT_PREFERENCES: AlertPreference[] = [
@@ -80,6 +87,7 @@ const DEFAULT_PREFERENCES: AlertPreference[] = [
   { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
   { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
   { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'customer_health_drop', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, drop_threshold: 15, retention_days: 30 },
 ];
 
 const HOUR_OPTIONS = [
@@ -178,7 +186,7 @@ export default function NotificationsSettingsPage() {
     fetchData();
   }, [router]);
 
-  const updatePref = (alertType: string, field: keyof AlertPreference, value: boolean | number | null) => {
+  const updatePref = (alertType: string, field: keyof AlertPreference | 'drop_threshold', value: boolean | number | null) => {
     setPreferences(prev =>
       prev.map(p =>
         p.alert_type === alertType ? { ...p, [field]: value } : p
@@ -348,11 +356,17 @@ export default function NotificationsSettingsPage() {
                 const config = ALERT_TYPE_CONFIG[pref.alert_type];
                 if (!config) return null;
 
+                // Plan gating: hide row if user's plan is not in the allowed list
+                if (config.planGate && user?.plan && !config.planGate.includes(user.plan)) {
+                  return null;
+                }
+
                 const activeChannels = getActiveChannels(pref);
 
                 return (
                   <div
                     key={pref.alert_type}
+                    data-testid={`alert-row-${pref.alert_type}`}
                     className={`rounded-lg border p-4 transition-colors ${
                       pref.is_enabled ? 'bg-background border-border' : 'bg-muted/50 border-muted opacity-60'
                     }`}
@@ -445,12 +459,18 @@ export default function NotificationsSettingsPage() {
                   ))}
                 </div>
 
-                {/* Threshold */}
+                {/* Single threshold */}
                 {editingConfig.hasThreshold && (
                   <div className="space-y-2 pt-2 border-t border-border">
-                    <p className="text-sm font-medium text-foreground pt-2">{editingConfig.thresholdLabel}</p>
+                    <label
+                      htmlFor={`threshold-${editingPref.alert_type}`}
+                      className="text-sm font-medium text-foreground pt-2 block"
+                    >
+                      {editingConfig.thresholdLabel}
+                    </label>
                     <div className="flex items-center gap-2">
                       <Input
+                        id={`threshold-${editingPref.alert_type}`}
                         type="number"
                         className="w-28 h-9 text-sm"
                         value={editingPref.threshold_value ?? ''}
@@ -463,6 +483,63 @@ export default function NotificationsSettingsPage() {
                         max={editingPref.alert_type === 'volume_spike' ? '10' : '100'}
                       />
                       <span className="text-sm text-muted-foreground">{editingConfig.thresholdUnit}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Dual threshold (customer_health_drop) */}
+                {editingConfig.hasDualThreshold && (
+                  <div className="space-y-4 pt-2 border-t border-border">
+                    <div className="space-y-2 pt-2">
+                      <label
+                        htmlFor={`threshold-absolute-${editingPref.alert_type}`}
+                        className="text-sm font-medium text-foreground block"
+                      >
+                        Alert when score drops below
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id={`threshold-absolute-${editingPref.alert_type}`}
+                          aria-label="Alert when score drops below"
+                          type="number"
+                          className="w-28 h-9 text-sm"
+                          value={editingPref.threshold_value ?? 50}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                            updatePref(editingPref.alert_type, 'threshold_value', val);
+                          }}
+                          min="1"
+                          max="99"
+                          step="1"
+                          disabled={!editingPref.is_enabled}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label
+                        htmlFor={`threshold-drop-${editingPref.alert_type}`}
+                        className="text-sm font-medium text-foreground block"
+                      >
+                        Alert on drop of
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id={`threshold-drop-${editingPref.alert_type}`}
+                          aria-label="Alert on drop of"
+                          type="number"
+                          className="w-28 h-9 text-sm"
+                          value={editingPref.drop_threshold ?? 15}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                            updatePref(editingPref.alert_type, 'drop_threshold', val);
+                          }}
+                          min="5"
+                          max="50"
+                          step="1"
+                          disabled={!editingPref.is_enabled}
+                        />
+                        <span className="text-sm text-muted-foreground">or more points</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -604,6 +681,7 @@ export default function NotificationsSettingsPage() {
             {preferences.map(pref => {
               const config = ALERT_TYPE_CONFIG[pref.alert_type];
               if (!config) return null;
+              if (config.planGate && user?.plan && !config.planGate.includes(user.plan)) return null;
               const days = retentionByType[pref.alert_type] ?? 30;
               const extraDays = Math.max(0, days - 30);
               const cost = extraDays * 0.10;

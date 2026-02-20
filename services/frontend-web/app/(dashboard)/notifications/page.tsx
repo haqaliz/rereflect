@@ -13,6 +13,7 @@ const TYPE_FILTERS = [
   { label: 'Sentiment', value: 'sentiment_spike' },
   { label: 'Churn', value: 'churn_risk' },
   { label: 'Volume', value: 'volume_spike' },
+  { label: 'Health Drop', value: 'customer_health_drop' },
 ] as const;
 
 const PAGE_SIZE = 20;
@@ -171,7 +172,8 @@ export default function NotificationsPage() {
           <>
             {notifications.map(notification => {
               const Icon = TYPE_ICONS[notification.type] || Bell;
-              const iconColor = TYPE_COLORS[notification.type] || 'text-muted-foreground';
+              const isRecovery = notification.type === 'customer_health_drop' && notification.metadata?.is_recovery === true;
+              const iconColor = isRecovery ? 'text-green-500' : (TYPE_COLORS[notification.type] || 'text-muted-foreground');
 
               return (
                 <div
@@ -185,7 +187,7 @@ export default function NotificationsPage() {
                     <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary rounded-r" />
                   )}
 
-                  <div className={`mt-0.5 ${iconColor}`}>
+                  <div data-testid={`notif-icon-${notification.id}`} className={`mt-0.5 ${iconColor}`}>
                     <Icon className="w-5 h-5" />
                   </div>
 
