@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { customerHealthAPI, CustomerHealthData } from '@/lib/api/customer-health';
@@ -131,11 +131,10 @@ function FeedbackDetailContent() {
   const [feedback, setFeedback] = useState<FeedbackItem | null>(null);
   const [customerHealth, setCustomerHealth] = useState<CustomerHealthData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (feedbackId) {
@@ -153,21 +152,6 @@ function FeedbackDetailContent() {
       .then(setCustomerHealth)
       .catch(() => setCustomerHealth(null)); // 404 or 403 = silently skip
   }, [feedback?.customer_email]);
-
-  // Polling for auto-refresh (every 30 seconds)
-  useEffect(() => {
-    if (loading || !feedbackId) return;
-
-    pollingIntervalRef.current = setInterval(async () => {
-      await fetchFeedback();
-    }, 30000);
-
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, [loading, feedbackId]);
 
   const fetchFeedback = async () => {
     try {
@@ -188,20 +172,23 @@ function FeedbackDetailContent() {
     }
   };
 
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true);
+      const data = await feedbackAPI.get(feedbackId);
+      setFeedback(data);
+    } catch (err) {
+      console.error('Refresh failed:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (!feedback) return;
     try {
       setAnalyzing(true);
       await feedbackAPI.analyze([feedback.id], true);
-      // Poll for completion since analysis is async via Celery
-      for (let i = 0; i < 15; i++) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const updated = await feedbackAPI.get(feedbackId);
-        if (updated.sentiment_label) {
-          setFeedback(updated);
-          break;
-        }
-      }
     } catch (err) {
       console.error('Analysis failed:', err);
     } finally {
@@ -379,6 +366,15 @@ function FeedbackDetailContent() {
               <TabsTrigger value="analysis" className="text-xs px-2 h-6">Analysis</TabsTrigger>
               <TabsTrigger value="timeline" className="text-xs px-2 h-6">Timeline</TabsTrigger>
             </TabsList>
+            <Button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
             <Button
               onClick={handleAnalyze}
               disabled={analyzing}
