@@ -25,6 +25,7 @@ import Link from "next/link"
 import { FeedbackItem } from "@/lib/api/feedback"
 import { getTagStyles, getCategoryBadgeStyle } from "@/lib/category-utils"
 import { getStatusColor, getStatusLabel } from "@/lib/workflow-utils"
+import { LowConfidenceWarning } from "@/components/feedbacks/LowConfidenceWarning"
 
 const getSentimentIcon = (sentiment: string) => {
   switch (sentiment) {
@@ -288,6 +289,7 @@ export const createColumns = (
           >
             {score}%
           </Badge>
+          <LowConfidenceWarning confidenceScore={row.original.customer_confidence_score} />
         </div>
       )
     },

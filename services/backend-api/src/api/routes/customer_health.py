@@ -24,6 +24,8 @@ class CustomerHealthResponse(BaseModel):
     frequency_component: int
     feedback_count: int
     last_feedback_at: Optional[datetime] = None
+    confidence_score: int = 0
+    confidence_level: str = "low"
     llm_analysis: Optional[str] = None
     llm_analyzed_at: Optional[datetime] = None
 
@@ -61,6 +63,8 @@ def get_customer_health(
         frequency_component=record.frequency_component,
         feedback_count=record.feedback_count,
         last_feedback_at=record.last_feedback_at,
+        confidence_score=record.confidence_score or 0,
+        confidence_level=record.confidence_level or "low",
         llm_analysis=record.llm_analysis,
         llm_analyzed_at=record.llm_analyzed_at,
     )

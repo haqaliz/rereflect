@@ -51,6 +51,7 @@ class FeedbackItem(Base):
     llm_analyzed = Column(Boolean, default=False, nullable=False)
     llm_analysis_pending = Column(Boolean, default=False, nullable=False)
     churn_risk_score = Column(Integer, nullable=True)  # 0-100
+    churn_risk_factors = Column(JSON, nullable=True)  # Per-factor breakdown {factor: {score, max, label}}
     suggested_action = Column(Text, nullable=True)
 
     # Customer identification (extracted from source_metadata)

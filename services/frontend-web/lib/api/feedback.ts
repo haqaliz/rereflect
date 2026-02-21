@@ -40,6 +40,8 @@ export interface FeedbackItem {
   categorization_confidence: number | null;
   // Churn risk
   churn_risk_score: number | null;
+  churn_risk_factors: Record<string, { score: number; max: number; label: string }> | null;
+  customer_confidence_score: number | null;
   suggested_action: string | null;
   // Customer
   customer_email: string | null;
@@ -169,9 +171,10 @@ export const feedbackAPI = {
     return response.data;
   },
 
-  analyze: async (feedbackIds: number[]): Promise<{analyzed_count: number; message: string}> => {
+  analyze: async (feedbackIds: number[], force: boolean = false): Promise<{queued_count: number; message: string}> => {
     const response = await apiClient.post('/api/v1/analyze/', {
       feedback_ids: feedbackIds,
+      force,
     });
     return response.data;
   },

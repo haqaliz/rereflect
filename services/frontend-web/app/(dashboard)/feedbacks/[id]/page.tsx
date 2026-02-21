@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useEffect, useState, useRef, useCallback, Suspense } from 'react';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { customerHealthAPI, CustomerHealthData } from '@/lib/api/customer-health';
 import { analytics } from '@/lib/analytics';
@@ -79,12 +79,54 @@ import { WorkflowSection } from '@/components/workflow/WorkflowSection';
 import { FeedbackTimeline } from '@/components/workflow/FeedbackTimeline';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
+import { ChurnFactorBreakdown } from '@/components/feedbacks/ChurnFactorBreakdown';
+import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
 
 export default function FeedbackDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 border-4 border-primary/20 rounded-full"></div>
+            <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <p className="text-muted-foreground font-medium">Loading feedback...</p>
+        </div>
+      </div>
+    }>
+      <FeedbackDetailContent />
+    </Suspense>
+  );
+}
+
+function FeedbackDetailContent() {
   const router = useRouter();
   const { user } = useAuth();
   const params = useParams();
+  const searchParams = useSearchParams();
   const feedbackId = Number(params.id);
+
+  const validTabs = ['overview', 'analysis', 'timeline'] as const;
+  const tabParam = searchParams.get('tab');
+  const initialTab = validTabs.includes(tabParam as any) ? tabParam! : 'overview';
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  // Sync tab to URL on mount (so ?tab=overview appears immediately)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('tab') !== activeTab) {
+      url.searchParams.set('tab', activeTab);
+      window.history.replaceState(null, '', url.toString());
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTabChange = useCallback((value: string) => {
+    setActiveTab(value);
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', value);
+    window.history.replaceState(null, '', url.toString());
+  }, []);
 
   const [feedback, setFeedback] = useState<FeedbackItem | null>(null);
   const [customerHealth, setCustomerHealth] = useState<CustomerHealthData | null>(null);
@@ -150,8 +192,16 @@ export default function FeedbackDetailPage() {
     if (!feedback) return;
     try {
       setAnalyzing(true);
-      await feedbackAPI.analyze([feedback.id]);
-      await fetchFeedback();
+      await feedbackAPI.analyze([feedback.id], true);
+      // Poll for completion since analysis is async via Celery
+      for (let i = 0; i < 15; i++) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const updated = await feedbackAPI.get(feedbackId);
+        if (updated.sentiment_label) {
+          setFeedback(updated);
+          break;
+        }
+      }
     } catch (err) {
       console.error('Analysis failed:', err);
     } finally {
@@ -311,7 +361,7 @@ export default function FeedbackDetailPage() {
 
   return (
     <div className="min-h-screen pattern-bg">
-      <Tabs defaultValue="overview">
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Back button, tabs, and actions */}
         <div className="flex items-center justify-between animate-fade-in">
@@ -616,6 +666,18 @@ export default function FeedbackDetailPage() {
                                 }}
                               />
                             </div>
+                            {feedback.customer_confidence_score !== null && feedback.customer_confidence_score !== undefined && (
+                              <ConfidenceBadge
+                                confidenceScore={feedback.customer_confidence_score}
+                                feedbackCount={customerHealth?.feedback_count ?? 0}
+                                lastFeedbackDaysAgo={
+                                  customerHealth?.last_feedback_at
+                                    ? Math.floor((Date.now() - new Date(customerHealth.last_feedback_at).getTime()) / 86400000)
+                                    : 0
+                                }
+                                uniqueCategories={0}
+                              />
+                            )}
                           </>
                         );
                       })()}
@@ -623,6 +685,7 @@ export default function FeedbackDetailPage() {
                   ) : (
                     <p className="text-muted-foreground italic text-sm">Not calculated</p>
                   )}
+                  <ChurnFactorBreakdown churnRiskFactors={feedback.churn_risk_factors ?? null} />
                 </CardContent>
               </Card>
 

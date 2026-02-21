@@ -730,3 +730,114 @@ def update_action_item(
         completed_at=action.completed_at,
         created_at=action.created_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Churn Factors Endpoint
+# ---------------------------------------------------------------------------
+
+class AggregatedFactorItem(BaseModel):
+    avg_score: float
+    max: int
+    description: str
+
+
+class ChurnFactorsResponse(BaseModel):
+    customer_email: str
+    period_days: int
+    feedback_count: int
+    aggregated_factors: dict
+    top_risk_drivers: List[str]
+
+
+@router.get(
+    "/{email}/churn-factors",
+    response_model=ChurnFactorsResponse,
+    dependencies=[Depends(require_feature("enhanced_churn_prediction"))],
+)
+def get_customer_churn_factors(
+    email: str,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Get aggregated churn risk factor breakdown for a customer over the last 30 days.
+    Pro+ only (enhanced_churn_prediction feature).
+    """
+    from src.models.feedback import FeedbackItem
+
+    PERIOD_DAYS = 30
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=PERIOD_DAYS)
+
+    # Get feedbacks with churn_risk_factors in the last 30 days
+    feedbacks = db.query(FeedbackItem).filter(
+        FeedbackItem.organization_id == current_org.id,
+        FeedbackItem.customer_email == email,
+        FeedbackItem.churn_risk_factors.isnot(None),
+        FeedbackItem.created_at >= cutoff,
+    ).all()
+
+    if not feedbacks:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No churn factor data found for customer '{email}' in the last {PERIOD_DAYS} days",
+        )
+
+    FACTOR_MAXES = {
+        "sentiment": 15,
+        "churn_keywords": 15,
+        "frustration_keywords": 10,
+        "urgency": 10,
+        "sentiment_trend": 15,
+        "feedback_frequency": 10,
+        "resolution_time": 10,
+        "pain_severity": 10,
+        "feature_density": 5,
+    }
+
+    # Aggregate factor scores across all feedbacks
+    factor_sums: dict = {key: 0.0 for key in FACTOR_MAXES}
+    factor_counts: dict = {key: 0 for key in FACTOR_MAXES}
+
+    for fb in feedbacks:
+        factors = fb.churn_risk_factors
+        if not isinstance(factors, dict):
+            continue
+        for key in FACTOR_MAXES:
+            if key in factors and "score" in factors[key]:
+                factor_sums[key] += factors[key]["score"]
+                factor_counts[key] += 1
+
+    aggregated_factors = {}
+    for key, max_pts in FACTOR_MAXES.items():
+        count = factor_counts[key]
+        avg = (factor_sums[key] / count) if count > 0 else 0.0
+        pct = (avg / max_pts * 100) if max_pts > 0 else 0.0
+        if pct > 75:
+            desc = f"Consistently high {key.replace('_', ' ')} risk"
+        elif pct > 40:
+            desc = f"Moderate {key.replace('_', ' ')} risk"
+        else:
+            desc = f"Low {key.replace('_', ' ')} risk"
+        aggregated_factors[key] = {
+            "avg_score": round(avg, 2),
+            "max": max_pts,
+            "description": desc,
+        }
+
+    # Top risk drivers: factors with highest avg_score relative to max, top 3
+    sorted_factors = sorted(
+        aggregated_factors.items(),
+        key=lambda x: x[1]["avg_score"] / x[1]["max"] if x[1]["max"] > 0 else 0,
+        reverse=True,
+    )
+    top_risk_drivers = [k for k, _ in sorted_factors[:3] if sorted_factors[0][1]["avg_score"] > 0]
+
+    return ChurnFactorsResponse(
+        customer_email=email,
+        period_days=PERIOD_DAYS,
+        feedback_count=len(feedbacks),
+        aggregated_factors=aggregated_factors,
+        top_risk_drivers=top_risk_drivers,
+    )

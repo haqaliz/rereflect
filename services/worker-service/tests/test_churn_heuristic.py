@@ -6,25 +6,30 @@ from src.tasks.analysis import _compute_heuristic_churn_risk, _compute_heuristic
 
 
 class TestComputeHeuristicChurnRisk:
-    """Tests for _compute_heuristic_churn_risk."""
+    """Tests for _compute_heuristic_churn_risk.
+
+    Note: function now returns Tuple[int, Dict] — (score, factors).
+    """
 
     def test_very_negative_sentiment_high_score(self):
         feedback = MagicMock()
         feedback.text = "I'm canceling my subscription, this is terrible"
         feedback.sentiment_score = -0.8
         feedback.is_urgent = True
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
-        # -0.8 sentiment: 40pts + urgent: 20pts + "cancel": 10pts + "terrible": 5pts = 75
-        assert score >= 70
+        score, _ = _compute_heuristic_churn_risk(feedback)
+        # sentiment: 15pts + urgent: 10pts + "cancel": 5pts + "terrible": 5pts = 35
+        assert score >= 30
 
     def test_neutral_feedback_low_score(self):
         feedback = MagicMock()
         feedback.text = "The product is okay, nothing special"
         feedback.sentiment_score = 0.1
         feedback.is_urgent = False
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
+        score, _ = _compute_heuristic_churn_risk(feedback)
         assert score < 40
 
     def test_churn_keywords_boost_score(self):
@@ -32,28 +37,31 @@ class TestComputeHeuristicChurnRisk:
         feedback.text = "I want to cancel and switch to a competitor"
         feedback.sentiment_score = -0.4
         feedback.is_urgent = False
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
-        # -0.4 sentiment: 20pts + "cancel": 10pts + "switch": 10pts + "competitor": 10pts = 50 (capped at 25 for keywords)
-        assert score >= 40
+        score, _ = _compute_heuristic_churn_risk(feedback)
+        # sentiment: 10pts + "cancel": 5 + "switch": 5 + "competitor": 5 = 25 (capped at 15 for keywords) = 25
+        assert score >= 20
 
     def test_frustration_keywords_boost_score(self):
         feedback = MagicMock()
         feedback.text = "This is frustrated and disappointed with the service"
         feedback.sentiment_score = -0.6
         feedback.is_urgent = False
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
-        # -0.6 sentiment: 30pts + "frustrated": 5pts + "disappointed": 5pts = 40
-        assert score >= 40
+        score, _ = _compute_heuristic_churn_risk(feedback)
+        # sentiment: 15pts + "frustrated": 5 + "disappointed": 5 = 25
+        assert score >= 20
 
     def test_positive_feedback_zero_score(self):
         feedback = MagicMock()
         feedback.text = "Love this product, great work!"
         feedback.sentiment_score = 0.9
         feedback.is_urgent = False
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
+        score, _ = _compute_heuristic_churn_risk(feedback)
         assert score == 0
 
     def test_score_capped_at_100(self):
@@ -61,34 +69,39 @@ class TestComputeHeuristicChurnRisk:
         feedback.text = "I'm canceling, switching to competitor, leaving, this is terrible awful horrible frustrated disappointed unacceptable"
         feedback.sentiment_score = -0.9
         feedback.is_urgent = True
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
+        score, _ = _compute_heuristic_churn_risk(feedback)
         assert score <= 100
 
-    def test_urgent_adds_20_points(self):
+    def test_urgent_adds_10_points(self):
+        """Urgency factor contributes 10 points."""
         feedback_urgent = MagicMock()
         feedback_urgent.text = "Something broke"
         feedback_urgent.sentiment_score = -0.4
         feedback_urgent.is_urgent = True
+        feedback_urgent.customer_email = None
 
         feedback_not_urgent = MagicMock()
         feedback_not_urgent.text = "Something broke"
         feedback_not_urgent.sentiment_score = -0.4
         feedback_not_urgent.is_urgent = False
+        feedback_not_urgent.customer_email = None
 
-        score_urgent = _compute_heuristic_churn_risk(feedback_urgent)
-        score_not = _compute_heuristic_churn_risk(feedback_not_urgent)
-        assert score_urgent - score_not == 20
+        score_urgent, _ = _compute_heuristic_churn_risk(feedback_urgent)
+        score_not, _ = _compute_heuristic_churn_risk(feedback_not_urgent)
+        assert score_urgent - score_not == 10
 
     def test_none_sentiment_score(self):
         feedback = MagicMock()
         feedback.text = "Cancel my account"
         feedback.sentiment_score = None
         feedback.is_urgent = False
+        feedback.customer_email = None
 
-        score = _compute_heuristic_churn_risk(feedback)
-        # No sentiment: 0pts + "cancel": 10pts = 10
-        assert score >= 10
+        score, _ = _compute_heuristic_churn_risk(feedback)
+        # No sentiment: 0pts + "cancel": 5pts = 5
+        assert score >= 5
 
 
 class TestComputeHeuristicSuggestion:

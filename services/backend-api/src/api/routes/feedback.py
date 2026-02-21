@@ -134,6 +134,7 @@ class FeedbackResponse(BaseModel):
     categorization_confidence: Optional[float]
     # Churn risk
     churn_risk_score: Optional[int] = None
+    churn_risk_factors: Optional[dict] = None
     suggested_action: Optional[str] = None
     # Customer
     customer_email: Optional[str] = None
@@ -395,6 +396,7 @@ def list_feedback(
             "urgent_response_time": item.urgent_response_time,
             "categorization_confidence": item.categorization_confidence,
             "churn_risk_score": item.churn_risk_score,
+            "churn_risk_factors": item.churn_risk_factors,
             "suggested_action": item.suggested_action,
             "customer_email": item.customer_email,
             "workflow_status": item.workflow_status,
@@ -469,6 +471,7 @@ def get_feedback(
         urgent_response_time=feedback.urgent_response_time,
         categorization_confidence=feedback.categorization_confidence,
         churn_risk_score=feedback.churn_risk_score,
+        churn_risk_factors=feedback.churn_risk_factors,
         suggested_action=feedback.suggested_action,
         customer_email=feedback.customer_email,
         workflow_status=feedback.workflow_status,

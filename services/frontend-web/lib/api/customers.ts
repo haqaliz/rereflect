@@ -64,6 +64,7 @@ export interface CustomerProfileData {
   health_score: number;
   risk_level: string;
   confidence_level: 'low' | 'medium' | 'high';
+  confidence_score: number | null;
   feedback_count: number;
   last_feedback_at: string | null;
   churn_risk_component: number;
@@ -135,6 +136,20 @@ export interface AnalyzeResponse {
   estimated_wait_seconds: number;
 }
 
+export interface AggregatedFactor {
+  avg_score: number;
+  max: number;
+  description: string;
+}
+
+export interface ChurnFactorsResponse {
+  customer_email: string;
+  period_days: number;
+  feedback_count: number;
+  aggregated_factors: Record<string, AggregatedFactor>;
+  top_risk_drivers: string[];
+}
+
 export const customersAPI = {
   list: async (params: CustomerListParams = {}): Promise<CustomerListResponse> => {
     const query = new URLSearchParams();
@@ -194,6 +209,13 @@ export const customersAPI = {
 
   batchAnalyze: async (): Promise<{ message: string; customer_count: number }> => {
     const response = await apiClient.post('/api/v1/customers/batch-analyze');
+    return response.data;
+  },
+
+  getChurnFactors: async (email: string): Promise<ChurnFactorsResponse> => {
+    const response = await apiClient.get(
+      `/api/v1/customers/${encodeURIComponent(email)}/churn-factors`
+    );
     return response.data;
   },
 };

@@ -11,6 +11,8 @@ export interface CustomerHealthData {
   frequency_component: number;
   feedback_count: number;
   last_feedback_at: string | null;
+  confidence_score: number | null;
+  confidence_level: string | null;
   llm_analysis: string | null;
   llm_analyzed_at: string | null;
 }

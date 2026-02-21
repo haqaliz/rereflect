@@ -29,6 +29,7 @@ class CustomerHealth(Base):
 
     # Confidence level based on feedback count
     confidence_level = Column(String(20), default="low")  # low (<3), medium (3-9), high (10+)
+    confidence_score = Column(Integer, default=0)  # 0-100 percentage (granular numeric confidence)
 
     # Soft archive when all feedback deleted
     is_archived = Column(Boolean, default=False, server_default="false")

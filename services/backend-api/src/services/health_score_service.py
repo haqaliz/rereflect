@@ -114,9 +114,30 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
     """Compute and upsert customer health score, recording history on significant changes."""
     from src.models.customer_health import CustomerHealth
     from src.models.customer_health_history import CustomerHealthHistory
+    from src.models.feedback import FeedbackItem
 
     result = compute_health_score(org_id, customer_email, db)
     new_score = result["health_score"]
+
+    # Compute granular confidence score from volume + recency + topic diversity
+    unique_pain_cats = db.query(func.count(func.distinct(FeedbackItem.pain_point_category))).filter(
+        FeedbackItem.organization_id == org_id,
+        FeedbackItem.customer_email == customer_email,
+        FeedbackItem.pain_point_category.isnot(None),
+    ).scalar() or 0
+
+    unique_feature_cats = db.query(func.count(func.distinct(FeedbackItem.feature_request_category))).filter(
+        FeedbackItem.organization_id == org_id,
+        FeedbackItem.customer_email == customer_email,
+        FeedbackItem.feature_request_category.isnot(None),
+    ).scalar() or 0
+
+    confidence = compute_confidence_score(
+        feedback_count=result["feedback_count"],
+        last_feedback_at=result["last_feedback_at"],
+        unique_categories=unique_pain_cats + unique_feature_cats,
+    )
+    confidence_level = "low" if confidence <= 30 else ("medium" if confidence <= 60 else "high")
 
     existing = db.query(CustomerHealth).filter(
         CustomerHealth.organization_id == org_id,
@@ -135,7 +156,8 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
         existing.feedback_count = result["feedback_count"]
         existing.last_feedback_at = result["last_feedback_at"]
         existing.customer_name = result["customer_name"]
-        existing.confidence_level = result["confidence_level"]
+        existing.confidence_level = confidence_level
+        existing.confidence_score = confidence
         existing.is_archived = False  # Unarchive when new feedback arrives
         existing.updated_at = datetime.utcnow()
 
@@ -172,7 +194,8 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             feedback_count=result["feedback_count"],
             last_feedback_at=result["last_feedback_at"],
             risk_level=result["risk_level"],
-            confidence_level=result["confidence_level"],
+            confidence_level=confidence_level,
+            confidence_score=confidence,
             is_archived=False,
         )
         db.add(health)
@@ -193,6 +216,56 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             risk_level=result["risk_level"],
         )
         db.add(history)
+
+
+def compute_confidence_score(feedback_count: int, last_feedback_at, unique_categories: int) -> int:
+    """
+    Compute a 0-100 confidence score for customer health predictions.
+
+    Three factors:
+    - Volume (0-40): based on feedback_count
+    - Recency (0-35): based on days since last feedback
+    - Diversity (0-25): based on unique_categories (distinct pain/feature categories)
+    """
+    # Factor 1: Data volume (0-40 points)
+    if feedback_count >= 20:
+        volume_score = 40
+    elif feedback_count >= 10:
+        volume_score = 30
+    elif feedback_count >= 5:
+        volume_score = 20
+    elif feedback_count >= 3:
+        volume_score = 10
+    else:
+        volume_score = feedback_count * 3  # 0, 3, 6
+
+    # Factor 2: Data recency (0-35 points)
+    if last_feedback_at is None:
+        recency_score = 0
+    else:
+        days_since = (datetime.utcnow() - last_feedback_at).days
+        if days_since <= 7:
+            recency_score = 35
+        elif days_since <= 14:
+            recency_score = 28
+        elif days_since <= 30:
+            recency_score = 20
+        elif days_since <= 60:
+            recency_score = 10
+        else:
+            recency_score = 5
+
+    # Factor 3: Topic diversity (0-25 points)
+    if unique_categories >= 5:
+        diversity_score = 25
+    elif unique_categories >= 3:
+        diversity_score = 18
+    elif unique_categories >= 2:
+        diversity_score = 10
+    else:
+        diversity_score = 5
+
+    return min(volume_score + recency_score + diversity_score, 100)
 
 
 def compute_sentiment_trend(org_id: int, customer_email: str, db: Session) -> dict:

@@ -13,6 +13,8 @@ import { ComponentProgressBars } from '@/components/customers/ComponentProgressB
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
 import { ActivityTimeline } from '@/components/customers/ActivityTimeline';
 import { CustomerFeedbackList } from '@/components/customers/CustomerFeedbackList';
+import { ChurnRiskDrivers } from '@/components/customers/ChurnRiskDrivers';
+import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -521,6 +523,20 @@ export default function CustomerProfilePage() {
                     </Tooltip>
                   </div>
                 )}
+                {profile.confidence_score !== null && profile.confidence_score !== undefined && (
+                  <div className="mt-2">
+                    <ConfidenceBadge
+                      confidenceScore={profile.confidence_score}
+                      feedbackCount={profile.feedback_count}
+                      lastFeedbackDaysAgo={
+                        profile.last_feedback_at
+                          ? Math.floor((Date.now() - new Date(profile.last_feedback_at).getTime()) / 86400000)
+                          : 0
+                      }
+                      uniqueCategories={0}
+                    />
+                  </div>
+                )}
               </div>
 
               <Button variant="outline" size="sm" asChild>
@@ -575,6 +591,11 @@ export default function CustomerProfilePage() {
               hasActionsFeature={hasActionsFeature}
               onAnalysisRequested={() => setAnalysisRefetchToken((t) => t + 1)}
             />
+
+            {/* Churn Risk Drivers */}
+            {hasLLMFeature && (
+              <ChurnRiskDrivers email={profile.customer_email} />
+            )}
 
             {/* Recent Activity */}
             <Card>

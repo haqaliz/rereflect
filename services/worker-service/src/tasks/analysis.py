@@ -344,6 +344,9 @@ def _analyze_feedback_item(feedback, db=None) -> None:
 
     if llm_result:
         _apply_llm_result(feedback, llm_result)
+        # Also compute heuristic factors for explainability (LLM doesn't return factor breakdown)
+        _, churn_factors = _compute_heuristic_churn_risk(feedback, db)
+        feedback.churn_risk_factors = churn_factors
     else:
         _apply_keyword_analysis(feedback, db)
         # Mark for LLM retry if org has AI enabled but LLM failed
@@ -467,7 +470,9 @@ def _apply_keyword_analysis(feedback, db=None) -> None:
     feedback.tags = tag_extractor.extract_tags(feedback.text)
 
     # Keyword fallback: compute heuristic churn risk score (9-factor with db)
-    feedback.churn_risk_score = _compute_heuristic_churn_risk(feedback, db)
+    churn_score, churn_factors = _compute_heuristic_churn_risk(feedback, db)
+    feedback.churn_risk_score = churn_score
+    feedback.churn_risk_factors = churn_factors
     feedback.suggested_action = _compute_heuristic_suggestion(feedback)
 
     # Keyword fallback doesn't set LLM fields
@@ -488,32 +493,71 @@ def _extract_customer_email(feedback) -> Optional[str]:
     return None
 
 
-def _compute_heuristic_churn_risk(feedback, db=None) -> int:
+def _compute_heuristic_churn_risk(feedback, db=None):
     """
     Compute a churn risk score (0-100) using 9-factor heuristics.
     Original 4 factors (50pts) + 5 new customer-level factors (50pts).
     New factors require customer_email + db session; graceful fallback to 4-factor.
+
+    Returns:
+        Tuple[int, Dict]: (composite_score, factors_dict) where factors_dict contains
+        per-factor breakdown with score, max, and label for each of the 9 factors.
     """
     from datetime import timedelta
     from sqlalchemy import func as sa_func
 
-    score = 0
     text_lower = feedback.text.lower()
+
+    # Initialize all 9 factor scores and labels
+    sentiment_score_pts = 0
+    sentiment_label = "Neutral/positive sentiment"
+
+    urgency_score_pts = 0
+    urgency_label = "Not urgent"
+
+    churn_keywords_score_pts = 0
+    churn_keywords_label = "No churn keywords"
+
+    frustration_score_pts = 0
+    frustration_label = "No frustration keywords"
+
+    # Customer-level factors — defaults (no db or no email)
+    sentiment_trend_score_pts = 0
+    sentiment_trend_label = "Insufficient data for trend"
+
+    frequency_score_pts = 0
+    frequency_label = "Normal frequency"
+
+    resolution_score_pts = 0
+    resolution_label = "Insufficient resolution data"
+
+    pain_score_pts = 0
+    pain_label = "No critical pain points"
+
+    feature_density_score_pts = 0
+    feature_density_label = "Low feature request ratio"
 
     # --- Original 4 factors (50 pts) ---
 
     # Sentiment (0-15 pts)
     if feedback.sentiment_score is not None:
         if feedback.sentiment_score < -0.5:
-            score += 15
+            sentiment_score_pts = 15
+            sentiment_label = "Very negative sentiment"
         elif feedback.sentiment_score < -0.2:
-            score += 10
+            sentiment_score_pts = 10
+            sentiment_label = "Moderately negative sentiment"
         elif feedback.sentiment_score < 0:
-            score += 5
+            sentiment_score_pts = 5
+            sentiment_label = "Slightly negative sentiment"
+        else:
+            sentiment_score_pts = 0
+            sentiment_label = "Neutral/positive sentiment"
 
     # Urgency (0-10 pts)
     if feedback.is_urgent:
-        score += 10
+        urgency_score_pts = 10
+        urgency_label = "Marked as urgent"
 
     # Churn keywords (0-15 pts)
     churn_keywords = [
@@ -524,7 +568,13 @@ def _compute_heuristic_churn_risk(feedback, db=None) -> int:
         'unsubscribe', 'downgrade', 'not renewing',
     ]
     churn_matches = sum(1 for kw in churn_keywords if kw in text_lower)
-    score += min(churn_matches * 5, 15)
+    churn_keywords_score_pts = min(churn_matches * 5, 15)
+    if churn_matches > 0:
+        matched_kws = [kw for kw in churn_keywords if kw in text_lower]
+        sample = ', '.join(matched_kws[:3])
+        churn_keywords_label = f"{churn_matches} churn keyword{'s' if churn_matches != 1 else ''} found: {sample}"
+    else:
+        churn_keywords_label = "No churn keywords"
 
     # Frustration keywords (0-10 pts)
     frustration_keywords = [
@@ -532,140 +582,185 @@ def _compute_heuristic_churn_risk(feedback, db=None) -> int:
         'worst', 'useless', 'waste', 'disappointed', 'unacceptable',
     ]
     frustration_matches = sum(1 for kw in frustration_keywords if kw in text_lower)
-    score += min(frustration_matches * 5, 10)
+    frustration_score_pts = min(frustration_matches * 5, 10)
+    if frustration_matches > 0:
+        matched_fkws = [kw for kw in frustration_keywords if kw in text_lower]
+        sample_f = ', '.join(matched_fkws[:3])
+        frustration_label = f"{frustration_matches} frustration keyword{'s' if frustration_matches != 1 else ''}: {sample_f}"
+    else:
+        frustration_label = "No frustration keywords"
 
     # --- New 5 factors (50 pts) — require customer_email + db ---
     customer_email = getattr(feedback, 'customer_email', None)
-    if not customer_email or db is None:
-        return min(score, 100)
+    if customer_email and db is not None:
+        from src.models import FeedbackItem
+        from datetime import datetime
+        now = datetime.utcnow()
+        org_id = feedback.organization_id
 
-    from src.models import FeedbackItem
-    from datetime import datetime
-    now = datetime.utcnow()
-    org_id = feedback.organization_id
+        # Sentiment trend (0-15 pts) — declining over last 5 feedbacks
+        try:
+            recent_scores = db.query(FeedbackItem.sentiment_score).filter(
+                FeedbackItem.organization_id == org_id,
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.sentiment_score.isnot(None),
+                FeedbackItem.id != feedback.id,
+            ).order_by(FeedbackItem.created_at.desc()).limit(5).all()
 
-    # Sentiment trend (0-15 pts) — declining over last 5 feedbacks
-    try:
-        recent_scores = db.query(FeedbackItem.sentiment_score).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.sentiment_score.isnot(None),
-            FeedbackItem.id != feedback.id,
-        ).order_by(FeedbackItem.created_at.desc()).limit(5).all()
+            if len(recent_scores) >= 2:
+                scores_list = [r.sentiment_score for r in recent_scores]
+                if scores_list[0] < scores_list[-1]:
+                    decline = scores_list[-1] - scores_list[0]
+                    if decline > 0.5:
+                        sentiment_trend_score_pts = 15
+                        sentiment_trend_label = f"Sentiment declining sharply (-{decline:.1f})"
+                    elif decline > 0.3:
+                        sentiment_trend_score_pts = 10
+                        sentiment_trend_label = f"Sentiment declining moderately (-{decline:.1f})"
+                    elif decline > 0.1:
+                        sentiment_trend_score_pts = 5
+                        sentiment_trend_label = f"Sentiment declining slightly (-{decline:.1f})"
+                    else:
+                        sentiment_trend_label = "Stable sentiment trend"
+                else:
+                    sentiment_trend_label = "Stable sentiment trend"
+            else:
+                sentiment_trend_label = "Insufficient data for trend"
+        except Exception:
+            pass
 
-        if len(recent_scores) >= 2:
-            scores_list = [r.sentiment_score for r in recent_scores]
-            if scores_list[0] < scores_list[-1]:
-                decline = scores_list[-1] - scores_list[0]
-                if decline > 0.5:
-                    score += 15
-                elif decline > 0.3:
-                    score += 10
-                elif decline > 0.1:
-                    score += 5
-    except Exception:
-        pass
+        # Feedback frequency (0-10 pts) — more complaints recently
+        try:
+            last_7d = db.query(sa_func.count(FeedbackItem.id)).filter(
+                FeedbackItem.organization_id == org_id,
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.created_at >= now - timedelta(days=7),
+            ).scalar() or 0
 
-    # Feedback frequency (0-10 pts) — more complaints recently
-    try:
-        last_7d = db.query(sa_func.count(FeedbackItem.id)).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.created_at >= now - timedelta(days=7),
-        ).scalar() or 0
+            last_30d = db.query(sa_func.count(FeedbackItem.id)).filter(
+                FeedbackItem.organization_id == org_id,
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.created_at >= now - timedelta(days=30),
+            ).scalar() or 0
 
-        last_30d = db.query(sa_func.count(FeedbackItem.id)).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.created_at >= now - timedelta(days=30),
-        ).scalar() or 0
+            avg_weekly = (last_30d / 4.0) if last_30d > 0 else 0
+            if avg_weekly > 0 and last_7d > avg_weekly * 2:
+                frequency_score_pts = 10
+                frequency_label = f"Complaint frequency spiking ({last_7d} this week vs {avg_weekly:.1f} avg)"
+            elif avg_weekly > 0 and last_7d > avg_weekly * 1.5:
+                frequency_score_pts = 5
+                frequency_label = f"Complaint frequency increasing ({last_7d} this week vs {avg_weekly:.1f} avg)"
+            else:
+                frequency_label = "Normal frequency"
+        except Exception:
+            pass
 
-        avg_weekly = (last_30d / 4.0) if last_30d > 0 else 0
-        if avg_weekly > 0 and last_7d > avg_weekly * 2:
-            score += 10
-        elif avg_weekly > 0 and last_7d > avg_weekly * 1.5:
-            score += 5
-    except Exception:
-        pass
+        # Resolution time (0-10 pts) — slow resolution
+        try:
+            from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+            resolved_events = db.query(
+                FeedbackWorkflowEvent.feedback_id,
+                FeedbackWorkflowEvent.created_at,
+            ).filter(
+                FeedbackWorkflowEvent.organization_id == org_id,
+                FeedbackWorkflowEvent.event_type == 'status_changed',
+                FeedbackWorkflowEvent.new_value == 'resolved',
+            ).join(
+                FeedbackItem, FeedbackItem.id == FeedbackWorkflowEvent.feedback_id,
+            ).filter(
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.created_at >= now - timedelta(days=60),
+            ).all()
 
-    # Resolution time (0-10 pts) — slow resolution
-    try:
-        from src.models.feedback_workflow_event import FeedbackWorkflowEvent
-        resolved_events = db.query(
-            FeedbackWorkflowEvent.feedback_id,
-            FeedbackWorkflowEvent.created_at,
-        ).filter(
-            FeedbackWorkflowEvent.organization_id == org_id,
-            FeedbackWorkflowEvent.event_type == 'status_changed',
-            FeedbackWorkflowEvent.new_value == 'resolved',
-        ).join(
-            FeedbackItem, FeedbackItem.id == FeedbackWorkflowEvent.feedback_id,
-        ).filter(
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.created_at >= now - timedelta(days=60),
-        ).all()
+            if resolved_events:
+                feedback_ids = [e.feedback_id for e in resolved_events]
+                create_dates = {
+                    row.id: row.created_at
+                    for row in db.query(FeedbackItem.id, FeedbackItem.created_at).filter(
+                        FeedbackItem.id.in_(feedback_ids),
+                    ).all()
+                }
+                total_days = 0
+                count = 0
+                for event in resolved_events:
+                    created = create_dates.get(event.feedback_id)
+                    if created:
+                        delta = (event.created_at - created).total_seconds() / 86400
+                        total_days += delta
+                        count += 1
+                if count > 0:
+                    avg_days = total_days / count
+                    if avg_days > 7:
+                        resolution_score_pts = 10
+                        resolution_label = f"Average resolution > 7 days ({avg_days:.1f} days avg)"
+                    elif avg_days > 3:
+                        resolution_score_pts = 5
+                        resolution_label = f"Average resolution > 3 days ({avg_days:.1f} days avg)"
+                    else:
+                        resolution_label = f"Resolved within {avg_days:.1f} days avg"
+            else:
+                resolution_label = "No resolved issues in 60 days"
+        except Exception:
+            pass
 
-        if resolved_events:
-            feedback_ids = [e.feedback_id for e in resolved_events]
-            create_dates = {
-                row.id: row.created_at
-                for row in db.query(FeedbackItem.id, FeedbackItem.created_at).filter(
-                    FeedbackItem.id.in_(feedback_ids),
-                ).all()
-            }
-            total_days = 0
-            count = 0
-            for event in resolved_events:
-                created = create_dates.get(event.feedback_id)
-                if created:
-                    delta = (event.created_at - created).total_seconds() / 86400
-                    total_days += delta
-                    count += 1
-            if count > 0:
-                avg_days = total_days / count
-                if avg_days > 7:
-                    score += 10
-                elif avg_days > 3:
-                    score += 5
-    except Exception:
-        pass
+        # Pain point severity (0-10 pts)
+        try:
+            critical_count = db.query(sa_func.count(FeedbackItem.id)).filter(
+                FeedbackItem.organization_id == org_id,
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.pain_point_severity.in_(["critical", "major"]),
+                FeedbackItem.created_at >= now - timedelta(days=30),
+            ).scalar() or 0
+            if critical_count >= 3:
+                pain_score_pts = 10
+                pain_label = f"{critical_count} critical pain points in 30 days"
+            elif critical_count >= 1:
+                pain_score_pts = 5
+                pain_label = f"{critical_count} critical pain point{'s' if critical_count != 1 else ''} in 30 days"
+            else:
+                pain_label = "No critical pain points"
+        except Exception:
+            pass
 
-    # Pain point severity (0-10 pts)
-    try:
-        critical_count = db.query(sa_func.count(FeedbackItem.id)).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.pain_point_severity.in_(["critical", "major"]),
-            FeedbackItem.created_at >= now - timedelta(days=30),
-        ).scalar() or 0
-        if critical_count >= 3:
-            score += 10
-        elif critical_count >= 1:
-            score += 5
-    except Exception:
-        pass
+        # Feature request density (0-5 pts)
+        try:
+            total_30d = db.query(sa_func.count(FeedbackItem.id)).filter(
+                FeedbackItem.organization_id == org_id,
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.created_at >= now - timedelta(days=30),
+            ).scalar() or 0
 
-    # Feature request density (0-5 pts)
-    try:
-        total_30d = db.query(sa_func.count(FeedbackItem.id)).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.created_at >= now - timedelta(days=30),
-        ).scalar() or 0
+            feature_count = db.query(sa_func.count(FeedbackItem.id)).filter(
+                FeedbackItem.organization_id == org_id,
+                FeedbackItem.customer_email == customer_email,
+                FeedbackItem.feature_request_category.isnot(None),
+                FeedbackItem.created_at >= now - timedelta(days=30),
+            ).scalar() or 0
 
-        feature_count = db.query(sa_func.count(FeedbackItem.id)).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-            FeedbackItem.feature_request_category.isnot(None),
-            FeedbackItem.created_at >= now - timedelta(days=30),
-        ).scalar() or 0
+            if total_30d > 0 and (feature_count / total_30d) > 0.5:
+                feature_density_score_pts = 5
+                pct = int((feature_count / total_30d) * 100)
+                feature_density_label = f"High feature request ratio ({pct}%)"
+            else:
+                feature_density_label = "Low feature request ratio"
+        except Exception:
+            pass
 
-        if total_30d > 0 and (feature_count / total_30d) > 0.5:
-            score += 5
-    except Exception:
-        pass
+    # Build factors dict
+    factors = {
+        "sentiment": {"score": sentiment_score_pts, "max": 15, "label": sentiment_label},
+        "churn_keywords": {"score": churn_keywords_score_pts, "max": 15, "label": churn_keywords_label},
+        "frustration_keywords": {"score": frustration_score_pts, "max": 10, "label": frustration_label},
+        "urgency": {"score": urgency_score_pts, "max": 10, "label": urgency_label},
+        "sentiment_trend": {"score": sentiment_trend_score_pts, "max": 15, "label": sentiment_trend_label},
+        "feedback_frequency": {"score": frequency_score_pts, "max": 10, "label": frequency_label},
+        "resolution_time": {"score": resolution_score_pts, "max": 10, "label": resolution_label},
+        "pain_severity": {"score": pain_score_pts, "max": 10, "label": pain_label},
+        "feature_density": {"score": feature_density_score_pts, "max": 5, "label": feature_density_label},
+    }
 
-    return min(score, 100)
+    total = sum(v["score"] for v in factors.values())
+    return min(total, 100), factors
 
 
 def _compute_heuristic_suggestion(feedback) -> Optional[str]:
