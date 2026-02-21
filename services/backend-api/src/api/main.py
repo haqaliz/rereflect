@@ -62,7 +62,7 @@ root_path = os.getenv("ROOT_PATH", "")
 
 app = FastAPI(
     title="Customer Feedback Analyzer API",
-    version="1.0.0",
+    version="1.1.0",
     description="Multi-tenant SaaS API for customer feedback analysis",
     lifespan=lifespan,
     root_path=root_path,
