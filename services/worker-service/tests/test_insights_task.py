@@ -1,5 +1,5 @@
 """
-Tests for weekly insights generation Celery task and OpenAI generate_insights.
+Tests for weekly insights generation Celery task.
 """
 
 import pytest
@@ -7,118 +7,6 @@ from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
 from src.models import Organization, User, FeedbackItem, WeeklyInsight
-
-
-class TestGenerateInsightsOpenAI:
-    """Tests for the generate_insights OpenAI function."""
-
-    @patch("src.openai_client._get_client")
-    def test_returns_none_when_no_api_key(self, mock_get_client):
-        """Should return None when no API key is configured."""
-        mock_get_client.return_value = None
-        from src.openai_client import generate_insights
-        result = generate_insights(["feedback 1", "feedback 2"])
-        assert result is None
-
-    @patch("src.openai_client._get_client")
-    def test_returns_validated_insights(self, mock_get_client):
-        """Should parse and validate insights from GPT response."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '''{
-            "insights": [
-                {"title": "Login issues", "description": "Many login complaints", "category": "pain_point", "priority": "high"},
-                {"title": "Dark mode", "description": "Users want dark mode", "category": "feature_request", "priority": "medium"}
-            ]
-        }'''
-        mock_client.chat.completions.create.return_value = mock_response
-
-        from src.openai_client import generate_insights
-        result = generate_insights(["complaint 1", "complaint 2"])
-
-        assert result is not None
-        assert len(result) == 2
-        assert result[0]["title"] == "Login issues"
-        assert result[0]["category"] == "pain_point"
-        assert result[1]["priority"] == "medium"
-
-    @patch("src.openai_client._get_client")
-    def test_limits_to_5_insights(self, mock_get_client):
-        """Should cap at 5 insights even if GPT returns more."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-
-        mock_response = MagicMock()
-        insights_list = [
-            {"title": f"Insight {i}", "description": f"Desc {i}", "category": "opportunity", "priority": "low"}
-            for i in range(8)
-        ]
-        import json
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({"insights": insights_list})
-        mock_client.chat.completions.create.return_value = mock_response
-
-        from src.openai_client import generate_insights
-        result = generate_insights(["text"] * 10)
-
-        assert result is not None
-        assert len(result) == 5
-
-    @patch("src.openai_client._get_client")
-    def test_returns_none_on_empty_content(self, mock_get_client):
-        """Should return None when GPT returns empty content."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = None
-        mock_client.chat.completions.create.return_value = mock_response
-
-        from src.openai_client import generate_insights
-        result = generate_insights(["text"])
-        assert result is None
-
-    @patch("src.openai_client._get_client")
-    def test_returns_none_on_invalid_json(self, mock_get_client):
-        """Should return None when GPT returns invalid JSON."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "not json"
-        mock_client.chat.completions.create.return_value = mock_response
-
-        from src.openai_client import generate_insights
-        result = generate_insights(["text"])
-        assert result is None
-
-    @patch("src.openai_client._get_client")
-    def test_skips_invalid_insight_items(self, mock_get_client):
-        """Should skip insights missing required fields."""
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = '''{
-            "insights": [
-                {"title": "Valid", "description": "Has both fields", "category": "opportunity", "priority": "low"},
-                {"title_only": "Missing description"},
-                {"description_only": "Missing title"}
-            ]
-        }'''
-        mock_client.chat.completions.create.return_value = mock_response
-
-        from src.openai_client import generate_insights
-        result = generate_insights(["text"])
-        assert result is not None
-        assert len(result) == 1
-        assert result[0]["title"] == "Valid"
 
 
 class TestGenerateWeeklyInsightsTask:

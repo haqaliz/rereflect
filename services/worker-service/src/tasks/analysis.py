@@ -13,7 +13,7 @@ from celery import shared_task
 
 from src.database import get_db_session
 from src.config import settings, get_redis_url
-from src.openai_client import categorize_feedback
+from src.llm_client import categorize_feedback
 
 # Redis client for distributed task locking
 _redis_client = None
@@ -335,11 +335,11 @@ def _analyze_feedback_item(feedback, db=None) -> None:
 
     llm_result = None
     if use_llm:
-        org_api_key = org.openai_api_key if org else None
         llm_result = categorize_feedback(
             text=feedback.text,
             custom_categories=custom_categories if custom_categories else None,
-            org_api_key=org_api_key,
+            org_id=feedback.organization_id,
+            db=db,
         )
 
     if llm_result:
@@ -394,6 +394,10 @@ def _apply_llm_result(feedback, result: dict) -> None:
     feedback.tags = result.get("tags", [])
     feedback.churn_risk_score = result.get("churn_risk_score", 0)
     feedback.suggested_action = result.get("suggested_action")
+
+    # Store which LLM provider/model was used
+    feedback.llm_provider = result.get("_llm_provider")
+    feedback.llm_model = result.get("_llm_model")
 
     feedback.llm_analyzed = True
     feedback.llm_analysis_pending = False
@@ -838,7 +842,8 @@ def retry_llm_analysis() -> dict:
                 llm_result = categorize_feedback(
                     text=feedback.text,
                     custom_categories=cat_cache[org_id] if cat_cache[org_id] else None,
-                    org_api_key=org.openai_api_key,
+                    org_id=org_id,
+                    db=db,
                 )
 
                 if llm_result:

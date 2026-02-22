@@ -25,6 +25,10 @@ from .customer_health import CustomerHealth
 from .customer_health_history import CustomerHealthHistory
 from .customer_analysis_action import CustomerAnalysisAction
 from .dashboard_layout import UserDashboardLayout
+from .org_api_key import OrgApiKey
+from .org_ai_config import OrgAIConfig
+from .llm_usage_log import LLMUsageLog
+from .llm_model_price import LLMModelPrice
 
 __all__ = [
     "Base",
@@ -55,4 +59,8 @@ __all__ = [
     "CustomerHealthHistory",
     "CustomerAnalysisAction",
     "UserDashboardLayout",
+    "OrgApiKey",
+    "OrgAIConfig",
+    "LLMUsageLog",
+    "LLMModelPrice",
 ]

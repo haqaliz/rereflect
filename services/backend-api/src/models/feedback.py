@@ -54,6 +54,10 @@ class FeedbackItem(Base):
     churn_risk_factors = Column(JSON, nullable=True)  # Per-factor breakdown {factor: {score, max, label}}
     suggested_action = Column(Text, nullable=True)
 
+    # LLM model tracking (which provider/model analyzed this item)
+    llm_provider = Column(String(20), nullable=True)  # openai, anthropic, google
+    llm_model = Column(String(50), nullable=True)  # gpt-4o-mini, claude-haiku-4-5, etc.
+
     # Customer identification (extracted from source_metadata)
     customer_email = Column(String(255), nullable=True, index=True)
 

@@ -25,3 +25,11 @@ svix==1.41.0                 # Resend webhook signature verification
 
 # Google OAuth
 google-auth>=2.27.0          # Google ID token verification
+
+# Encryption (for BYOK API key storage)
+cryptography>=43.0.0         # Fernet symmetric encryption for LLM API keys
+
+# LLM providers (for model testing / key validation)
+openai>=1.82.0               # OpenAI API client
+anthropic>=0.40.0            # Anthropic API client
+google-generativeai>=0.8.0   # Google Generative AI client

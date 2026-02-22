@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-20
+**Last Updated**: 2026-02-22
 
 ---
 
@@ -376,6 +376,31 @@
   - Phase 4 — Test Coverage: Billing/Stripe test suite (test_billing.py, 15+ test cases covering checkout, webhooks, portal, usage limits, feature gating), Vitest configured with jsdom + @testing-library/react, StatCard + ThemeContext tests, frontend test scripts (npm run test/test:watch/test:coverage)
   - Alembic migration: 9232cfa0634d_add_critical_feedback_indexes
   - PRD: PRD-TECHNICAL-DEBT.md
+- **Churn Prediction Accuracy** (M1.4):
+  - Factor breakdown component (`ChurnFactorBreakdown.tsx`): shadcn Collapsible with 9 factors sorted by score, color-coded progress bars (red >75%, orange 40-75%, green <40%), Pro+ plan gating with upgrade CTA
+  - Confidence score on customer health scores: `confidence_score` column on `customer_health_scores`, computed from feedback count + data recency + analysis coverage
+  - Backtest validation script (`scripts/backtest_churn.py`): evaluates prediction accuracy against historical churn data
+  - `churn_risk_factors` JSON column on `feedback_items`: 9-factor breakdown (sentiment, churn_keywords, frustration_keywords, urgency, sentiment_trend, feedback_frequency, resolution_time, pain_severity, feature_density)
+  - Worker-service model fix: added missing `churn_risk_factors` column to worker's `FeedbackItem` model (was silently not persisting)
+  - Backfill script for 1000 existing analyzed feedback items
+  - Alembic migration: `6e4501930bf0` (confidence_score + churn_risk_factors columns)
+  - 11 frontend tests (ChurnFactorBreakdown: collapse/expand, sorting, colors, plan gating, null state)
+  - Feedback detail page: URL-synced tabs (`?tab=overview|analysis|timeline`), manual refresh button replacing 30s polling
+  - Deployed to production (Railway): backend-api + worker-service
+- **Multi-Model Support** (M2.1, PRD-MULTI-MODEL-SUPPORT.md):
+  - LLM abstraction layer: unified `LLMClient` with provider factory (OpenAI, Anthropic, Google)
+  - Per-org model selection: configurable default provider + model per task type (categorization, analysis, insights)
+  - BYOK key management: Fernet-encrypted API key storage per provider, add/remove/validate endpoints
+  - Fallback chain: primary → retry → system OpenAI fallback with automatic provider rotation
+  - Plan gating: Free = GPT-4o-mini only, Pro = all OpenAI models, Business+ = all providers (Anthropic, Google)
+  - Budget tracking: per-org monthly usage limits with provider-level cost breakdown
+  - Model registry: admin-managed model catalog with tier badges (cheap/mid/premium), pricing, availability
+  - Backend: 8 new API endpoints (keys CRUD, model list, model test, usage, budget), 4 new DB models (OrgAIConfig, OrgAPIKey, LLMModelPrice, LLMUsageLog), Alembic migration
+  - Worker: LLM factory with provider-specific clients, org config resolver, usage logging, pricing calculation
+  - Frontend: AI Settings page (3 tabs: General, Providers, Usage), model selector with tier badges, BYOK key management UI, usage charts, budget banner
+  - Admin: AI Models registry page (`/system/ai-models`) with pricing sync, availability toggles
+  - SVG tier badge icons replacing emoji indicators, legend labels on model selection
+  - 94 worker TDD tests + 8 backend tests + 54 frontend tests (all passing)
 - **Customer Sentiment Alerts** (M1.3, PRD-CUSTOMER-SENTIMENT-ALERTS.md):
   - New alert type `customer_health_drop` with 3 trigger conditions: threshold crossing (score < 50), point drop (≥ 15pts), risk level downgrade
   - Recovery alerts on risk level upgrades (green positive notifications)
@@ -430,6 +455,9 @@
 - Customer sentiment alerts: 3 trigger conditions (threshold + drop + risk change), recovery alerts on risk upgrade, 24h Redis dedup bypassed for risk transitions
 - Health drop email: daily digest pipeline (no dedicated template), consistent with existing alert email pattern
 - Health drop dedup: Redis DB 2 key `health_alert_cooldown:{org_id}:{email}` with 86400s TTL, re-alerts only if score dropped further
+- Multi-model support: factory pattern with provider-specific clients, Fernet encryption for BYOK keys, fallback chain (primary → retry → system OpenAI), per-org config stored in DB
+- LLM usage tracking: per-request logging with provider/model/tokens/cost, monthly budget limits, plan-gated model access
+- Model registry: admin-managed catalog with tier classification (cheap/mid/premium), plan-based availability gating
 
 ---
 

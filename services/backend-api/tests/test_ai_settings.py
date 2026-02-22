@@ -1,5 +1,7 @@
 """
 Tests for AI settings API endpoints.
+Updated for M2.1: schema expanded with provider, models, budget.
+BYOK key management moved to /api/v1/settings/ai/keys.
 """
 
 import pytest
@@ -63,12 +65,14 @@ def member_headers(member_user: User) -> dict:
 
 class TestGetAISettings:
     def test_get_default_settings(self, client: TestClient, auth_headers: dict):
-        """Should return default AI settings (enabled, no custom key)."""
+        """Should return expanded AI settings with provider, models, budget."""
         response = client.get("/api/v1/settings/ai", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["ai_analysis_enabled"] is True
-        assert data["has_custom_key"] is False
+        assert "default_provider" in data
+        assert "models" in data
+        assert "budget" in data
 
     def test_requires_auth(self, client: TestClient):
         """Should require authentication."""
@@ -115,38 +119,32 @@ class TestUpdateAISettings:
         )
         assert response.status_code == 403
 
-    def test_owner_can_set_api_key(self, client: TestClient, owner_headers: dict):
-        """Owner should be able to set BYOK API key."""
-        response = client.patch(
-            "/api/v1/settings/ai",
-            headers=owner_headers,
-            json={"openai_api_key": "sk-test-key-123"},
-        )
-        assert response.status_code == 200
-        assert response.json()["has_custom_key"] is True
-
-    def test_owner_can_remove_api_key(self, client: TestClient, owner_headers: dict, db, test_organization):
-        """Owner should be able to remove BYOK API key."""
-        # Set key first
-        test_organization.openai_api_key = "sk-existing-key"
-        db.commit()
-
-        response = client.patch(
-            "/api/v1/settings/ai",
-            headers=owner_headers,
-            json={"openai_api_key": ""},
-        )
-        assert response.status_code == 200
-        assert response.json()["has_custom_key"] is False
-
-    def test_admin_cannot_set_api_key(self, client: TestClient, auth_headers: dict):
-        """Admin should NOT be able to set BYOK API key (owner only)."""
+    def test_admin_can_update_provider(self, client: TestClient, auth_headers: dict):
+        """Admin should be able to change the default provider."""
         response = client.patch(
             "/api/v1/settings/ai",
             headers=auth_headers,
-            json={"openai_api_key": "sk-test-key"},
+            json={"default_provider": "anthropic"},
         )
-        assert response.status_code == 403
+        assert response.status_code == 200
+        assert response.json()["default_provider"] == "anthropic"
+
+    def test_admin_can_update_models(self, client: TestClient, auth_headers: dict):
+        """Admin should be able to change model selection per task."""
+        response = client.patch(
+            "/api/v1/settings/ai",
+            headers=auth_headers,
+            json={
+                "model_categorization": "claude-haiku-4-5",
+                "model_analysis": "claude-haiku-4-5",
+                "model_insights": "claude-haiku-4-5",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["models"]["categorization"] == "claude-haiku-4-5"
+        assert data["models"]["analysis"] == "claude-haiku-4-5"
+        assert data["models"]["insights"] == "claude-haiku-4-5"
 
     def test_persists_settings(self, client: TestClient, owner_headers: dict):
         """Settings should persist across GET requests."""

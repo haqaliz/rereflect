@@ -14,6 +14,7 @@ import {
 import { usePathname } from 'next/navigation';
 import { TrialBanner } from '@/components/TrialBanner';
 import { UsageWarning } from '@/components/UsageWarning';
+import { BudgetBannerWrapper } from '@/components/shared/BudgetBannerWrapper';
 import { Toaster } from 'sonner';
 import { NotificationBell } from '@/components/NotificationBell';
 
@@ -40,6 +41,7 @@ const pageTitles: Record<string, string> = {
   '/shared-links': 'Shared Links',
   '/workflow': 'Workflow',
   '/settings/workflow': 'Workflow Settings',
+  '/system/ai-models': 'AI Models',
 };
 
 export default function DashboardLayout({
@@ -109,6 +111,7 @@ export default function DashboardLayout({
           <div className="px-4 pt-4 space-y-2">
             <TrialBanner />
             <UsageWarning />
+            <BudgetBannerWrapper />
           </div>
           {children}
         </div>

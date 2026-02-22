@@ -19,7 +19,6 @@ class Organization(Base):
 
     # AI Analysis settings
     ai_analysis_enabled = Column(Boolean, default=True, nullable=False)
-    openai_api_key = Column(Text, nullable=True)  # BYOK for Enterprise plans
 
     # Alert configuration (org-wide defaults)
     default_alert_channels = Column(JSON, nullable=False, default={"dashboard": True, "email": False, "slack": False})

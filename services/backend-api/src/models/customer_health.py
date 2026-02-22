@@ -42,6 +42,10 @@ class CustomerHealth(Base):
     llm_analysis_data = Column(JSON, nullable=True)  # {analysis, recommended_actions, risk_drivers, estimated_urgency, analysis_type}
     llm_raw_response = Column(JSON, nullable=True)  # Raw OpenAI response for debugging
 
+    # LLM model tracking (which provider/model analyzed this customer)
+    llm_provider = Column(String(20), nullable=True)  # openai, anthropic, google
+    llm_model = Column(String(50), nullable=True)  # gpt-4o-mini, claude-haiku-4-5, etc.
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

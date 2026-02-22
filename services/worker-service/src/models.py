@@ -42,7 +42,6 @@ class Organization(Base):
 
     # AI Analysis settings
     ai_analysis_enabled = Column(Boolean, default=True, nullable=False)
-    openai_api_key = Column(Text, nullable=True)
 
     # Alert configuration
     default_alert_channels = Column(JSON, nullable=False, default={"dashboard": True, "email": False, "slack": False})
@@ -138,6 +137,10 @@ class FeedbackItem(Base):
     churn_risk_score = Column(Integer, nullable=True)  # 0-100
     churn_risk_factors = Column(JSON, nullable=True)  # 9-factor breakdown
     suggested_action = Column(Text, nullable=True)
+
+    # LLM model tracking
+    llm_provider = Column(String(20), nullable=True)
+    llm_model = Column(String(50), nullable=True)
 
     # Workflow fields
     workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
@@ -449,6 +452,10 @@ class CustomerHealth(Base):
     llm_analysis_data = Column(JSON, nullable=True)
     llm_raw_response = Column(JSON, nullable=True)
 
+    # LLM model tracking
+    llm_provider = Column(String(20), nullable=True)
+    llm_model = Column(String(50), nullable=True)
+
     is_archived = Column(Boolean, default=False, server_default="false")
     confidence_level = Column(String(20), default="low")
 
@@ -497,4 +504,89 @@ class FeedbackWorkflowEvent(Base):
 
     __table_args__ = (
         Index('ix_workflow_event_feedback', 'feedback_id', 'created_at'),
+    )
+
+
+class OrgApiKey(Base):
+    """Encrypted API keys per provider per org."""
+    __tablename__ = "org_api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    provider = Column(String(20), nullable=False)  # openai, anthropic, google
+    encrypted_key = Column(Text, nullable=False)
+    key_hint = Column(String(8), nullable=True)
+    is_valid = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', 'provider', name='uq_org_api_key_org_provider'),
+        Index('idx_org_api_keys_org', 'organization_id'),
+    )
+
+
+class OrgAIConfig(Base):
+    """Per-org AI configuration: provider, model per task, budget."""
+    __tablename__ = "org_ai_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, unique=True, nullable=False)
+    default_provider = Column(String(20), default='openai', nullable=False)
+    model_categorization = Column(String(50), default='gpt-4o-mini', nullable=False)
+    model_analysis = Column(String(50), default='gpt-4o-mini', nullable=False)
+    model_insights = Column(String(50), default='gpt-4o-mini', nullable=False)
+    monthly_budget_cents = Column(Integer, nullable=True)
+    budget_used_cents = Column(Integer, default=0, nullable=False)
+    budget_reset_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class LLMUsageLog(Base):
+    """Per-request LLM usage tracking."""
+    __tablename__ = "llm_usage_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    provider = Column(String(20), nullable=False)
+    model = Column(String(50), nullable=False)
+    task_type = Column(String(30), nullable=False)
+    prompt_tokens = Column(Integer, nullable=False)
+    completion_tokens = Column(Integer, nullable=False)
+    total_tokens = Column(Integer, nullable=False)
+    estimated_cost_cents = Column(Float, nullable=False)
+    latency_ms = Column(Integer, nullable=True)
+    was_fallback = Column(Boolean, default=False, nullable=False)
+    fallback_reason = Column(String(30), nullable=True)
+    is_byok = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('idx_llm_usage_org_date', 'organization_id', 'created_at'),
+    )
+
+
+class LLMModelPrice(Base):
+    """System-wide model pricing table."""
+    __tablename__ = "llm_model_prices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(20), nullable=False)
+    model_id = Column(String(50), nullable=False)
+    display_name = Column(String(100), nullable=False)
+    input_price_per_1m_tokens = Column(Float, nullable=False)
+    output_price_per_1m_tokens = Column(Float, nullable=False)
+    context_window = Column(Integer, nullable=True)
+    max_output_tokens = Column(Integer, nullable=True)
+    supports_json_mode = Column(Boolean, default=False, nullable=False)
+    tier = Column(String(10), nullable=False)
+    min_plan = Column(String(20), default='free', nullable=False)
+    is_available = Column(Boolean, default=True, nullable=False)
+    is_deprecated = Column(Boolean, default=False, nullable=False)
+    replacement_model_id = Column(String(50), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('provider', 'model_id', name='uq_llm_model_price_provider_model'),
     )

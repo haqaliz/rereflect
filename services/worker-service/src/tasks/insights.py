@@ -11,7 +11,7 @@ from celery import shared_task
 
 from src.database import get_db_session
 from src.models import Organization, FeedbackItem, WeeklyInsight, CustomerHealth, CustomerAnalysisAction
-from src.openai_client import generate_insights, generate_churn_analysis, generate_customer_analysis
+from src.llm_client import generate_insights, generate_churn_analysis, generate_customer_analysis
 from src.notification_dispatch import dispatch_alert
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,11 @@ def _store_analysis_result(db, customer: CustomerHealth, result: dict, org_id: i
     """
     # Extract raw response before building structured data
     raw_response = result.pop("_raw_response", None)
+
+    # Store which LLM provider/model was used
+    if raw_response and isinstance(raw_response, dict):
+        customer.llm_provider = raw_response.get("provider")
+        customer.llm_model = raw_response.get("model")
 
     # Build structured data (without _raw_response)
     structured_data = {
@@ -130,9 +135,8 @@ def generate_weekly_insights() -> dict:
 
                 feedback_texts = [item.text for item in feedback_items]
 
-                # Generate insights via OpenAI
-                org_key = getattr(org, "openai_api_key", None)
-                insights = generate_insights(feedback_texts, org_api_key=org_key)
+                # Generate insights via LLM factory
+                insights = generate_insights(feedback_texts, org_id=org.id, db=db)
 
                 if not insights:
                     logger.warning(f"No insights generated for org {org.id}")
@@ -203,8 +207,6 @@ def generate_churn_insights() -> dict:
                     skipped += 1
                     continue
 
-                org_key = getattr(org, "openai_api_key", None)
-
                 for customer in at_risk:
                     try:
                         # Get recent feedback for this customer
@@ -230,7 +232,8 @@ def generate_churn_insights() -> dict:
                             resolution_component=customer.resolution_component,
                             frequency_component=customer.frequency_component,
                             feedback_texts=feedback_texts,
-                            org_api_key=org_key,
+                            org_id=org.id,
+                            db=db,
                         )
 
                         if result:
@@ -294,8 +297,6 @@ def batch_churn_analysis(org_id: int) -> dict:
         if not org:
             logger.error(f"batch_churn_analysis: org {org_id} not found")
             return {"status": "error", "detail": "org_not_found"}
-
-        org_key = getattr(org, "openai_api_key", None)
 
         all_customers = (
             db.query(CustomerHealth)
@@ -367,7 +368,8 @@ def batch_churn_analysis(org_id: int) -> dict:
                     resolution_component=customer.resolution_component or 50,
                     frequency_component=customer.frequency_component or 50,
                     feedback_texts=feedback_texts,
-                    org_api_key=org_key,
+                    org_id=org_id,
+                    db=db,
                 )
 
                 if result:
@@ -437,8 +439,6 @@ def _run_tiered_analysis(analysis_type: str, score_min: int, score_max: int, lim
                     skipped += 1
                     continue
 
-                org_key = getattr(org, "openai_api_key", None)
-
                 for i, customer in enumerate(customers):
                     # Skip if analysis is fresh
                     if (
@@ -471,7 +471,8 @@ def _run_tiered_analysis(analysis_type: str, score_min: int, score_max: int, lim
                             resolution_component=customer.resolution_component or 50,
                             frequency_component=customer.frequency_component or 50,
                             feedback_texts=feedback_texts,
-                            org_api_key=org_key,
+                            org_id=org.id,
+                            db=db,
                         )
 
                         if result:
@@ -578,8 +579,6 @@ def analyze_customer_health(org_id: int, customer_email: str) -> dict:
             logger.error(f"analyze_customer_health: org {org_id} not found")
             return {"status": "error", "detail": "org_not_found"}
 
-        org_key = getattr(org, "openai_api_key", None)
-
         recent_feedback = (
             db.query(FeedbackItem)
             .filter(
@@ -615,7 +614,8 @@ def analyze_customer_health(org_id: int, customer_email: str) -> dict:
             resolution_component=customer.resolution_component or 50,
             frequency_component=customer.frequency_component or 50,
             feedback_texts=feedback_texts,
-            org_api_key=org_key,
+            org_id=org_id,
+            db=db,
         )
 
         if result:

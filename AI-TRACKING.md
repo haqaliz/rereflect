@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-02-20
+**Last Updated**: 2026-02-22
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -96,10 +96,10 @@
 - [x] Notification: in-app + email + Slack (uses existing notification dispatch)
 - [x] Trigger in health score recomputation: compare new vs previous score
 
-#### M1.4 — Churn Prediction Accuracy (1 week)
-- [ ] AI explainability on churn risk: show factor breakdown on feedback detail ("Churn risk: 72 — Sentiment trend -15, Frustration keywords +10, ...")
-- [ ] Confidence score on health scores ("87% confidence" based on data volume — low feedback count = low confidence)
-- [ ] Backtest validation: script to evaluate churn prediction accuracy against historical data (customers who actually churned)
+#### M1.4 — Churn Prediction Accuracy (1 week) — COMPLETE
+- [x] AI explainability on churn risk: show factor breakdown on feedback detail ("Churn risk: 72 — Sentiment trend -15, Frustration keywords +10, ...")
+- [x] Confidence score on health scores ("87% confidence" based on data volume — low feedback count = low confidence)
+- [x] Backtest validation: script to evaluate churn prediction accuracy against historical data (customers who actually churned)
 
 **Q1 Deliverables**: Customer 360 page, health badges everywhere, sentiment alerts, churn explainability
 **Plan Gating**: Customer 360 + alerts + explainability = Pro+, basic churn display stays Free
@@ -111,12 +111,12 @@
 
 **Goal**: Users can ask Rereflect questions in natural language and get instant, accurate answers. AI drafts responses and suggests actions.
 
-#### M2.1 — Multi-Model Support (1 week)
-- [ ] LLM abstraction layer: unified interface for OpenAI, Anthropic, Google
-- [ ] Model selection per org (settings page): choose default provider
-- [ ] BYOK key management: store API keys per provider (encrypted)
-- [ ] Fallback chain: if primary model fails, try secondary
-- [ ] Plan gate: Free = GPT-4o-mini only, Pro = OpenAI models, Business+ = all providers
+#### M2.1 — Multi-Model Support (1 week) — COMPLETE
+- [x] LLM abstraction layer: unified interface for OpenAI, Anthropic, Google
+- [x] Model selection per org (settings page): choose default provider
+- [x] BYOK key management: store API keys per provider (encrypted)
+- [x] Fallback chain: if primary model fails, try secondary
+- [x] Plan gate: Free = GPT-4o-mini only, Pro = OpenAI models, Business+ = all providers
 
 #### M2.2 — AI Copilot: Command Bar (3 weeks)
 - [ ] `Cmd+K` command bar UI: search input + results panel + keyboard navigation

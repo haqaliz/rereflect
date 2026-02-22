@@ -311,6 +311,18 @@ export function AppSidebar() {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive('/system/ai-models')}
+                      tooltip="AI Models"
+                    >
+                      <Link href="/system/ai-models">
+                        <Brain className="w-4 h-4" />
+                        <span>AI Models</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

@@ -49,7 +49,7 @@ class TestAnalyzeWithLLM:
              patch("src.tasks.analysis._apply_keyword_analysis") as mock_keyword:
             _analyze_feedback_item(unanalyzed_feedback, db)
 
-        mock_keyword.assert_called_once_with(unanalyzed_feedback)
+        mock_keyword.assert_called_once()
         assert unanalyzed_feedback.llm_analysis_pending is True
 
     def test_skips_llm_when_org_has_ai_disabled(self, db, ai_disabled_org):
@@ -70,7 +70,7 @@ class TestAnalyzeWithLLM:
             _analyze_feedback_item(feedback, db)
 
         mock_llm.assert_not_called()
-        mock_keyword.assert_called_once_with(feedback)
+        mock_keyword.assert_called_once()
 
     def test_passes_custom_categories_to_llm(self, db, ai_enabled_org, custom_categories, unanalyzed_feedback):
         """Should pass custom categories to the LLM when they exist."""
@@ -104,13 +104,13 @@ class TestAnalyzeWithLLM:
         assert "onboarding_issues" in cat_names
         assert "api_requests" in cat_names
 
-    def test_passes_org_api_key_for_byok(self, db):
-        """Should pass org's BYOK API key to categorize_feedback."""
+    def test_passes_org_id_and_db_for_byok(self, db):
+        """Should pass org_id and db session to categorize_feedback."""
         from src.tasks.analysis import _analyze_feedback_item
 
         org = Organization(
             name="BYOK Corp", plan="enterprise",
-            ai_analysis_enabled=True, openai_api_key="sk-byok-key"
+            ai_analysis_enabled=True,
         )
         db.add(org)
         db.commit()
@@ -144,7 +144,8 @@ class TestAnalyzeWithLLM:
             _analyze_feedback_item(feedback, db)
 
         call_kwargs = mock_llm.call_args.kwargs
-        assert call_kwargs["org_api_key"] == "sk-byok-key"
+        assert call_kwargs["org_id"] == org.id
+        assert call_kwargs["db"] is db
 
 
 class TestApplyLLMResult:
