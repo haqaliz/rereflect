@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { getStatusColor, getStatusLabel, formatRelativeTime } from '@/lib/workflow-utils';
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import { ArrowUpDown, KanbanSquare as KanbanIcon } from 'lucide-react';
 
 interface TeamMember {
@@ -103,8 +104,6 @@ export default function WorkflowPage() {
     },
     staleTime: 5 * 60 * 1000, // 5 min
     gcTime: 30 * 60 * 1000, // 30 min
-    refetchInterval: 30000, // Poll every 30 seconds
-    refetchIntervalInBackground: false, // Don't poll in background tabs
   });
 
   const items = workflowData?.items || [];
@@ -113,6 +112,10 @@ export default function WorkflowPage() {
   const totalPages = workflowData?.totalPages || 1;
   const teamMembers = workflowData?.teamMembers || [];
   const searching = searchQuery !== debouncedSearch;
+
+  useRealtimeEvents('workflow:*', () => {
+    queryClient.invalidateQueries({ queryKey: ['workflow'] });
+  });
 
   const handleStatusChange = async (id: number, newStatus: string) => {
     try {

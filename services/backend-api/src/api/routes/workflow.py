@@ -18,6 +18,7 @@ from src.models.user import User
 from src.models.organization import Organization
 from src.api.dependencies import get_current_user, get_current_org
 from src.services.workflow_service import create_workflow_event
+from src.services.event_emitter import emit_event
 
 router = APIRouter(prefix="/api/v1/workflow", tags=["workflow"])
 
@@ -134,7 +135,7 @@ class AssignmentRuleResponse(BaseModel):
 # ── Status + Assignment ──────────────────────────────────────
 
 @router.post("/status")
-def change_status(
+async def change_status(
     data: StatusChangeRequest,
     current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
@@ -182,11 +183,18 @@ def change_status(
     except Exception:
         pass
 
+    if updated > 0:
+        await emit_event(
+            org_id=current_org.id,
+            event_type="workflow:status_changed",
+            data={"feedback_ids": data.feedback_ids, "new_status": data.new_status},
+        )
+
     return {"updated": updated}
 
 
 @router.post("/assign")
-def assign_feedback(
+async def assign_feedback(
     data: AssignRequest,
     current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
@@ -245,6 +253,13 @@ def assign_feedback(
             dispatch_feedback_assigned(current_org.id, current_user, assignee, feedbacks)
     except Exception:
         pass
+
+    if updated > 0:
+        await emit_event(
+            org_id=current_org.id,
+            event_type="workflow:assigned",
+            data={"feedback_ids": data.feedback_ids, "assignee_id": data.assign_to_user_id},
+        )
 
     return {"updated": updated}
 
@@ -442,7 +457,7 @@ def list_notes(
 
 
 @router.post("/{feedback_id}/notes", response_model=NoteResponse, status_code=201)
-def create_note(
+async def create_note(
     feedback_id: int,
     data: NoteCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -493,6 +508,12 @@ def create_note(
         dispatch_note_added(current_org.id, current_user, fb, note)
     except Exception:
         pass
+
+    await emit_event(
+        org_id=current_org.id,
+        event_type="workflow:note_added",
+        data={"feedback_id": feedback_id, "note_id": note.id},
+    )
 
     return NoteResponse(
         id=note.id,

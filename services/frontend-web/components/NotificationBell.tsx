@@ -7,8 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { notificationsAPI, NotificationItem } from '@/lib/api/notifications';
 import { TYPE_ICONS, TYPE_COLORS, timeAgo } from '@/lib/notification-utils';
-
-const POLL_INTERVAL = 30000; // 30 seconds
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 
 export function NotificationBell() {
   const router = useRouter();
@@ -28,9 +27,12 @@ export function NotificationBell() {
 
   useEffect(() => {
     fetchCount();
-    const interval = setInterval(fetchCount, POLL_INTERVAL);
-    return () => clearInterval(interval);
   }, [fetchCount]);
+
+  useRealtimeEvents('notification:count', (event) => {
+    const data = event as { unread_count: number };
+    setUnreadCount(data.unread_count);
+  });
 
   const fetchRecent = useCallback(async () => {
     setLoading(true);

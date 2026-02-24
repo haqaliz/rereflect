@@ -15,6 +15,7 @@ from src.models.user import User
 from src.models.notification import Notification
 from src.models.user_alert_preference import UserAlertPreference
 from src.api.dependencies import get_current_user
+from src.services.event_emitter import emit_event
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
@@ -223,7 +224,7 @@ def unread_count(
 # ── Mark Read ────────────────────────────────────────────────────────────────
 
 @router.patch("/{notification_id}/read")
-def mark_read(
+async def mark_read(
     notification_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -239,13 +240,20 @@ def mark_read(
 
     notification.is_read = True
     db.commit()
+
+    await emit_event(
+        org_id=current_user.organization_id,
+        event_type="notification:read",
+        data={"id": notification_id},
+    )
+
     return {"ok": True}
 
 
 # ── Mark All Read ────────────────────────────────────────────────────────────
 
 @router.post("/read-all", response_model=MarkAllReadResponse)
-def mark_all_read(
+async def mark_all_read(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -257,6 +265,13 @@ def mark_all_read(
     ).update({"is_read": True})
 
     db.commit()
+
+    await emit_event(
+        org_id=current_user.organization_id,
+        event_type="notification:read_all",
+        data={},
+    )
+
     return MarkAllReadResponse(updated=updated)
 
 

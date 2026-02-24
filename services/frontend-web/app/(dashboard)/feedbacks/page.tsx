@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { FeedbackPageProvider, useFeedbackPage } from '@/contexts/FeedbackPageContext';
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import { DataTable } from '@/components/shared/data-table';
 import { FeedbacksPageSkeleton } from '@/components/shared/page-skeletons';
 import { MessageSquare } from 'lucide-react';
@@ -117,13 +118,15 @@ function FeedbackPageContent() {
     },
     staleTime: 5 * 60 * 1000, // 5 min
     gcTime: 30 * 60 * 1000, // 30 min
-    refetchInterval: 30000, // Poll every 30 seconds
-    refetchIntervalInBackground: false, // Don't poll in background tabs
   });
 
   const feedbackList = feedbackResponse?.items || [];
   const searching = searchQuery !== debouncedSearch;
   const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null;
+
+  useRealtimeEvents('feedback:*', () => {
+    queryClient.invalidateQueries({ queryKey: ['feedback'] });
+  });
 
   const handleAnalyze = async (selectedItems?: FeedbackItem[]) => {
     const idsToAnalyze = selectedItems ? selectedItems.map(item => item.id) : selectedIds;

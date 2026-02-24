@@ -11,6 +11,11 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/notifications',
 }));
 
+// Mock useRealtimeEvents (NotificationBell now uses it)
+vi.mock('@/hooks/useRealtimeEvents', () => ({
+  useRealtimeEvents: vi.fn(() => ({ connected: false, reconnecting: false })),
+}));
+
 // Mock notifications API
 vi.mock('@/lib/api/notifications', () => ({
   notificationsAPI: {

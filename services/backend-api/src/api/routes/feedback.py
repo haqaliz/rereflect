@@ -8,8 +8,10 @@ from src.database.session import get_db
 from src.models.feedback import FeedbackItem
 from src.models.feedback_source import FeedbackSource
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org, check_feedback_limit, track_feedback_usage, get_current_usage
+from src.models.user import User
+from src.api.dependencies import get_current_user, get_current_org, check_feedback_limit, track_feedback_usage, get_current_usage
 from src.models.usage import UsageRecord
+from src.services.event_emitter import emit_event
 from pydantic import BaseModel
 from datetime import datetime
 import sys
@@ -164,8 +166,9 @@ class CSVImportResponse(BaseModel):
 
 # Endpoints
 @router.post("/", response_model=FeedbackResponse, status_code=status.HTTP_201_CREATED)
-def create_feedback(
+async def create_feedback(
     data: FeedbackCreateRequest,
+    current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
     usage: UsageRecord = Depends(get_current_usage),
     _limit_check: bool = Depends(check_feedback_limit),
@@ -215,6 +218,12 @@ def create_feedback(
 
     # Queue for analysis via Celery worker
     queue_analyze_feedback(feedback.id)
+
+    await emit_event(
+        org_id=current_org.id,
+        event_type="feedback:created",
+        data={"id": feedback.id, "source": feedback.source},
+    )
 
     return feedback
 
@@ -481,8 +490,9 @@ def get_feedback(
 
 
 @router.delete("/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_feedback(
+async def delete_feedback(
     feedback_id: int,
+    current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
@@ -525,6 +535,12 @@ def delete_feedback(
     from src.services.cache_service import cache_invalidate
     cache_invalidate(f"dashboard:{current_org.id}:*")
     cache_invalidate(f"analytics:{current_org.id}:*")
+
+    await emit_event(
+        org_id=current_org.id,
+        event_type="feedback:deleted",
+        data={"id": feedback_id},
+    )
 
     return None
 
@@ -569,9 +585,10 @@ def bulk_delete_feedback(
 
 
 @router.patch("/{feedback_id}", response_model=FeedbackResponse)
-def update_feedback(
+async def update_feedback(
     feedback_id: int,
     data: FeedbackCreateRequest,
+    current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
@@ -618,12 +635,19 @@ def update_feedback(
     cache_invalidate(f"dashboard:{current_org.id}:*")
     cache_invalidate(f"analytics:{current_org.id}:*")
 
+    await emit_event(
+        org_id=current_org.id,
+        event_type="feedback:updated",
+        data={"id": feedback.id},
+    )
+
     return feedback
 
 
 @router.post("/import-csv", response_model=CSVImportResponse)
 async def import_csv(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     current_org: Organization = Depends(get_current_org),
     usage: UsageRecord = Depends(get_current_usage),
     db: Session = Depends(get_db)
@@ -792,6 +816,12 @@ async def import_csv(
         from src.services.cache_service import cache_invalidate
         cache_invalidate(f"dashboard:{current_org.id}:*")
         cache_invalidate(f"analytics:{current_org.id}:*")
+
+        await emit_event(
+            org_id=current_org.id,
+            event_type="feedback:imported",
+            data={"count": imported_count},
+        )
 
     return CSVImportResponse(
         total_rows=total_rows,

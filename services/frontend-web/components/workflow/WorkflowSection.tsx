@@ -66,6 +66,13 @@ export function WorkflowSection({
       return;
     }
 
+    // Clear any pending resolution note if user picks a different status
+    if (showResolutionNote) {
+      setShowResolutionNote(false);
+      setResolutionNote('');
+      setPendingStatus(null);
+    }
+
     // Otherwise, change status immediately
     try {
       setIsChangingStatus(true);
@@ -128,7 +135,7 @@ export function WorkflowSection({
           <div className="space-y-2">
             <label className="text-sm font-medium">Status</label>
             <Select
-              value={workflowStatus}
+              value={pendingStatus || workflowStatus}
               onValueChange={handleStatusChange}
               disabled={isChangingStatus}
             >
@@ -137,9 +144,9 @@ export function WorkflowSection({
                   <div className="flex items-center gap-2">
                     <div
                       className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: getStatusColor(workflowStatus) }}
+                      style={{ backgroundColor: getStatusColor(pendingStatus || workflowStatus) }}
                     />
-                    {getStatusLabel(workflowStatus)}
+                    {getStatusLabel(pendingStatus || workflowStatus)}
                   </div>
                 </SelectValue>
               </SelectTrigger>

@@ -48,7 +48,6 @@ export function useActivityFeed() {
     queryFn: () => dashboardV2API.getActivityFeed(),
     staleTime: 30 * 1000,
     gcTime: GC_TIME,
-    refetchInterval: 30 * 1000,
   });
 }
 

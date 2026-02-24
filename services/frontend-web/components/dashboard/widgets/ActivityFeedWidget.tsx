@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   MessageSquare,
   CircleAlert,
@@ -9,8 +10,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { ActivityFeedItem, ActivityFeedResponse, dashboardV2API } from '@/lib/api/dashboard-v2';
-
-const POLL_INTERVAL = 30_000; // 30 seconds
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 
 const severityColors: Record<string, string> = {
   critical: 'var(--destructive)',
@@ -45,6 +45,7 @@ export function ActivityFeedWidget() {
   const [items, setItems] = useState<ActivityFeedItem[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   const fetchFeed = useCallback(async () => {
     try {
@@ -60,9 +61,12 @@ export function ActivityFeedWidget() {
 
   useEffect(() => {
     fetchFeed();
-    const interval = setInterval(fetchFeed, POLL_INTERVAL);
-    return () => clearInterval(interval);
   }, [fetchFeed]);
+
+  useRealtimeEvents('activity:*', () => {
+    queryClient.invalidateQueries({ queryKey: ['activity-feed'] });
+    fetchFeed();
+  });
 
   const timeSinceUpdate = lastUpdated
     ? getRelativeTime(lastUpdated)

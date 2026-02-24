@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { customerHealthAPI, CustomerHealthData } from '@/lib/api/customer-health';
 import { analytics } from '@/lib/analytics';
+import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -171,6 +172,22 @@ function FeedbackDetailContent() {
       setLoading(false);
     }
   };
+
+  // Silently refetch feedback when realtime events arrive (no loading spinner)
+  const silentRefetch = useCallback(async () => {
+    console.log('[FeedbackDetail] Realtime event received, refetching feedback', feedbackId);
+    try {
+      const data = await feedbackAPI.get(feedbackId);
+      console.log('[FeedbackDetail] Refetched, workflow_status:', data.workflow_status);
+      setFeedback(data);
+    } catch {
+      // ignore — user already has stale data displayed
+    }
+  }, [feedbackId]);
+
+  // Listen for workflow + feedback events on this item
+  useRealtimeEvents('workflow:*', silentRefetch);
+  useRealtimeEvents('feedback:*', silentRefetch);
 
   const handleRefresh = async () => {
     try {
