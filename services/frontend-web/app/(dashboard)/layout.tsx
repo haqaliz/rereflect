@@ -17,6 +17,9 @@ import { UsageWarning } from '@/components/UsageWarning';
 import { BudgetBannerWrapper } from '@/components/shared/BudgetBannerWrapper';
 import { Toaster } from 'sonner';
 import { NotificationBell } from '@/components/NotificationBell';
+import { CommandBarProvider } from '@/components/copilot/CommandBarProvider';
+import { CopilotHeaderButton } from '@/components/copilot/CopilotHeaderButton';
+import { RealtimeProvider } from '@/contexts/RealtimeContext';
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -42,6 +45,7 @@ const pageTitles: Record<string, string> = {
   '/workflow': 'Workflow',
   '/settings/workflow': 'Workflow Settings',
   '/system/ai-models': 'AI Models',
+  '/conversations': 'AI Copilot',
 };
 
 export default function DashboardLayout({
@@ -82,40 +86,45 @@ export default function DashboardLayout({
   };
 
   return (
+    <RealtimeProvider>
     <SidebarProvider>
       <Toaster position="top-right" richColors />
       <AppSidebar />
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-2 h-4" />
-          <Breadcrumb>
-            <BreadcrumbList>
-              <BreadcrumbItem className="hidden md:block">
-                <BreadcrumbLink href="/dashboard">
-                  Rereflect
-                </BreadcrumbLink>
-              </BreadcrumbItem>
-              <BreadcrumbSeparator className="hidden md:block" />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{getPageTitle()}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </BreadcrumbList>
-          </Breadcrumb>
-          <div className="ml-auto">
-            <NotificationBell />
+        <CommandBarProvider>
+          <header className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem className="hidden md:block">
+                  <BreadcrumbLink href="/dashboard">
+                    Rereflect
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className="hidden md:block" />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{getPageTitle()}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+            <div className="ml-auto flex items-center gap-2">
+              <CopilotHeaderButton />
+              <NotificationBell />
+            </div>
+          </header>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+            {/* Billing banners */}
+            <div className="px-4 pt-4 space-y-2">
+              <TrialBanner />
+              <UsageWarning />
+              <BudgetBannerWrapper />
+            </div>
+            {children}
           </div>
-        </header>
-        <div className="flex-1 overflow-auto">
-          {/* Billing banners */}
-          <div className="px-4 pt-4 space-y-2">
-            <TrialBanner />
-            <UsageWarning />
-            <BudgetBannerWrapper />
-          </div>
-          {children}
-        </div>
+        </CommandBarProvider>
       </SidebarInset>
     </SidebarProvider>
+    </RealtimeProvider>
   );
 }

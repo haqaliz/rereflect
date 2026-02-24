@@ -29,6 +29,12 @@ from .org_api_key import OrgApiKey
 from .org_ai_config import OrgAIConfig
 from .llm_usage_log import LLMUsageLog
 from .llm_model_price import LLMModelPrice
+from .conversation_folder import ConversationFolder
+from .conversation import Conversation
+from .conversation_message import ConversationMessage
+from .query_template import QueryTemplate
+from .query_template_mapping import QueryTemplateMapping
+from .copilot_schema_whitelist import CopilotSchemaWhitelist
 
 __all__ = [
     "Base",
@@ -63,4 +69,10 @@ __all__ = [
     "OrgAIConfig",
     "LLMUsageLog",
     "LLMModelPrice",
+    "ConversationFolder",
+    "Conversation",
+    "ConversationMessage",
+    "QueryTemplate",
+    "QueryTemplateMapping",
+    "CopilotSchemaWhitelist",
 ]

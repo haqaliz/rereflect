@@ -8,6 +8,8 @@ from src.api.routes import source_webhooks, feedback_sources, pending_feedback, 
 from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications, analytics, saved_views, shared_links, workflow, email_webhooks
 from src.api.routes import customer_health, activity_feed, dashboard_layout, admin_promo, admin_users, admin_orgs
 from src.api.routes import customers, admin_backtest, admin_ai_models
+from src.api.routes import conversation_folders, conversations, copilot_ws, copilot
+from src.api.routes import events_ws
 from src.seed import seed_admin_user
 import logging
 import os
@@ -139,6 +141,12 @@ app.include_router(admin_orgs.router)
 app.include_router(admin_backtest.router)
 app.include_router(admin_ai_models.router)
 app.include_router(customers.router)
+# AI Copilot (M2.2) — folder router MUST come before conversations to avoid route conflicts
+app.include_router(conversation_folders.router)
+app.include_router(conversations.router)
+app.include_router(copilot_ws.router)
+app.include_router(copilot.router)
+app.include_router(events_ws.router)
 
 
 @app.get("/")

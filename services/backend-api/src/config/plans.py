@@ -35,6 +35,7 @@ PLANS = {
             "csv_import",
             "sentiment_analysis",
             "email_support",
+            # Copilot: free users get basic access (no folders, no analysis)
         ],
         "stripe_price_monthly": None,
         "stripe_price_annual": None,
@@ -70,6 +71,10 @@ PLANS = {
             "multi_model_support",
             "byok_keys",
             "ai_usage_dashboard",
+            # Copilot M2.2
+            "conversation_folders",
+            "copilot_analysis_queries",
+            "copilot_dynamic_suggestions",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -109,6 +114,12 @@ PLANS = {
             "multi_model_support",
             "byok_keys",
             "ai_usage_dashboard",
+            # Copilot M2.2
+            "conversation_folders",
+            "copilot_analysis_queries",
+            "copilot_dynamic_suggestions",
+            "copilot_entity_scopes",
+            "copilot_query_templates_admin",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -198,6 +209,13 @@ FEATURE_PLANS = {
     "multi_model_support": "pro",
     "byok_keys": "pro",
     "ai_usage_dashboard": "pro",
+    # AI Copilot features (M2.2)
+    "conversation_folders": "pro",
+    "copilot_analysis_queries": "pro",
+    "copilot_dynamic_suggestions": "pro",
+    "copilot_entity_scopes": "business",
+    "copilot_query_templates_admin": "business",
+    "copilot_audit_trail": "enterprise",
 }
 
 

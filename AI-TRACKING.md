@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-02-22
+**Last Updated**: 2026-02-25
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -118,21 +118,21 @@
 - [x] Fallback chain: if primary model fails, try secondary
 - [x] Plan gate: Free = GPT-4o-mini only, Pro = OpenAI models, Business+ = all providers
 
-#### M2.2 — AI Copilot: Command Bar (3 weeks)
-- [ ] `Cmd+K` command bar UI: search input + results panel + keyboard navigation
-- [ ] Natural language query parser: classify intent (data question, analysis, action request)
-- [ ] Data queries: "How many negative feedbacks this week?", "Which customers mentioned pricing?"
-  - [ ] SQL query generation from natural language (safe, read-only, scoped to org)
-  - [ ] Result formatting: tables, counts, lists
-- [ ] Analysis queries: "Why is churn increasing?", "Compare this month vs last month"
-  - [ ] Context assembly: pull relevant data, feed to LLM with analysis prompt
-  - [ ] Structured response with supporting data
-- [ ] Action suggestions: "What should I do about customer X?", "Prioritize these feature requests"
-  - [ ] Suggest actions with one-click execution buttons (change status, assign, create report)
-  - [ ] Action confirmation modal before execution
-- [ ] Conversation history (per session): follow-up questions in context
-- [ ] Pre-built quick queries: "This week's summary", "Top churn risks", "Trending topics"
-- [ ] Plan gate: Free = 10 queries/day, Pro = 100/day, Business = unlimited
+#### M2.2 — AI Copilot: Command Bar (3 weeks) — COMPLETE
+- [x] `Cmd+K` command bar UI: search input + template chips + keyboard navigation + Spotlight modal
+- [x] Natural language query parser: rule-based regex + LLM fallback intent classifier (data/analysis/general)
+- [x] Data queries: SQL generation from natural language (safe, read-only, org-scoped, schema-whitelisted)
+  - [x] SQL query generation with 3-join max, 5s timeout, no subqueries, row limits by plan
+  - [x] Result formatting: tables, charts (Recharts), deep links, markdown
+- [x] Analysis queries: context assembly + LLM analysis with structured response
+  - [x] Context scope selector (All Data, Feedbacks, Customers, etc.) + @mentions
+  - [x] Structured response with supporting data
+- [x] Self-learning query templates: auto-save successful queries, cosine similarity matching (0.85 threshold)
+  - [x] 15 pre-built system templates + idempotent template saving + admin management page
+- [x] WebSocket streaming: real-time token-by-token LLM response via `wss://{host}/ws/copilot?token={jwt}`
+- [x] Conversations page: ChatGPT-style with folder organization, persistent history, auto-collapsing sidebar, UUID-based shareable URLs
+- [x] Plan gating: Free = 10 queries/day + 50K tokens/mo, Pro = unlimited + 500K tokens, Business = 5M tokens
+- [x] Usage display: copilot usage section in AI Settings, token budget bars, upgrade CTAs
 
 #### M2.3 — AI Response Suggestions (2 weeks)
 - [ ] Response templates library: pre-written templates per category (bug report response, feature request acknowledgment, churn risk outreach, etc.)

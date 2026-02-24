@@ -25,6 +25,7 @@ import {
   GitBranchPlus,
   Tag,
   Building2,
+  Sparkles,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -59,6 +60,11 @@ const mainNavItems = [
     title: 'Feedbacks',
     href: '/feedbacks',
     icon: MessageSquare,
+  },
+  {
+    title: 'AI Copilot',
+    href: '/conversations',
+    icon: Sparkles,
   },
   {
     title: 'Customers',

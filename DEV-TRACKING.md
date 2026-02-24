@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-22
+**Last Updated**: 2026-02-25
 
 ---
 
@@ -401,6 +401,25 @@
   - Admin: AI Models registry page (`/system/ai-models`) with pricing sync, availability toggles
   - SVG tier badge icons replacing emoji indicators, legend labels on model selection
   - 94 worker TDD tests + 8 backend tests + 54 frontend tests (all passing)
+- **AI Copilot: Command Bar** (M2.2, PRD-AI-COPILOT.md):
+  - Cmd+K spotlight modal: search input, 8 static template chips, dynamic AI suggestions, keyboard navigation, plan gating display
+  - Conversations page (`/conversations`): ChatGPT-style layout with auto-collapsing sidebar, folder organization, persistent history
+  - Chat UI: WebSocket streaming (token-by-token), markdown rendering (react-markdown + remark-gfm), SQL syntax highlighting, Recharts chart rendering, deep links, @mention autocomplete
+  - Intent classifier: rule-based regex patterns + LLM fallback for data/analysis/general classification with confidence scores
+  - SQL generation engine: LLM-based SQL generation → schema whitelist validation → org-scope injection → parameterized execution (5s timeout)
+  - SQL safety guardrails: read-only, schema whitelist, 3-join max, no subqueries, row limits by query type × plan tier
+  - Self-learning query templates: cosine similarity matching (OpenAI embeddings, 0.85 threshold), idempotent saving, 15 pre-built system templates
+  - Context resolver: @mention parsing (6 types: @customer:, @feedback:#, @period:, @tag:, @source:, @category:), conversation history assembly, 15K char context limit
+  - Response formatter: table/chart/deep link formatting, markdown XSS sanitization
+  - WebSocket endpoint: JWT auth via query param, streaming protocol, rate limiting, connection management
+  - REST API: conversations CRUD, folders CRUD (Pro+), template starters, usage endpoint
+  - Frontend API client: 12 API functions with full TypeScript interfaces
+  - Admin templates page (`/system/query-templates`): DataTable with search, usage stats, active toggle, delete
+  - Plan gating UI: remaining queries display (Free tier), upgrade CTAs (inline/banner/modal), token budget exceeded banner, usage section in AI Settings
+  - Backend: 6 new DB models, Alembic migration, 10 service modules, 4 route modules
+  - UUID `public_id` on conversations: all API routes, WS handler, and frontend use UUID strings instead of sequential numeric IDs for URLs and external references
+  - Alembic migration (`n3o4p5q6r7s8`): adds `public_id` column with backfill + unique index
+  - 334 backend TDD tests + 187 frontend TDD tests = 521 total tests (all passing)
 - **Customer Sentiment Alerts** (M1.3, PRD-CUSTOMER-SENTIMENT-ALERTS.md):
   - New alert type `customer_health_drop` with 3 trigger conditions: threshold crossing (score < 50), point drop (≥ 15pts), risk level downgrade
   - Recovery alerts on risk level upgrades (green positive notifications)
@@ -458,6 +477,10 @@
 - Multi-model support: factory pattern with provider-specific clients, Fernet encryption for BYOK keys, fallback chain (primary → retry → system OpenAI), per-org config stored in DB
 - LLM usage tracking: per-request logging with provider/model/tokens/cost, monthly budget limits, plan-gated model access
 - Model registry: admin-managed catalog with tier classification (cheap/mid/premium), plan-based availability gating
+- AI Copilot (M2.2): Cmd+K spotlight modal → /conversations page, WebSocket streaming, self-learning query templates, SQL generation with safety guardrails, plan gating with token budgets
+- Copilot architecture: rule-based intent classifier + LLM fallback, cosine similarity template matching (0.85 threshold), schema whitelist, read-only SQL with 3-join max/5s timeout
+- Copilot conversations: ChatGPT-style with folder organization, persistent history, auto-collapsing sidebar, org-wide shared conversations, UUID public_id for shareable URLs
+- Copilot plan gating: Free=10 queries/day + 50K tokens/mo, Pro=unlimited + 500K tokens, Business=5M tokens, with upgrade CTAs and usage display in AI Settings
 
 ---
 
