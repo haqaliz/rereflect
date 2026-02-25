@@ -373,7 +373,7 @@ interface ConversationItemProps {
   isActive: boolean;
   isRenaming: boolean;
   renameValue: string;
-  renameInputRef?: React.RefObject<HTMLInputElement>;
+  renameInputRef?: React.RefObject<HTMLInputElement | null>;
   onSelect: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
