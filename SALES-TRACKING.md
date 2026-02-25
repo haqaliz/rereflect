@@ -103,11 +103,15 @@ Cheers,
 
 ### 4. Content Marketing (Target: 10-20 signups)
 
-**SEO-targeted blog posts** (long-term):
-- "How to organize customer feedback (2026 guide)"
-- "Customer feedback analysis: manual vs AI"
-- "Sentiment analysis for SaaS: beginner's guide"
-- "How to prioritize features using customer feedback"
+**Full blog roadmap**: See [BLOG-TRACKING.md](BLOG-TRACKING.md) — 22 posts planned through Dec 2026 (2/month)
+
+**Published blog posts**:
+- [x] "How to organize customer feedback (2026 guide)" — Feb 14
+- [x] "Customer feedback analysis: manual vs AI" — Feb 14
+
+**Next up** (Mar 2026):
+- [ ] "Sentiment analysis for SaaS: beginner's guide" — Mar 1
+- [ ] "Rereflect vs Productboard" — Mar 15
 
 **Quick wins** (short-term):
 - [x] Write a Twitter thread on "5 feedback mistakes that kill startups"
@@ -365,6 +369,7 @@ Website Visit → Signup → Activate → Trial → Paid
 ## Resources
 
 - [DEV-TRACKING.md](DEV-TRACKING.md) - Development roadmap
+- [BLOG-TRACKING.md](BLOG-TRACKING.md) - Blog content calendar & roadmap
 - [CLAUDE.md](CLAUDE.md) - Technical documentation
 
 ---

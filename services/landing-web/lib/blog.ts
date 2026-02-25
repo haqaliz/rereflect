@@ -234,6 +234,126 @@ const posts: BlogPost[] = [
       },
     ],
   },
+  {
+    slug: 'sentiment-analysis-saas-beginners-guide',
+    title: 'Sentiment Analysis for SaaS: A Beginner\'s Guide',
+    excerpt: 'Sentiment analysis turns raw customer feedback into measurable signals. This guide explains how it works, why SaaS teams need it, and how to start using it without a data science degree.',
+    date: '2026-03-01',
+    readTime: '9 min read',
+    author: 'Rereflect Team',
+    tags: ['Sentiment Analysis', 'SaaS', 'Customer Feedback', 'AI'],
+    seoTitle: 'Sentiment Analysis for SaaS: A Beginner\'s Guide (2026) | Rereflect',
+    seoDescription: 'Learn what sentiment analysis is, how it works for SaaS companies, and how to use it to understand customer feedback, reduce churn, and prioritize your product roadmap.',
+    sections: [
+      {
+        heading: 'What is sentiment analysis?',
+        content: [
+          'Sentiment analysis is the process of determining whether a piece of text expresses a positive, negative, or neutral opinion. In the context of SaaS, it means automatically scoring every piece of customer feedback on an emotional spectrum — from enthusiastic praise to active frustration.',
+          'At its simplest, sentiment analysis answers one question: how does this customer feel? But that simple question, applied consistently across hundreds or thousands of feedback items, reveals patterns that no amount of manual reading can surface reliably.',
+          'A single negative review is an anecdote. A thousand feedback items scored and tracked over time is a trend line that tells you whether your product is getting better or worse in the eyes of the people who use it.',
+        ],
+      },
+      {
+        heading: 'How sentiment analysis works under the hood',
+        content: [
+          'Modern sentiment analysis uses natural language processing (NLP) to evaluate text. There are three common approaches, each with different trade-offs:',
+        ],
+        listItems: [
+          'Rule-based (lexicon) systems — These use dictionaries of words pre-scored for sentiment. Words like "excellent" and "love" score positive; "broken" and "frustrated" score negative. The system sums up the scores to produce an overall sentiment. Simple and fast, but struggles with sarcasm, negation ("not bad"), and domain-specific language.',
+          'Machine learning models — These are trained on large datasets of labeled text. The model learns patterns that associate certain word combinations, sentence structures, and contextual cues with positive or negative sentiment. More accurate than rule-based systems, especially on nuanced text.',
+          'Large language models (LLMs) — The newest approach uses models like GPT or Claude to analyze sentiment with near-human comprehension. These models understand context, sarcasm, implied meaning, and multi-sentence reasoning. They are the most accurate but also the most computationally expensive.',
+        ],
+        content2: [
+          'Most production systems use a combination. A fast rule-based system handles straightforward cases, while a more sophisticated model processes ambiguous or complex feedback. This balances accuracy with speed and cost.',
+        ],
+      },
+      {
+        heading: 'Why sentiment analysis matters for SaaS teams',
+        content: [
+          'SaaS businesses live and die by customer retention. A customer who quietly grows frustrated and cancels costs far more than one who complains loudly and gets help. Sentiment analysis surfaces the quiet frustration before it becomes a cancellation.',
+          'Here are the specific ways SaaS teams use sentiment analysis:',
+        ],
+        listItems: [
+          'Churn early warning — A sustained drop in sentiment from a customer or segment is one of the strongest predictors of churn. By the time a customer writes "I am canceling," the decision was made weeks ago. Sentiment tracking catches the decline while there is still time to intervene.',
+          'Feature validation — After launching a new feature, sentiment analysis on related feedback tells you whether customers actually find it valuable. A feature that generates mostly neutral or negative sentiment needs iteration, regardless of what the usage numbers say.',
+          'Support team performance — Tracking sentiment trends in support conversations reveals whether your team is resolving issues effectively. Consistent negative sentiment in post-interaction feedback points to process problems, not just individual performance.',
+          'Competitive positioning — When customers mention competitors, the surrounding sentiment tells you whether they are comparing favorably ("I like your approach better than X") or shopping around ("X handles this much better").',
+          'Product health dashboard — Aggregate sentiment over time becomes a product health metric. Just like you track NPS or CSAT, a real-time sentiment score based on all feedback channels gives you a continuous pulse check.',
+        ],
+      },
+      {
+        heading: 'Sentiment analysis vs NPS and CSAT',
+        content: [
+          'Many SaaS teams already use Net Promoter Score (NPS) or Customer Satisfaction (CSAT) surveys. These are useful but limited. Here is how sentiment analysis compares:',
+        ],
+        table: {
+          headers: ['Dimension', 'NPS / CSAT', 'Sentiment Analysis'],
+          rows: [
+            ['Data source', 'Periodic surveys (quarterly, post-interaction)', 'All feedback, all channels, all the time'],
+            ['Response rate', '10\u201330% of customers respond', '100% of feedback is analyzed'],
+            ['Granularity', 'Single numeric score', 'Per-message scoring with topic context'],
+            ['Lag time', 'Days to weeks (survey collection)', 'Real-time or near-real-time'],
+            ['Actionability', '"Detractor" tells you someone is unhappy', 'Tells you what they are unhappy about'],
+            ['Bias', 'Vocal extremes over-represented', 'Captures all customers equally'],
+            ['Cost', 'Survey tool subscription', 'Included in feedback analysis tools'],
+          ],
+        },
+        content2: [
+          'The two approaches are complementary, not competing. NPS gives you a benchmark metric for board decks and investor updates. Sentiment analysis gives your product and support teams the granular, real-time signal they need to act.',
+        ],
+      },
+      {
+        heading: 'Common pitfalls and how to avoid them',
+        content: [
+          'Sentiment analysis is not magic. Teams that implement it without understanding its limitations end up with misleading data. Here are the most common pitfalls:',
+        ],
+        listItems: [
+          'Treating scores as absolute truth — A sentiment score of 0.7 positive does not mean the customer is exactly 70% happy. Treat scores as directional signals, not precise measurements. Trends over time are far more meaningful than individual scores.',
+          'Ignoring context length — Very short feedback ("ok" or "fine") is notoriously difficult to score. A one-word response could be genuine satisfaction or passive disappointment. Flag short-form feedback for human review rather than trusting the automated score.',
+          'Forgetting domain-specific language — In SaaS, words like "bug," "crash," and "downtime" carry strong negative signals. But "aggressive" might be positive when describing a pricing strategy, and "basic" could be negative when describing features. Ensure your system understands your domain.',
+          'Aggregating without segmenting — An overall positive sentiment score can mask serious problems in a specific customer segment, product area, or geographic region. Always segment your sentiment data by customer tier, feature area, and feedback channel.',
+          'Analyzing sentiment without analyzing content — Knowing that 40% of feedback is negative is useful. Knowing that 40% of feedback is negative and most of it mentions the onboarding flow is actionable. Pair sentiment analysis with topic detection for maximum value.',
+        ],
+      },
+      {
+        heading: 'Setting up sentiment analysis for your SaaS',
+        content: [
+          'You do not need a data science team to start using sentiment analysis. Here is a practical path from zero to useful insights:',
+        ],
+        listItems: [
+          'Step 1: Centralize your feedback — Before analyzing sentiment, route all feedback to one place. Support tickets, Slack messages, survey responses, app reviews, and email feedback should all flow into a single system.',
+          'Step 2: Start with what you have — Export your existing feedback (even a CSV from a spreadsheet) and run it through a sentiment analysis tool. The historical trends in your existing data are immediately valuable.',
+          'Step 3: Set up real-time analysis — Connect your feedback channels so new items are scored automatically as they arrive. The goal is zero manual tagging for sentiment.',
+          'Step 4: Build your dashboard — Create a view that shows sentiment trends over time, broken down by topic, customer segment, and feedback channel. This becomes your product health monitor.',
+          'Step 5: Create alerts — Set up notifications for sentiment drops. If negative sentiment from enterprise customers spikes by 20% in a week, your CS team should know immediately.',
+        ],
+      },
+      {
+        heading: 'What good looks like',
+        content: [
+          'When sentiment analysis is working well for a SaaS team, it shows up in several ways:',
+        ],
+        listItems: [
+          'The product team references sentiment data in sprint planning and roadmap discussions, not just feature request counts.',
+          'The CS team receives automatic alerts when high-value accounts show declining sentiment, enabling proactive outreach before churn.',
+          'Monthly board updates include a sentiment trend line alongside revenue and usage metrics.',
+          'Post-launch reviews include sentiment analysis of related feedback, providing a qualitative counterpart to adoption metrics.',
+          'Support managers use sentiment trends to identify training needs and process improvements.',
+        ],
+        content2: [
+          'The common thread is that sentiment data moves from a nice-to-have dashboard widget to an input that directly influences decisions.',
+        ],
+      },
+      {
+        heading: 'Getting started',
+        content: [
+          'Sentiment analysis is one of those capabilities that delivers value from day one. Unlike complex analytics that require weeks of setup and tuning, you can get meaningful sentiment insights from your existing feedback data within minutes.',
+          'Rereflect includes sentiment analysis as a core feature, not an add-on. Every piece of feedback — whether it arrives via Slack, Intercom, email, or CSV upload — is automatically scored for sentiment, categorized by topic, and checked for urgency signals. The dashboard shows you sentiment trends over time, broken down by the dimensions that matter to your team.',
+          'You can start with a free account and upload your existing feedback data to see it in action. No data science background required, no complex configuration. Visit app.rereflect.ca to try it.',
+        ],
+      },
+    ],
+  },
 ];
 
 export function getAllPosts(): BlogPost[] {
