@@ -118,7 +118,7 @@ import { conversationsAPI } from '@/lib/api/conversations';
 import ConversationsPage from '@/app/(dashboard)/conversations/page';
 import { ChatArea } from '@/components/copilot/ChatArea';
 
-const api = conversationsAPI as Record<string, ReturnType<typeof vi.fn>>;
+const api = conversationsAPI as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 

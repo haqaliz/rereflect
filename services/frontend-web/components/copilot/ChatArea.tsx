@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, Send, X } from 'lucide-react';
 import { conversationsAPI, type ConversationMessage, type CopilotUsageResponse } from '@/lib/api/conversations';
-import { useCopilotWebSocket } from '@/hooks/useCopilotWebSocket';
+import { useCopilotWebSocket, type CopilotMessage } from '@/hooks/useCopilotWebSocket';
 import { MessageBubble } from './MessageBubble';
 import { SCOPE_OPTIONS, type ContextScope } from './ContextScopeSelector';
 import { MentionAutocomplete, detectMention, isScopeOption, extractScope, type MentionMatch } from './MentionAutocomplete';
@@ -115,7 +115,7 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
   // WebSocket
   const { connected: _connected, streaming, streamingContent, statusText, reconnecting, error: wsError, sendQuery, stopGeneration, regenerate } =
     useCopilotWebSocket({
-      onMessage: useCallback((msg) => {
+      onMessage: useCallback((msg: CopilotMessage) => {
         if (msg.type === 'assistant_message') {
           setMessages((prev) => [
             ...prev,

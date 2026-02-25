@@ -134,11 +134,11 @@ describe('useCopilotWebSocket', () => {
       const { result } = renderHook(() => useCopilotWebSocket());
       act(() => { instances[0].open(); });
       act(() => {
-        result.current.sendQuery(42, 'How many feedbacks today?', 'all_data');
+        result.current.sendQuery('test-uuid-42', 'How many feedbacks today?', 'all_data');
       });
       const sent = JSON.parse(instances[0].sentMessages[0]);
       expect(sent.type).toBe('query');
-      expect(sent.conversation_id).toBe(42);
+      expect(sent.conversation_id).toBe('test-uuid-42');
       expect(sent.content).toBe('How many feedbacks today?');
       expect(sent.context_scope).toBe('all_data');
     });
@@ -147,7 +147,7 @@ describe('useCopilotWebSocket', () => {
       const { result } = renderHook(() => useCopilotWebSocket());
       // Don't call .open() — ws is still CONNECTING
       act(() => {
-        result.current.sendQuery(1, 'test', 'all_data');
+        result.current.sendQuery('test-uuid-1', 'test', 'all_data');
       });
       expect(instances[0].sentMessages.length).toBe(0);
     });

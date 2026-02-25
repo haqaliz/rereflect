@@ -96,7 +96,7 @@ const proUsageBudgetExceeded = {
 };
 
 const mockConversation = {
-  id: 1, organization_id: 1, created_by_user_id: 1, title: 'Test',
+  id: 1, public_id: 'test-uuid-1', organization_id: 1, created_by_user_id: 1, title: 'Test',
   folder_id: null, context_scope: 'all_data', is_active: true,
   created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
   messages: [],
@@ -171,7 +171,7 @@ describe('ChatArea — token budget gating', () => {
   it('shows token budget exceeded banner when budget is used up', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
     (conversationsAPI.getCopilotUsage as ReturnType<typeof vi.fn>).mockResolvedValue(proUsageBudgetExceeded);
-    render(<ChatArea conversationId={1} copilotUsage={proUsageBudgetExceeded} />);
+    render(<ChatArea conversationId={'test-uuid-1'} copilotUsage={proUsageBudgetExceeded} />);
     await waitFor(() => {
       expect(screen.getByTestId('token-budget-banner')).toBeInTheDocument();
     });
@@ -179,7 +179,7 @@ describe('ChatArea — token budget gating', () => {
 
   it('disables chat input when token budget is exceeded', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
-    render(<ChatArea conversationId={1} copilotUsage={proUsageBudgetExceeded} />);
+    render(<ChatArea conversationId={'test-uuid-1'} copilotUsage={proUsageBudgetExceeded} />);
     await waitFor(() => {
       expect(screen.getByTestId('chat-input')).toBeDisabled();
     });
@@ -187,7 +187,7 @@ describe('ChatArea — token budget gating', () => {
 
   it('does not show budget banner when usage is within budget', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
-    render(<ChatArea conversationId={1} copilotUsage={proUsage} />);
+    render(<ChatArea conversationId={'test-uuid-1'} copilotUsage={proUsage} />);
     await waitFor(() => {
       expect(screen.getByTestId('chat-input')).toBeInTheDocument();
     });
@@ -196,7 +196,7 @@ describe('ChatArea — token budget gating', () => {
 
   it('does not disable input when no budget cap (free tier or unlimited)', async () => {
     mockUseAuth.mockReturnValue({ user: freeUser });
-    render(<ChatArea conversationId={1} copilotUsage={freeUsageUnderLimit} />);
+    render(<ChatArea conversationId={'test-uuid-1'} copilotUsage={freeUsageUnderLimit} />);
     await waitFor(() => {
       expect(screen.getByTestId('chat-input')).not.toBeDisabled();
     });
