@@ -1,19 +1,25 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { BarChart3, Brain, TrendingUp, Zap, Shield, ArrowRight, Sparkles, Target, Bell, ChevronRight, Check, X, AlertTriangle, Workflow, Tags, Lightbulb, Rocket, Layers, Headphones } from 'lucide-react';
-import Link from 'next/link';
-import { Logo } from '@rereflect/ui';
+import { useEffect, useRef, useState } from 'react';
+import { TrendingUp, Zap, Shield, ArrowRight, Sparkles, ChevronRight, Check } from 'lucide-react';
+import { Navigation } from '@/components/landing/Navigation';
+import { Footer } from '@/components/landing/Footer';
+import { IntegrationBar } from '@/components/landing/IntegrationBar';
+import BentoFeatures from '@/components/landing/BentoFeatures';
+import HeroDemo from '@/components/landing/HeroDemo';
+import ImpactMetrics from '@/components/landing/ImpactMetrics';
+import FAQ from '@/components/landing/FAQ';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
 
 
 export default function Home() {
-  const heroRef = useRef<HTMLDivElement>(null);
-  const featuresRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const heroSectionRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   const pricingRef = useRef<HTMLDivElement>(null);
   const ctaRef = useRef<HTMLDivElement>(null);
+  const [isSticky, setIsSticky] = useState(false);
 
   // Smooth scroll handler
   const scrollToSection = (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => {
@@ -23,6 +29,18 @@ export default function Home() {
       element.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
+
+  // Sticky nav via IntersectionObserver on hero section
+  useEffect(() => {
+    const hero = heroSectionRef.current;
+    if (!hero) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsSticky(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(hero);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     // Lazy load GSAP for better initial page load performance
@@ -98,27 +116,6 @@ export default function Home() {
         }
       });
 
-      // Feature cards - set initial state then animate on scroll
-      gsap.set('.feature-card', { opacity: 1, y: 0 });
-
-      ScrollTrigger.batch('.feature-card', {
-        onEnter: (elements) => {
-          gsap.fromTo(elements,
-            { opacity: 0, y: 60 },
-            {
-              opacity: 1,
-              y: 0,
-              duration: 0.8,
-              stagger: 0.15,
-              ease: 'power3.out',
-              overwrite: true
-            }
-          );
-        },
-        start: 'top 90%',
-        once: true
-      });
-
       // Stats counter animation
       ScrollTrigger.create({
         trigger: statsRef.current,
@@ -130,6 +127,43 @@ export default function Home() {
             opacity: 0,
             duration: 0.7,
             stagger: 0.1,
+            ease: 'power3.out'
+          });
+        }
+      });
+
+      // Bento feature cards — stagger in on scroll
+      gsap.set('[data-testid="bento-section"] [data-size]', { opacity: 1, y: 0 });
+
+      ScrollTrigger.batch('[data-testid="bento-section"] [data-size]', {
+        onEnter: (elements) => {
+          gsap.fromTo(elements,
+            { opacity: 0, y: 60 },
+            {
+              opacity: 1,
+              y: 0,
+              duration: 0.8,
+              stagger: 0.12,
+              ease: 'power3.out',
+              overwrite: true
+            }
+          );
+        },
+        start: 'top 90%',
+        once: true
+      });
+
+      // Impact metrics — slide up on scroll
+      ScrollTrigger.create({
+        trigger: '[data-testid="impact-section"]',
+        start: 'top 80%',
+        once: true,
+        onEnter: () => {
+          gsap.from('[data-testid^="metric-card"]', {
+            y: 40,
+            opacity: 0,
+            duration: 0.7,
+            stagger: 0.15,
             ease: 'power3.out'
           });
         }
@@ -157,6 +191,21 @@ export default function Home() {
         }
       });
 
+      // FAQ — fade in on scroll
+      ScrollTrigger.create({
+        trigger: '[data-testid="faq-section"]',
+        start: 'top 80%',
+        once: true,
+        onEnter: () => {
+          gsap.from('[data-testid="faq-section"]', {
+            y: 30,
+            opacity: 0,
+            duration: 0.8,
+            ease: 'power3.out'
+          });
+        }
+      });
+
       // CTA section animation
       ScrollTrigger.create({
         trigger: ctaRef.current,
@@ -172,7 +221,7 @@ export default function Home() {
         }
       });
 
-      }, heroRef);
+      }, pageRef);
     })(); // End async IIFE
 
     return () => {
@@ -184,7 +233,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div ref={heroRef} className="min-h-screen bg-background overflow-hidden">
+    <div ref={pageRef} className="min-h-screen bg-background overflow-hidden">
       {/* Ambient Background */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,var(--accent)_0%,transparent_50%)] opacity-[0.08]" />
@@ -199,69 +248,11 @@ export default function Home() {
       </div>
 
       {/* Navigation */}
-      <nav className="relative z-50 px-6 py-5">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="relative">
-              <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full scale-150 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <Logo size="lg" className="relative" />
-            </div>
-            <span className="text-xl font-bold tracking-tight">
-              <span className="text-muted-foreground">Re</span>
-              <span className="text-foreground">reflect</span>
-            </span>
-          </Link>
-
-          <div className="hidden md:flex items-center gap-8">
-            <a
-              href="#features"
-              onClick={(e) => scrollToSection(e, 'features')}
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              Features
-            </a>
-            <a
-              href="#pricing"
-              onClick={(e) => scrollToSection(e, 'pricing')}
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              Pricing
-            </a>
-            <Link
-              href="/integrations"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Integrations
-            </Link>
-            <Link
-              href="/blog"
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Blog
-            </Link>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <a href={`${APP_URL}/login`}>
-              <button className="px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-                Sign In
-              </button>
-            </a>
-            <a href={`${APP_URL}/signup`}>
-              <button className="group relative px-5 py-2.5 text-sm font-semibold text-primary-foreground rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02]">
-                <div className="absolute inset-0 bg-gradient-to-r from-primary via-chart-5 to-primary bg-[length:200%_100%] animate-[shimmer_3s_ease-in-out_infinite]" />
-                <span className="relative flex items-center gap-1.5">
-                  Get Started
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                </span>
-              </button>
-            </a>
-          </div>
-        </div>
-      </nav>
+      <Navigation isSticky={isSticky} onScrollToSection={scrollToSection} />
+      {isSticky && <div className="h-[73px]" aria-hidden="true" />}
 
       {/* Hero Section */}
-      <section className="relative z-10 pt-12 pb-24 md:pt-20 md:pb-32">
+      <section ref={heroSectionRef} className="relative z-10 pt-12 pb-24 md:pt-20 md:pb-32">
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid lg:grid-cols-2 gap-12 lg:gap-8 items-center">
             {/* Left Content */}
@@ -294,7 +285,7 @@ export default function Home() {
                   </button>
                 </a>
                 <a href={`${APP_URL}/login`}>
-                  <button className="hero-cta group px-8 py-4 text-base font-semibold text-foreground bg-card border-2 border-border rounded-2xl transition-all duration-300 hover:border-primary/50 hover:shadow-lg hover:scale-[1.02]">
+                  <button className="group px-8 py-4 text-base font-semibold text-foreground bg-transparent border-2 border-foreground/20 rounded-2xl transition-all duration-300 hover:border-primary/50 hover:bg-card hover:shadow-lg hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
                       View Demo
                       <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
@@ -325,100 +316,10 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Right Visual */}
+            {/* Right Visual — Animated Product Demo */}
             <div className="hero-visual relative lg:pl-8">
               <div className="hero-visual-float relative">
-                {/* Main Dashboard Preview */}
-                <div className="relative bg-card rounded-3xl border border-border shadow-2xl shadow-primary/10 p-6 overflow-hidden">
-                  {/* Glow effect */}
-                  <div className="absolute -top-20 -right-20 w-40 h-40 bg-primary/30 rounded-full blur-3xl" />
-                  <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-accent/20 rounded-full blur-3xl" />
-
-                  {/* Header */}
-                  <div className="relative flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                      <Logo size="sm" />
-                      <span className="font-semibold text-foreground">Dashboard</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-chart-3" />
-                      <div className="w-3 h-3 rounded-full bg-accent" />
-                      <div className="w-3 h-3 rounded-full bg-primary" />
-                    </div>
-                  </div>
-
-                  {/* Stats Grid */}
-                  <div className="relative grid grid-cols-3 gap-3 mb-6">
-                    <div className="bg-background/50 rounded-xl p-4 border border-border/50">
-                      <div className="text-2xl font-bold text-foreground">2,847</div>
-                      <div className="text-xs text-muted-foreground">Total Feedback</div>
-                      <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full w-3/4 bg-primary rounded-full" />
-                      </div>
-                    </div>
-                    <div className="bg-background/50 rounded-xl p-4 border border-border/50">
-                      <div className="text-2xl font-bold text-success-text">78%</div>
-                      <div className="text-xs text-muted-foreground">Positive</div>
-                      <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full w-[78%] bg-success-border rounded-full" />
-                      </div>
-                    </div>
-                    <div className="bg-background/50 rounded-xl p-4 border border-border/50">
-                      <div className="text-2xl font-bold text-warning-text">23</div>
-                      <div className="text-xs text-muted-foreground">Urgent</div>
-                      <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full w-1/4 bg-warning-border rounded-full" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Sample Feedback Items */}
-                  <div className="relative space-y-3">
-                    <div className="flex items-start gap-3 p-3 rounded-xl bg-success-bg/50 border border-success-border/30">
-                      <div className="w-8 h-8 rounded-lg bg-success-bg flex items-center justify-center shrink-0">
-                        <span className="text-success-text text-sm">+</span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-foreground truncate">&quot;Love the new dashboard!&quot;</div>
-                        <div className="text-xs text-muted-foreground">Sentiment: Positive</div>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3 p-3 rounded-xl bg-warning-bg/50 border border-warning-border/30">
-                      <div className="w-8 h-8 rounded-lg bg-warning-bg flex items-center justify-center shrink-0">
-                        <Bell className="w-4 h-4 text-warning-text" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-foreground truncate">&quot;Export feature needs work&quot;</div>
-                        <div className="text-xs text-muted-foreground">Pain Point Detected</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Floating Card - Feature Request */}
-                <div className="absolute -right-4 top-1/4 bg-card rounded-2xl border border-border shadow-xl p-4 w-48 transform rotate-3 hover:rotate-0 transition-transform duration-300">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-6 h-6 rounded-lg bg-accent/20 flex items-center justify-center">
-                      <Target className="w-3.5 h-3.5 text-accent-foreground" />
-                    </div>
-                    <span className="text-xs font-semibold text-foreground">Feature Request</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">Dark mode support requested by 47 users</div>
-                </div>
-
-                {/* Floating Card - AI Analysis */}
-                <div className="absolute -left-4 bottom-1/4 bg-card rounded-2xl border border-border shadow-xl p-4 w-44 transform -rotate-3 hover:rotate-0 transition-transform duration-300">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-6 h-6 rounded-lg bg-primary/20 flex items-center justify-center">
-                      <Brain className="w-3.5 h-3.5 text-primary" />
-                    </div>
-                    <span className="text-xs font-semibold text-foreground">AI Analysis</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">Processing 156 new items...</div>
-                  <div className="mt-2 h-1 rounded-full bg-muted overflow-hidden">
-                    <div className="h-full w-2/3 bg-gradient-to-r from-primary to-accent rounded-full animate-pulse" />
-                  </div>
-                </div>
+                <HeroDemo />
               </div>
             </div>
           </div>
@@ -449,179 +350,16 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Features Section */}
-      <section ref={featuresRef} id="features" className="relative z-10 py-24 md:py-32">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
-              <Zap className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">Powerful Features</span>
-            </div>
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              Analyze feedback.
-              <span className="block text-primary">Then act on it.</span>
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              From AI-powered churn detection to workflow automation, close the loop on every piece of feedback — from insight to shipped feature.
-            </p>
-          </div>
+      {/* Integration Logo Bar */}
+      <IntegrationBar />
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Feature Card 1 - AI Churn Detection */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-1/10 hover:border-chart-1/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-chart-1/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-1 to-chart-2 flex items-center justify-center mb-6 shadow-lg shadow-chart-1/25 group-hover:scale-110 transition-transform duration-300">
-                  <AlertTriangle className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">AI Churn Detection</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Catch at-risk customers before they leave. Our AI scans every piece of feedback for frustration patterns, unresolved complaints, and churn signals — then alerts your team in real-time.
-                </p>
-              </div>
-            </div>
+      {/* Features — Bento Grid */}
+      <div id="features">
+        <BentoFeatures />
+      </div>
 
-            {/* Feature Card 2 - Workflow Automation */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-4/10 hover:border-chart-4/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-chart-4/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-4 to-chart-5 flex items-center justify-center mb-6 shadow-lg shadow-chart-4/25 group-hover:scale-110 transition-transform duration-300">
-                  <Workflow className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Workflow Automation</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Route feedback to the right person instantly. Set category-based assignment rules, track status from &apos;New&apos; to &apos;Resolved&apos;, and close the loop with internal notes and timeline logs.
-                </p>
-              </div>
-            </div>
-
-            {/* Feature Card 3 - Smart Categorization */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-3/10 hover:border-chart-3/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-chart-3/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-3 to-chart-4 flex items-center justify-center mb-6 shadow-lg shadow-chart-3/25 group-hover:scale-110 transition-transform duration-300">
-                  <Tags className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Smart Categorization</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Let AI tag feedback automatically. Define custom categories (Billing, Performance, UX) and watch our engine sort thousands of items in seconds — no manual tagging required.
-                </p>
-              </div>
-            </div>
-
-            {/* Feature Card 4 - Weekly AI Insights */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-chart-5/10 hover:border-chart-5/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-chart-5/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-chart-5 to-accent flex items-center justify-center mb-6 shadow-lg shadow-chart-5/25 group-hover:scale-110 transition-transform duration-300">
-                  <Lightbulb className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Weekly AI Insights</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Get a Friday morning email with what matters: sentiment spikes, emerging pain points, top feature requests, and AI-generated action items you can act on Monday.
-                </p>
-              </div>
-            </div>
-
-            {/* Feature Card 5 - Real-Time Notifications */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-destructive/10 hover:border-destructive/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-destructive to-chart-8 flex items-center justify-center mb-6 shadow-lg shadow-destructive/25 group-hover:scale-110 transition-transform duration-300">
-                  <Bell className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Real-Time Notifications</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Stay ahead of fires. Get Slack alerts when urgent feedback arrives, volume spikes happen, or sentiment drops — with smart deduplication to avoid alert fatigue.
-                </p>
-              </div>
-            </div>
-
-            {/* Feature Card 6 - Dashboard Sharing */}
-            <div className="feature-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-500 hover:shadow-xl hover:shadow-primary/10 hover:border-primary/30 hover:-translate-y-1">
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 rounded-3xl" />
-              <div className="relative">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-chart-5 flex items-center justify-center mb-6 shadow-lg shadow-primary/25 group-hover:scale-110 transition-transform duration-300">
-                  <BarChart3 className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="text-xl font-bold text-foreground mb-3">Dashboard Sharing</h3>
-                <p className="text-muted-foreground leading-relaxed">
-                  Share insights with stakeholders. Generate public links to your analytics dashboard (with optional password protection) and export reports as PDF with one click.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Use Cases Section */}
-      <section className="relative z-10 py-24 md:py-32 border-y border-border bg-card/30">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
-              <Brain className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">Real Impact</span>
-            </div>
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              How teams use Rereflect
-              <span className="block text-primary">to ship faster</span>
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              From startup founders to enterprise product teams, here&apos;s how Rereflect helps close the feedback loop.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {/* Use Case 1 - SaaS Startup Founder */}
-            <div className="group relative bg-card rounded-3xl border-l-4 border-l-primary p-8 transition-all duration-300 hover:shadow-xl hover:shadow-primary/10">
-              <div className="flex items-start gap-4 mb-4">
-                <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300">
-                  <Rocket className="w-6 h-6 text-primary" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-foreground">SaaS Startup Founder</h3>
-                  <p className="text-sm text-muted-foreground">Early-stage, 5-person team</p>
-                </div>
-              </div>
-              <blockquote className="text-muted-foreground italic leading-relaxed border-l-2 border-border pl-4">
-                &ldquo;We used to manually read every support ticket. Now Rereflect auto-categorizes feedback, flags churn risks, and routes urgent items to our eng team — saving us 10+ hours/week.&rdquo;
-              </blockquote>
-            </div>
-
-            {/* Use Case 2 - Product Manager */}
-            <div className="group relative bg-card rounded-3xl border-l-4 border-l-chart-5 p-8 transition-all duration-300 hover:shadow-xl hover:shadow-chart-5/10">
-              <div className="flex items-start gap-4 mb-4">
-                <div className="w-12 h-12 rounded-xl bg-chart-5/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300">
-                  <Layers className="w-6 h-6 text-chart-5" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-foreground">Product Manager</h3>
-                  <p className="text-sm text-muted-foreground">B2B SaaS, 50K users</p>
-                </div>
-              </div>
-              <blockquote className="text-muted-foreground italic leading-relaxed border-l-2 border-border pl-4">
-                &ldquo;Instead of guessing what to build next, I check Rereflect&apos;s AI-generated insights every Friday. It surfaces the top 3 feature requests and tells me which ones reduce churn the most.&rdquo;
-              </blockquote>
-            </div>
-
-            {/* Use Case 3 - Customer Success Lead */}
-            <div className="group relative bg-card rounded-3xl border-l-4 border-l-accent p-8 transition-all duration-300 hover:shadow-xl hover:shadow-accent/10">
-              <div className="flex items-start gap-4 mb-4">
-                <div className="w-12 h-12 rounded-xl bg-accent/10 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform duration-300">
-                  <Headphones className="w-6 h-6 text-accent" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-foreground">Customer Success Lead</h3>
-                  <p className="text-sm text-muted-foreground">Enterprise, 200+ seats</p>
-                </div>
-              </div>
-              <blockquote className="text-muted-foreground italic leading-relaxed border-l-2 border-border pl-4">
-                &ldquo;Our team gets Slack alerts the moment a high-value customer leaves negative feedback. We follow up within an hour and have cut churn by 40% in 3 months.&rdquo;
-              </blockquote>
-            </div>
-          </div>
-        </div>
-      </section>
+      {/* Impact Metrics — Before vs After */}
+      <ImpactMetrics />
 
       {/* Pricing Section */}
       <section ref={pricingRef} id="pricing" className="relative z-10 py-24 md:py-32">
@@ -802,10 +540,13 @@ export default function Home() {
         </div>
       </section>
 
+      {/* FAQ */}
+      <FAQ />
+
       {/* CTA Section */}
       <section ref={ctaRef} className="relative z-10 py-24 md:py-32">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="cta-content relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-primary via-chart-5 to-accent p-12 md:p-16 lg:p-20">
+          <div className="cta-content relative overflow-hidden rounded-[2.5rem] bg-gradient-to-br from-primary via-chart-5 to-accent p-8 sm:p-12 md:p-16 lg:p-20">
             {/* Background Pattern */}
             <div className="absolute inset-0 opacity-10">
               <div className="absolute inset-0" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'0.4\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")' }} />
@@ -838,92 +579,7 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-border bg-card/50 py-16">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-3 gap-12 mb-12">
-            <div className="md:col-span-2">
-              <Link href="/" className="flex items-center gap-3 mb-4">
-                <Logo size="lg" />
-                <span className="text-xl font-bold">
-                  <span className="text-muted-foreground">Re</span>
-                  <span className="text-foreground">reflect</span>
-                </span>
-              </Link>
-              <p className="text-muted-foreground max-w-sm mb-6">
-                Transform overwhelming customer feedback into clear, actionable insights with AI-powered analysis.
-              </p>
-              <div className="flex flex-col gap-4">
-                <a
-                  href="https://twitter.com/rereflectapp"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors w-fit"
-                >
-                  <X className="w-5 h-5" />
-                  <span className="text-sm">Follow us on X</span>
-                </a>
-                <a
-                  href="https://www.producthunt.com/products/rereflect?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-rereflect"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img
-                    alt="Rereflect - AI-powered customer feedback analysis for SaaS teams | Product Hunt"
-                    width="250"
-                    height="54"
-                    src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1073104&theme=dark&t=1770240628252"
-                  />
-                </a>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold text-foreground mb-4">Product</h4>
-              <ul className="space-y-3 text-muted-foreground">
-                <li>
-                  <a
-                    href="#features"
-                    onClick={(e) => scrollToSection(e, 'features')}
-                    className="hover:text-foreground transition-colors cursor-pointer"
-                  >
-                    Features
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#pricing"
-                    onClick={(e) => scrollToSection(e, 'pricing')}
-                    className="hover:text-foreground transition-colors cursor-pointer"
-                  >
-                    Pricing
-                  </a>
-                </li>
-                <li>
-                  <Link href="/integrations" className="hover:text-foreground transition-colors">
-                    Integrations
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/blog" className="hover:text-foreground transition-colors">
-                    Blog
-                  </Link>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Footer Bottom */}
-          <div className="pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
-            <p>2025 Rereflect. All rights reserved.</p>
-            <div className="flex gap-6">
-              <Link href="/changelog" className="hover:text-foreground transition-colors">Changelog</Link>
-              <Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link>
-              <Link href="/blog" className="hover:text-foreground transition-colors">Blog</Link>
-              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
-              <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <Footer onScrollToSection={scrollToSection} />
 
       {/* Custom Styles */}
       <style jsx>{`
