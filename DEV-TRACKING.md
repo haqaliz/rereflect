@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-25
+**Last Updated**: 2026-03-09
 
 ---
 
@@ -143,6 +143,7 @@
 
 - [x] Intercom API (pull support conversations)
 - [x] Email forwarding (receive feedback via email)
+- [x] Linear integration (OAuth, webhooks, feedback sources, issue management)
 - [ ] Zendesk API (pull support tickets)
 - [ ] HubSpot integration (sync with CRM)
 
@@ -169,7 +170,7 @@
 
 ### Workflow Automation
 - [ ] JIRA integration
-- [ ] Linear integration
+- [x] Linear integration
 - [ ] Asana integration
 - [ ] Custom webhooks (trigger on events)
 - [ ] Auto-routing rules
@@ -235,7 +236,7 @@
 
 ---
 
-## Recent Completions (Feb 2026)
+## Recent Completions (Feb–Mar 2026)
 
 - **Predictive Analytics** (4 phases, PRD-PREDICTIVE-ANALYTICS.md):
   - Phase 1 — Enhanced Churn Scoring: `customer_email` column + index on feedback_items, email extraction from source_metadata + CSV import + all adapters, 9-factor churn risk scoring (up from 4), backfill script for existing data
@@ -431,6 +432,23 @@
   - Frontend: alert preferences row with dual threshold inputs, notification list/bell/detail with red (drop) / green (recovery) styling, score change display, risk badges, component breakdown
   - Plan gated to Pro+ (reuses `customer_health_scores` feature)
   - 90 TDD tests across 5 test files (backend alerts, preferences API, worker dispatch, frontend preferences UI, notification display)
+- **Linear Integration** (full-stack, Mar 2026):
+  - OAuth flow: connect + callback + disconnect endpoints with state management
+  - Linear API client: organizations, teams, issues, comments, labels, statuses, webhooks
+  - Webhook receiver: signature verification, issue/comment event processing
+  - Team mapping + status mapping configuration (per-org)
+  - Issue templates with variable substitution (sentiment, category, source, etc.)
+  - Test connection endpoint (validates access token against Linear API)
+  - Feedback source type: `linear` with triggers (all_messages, labels, keywords)
+  - Frontend: Linear settings page (header with test/delete, status toggle, mapping tabs, template editor, sticky save bar)
+  - Frontend: CreateIssueDialog, LinkedIssuesCard, LinearIcon components
+  - Frontend: Linear in feedback sources wizard with OAuth check
+  - Frontend: "Requires OAuth" badge on Linear across all feedback source pages
+  - Landing page: Linear integration detail page, added to integrations overview + IntegrationBar
+  - Plan gating: `linear_integration` feature on Pro+
+  - Alembic migration: linear_integration tables (linear_integrations, linear_team_mappings, linear_status_mappings, linear_issue_templates)
+  - Backend tests: 7 test files (client, config, issues, models, OAuth, plan gating, webhook)
+  - Frontend tests: 4 test files (CreateIssueButton, CreateIssueDialog, LinearSettings, LinkedIssuesCard)
 
 ---
 
@@ -481,6 +499,8 @@
 - Copilot architecture: rule-based intent classifier + LLM fallback, cosine similarity template matching (0.85 threshold), schema whitelist, read-only SQL with 3-join max/5s timeout
 - Copilot conversations: ChatGPT-style with folder organization, persistent history, auto-collapsing sidebar, org-wide shared conversations, UUID public_id for shareable URLs
 - Copilot plan gating: Free=10 queries/day + 50K tokens/mo, Pro=unlimited + 500K tokens, Business=5M tokens, with upgrade CTAs and usage display in AI Settings
+- Linear integration: own OAuth system (separate from generic Integration model), dedicated tables (not reusing integrations table), Pro+ plan gating, webhook signature verification, team/status mappings for org-level config
+- Linear feedback sources: `requires_integration=false` in backend (uses its own OAuth), frontend adds `|| type.type === 'linear'` for "Requires OAuth" badge display
 
 ---
 

@@ -4,7 +4,7 @@
 **Cadence**: 2 posts per month (1st and 15th)
 **Goal**: Mix of SEO, thought leadership, comparisons, and conversion content
 **Audiences**: SaaS founders/CEOs, Product Managers, CS/Support teams
-**Last Updated**: 2026-02-25
+**Last Updated**: 2026-03-09
 
 ---
 
@@ -14,6 +14,7 @@
 |---|-------|------|------|------|-----------------|----------------|
 | 1 | How to Organize Customer Feedback (2026 Guide) | `how-to-organize-customer-feedback` | Feb 14 | SEO | All | "organize customer feedback" |
 | 2 | Customer Feedback Analysis: Manual vs AI-Powered | `customer-feedback-analysis-manual-vs-ai` | Feb 14 | SEO | PMs, Founders | "customer feedback analysis" |
+| 3 | Sentiment Analysis for SaaS: A Beginner's Guide | `sentiment-analysis-saas-beginners-guide` | Mar 1 | SEO | PMs, CS | "sentiment analysis SaaS" |
 
 ---
 
@@ -23,7 +24,6 @@
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 3 | Sentiment Analysis for SaaS: A Beginner's Guide | `sentiment-analysis-saas-beginners-guide` | Mar 1 | SEO | PMs, CS | "sentiment analysis SaaS" | Written |
 | 4 | Rereflect vs Productboard: Which Is Right for Your Team? | `rereflect-vs-productboard` | Mar 15 | Comparison | PMs, Founders | "Productboard alternative" | Written |
 
 ### April 2026
