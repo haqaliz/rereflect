@@ -354,6 +354,442 @@ const posts: BlogPost[] = [
       },
     ],
   },
+  {
+    slug: 'rereflect-vs-productboard',
+    title: 'Rereflect vs Productboard: Which Is Right for Your Team?',
+    excerpt: 'Productboard is a powerful product management platform. Rereflect is an AI-powered feedback analysis tool. They solve related but different problems. This comparison helps you decide which fits your team.',
+    date: '2026-03-15',
+    readTime: '10 min read',
+    author: 'Rereflect Team',
+    tags: ['Comparison', 'Productboard', 'Product Management', 'Feedback Analysis'],
+    seoTitle: 'Rereflect vs Productboard: Honest Comparison for SaaS Teams (2026) | Rereflect',
+    seoDescription: 'Compare Rereflect and Productboard for customer feedback management. Feature-by-feature breakdown of pricing, AI analysis, integrations, and use cases to help you choose.',
+    sections: [
+      {
+        heading: 'Why people compare these two tools',
+        content: [
+          'If you have searched for "Productboard alternative," you are probably experiencing one of two things: Productboard does more than you need and costs more than you want, or you want deeper feedback analysis than what Productboard provides out of the box.',
+          'Rereflect and Productboard both deal with customer feedback, but they approach the problem from different angles. Productboard is a product management platform that includes feedback collection as one of many features. Rereflect is a feedback analysis tool built specifically to turn raw feedback into categorized, scored, and prioritized insights using AI.',
+          'This comparison covers both tools honestly — including where each one is the better choice.',
+        ],
+      },
+      {
+        heading: 'Productboard overview',
+        content: [
+          'Productboard is an established product management platform used by companies like Microsoft, Zendesk, and UiPath. It was founded in 2014 and has raised over $125M in funding.',
+          'At its core, Productboard helps product teams collect feedback, prioritize features, build roadmaps, and communicate product plans. It is a full-lifecycle product management tool, not just a feedback tool.',
+          'Key capabilities include:',
+        ],
+        listItems: [
+          'Feedback collection — A portal where customers and internal teams can submit feature requests and feedback. Integrates with Slack, Intercom, Zendesk, and email.',
+          'Feature prioritization — A scoring system that lets PMs weigh feedback against strategic objectives, effort estimates, and business impact.',
+          'Roadmap visualization — Multiple views (timeline, Kanban, release-based) for communicating product plans to different audiences.',
+          'Customer insights — Links feedback to specific customer segments and product areas.',
+          'Integrations — Connects to Jira, Azure DevOps, Trello, GitHub, and other dev tools for handoff.',
+        ],
+        content2: [
+          'Productboard is strongest when a product team needs a unified system for the full feedback-to-feature lifecycle: collect requests, score and prioritize them, plan releases, and communicate the roadmap.',
+        ],
+      },
+      {
+        heading: 'Rereflect overview',
+        content: [
+          'Rereflect is an AI-powered feedback analysis platform built for SaaS teams that need to understand what their customers are telling them — fast.',
+          'Rather than managing the full product lifecycle, Rereflect focuses on one thing: turning unstructured feedback into structured, actionable insights. It does this automatically, using AI to handle what most teams do manually.',
+          'Key capabilities include:',
+        ],
+        listItems: [
+          'AI sentiment analysis — Every piece of feedback is automatically scored as positive, neutral, or negative with a confidence score.',
+          'Pain point detection — AI identifies and categorizes specific problems customers mention, grouping similar complaints even when they use different words.',
+          'Feature request extraction — Requests are pulled out and prioritized based on frequency and urgency of the surrounding context.',
+          'Churn risk detection — Feedback that signals cancellation risk (negative language, competitor mentions, frustration patterns) is flagged immediately with a 9-factor scoring system.',
+          'AI Copilot — Ask natural language questions about your feedback data. "What are enterprise customers most frustrated about this month?" returns an instant, data-backed answer.',
+          'Customer 360 — Health scores, churn prediction, and proactive alerts for every customer across all feedback channels.',
+          'Multi-model AI — Bring your own API keys (OpenAI, Anthropic, Google) and choose the model that fits your needs and budget.',
+        ],
+        content2: [
+          'Rereflect is strongest when a team needs fast, AI-driven analysis of incoming feedback without building spreadsheets, writing SQL, or manually tagging every item.',
+        ],
+      },
+      {
+        heading: 'Feature comparison',
+        content: [
+          'Here is how the two tools compare across the dimensions that matter most for feedback management:',
+        ],
+        table: {
+          headers: ['Feature', 'Productboard', 'Rereflect'],
+          rows: [
+            ['Primary purpose', 'Product management platform', 'AI feedback analysis'],
+            ['AI sentiment analysis', 'Basic (manual + limited auto-tagging)', 'Core feature (automatic, every item)'],
+            ['Pain point detection', 'Manual tagging by PMs', 'Automatic AI categorization'],
+            ['Churn risk detection', 'Not included', '9-factor scoring with alerts'],
+            ['Feature prioritization', 'Advanced (drivers, scoring, objectives)', 'Frequency + urgency based'],
+            ['Roadmap management', 'Advanced (timeline, Kanban, portal)', 'Not included'],
+            ['AI Copilot', 'Not included', 'Natural language queries over data'],
+            ['Customer health scores', 'Not included', 'Per-customer with trend tracking'],
+            ['Feedback sources', 'Portal, Slack, Intercom, Zendesk, email', 'Slack, Intercom, email, CSV'],
+            ['Workflow management', 'Jira/Linear handoff', 'Built-in (status, assignment, notes)'],
+            ['Team collaboration', 'Comments, mentions, sharing', 'Notes, assignment, shared views'],
+            ['Setup time', '1-2 weeks (full configuration)', '15 minutes (connect + import)'],
+            ['Self-serve analytics', 'Reports and dashboards', 'Trends, exports, PDF, shared links'],
+          ],
+        },
+      },
+      {
+        heading: 'Pricing comparison',
+        content: [
+          'Pricing is one of the biggest differences between the two tools:',
+        ],
+        table: {
+          headers: ['Plan', 'Productboard', 'Rereflect'],
+          rows: [
+            ['Free tier', 'No free plan (trial only)', 'Free forever (250 feedback/mo, 2 seats)'],
+            ['Starter / Pro', '$20/maker/mo (Essentials)', '$29/mo (2,500 feedback/mo, 10 seats)'],
+            ['Pro / Business', '$80/maker/mo (Pro)', '$99/mo (25,000 feedback/mo, 25 seats)'],
+            ['Enterprise', 'Custom pricing', 'Custom pricing'],
+            ['Pricing model', 'Per-maker (only PMs count)', 'Per-organization (all members included)'],
+          ],
+        },
+        content2: [
+          'The pricing models are fundamentally different. Productboard charges per "maker" — the product managers who actively use the system. Viewers are free. Rereflect charges per organization with all seats included in the plan.',
+          'For a team of 3 PMs, Productboard Essentials costs $60/month. Rereflect Pro at $29/month covers the entire team of up to 10 people. For larger teams with 5+ PMs, the gap widens significantly.',
+          'The key trade-off: Productboard includes roadmap management and feature prioritization tools that Rereflect does not offer. If you need those capabilities, the higher price includes genuine additional value.',
+        ],
+      },
+      {
+        heading: 'When to choose Productboard',
+        content: [
+          'Productboard is the better choice in these scenarios:',
+        ],
+        listItems: [
+          'You need a full product management platform — If your team needs feature prioritization frameworks, roadmap visualization, and stakeholder communication tools alongside feedback management, Productboard delivers all of this in one system.',
+          'You have a mature product organization — Teams with dedicated PMs, established prioritization processes, and executive stakeholders who need roadmap views will get the most out of Productboard\'s breadth.',
+          'You need Jira or Linear integration for handoff — If your development workflow depends on pushing prioritized features directly into sprint planning tools, Productboard\'s two-way integrations are mature and battle-tested.',
+          'Feedback collection is your primary need — If you want a customer-facing portal where users submit and vote on features, Productboard\'s portal is purpose-built for this use case.',
+        ],
+      },
+      {
+        heading: 'When to choose Rereflect',
+        content: [
+          'Rereflect is the better choice in these scenarios:',
+        ],
+        listItems: [
+          'You need AI-powered analysis, not just collection — If your bottleneck is understanding what feedback means (not just storing it), Rereflect\'s automatic sentiment analysis, pain point detection, and churn risk scoring solve this directly.',
+          'You are drowning in feedback volume — When you have hundreds of items per week coming from multiple channels, manual tagging breaks down. Rereflect processes everything automatically with consistent AI analysis.',
+          'Churn prevention is a priority — Rereflect\'s 9-factor churn risk scoring, customer health dashboard, and proactive alerts are built specifically for teams that need to catch at-risk customers before they leave.',
+          'You want fast time-to-value — Rereflect takes 15 minutes to set up: connect Slack or upload a CSV, and you immediately see sentiment scores, pain point categories, and urgency flags. No configuration sprint required.',
+          'Budget is a constraint — At $29/month for a team of 10 versus $80+/maker/month, Rereflect is significantly more affordable for early-stage teams that need feedback intelligence without the full product management suite.',
+          'You want to ask questions about your data — Rereflect\'s AI Copilot lets you query your feedback with natural language. "What are the top 3 complaints from customers who mentioned pricing?" gets an instant answer without building a report.',
+        ],
+      },
+      {
+        heading: 'Can you use both?',
+        content: [
+          'Yes, and some teams do. The combination works like this: Rereflect handles the analysis layer — ingesting feedback from all channels, scoring sentiment, detecting pain points, and flagging churn risk. The insights from Rereflect then inform prioritization decisions in Productboard.',
+          'This makes sense for teams that already use Productboard for roadmap management but find its feedback analysis capabilities insufficient for their volume or complexity.',
+          'However, for most teams — especially those under 50 employees — using both tools adds unnecessary complexity. Choose the one that solves your primary problem: product lifecycle management (Productboard) or feedback intelligence (Rereflect).',
+        ],
+      },
+      {
+        heading: 'Verdict',
+        content: [
+          'Productboard and Rereflect are not direct competitors — they solve related but different problems.',
+          'Productboard is a comprehensive product management platform. It excels at the full lifecycle from feedback collection through feature prioritization to roadmap communication. It is the right choice for teams that need all of these capabilities in one system and have the budget and organizational maturity to use them.',
+          'Rereflect is a focused feedback intelligence tool. It excels at turning raw, unstructured feedback into categorized, scored, and actionable insights using AI. It is the right choice for teams whose primary challenge is understanding what their customers are saying — especially at scale.',
+          'If you are reading this because you searched for "Productboard alternative," ask yourself what specifically is not working. If the answer is "it is too expensive for what I use" or "I need better feedback analysis," Rereflect is worth trying. If the answer is "I need better roadmap tools," you may want a different product management platform rather than a feedback analysis tool.',
+          'You can try Rereflect free at app.rereflect.ca — upload your existing feedback data and see AI-powered analysis on your actual data within minutes.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'how-to-prioritize-features-customer-feedback',
+    title: 'How to Prioritize Features Using Customer Feedback',
+    excerpt: 'Feature requests pile up fast. Without a system to prioritize them using actual customer data, product teams end up building for the loudest voice instead of the biggest impact. Here is a practical framework.',
+    date: '2026-04-01',
+    readTime: '9 min read',
+    author: 'Rereflect Team',
+    tags: ['Product Management', 'Feature Prioritization', 'Customer Feedback', 'SaaS'],
+    seoTitle: 'How to Prioritize Features Using Customer Feedback (2026) | Rereflect',
+    seoDescription: 'Learn how to prioritize feature requests using customer feedback data. Practical frameworks for SaaS product teams to build what matters most, backed by real user signals.',
+    sections: [
+      {
+        heading: 'The feature request problem',
+        content: [
+          'Every SaaS product team knows the feeling. Your backlog has 200 feature requests. Sales wants the enterprise SSO integration. Support is pushing for better onboarding. Three different customers emailed this week asking for CSV export. And your CEO just came back from a conference convinced you need to build an AI chatbot.',
+          'The default response is to prioritize based on whoever argues most persuasively in the next planning meeting. This approach has a name: HiPPO — the Highest Paid Person\'s Opinion. It feels productive because decisions get made, but it systematically biases your roadmap toward internal assumptions rather than customer reality.',
+          'The alternative is to let customer feedback data drive prioritization. Not as the only input — business strategy, technical feasibility, and resource constraints all matter — but as the foundation that grounds your decisions in what customers actually need.',
+        ],
+      },
+      {
+        heading: 'Why intuition fails at scale',
+        content: [
+          'When you have 20 customers, intuition works. You know each customer personally, you remember their pain points, and you can hold the full picture in your head. Prioritization happens naturally because the data set is small enough for a human brain to process.',
+          'Intuition breaks at three thresholds:',
+        ],
+        listItems: [
+          'Volume threshold (100+ feedback items/month) — You can no longer read everything. Items get skimmed, and the ones that stick in memory are the most emotionally charged, not necessarily the most important.',
+          'Diversity threshold (3+ feedback channels) — When feedback arrives via Slack, email, support tickets, and sales calls, no single person sees the full picture. Each team sees their slice and advocates for their customers.',
+          'Recency threshold (6+ months of data) — Human memory over-weights recent feedback. A pain point mentioned by 50 customers over six months loses to a flashy request mentioned by 3 customers this week.',
+        ],
+        content2: [
+          'At each threshold, the gap between what you think customers want and what they actually need widens. Data-driven prioritization closes that gap.',
+        ],
+      },
+      {
+        heading: 'A practical prioritization framework',
+        content: [
+          'The best prioritization frameworks are simple enough that your team will actually use them. Here is a four-factor model that works well for SaaS teams processing customer feedback:',
+        ],
+        listItems: [
+          'Frequency — How many unique customers have requested or mentioned this? A feature requested by 40 customers carries more weight than one requested by 2, regardless of how passionately those 2 customers argue for it.',
+          'Sentiment intensity — Are people mildly interested or actively frustrated by the absence of this feature? Feedback with strong negative sentiment ("this is a dealbreaker," "considering switching") signals higher urgency than neutral requests ("would be nice to have").',
+          'Customer segment — Which customers are asking? Requests from your highest-value segment (by revenue, growth potential, or strategic importance) should carry more weight than requests from segments you are not actively targeting.',
+          'Churn correlation — Is this request associated with customers who are at risk of leaving? If customers who mention this feature also show declining sentiment or reduced usage, addressing it has retention value beyond the feature itself.',
+        ],
+        content2: [
+          'Each factor can be scored on a 1-5 scale, giving you a composite priority score. The exact weights depend on your business — a company focused on reducing churn will weight sentiment intensity and churn correlation higher, while a company focused on expansion will weight customer segment higher.',
+        ],
+      },
+      {
+        heading: 'Step-by-step: from feedback to roadmap',
+        content: [
+          'Here is how to turn this framework into a repeatable process your team runs monthly:',
+        ],
+        listItems: [
+          'Step 1: Aggregate all feedback — Pull feedback from every channel into one system. Support tickets, Slack messages, survey responses, sales call notes, and NPS comments all go into the same pool. If items live in five different tools, you are making decisions on incomplete data.',
+          'Step 2: Categorize automatically — Use AI-powered categorization to sort feedback into pain points, feature requests, praise, and questions. Manual tagging is fine under 50 items per week, but becomes a bottleneck beyond that.',
+          'Step 3: Group related requests — "Add dark mode," "night theme please," and "the white background hurts my eyes" are all the same request. Group them so frequency counts are accurate. AI tools do this automatically by detecting semantic similarity.',
+          'Step 4: Score each group — Apply the four-factor framework (frequency, sentiment intensity, customer segment, churn correlation) to each group of related requests. This produces a ranked list.',
+          'Step 5: Cross-reference with strategy — Filter the ranked list against your product strategy. A highly requested feature that does not align with your target market or product vision should be noted but not prioritized. The data informs the decision; it does not make it.',
+          'Step 6: Communicate the why — When you share the roadmap, show the data behind each decision. "We are building X because 47 customers requested it, and it correlates with churn risk in our enterprise segment" is far more compelling than "We decided X is important."',
+        ],
+      },
+      {
+        heading: 'Common prioritization mistakes',
+        content: [
+          'Even teams with good data make predictable errors in how they use it:',
+        ],
+        listItems: [
+          'Counting requests instead of customers — If one customer submits the same request 10 times, that is 1 signal, not 10. Deduplicate by customer before counting frequency.',
+          'Ignoring silent signals — Not all important feedback is explicit. A customer who stops engaging, reduces usage, or gives shorter support responses is signaling something. Absence of positive feedback can be as telling as presence of negative feedback.',
+          'Prioritizing easy over important — Teams naturally gravitate toward requests that are quick to build. But if the highest-impact feature takes three months and the easy wins take a week each, building twelve easy wins will not deliver the same retention impact.',
+          'Treating all customers equally — In B2B SaaS, customer value varies enormously. A request from a $50K ARR account should weigh differently than one from a free-tier user, even if the free-tier user is more vocal.',
+          'Never saying no — Good prioritization requires explicit deprioritization. If everything is a priority, nothing is. Communicate what you are not building and why, so the team has clarity.',
+        ],
+      },
+      {
+        heading: 'Tools and automation',
+        content: [
+          'The manual version of this framework involves spreadsheets, weekly review meetings, and a product manager spending hours categorizing and counting. It works, but it does not scale.',
+          'AI-powered feedback tools can automate the most time-consuming parts:',
+        ],
+        listItems: [
+          'Automatic categorization — AI sorts incoming feedback into pain points and feature requests without manual tagging.',
+          'Semantic grouping — Similar requests are clustered together automatically, even when customers use different words.',
+          'Sentiment scoring — Every item gets a sentiment score, so you can filter for high-frustration requests without reading every one.',
+          'Churn risk flagging — Feedback from at-risk customers is flagged automatically based on language patterns and behavioral signals.',
+          'Trend detection — AI surfaces emerging patterns (a feature request that jumped from 5 mentions to 30 this month) before they become obvious.',
+        ],
+        content2: [
+          'The goal is not to remove humans from prioritization — product judgment is irreplaceable. The goal is to give product teams accurate, complete data so their judgment is applied to the right inputs.',
+        ],
+      },
+      {
+        heading: 'Measuring prioritization quality',
+        content: [
+          'How do you know if your prioritization is working? Track these signals:',
+        ],
+        listItems: [
+          'Post-launch sentiment — When you ship a prioritized feature, does sentiment in related feedback improve? If customers are not noticeably happier, the prioritization signal may have been weak.',
+          'Churn rate by segment — Are you retaining the customer segments whose feedback you prioritized? If churn stays flat after shipping their top requests, you may be solving the wrong problems.',
+          'Request resolution rate — What percentage of your top-20 feature requests are addressed each quarter? Low resolution rates suggest your backlog is growing faster than your capacity, which may indicate a prioritization or scoping problem.',
+          'Stakeholder alignment — Are product, engineering, sales, and support aligned on priorities? If stakeholders routinely challenge the roadmap, the underlying data or the communication of it needs improvement.',
+        ],
+      },
+      {
+        heading: 'Getting started',
+        content: [
+          'You do not need a perfect system to start prioritizing better. Begin with what you have:',
+          'If you have fewer than 50 feature requests, put them in a spreadsheet and score them on frequency and sentiment. That alone will surface your top priorities more reliably than discussion-based planning.',
+          'If you have hundreds of requests across multiple channels, consider a tool that automates categorization and scoring. The time you save on data wrangling can be spent on the judgment calls that actually require human insight.',
+          'Rereflect automates the data layer of feature prioritization. It categorizes incoming feedback, groups related requests, scores sentiment and urgency, and flags churn-correlated patterns — all automatically. Your team focuses on the strategic decisions while AI handles the analysis.',
+          'Try it free at app.rereflect.ca. Upload your existing feedback and see a prioritized view of what your customers actually need.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'rereflect-vs-canny',
+    title: 'Rereflect vs Canny: Feedback Collection vs Feedback Intelligence',
+    excerpt: 'Canny is a popular feedback board for collecting and voting on feature requests. Rereflect uses AI to analyze feedback from all your channels. This comparison helps you understand which approach your team needs.',
+    date: '2026-04-15',
+    readTime: '10 min read',
+    author: 'Rereflect Team',
+    tags: ['Comparison', 'Canny', 'Feature Requests', 'Feedback Analysis'],
+    seoTitle: 'Rereflect vs Canny: Feedback Collection vs Intelligence (2026) | Rereflect',
+    seoDescription: 'Compare Rereflect and Canny for customer feedback. See how AI-powered feedback analysis differs from traditional voting boards, with pricing, features, and use cases.',
+    sections: [
+      {
+        heading: 'Why people compare these two tools',
+        content: [
+          'Canny and Rereflect both help SaaS teams manage customer feedback, but they represent two fundamentally different philosophies. Canny gives customers a structured place to submit and vote on feature requests. Rereflect uses AI to analyze feedback that already exists across your channels.',
+          'The distinction matters because it determines what kind of insights you get, where your feedback comes from, and how much of the process is automated versus manual.',
+          'If you are evaluating both tools, you are probably trying to answer a specific question: should we build a system for customers to tell us what they want, or should we build a system that figures out what customers want from what they are already saying?',
+        ],
+      },
+      {
+        heading: 'Canny overview',
+        content: [
+          'Canny is a customer feedback management tool founded in 2017. It is used by companies like Ahrefs, Mercury, and Loom to collect, organize, and prioritize feature requests.',
+          'Canny\'s core concept is the feedback board — a public or private page where customers submit feature requests and vote on existing ones. The voting mechanism creates a natural prioritization signal: features with more votes presumably have more demand.',
+          'Key capabilities include:',
+        ],
+        listItems: [
+          'Feedback boards — Public or private boards where customers submit and vote on ideas. Boards can be organized by product area or category.',
+          'Changelog — A public page to announce shipped features. Customers who voted on a feature get notified when it ships, closing the feedback loop.',
+          'Roadmap — A visual roadmap page showing what is planned, in progress, and complete. Useful for setting customer expectations.',
+          'Integrations — Connects to Slack, Intercom, Zendesk, Jira, and other tools. Team members can push feedback from support conversations to Canny boards.',
+          'Autopilot (AI) — Newer feature that uses AI to detect duplicate requests and categorize posts. Available on higher-tier plans.',
+          'User identification — Links feedback to specific users and shows their MRR, plan, and account details alongside their requests.',
+        ],
+        content2: [
+          'Canny is strongest when a team wants to give customers a dedicated place to submit requests and wants voting as a prioritization signal.',
+        ],
+      },
+      {
+        heading: 'Rereflect overview',
+        content: [
+          'Rereflect is an AI-powered feedback analysis platform that works with the feedback you are already receiving — from Slack, Intercom, email, and CSV uploads. Instead of asking customers to go to a separate board, Rereflect analyzes conversations and messages where they already happen.',
+          'Key capabilities include:',
+        ],
+        listItems: [
+          'AI sentiment analysis — Every piece of feedback is automatically scored for sentiment with a confidence score, across all channels.',
+          'Pain point detection — AI identifies specific problems customers mention and groups similar complaints, even when expressed differently.',
+          'Feature request extraction — Requests are automatically pulled from unstructured feedback and prioritized by frequency and urgency.',
+          'Churn risk detection — A 9-factor scoring system flags customers showing signs of frustration, disengagement, or cancellation intent.',
+          'AI Copilot — Ask natural language questions about your feedback data and get instant answers backed by actual customer data.',
+          'Customer 360 — Per-customer health scores, trend tracking, and proactive alerts when a customer\'s sentiment drops.',
+          'Workflow management — Built-in status tracking, team assignment, and internal notes for acting on feedback insights.',
+        ],
+        content2: [
+          'Rereflect is strongest when a team has feedback flowing in from multiple channels and needs AI to surface patterns, risks, and priorities automatically.',
+        ],
+      },
+      {
+        heading: 'The core philosophical difference',
+        content: [
+          'The most important difference between Canny and Rereflect is not a feature — it is an assumption about where valuable feedback lives.',
+          'Canny assumes the best feedback comes when you ask for it. Give customers a structured form, let them articulate their requests clearly, and let the crowd vote on priorities. This is the "suggestion box" model, improved with software.',
+          'Rereflect assumes the most honest feedback already exists in your support conversations, Slack messages, and email threads. Customers express frustration in a support ticket more candidly than in a public feature request. The frustrated message "this export is broken AGAIN, I\'ve reported this 3 times" contains more signal than a clean vote on "improve data export."',
+          'Neither assumption is wrong. They lead to different kinds of insights:',
+        ],
+        listItems: [
+          'Canny captures explicit, considered requests — What customers think they want when asked directly.',
+          'Rereflect captures implicit, emotional signals — What customers actually struggle with in their daily use of your product.',
+        ],
+        content2: [
+          'The most complete picture comes from combining both, but most teams need to choose a primary approach based on their stage and resources.',
+        ],
+      },
+      {
+        heading: 'Feature comparison',
+        content: [
+          'Here is how the two tools compare across key dimensions:',
+        ],
+        table: {
+          headers: ['Feature', 'Canny', 'Rereflect'],
+          rows: [
+            ['Primary model', 'Voting boards (customers submit)', 'AI analysis (of existing feedback)'],
+            ['Feedback source', 'Dedicated board + manual push from tools', 'Slack, Intercom, email, CSV (automatic)'],
+            ['AI sentiment analysis', 'Not included', 'Core feature (every item, every channel)'],
+            ['Pain point detection', 'Not included', 'Automatic AI categorization'],
+            ['Feature request extraction', 'Manual (customer-submitted)', 'Automatic (from all feedback)'],
+            ['Churn risk detection', 'Not included', '9-factor scoring with alerts'],
+            ['Voting / prioritization', 'Core feature (public voting)', 'Frequency + sentiment + churn correlation'],
+            ['Public changelog', 'Included', 'Not included'],
+            ['Public roadmap', 'Included', 'Not included'],
+            ['AI Copilot', 'Not included', 'Natural language queries over data'],
+            ['Customer health scores', 'Not included', 'Per-customer with trend tracking'],
+            ['User identification', 'MRR and plan data displayed', 'Customer 360 with health history'],
+            ['Setup time', '30 minutes (board + embed)', '15 minutes (connect channels + import)'],
+          ],
+        },
+      },
+      {
+        heading: 'Pricing comparison',
+        content: [
+          'Both tools offer free tiers, but with different limits:',
+        ],
+        table: {
+          headers: ['Plan', 'Canny', 'Rereflect'],
+          rows: [
+            ['Free tier', 'Free (1 board, limited features)', 'Free (250 feedback/mo, 2 seats)'],
+            ['Starter / Pro', '$79/mo (Starter, 3 boards)', '$29/mo (2,500 feedback/mo, 10 seats)'],
+            ['Growth / Business', '$359/mo (Growth, unlimited)', '$99/mo (25,000 feedback/mo, 25 seats)'],
+            ['Business / Enterprise', 'Custom pricing', 'Custom pricing'],
+            ['Pricing model', 'Flat rate by tier', 'Per-organization (all seats included)'],
+          ],
+        },
+        content2: [
+          'Canny\'s pricing jumps significantly between tiers. The free plan is limited to one board with no AI features. To get Autopilot (AI), user segmentation, and priority scoring, you need the Growth plan at $359/month.',
+          'Rereflect\'s Pro plan at $29/month includes AI analysis, sentiment scoring, pain point detection, and 10 team seats. For teams where budget matters, the price difference is substantial — especially considering that Rereflect\'s core AI features are available from the free tier.',
+        ],
+      },
+      {
+        heading: 'The voting board problem',
+        content: [
+          'Voting boards are intuitive and popular, but they have well-documented limitations that are worth understanding before committing to the model:',
+        ],
+        listItems: [
+          'Vocal minority bias — The customers who visit your feedback board and vote are not representative of your entire user base. Power users and highly engaged customers are over-represented. The silent majority — who may have the most common pain points — never votes.',
+          'Solution bias — When customers submit feature requests, they describe their imagined solution, not their underlying problem. "Add a dark mode" might really mean "I use this tool late at night and the bright screen bothers me." The vote count for "dark mode" does not capture the actual need.',
+          'Gaming and lobbying — In public boards, a single customer can rally their team to vote on a request. Ten votes from one company look the same as ten votes from ten different companies, skewing priorities.',
+          'Missing negative signals — Voting boards capture what customers want added. They do not capture what is actively broken, frustrating, or driving churn. A customer who is about to cancel does not visit your feature board — they write an angry support ticket.',
+          'Engagement decay — Feedback board participation typically drops after the initial novelty. Most boards see 60-80% of their activity in the first three months, then contributions slow as customers realize their votes rarely lead to quick action.',
+        ],
+        content2: [
+          'None of these problems make voting boards useless. But they mean that vote counts alone are an incomplete and potentially misleading prioritization signal.',
+        ],
+      },
+      {
+        heading: 'When to choose Canny',
+        content: [
+          'Canny is the better choice in these scenarios:',
+        ],
+        listItems: [
+          'You want a customer-facing feedback portal — If giving customers a dedicated place to submit and track feature requests is important to your product experience, Canny\'s boards and changelog are purpose-built for this.',
+          'Public roadmap transparency matters — If your customers expect to see what you are building and when, Canny\'s roadmap feature provides this out of the box.',
+          'Your primary feedback is feature requests — If most of your feedback is "please build X" rather than complaints, frustrations, or support issues, a voting board captures this type of feedback well.',
+          'You want to close the feedback loop publicly — Canny\'s changelog automatically notifies voters when their requested feature ships. This is a powerful retention and engagement mechanism.',
+        ],
+      },
+      {
+        heading: 'When to choose Rereflect',
+        content: [
+          'Rereflect is the better choice in these scenarios:',
+        ],
+        listItems: [
+          'Your feedback is scattered across channels — If customers communicate through Slack, Intercom, email, and support tickets rather than a dedicated board, Rereflect meets feedback where it already lives instead of asking customers to change their behavior.',
+          'You need AI-powered analysis — If your bottleneck is understanding what feedback means (sentiment, pain points, urgency) rather than collecting more of it, Rereflect\'s automatic analysis solves this directly.',
+          'Churn prevention is a priority — Rereflect\'s health scores, churn risk detection, and proactive alerts are specifically designed to catch at-risk customers. Canny does not offer churn-related features.',
+          'You have high feedback volume — At 200+ items per week, manual review of a voting board becomes unsustainable. AI analysis scales linearly with no additional human effort.',
+          'You want insights from all feedback types — Not just feature requests, but complaints, praise, questions, and support issues. Rereflect analyzes everything; Canny focuses on feature requests.',
+          'Budget is a consideration — Rereflect Pro ($29/mo) versus Canny Growth ($359/mo) is a significant difference for early-stage teams, especially when Rereflect includes AI features that Canny reserves for higher tiers.',
+        ],
+      },
+      {
+        heading: 'Verdict',
+        content: [
+          'Canny and Rereflect represent two different approaches to the same underlying challenge: understanding what customers need.',
+          'Canny is a feedback collection tool. It creates a structured channel for customers to tell you what they want, and uses voting to surface popular requests. It works well when customers are willing to use a feedback portal and when feature requests are your primary input for product decisions.',
+          'Rereflect is a feedback intelligence tool. It analyzes conversations that are already happening across your channels and uses AI to extract insights — sentiment, pain points, feature requests, and churn risk — without requiring customers to change their behavior or visit a separate tool.',
+          'For most SaaS teams between 5 and 50 employees, the deciding question is: do you need more feedback (Canny), or do you need more insight from the feedback you already have (Rereflect)?',
+          'If the answer is insight, you can try Rereflect free at app.rereflect.ca. Connect your Slack or upload a CSV and see AI analysis on your actual feedback within minutes.',
+        ],
+      },
+    ],
+  },
 ];
 
 export function getAllPosts(): BlogPost[] {

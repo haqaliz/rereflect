@@ -24,14 +24,14 @@
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
 | 3 | Sentiment Analysis for SaaS: A Beginner's Guide | `sentiment-analysis-saas-beginners-guide` | Mar 1 | SEO | PMs, CS | "sentiment analysis SaaS" | Written |
-| 4 | Rereflect vs Productboard: Which Is Right for Your Team? | `rereflect-vs-productboard` | Mar 15 | Comparison | PMs, Founders | "Productboard alternative" | Planned |
+| 4 | Rereflect vs Productboard: Which Is Right for Your Team? | `rereflect-vs-productboard` | Mar 15 | Comparison | PMs, Founders | "Productboard alternative" | Written |
 
 ### April 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 5 | How to Prioritize Features Using Customer Feedback | `how-to-prioritize-features-customer-feedback` | Apr 1 | SEO | PMs | "prioritize features feedback" | Planned |
-| 6 | Rereflect vs Canny: Feedback Collection vs Feedback Intelligence | `rereflect-vs-canny` | Apr 15 | Comparison | PMs, Founders | "Canny alternative" | Planned |
+| 5 | How to Prioritize Features Using Customer Feedback | `how-to-prioritize-features-customer-feedback` | Apr 1 | SEO | PMs | "prioritize features feedback" | Written |
+| 6 | Rereflect vs Canny: Feedback Collection vs Feedback Intelligence | `rereflect-vs-canny` | Apr 15 | Comparison | PMs, Founders | "Canny alternative" | Written |
 
 ### May 2026
 
