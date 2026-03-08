@@ -75,6 +75,7 @@ PLANS = {
             "conversation_folders",
             "copilot_analysis_queries",
             "copilot_dynamic_suggestions",
+            "linear_integration",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -120,6 +121,7 @@ PLANS = {
             "copilot_dynamic_suggestions",
             "copilot_entity_scopes",
             "copilot_query_templates_admin",
+            "linear_integration",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -164,6 +166,7 @@ PLANS = {
             "multi_model_support",
             "byok_keys",
             "ai_usage_dashboard",
+            "linear_integration",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -209,6 +212,8 @@ FEATURE_PLANS = {
     "multi_model_support": "pro",
     "byok_keys": "pro",
     "ai_usage_dashboard": "pro",
+    # Linear integration
+    "linear_integration": "pro",
     # AI Copilot features (M2.2)
     "conversation_folders": "pro",
     "copilot_analysis_queries": "pro",

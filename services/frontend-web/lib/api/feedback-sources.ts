@@ -24,7 +24,7 @@ export interface FeedbackSource {
   id: number;
   organization_id: number;
   integration_id: number | null;
-  source_type: 'slack' | 'intercom' | 'webhook' | 'discord' | 'email';
+  source_type: 'slack' | 'intercom' | 'webhook' | 'discord' | 'email' | 'linear';
   name: string | null;
   provider_config: Record<string, any>;
   triggers: TriggerConfig;
@@ -263,6 +263,11 @@ export const TRIGGER_OPTIONS: Record<string, { key: string; label: string; descr
   email: [
     { key: 'all_messages', label: 'All Emails', description: 'Process every forwarded email' },
     { key: 'keywords', label: 'Keywords (optional)', description: 'Only emails containing keywords', hasValues: true },
+  ],
+  linear: [
+    { key: 'all_messages', label: 'All Issue Comments', description: 'Capture every comment on issues' },
+    { key: 'labels', label: 'Issue Labels', description: 'Only issues with specific labels', hasValues: true },
+    { key: 'keywords', label: 'Keywords', description: 'Comments containing keywords', hasValues: true },
   ],
 };
 

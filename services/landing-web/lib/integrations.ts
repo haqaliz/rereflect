@@ -57,7 +57,7 @@ const SHARED_FAQS: IntegrationFAQ[] = [
   },
   {
     question: 'Which plan includes integrations?',
-    answer: 'Slack, Intercom, and Email integrations are available on the Pro plan ($29/month) and above. CSV import is available on all plans including Free.',
+    answer: 'Slack, Intercom, Linear, and Email integrations are available on the Pro plan ($29/month) and above. CSV import is available on all plans including Free.',
   },
   {
     question: 'Can I use multiple integrations at once?',
@@ -182,6 +182,44 @@ export const integrations: Integration[] = [
       { step: 3, title: 'Create an email feedback source', description: 'Set up a feedback source with email type and configure keyword triggers if needed.' },
       { step: 4, title: 'Forward your first email', description: 'Forward a customer email from any client. Rereflect processes it within seconds.' },
       { step: 5, title: 'Optional: Set up auto-forwarding', description: 'Create email rules in Gmail/Outlook to automatically forward specific emails to Rereflect.' },
+    ],
+  },
+  {
+    slug: 'linear',
+    name: 'Linear',
+    tagline: 'Turn issue tracker comments into actionable product feedback',
+    description: 'Connect Linear and let Rereflect analyze issue comments, bug reports, and feature requests — surfacing customer sentiment and product patterns your team would otherwise miss.',
+    status: 'available',
+    color: 'chart-5',
+    gradient: 'from-[#5E6AD2] to-[#8B94E8]',
+    hoverShadow: 'hover:shadow-[#5E6AD2]/10',
+    hoverBorder: 'hover:border-[#5E6AD2]/30',
+    heroMessage: 'Your Linear issues are full of customer feedback hiding in comments and descriptions. Rereflect connects to Linear and automatically extracts sentiment, pain points, and feature requests — giving your product team a clear signal from the noise.',
+    howItWorks: [
+      { step: '1', title: 'Connect Linear', description: 'Authorize Rereflect via OAuth in one click. We securely connect to your Linear workspace.' },
+      { step: '2', title: 'Issues Flow In', description: 'New issue comments, status changes, and labels are sent to Rereflect via webhooks in real-time.' },
+      { step: '3', title: 'AI Finds Patterns', description: 'Our AI analyzes every comment for sentiment, categorizes feedback, and surfaces the most impactful product insights.' },
+    ],
+    features: [
+      { title: 'Issue Comment Analysis', description: 'Every comment on Linear issues is analyzed for customer sentiment, pain points, and feature requests — automatically.', icon: 'MessageSquare' },
+      { title: 'Label-Based Filtering', description: 'Choose which issues to monitor by label. Only capture feedback from customer-facing issues, bug reports, or specific projects.', icon: 'Tags' },
+      { title: 'Team Mapping', description: 'Map Linear teams to Rereflect categories. Route feedback from different teams to the right dashboard views.', icon: 'Users' },
+      { title: 'Status Tracking', description: 'Track how feedback correlates with issue status. See which customer pain points are being addressed and which are stuck.', icon: 'TrendingUp' },
+      { title: 'Issue Templates', description: 'Create issues back in Linear from Rereflect with customizable templates — including sentiment data and customer context.', icon: 'FileText' },
+      { title: 'Real-Time Webhooks', description: 'Instant data flow via Linear webhooks with signature verification. No polling, no delays — feedback appears in seconds.', icon: 'Zap' },
+    ],
+    useCases: [
+      { persona: 'Product Manager', role: 'B2B SaaS, 200+ issues/week', quote: 'We had feature requests scattered across hundreds of Linear issues. Rereflect now surfaces the top requests with sentiment context — we prioritize based on data, not gut feeling.', icon: 'Layers' },
+      { persona: 'Engineering Lead', role: 'Developer tools startup', quote: 'Bug reports from customers often have valuable product feedback buried in the comments. Rereflect catches patterns we never would have seen — like 3 different customers hitting the same workflow issue.', icon: 'Rocket' },
+      { persona: 'Customer Success Manager', role: 'Enterprise SaaS', quote: 'I used to manually scan Linear for customer-reported issues. Now I check Rereflect\'s dashboard and instantly see which accounts are frustrated and what they need fixed.', icon: 'Heart' },
+    ],
+    faqs: SHARED_FAQS,
+    setupSteps: [
+      { step: 1, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
+      { step: 2, title: 'Click "Connect Linear"', description: 'You\'ll be redirected to Linear to authorize Rereflect via OAuth. Approve the connection.' },
+      { step: 3, title: 'Configure team mappings', description: 'Map your Linear teams to Rereflect categories so feedback is automatically organized.' },
+      { step: 4, title: 'Set up a feedback source', description: 'Create a Linear feedback source and configure which labels or keywords to monitor.' },
+      { step: 5, title: 'Start analyzing issues', description: 'Issue comments flow in automatically. View insights on your dashboard within minutes.' },
     ],
   },
   {

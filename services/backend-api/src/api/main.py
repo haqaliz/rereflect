@@ -10,6 +10,7 @@ from src.api.routes import customer_health, activity_feed, dashboard_layout, adm
 from src.api.routes import customers, admin_backtest, admin_ai_models
 from src.api.routes import conversation_folders, conversations, copilot_ws, copilot
 from src.api.routes import events_ws
+from src.api.routes import linear_integration, linear_webhook
 from src.seed import seed_admin_user
 import logging
 import os
@@ -147,6 +148,8 @@ app.include_router(conversations.router)
 app.include_router(copilot_ws.router)
 app.include_router(copilot.router)
 app.include_router(events_ws.router)
+app.include_router(linear_integration.router)
+app.include_router(linear_webhook.router)
 
 
 @app.get("/")

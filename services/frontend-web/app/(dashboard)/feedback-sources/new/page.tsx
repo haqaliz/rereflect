@@ -29,6 +29,7 @@ import {
   FieldMappingConfig,
 } from '@/lib/api/feedback-sources';
 import { integrationsAPI, Integration } from '@/lib/api/integrations';
+import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
 import {
   Webhook,
   MessageCircle,
@@ -46,6 +47,7 @@ import {
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import { LinearIcon } from '@/components/icons/LinearIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -54,6 +56,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,
+  linear: LinearIcon,
 };
 
 // Source type colors
@@ -63,6 +66,7 @@ const SOURCE_COLORS: Record<string, string> = {
   webhook: 'text-blue-600',
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
+  linear: 'text-[#5E6AD2]',
 };
 
 type Step = 'type' | 'integration' | 'triggers' | 'mapping' | 'confirm' | 'email-setup';
@@ -75,6 +79,8 @@ function NewSourceContent() {
   // Determine initial step based on type
   const getInitialStep = (): Step => {
     if (!initialType) return 'type';
+    // Linear uses its own OAuth — check connection in integration step
+    if (initialType === 'linear') return 'integration';
     // Types that don't require integration go to triggers
     if (initialType === 'webhook' || initialType === 'discord' || initialType === 'email') return 'triggers';
     // OAuth types (slack, intercom) require integration selection
@@ -90,6 +96,7 @@ function NewSourceContent() {
   // Data
   const [sourceTypes, setSourceTypes] = useState<SourceTypeInfo[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [linearStatus, setLinearStatus] = useState<LinearConnectionStatus | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   // Form state
@@ -118,12 +125,14 @@ function NewSourceContent() {
     const fetchData = async () => {
       try {
         setLoadingData(true);
-        const [typesRes, integrationsRes] = await Promise.all([
+        const [typesRes, integrationsRes, linearStatusRes] = await Promise.allSettled([
           feedbackSourcesAPI.getTypes(),
           integrationsAPI.list(),
+          linearAPI.getStatus(),
         ]);
-        setSourceTypes(typesRes);
-        setIntegrations(integrationsRes.integrations);
+        if (typesRes.status === 'fulfilled') setSourceTypes(typesRes.value);
+        if (integrationsRes.status === 'fulfilled') setIntegrations(integrationsRes.value.integrations);
+        if (linearStatusRes.status === 'fulfilled') setLinearStatus(linearStatusRes.value);
       } catch (err) {
         console.error('Failed to load data:', err);
       } finally {
@@ -141,7 +150,14 @@ function NewSourceContent() {
   const handleTypeSelect = (type: string) => {
     setSelectedType(type);
     const typeInfo = sourceTypes.find(t => t.type === type);
-    if (typeInfo?.requires_integration) {
+    if (type === 'linear') {
+      // Linear uses its own OAuth — show integration check step
+      if (linearStatus?.connected && linearStatus?.is_active) {
+        setStep('triggers');
+      } else {
+        setStep('integration');
+      }
+    } else if (typeInfo?.requires_integration) {
       setStep('integration');
     } else {
       setStep('triggers');
@@ -307,8 +323,8 @@ function NewSourceContent() {
       { key: 'type', label: 'Source Type' },
     ];
 
-    if (currentTypeInfo?.requires_integration) {
-      steps.push({ key: 'integration', label: 'Integration' });
+    if (currentTypeInfo?.requires_integration || selectedType === 'linear') {
+      steps.push({ key: 'integration', label: selectedType === 'linear' ? 'Connection' : 'Integration' });
     }
 
     steps.push(
@@ -430,7 +446,7 @@ function NewSourceContent() {
                             {!type.available && (
                               <Badge variant="outline" className="text-xs">Coming Soon</Badge>
                             )}
-                            {type.requires_integration && type.available && (
+                            {(type.requires_integration || type.type === 'linear') && type.available && (
                               <Badge variant="secondary" className="text-xs">Requires OAuth</Badge>
                             )}
                           </div>
@@ -450,6 +466,65 @@ function NewSourceContent() {
           const TypeIcon = SOURCE_ICONS[selectedType] || Webhook;
           const typeColor = SOURCE_COLORS[selectedType] || 'text-muted-foreground';
           const typeName = selectedType.charAt(0).toUpperCase() + selectedType.slice(1);
+
+          // Linear uses its own integration system
+          if (selectedType === 'linear') {
+            const isLinearConnected = linearStatus?.connected && linearStatus?.is_active;
+            return (
+              <Card className="animate-slide-up">
+                <CardHeader>
+                  <CardTitle>Linear Connection</CardTitle>
+                  <CardDescription>
+                    {isLinearConnected
+                      ? `Connected to ${linearStatus?.org_name}`
+                      : 'Connect your Linear workspace to receive feedback from issue comments'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isLinearConnected ? (
+                    <>
+                      <div className="p-4 rounded-lg border-2 border-primary bg-primary/5">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-[#5E6AD2]/10 rounded-lg">
+                            <LinearIcon className="w-5 h-5 text-[#5E6AD2]" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-foreground">{linearStatus?.org_name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Connected by {linearStatus?.connected_by_email}
+                            </div>
+                          </div>
+                          <Check className="w-5 h-5 text-primary ml-auto" />
+                        </div>
+                      </div>
+                      <div className="flex justify-between pt-4">
+                        <Button variant="outline" onClick={() => setStep('type')}>
+                          Back
+                        </Button>
+                        <Button onClick={() => setStep('triggers')}>
+                          Continue
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <LinearIcon className="w-12 h-12 mx-auto text-[#5E6AD2]/50 mb-4" />
+                      <h3 className="font-semibold text-foreground mb-2">Linear not connected</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        You need to connect Linear first in Settings &gt; Integrations
+                      </p>
+                      <Link href="/settings/integrations/linear">
+                        <Button>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Connect Linear
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          }
 
           return (
             <Card className="animate-slide-up">
@@ -547,7 +622,7 @@ function NewSourceContent() {
                 <Label htmlFor="name">Source Name (optional)</Label>
                 <Input
                   id="name"
-                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
+                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'linear' ? 'Linear Issue Comments' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
                   value={form.name}
                   onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                 />
@@ -720,7 +795,7 @@ function NewSourceContent() {
               <div className="flex justify-between pt-4 border-t border-border">
                 <Button
                   variant="outline"
-                  onClick={() => setStep(currentTypeInfo?.requires_integration ? 'integration' : 'type')}
+                  onClick={() => setStep(currentTypeInfo?.requires_integration || selectedType === 'linear' ? 'integration' : 'type')}
                 >
                   Back
                 </Button>

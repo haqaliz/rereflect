@@ -8,6 +8,7 @@ import { AlertTriangle } from 'lucide-react';
 import { DataTable } from '@/components/shared/data-table';
 import { DataTablePageSkeleton } from '@/components/shared/page-skeletons';
 import { createColumns } from './columns';
+import { CreateIssueDialog } from '@/components/integrations/CreateIssueDialog';
 
 export default function PainPointsPage() {
   const router = useRouter();
@@ -100,14 +101,21 @@ export default function PainPointsPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Page Header */}
         <div className="animate-fade-in">
-          <div className="flex items-center space-x-3 mb-2">
-            <div className="p-3 bg-secondary rounded-xl">
-              <AlertTriangle className="w-8 h-8 text-primary" />
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center space-x-3">
+              <div className="p-3 bg-secondary rounded-xl">
+                <AlertTriangle className="w-8 h-8 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold text-foreground">Top Pain Points</h1>
+                <p className="text-muted-foreground text-lg">Customer issues and problems that need attention</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-4xl font-bold text-foreground">Top Pain Points</h1>
-              <p className="text-muted-foreground text-lg">Customer issues and problems that need attention</p>
-            </div>
+            <CreateIssueDialog
+              feedbackId={feedbackList[0]?.id ?? 0}
+              aiTitle={feedbackList[0]?.extracted_issue ?? undefined}
+              aiDescription={feedbackList[0]?.text}
+            />
           </div>
         </div>
 

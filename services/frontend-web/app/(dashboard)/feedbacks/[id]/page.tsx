@@ -82,6 +82,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { ChurnFactorBreakdown } from '@/components/feedbacks/ChurnFactorBreakdown';
 import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
+import { CreateIssueDialog } from '@/components/integrations/CreateIssueDialog';
+import { LinkedIssuesCard } from '@/components/feedback/LinkedIssuesCard';
 
 export default function FeedbackDetailPage() {
   return (
@@ -392,6 +394,11 @@ function FeedbackDetailContent() {
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             </Button>
+            <CreateIssueDialog
+              feedbackId={feedbackId}
+              aiTitle={feedback?.extracted_issue ?? undefined}
+              aiDescription={feedback?.text ?? undefined}
+            />
             <Button
               onClick={handleAnalyze}
               disabled={analyzing}
@@ -501,6 +508,7 @@ function FeedbackDetailContent() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-6">
+            <LinkedIssuesCard feedbackId={feedback.id} />
             <WorkflowSection
               feedbackId={feedback.id}
               workflowStatus={feedback.workflow_status}

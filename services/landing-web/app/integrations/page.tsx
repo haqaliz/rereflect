@@ -9,6 +9,7 @@ import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { EmailIcon } from '@/components/icons/EmailIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
+import { LinearIcon } from '@/components/icons/LinearIcon';
 import { getAvailableIntegrations, getComingSoonIntegrations } from '@/lib/integrations';
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
@@ -26,6 +27,7 @@ export default function IntegrationsPage() {
     slack: <SlackIcon size={40} />,
     intercom: <IntercomIcon size={40} />,
     email: <EmailIcon size={40} />,
+    linear: <LinearIcon size={40} />,
     zendesk: <ZendeskIcon size={40} />,
     hubspot: <HubSpotIcon size={40} />,
   };

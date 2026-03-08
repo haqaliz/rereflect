@@ -3,6 +3,7 @@ import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { EmailIcon } from '@/components/icons/EmailIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
+import { LinearIcon } from '@/components/icons/LinearIcon';
 
 export function IntegrationBar() {
   return (
@@ -29,6 +30,12 @@ export function IntegrationBar() {
             className="[&>svg]:grayscale hover:[&>svg]:grayscale-0 transition-all duration-300 cursor-default"
           >
             <EmailIcon size={40} />
+          </span>
+          <span
+            aria-label="Linear"
+            className="[&>svg]:grayscale hover:[&>svg]:grayscale-0 transition-all duration-300 cursor-default"
+          >
+            <LinearIcon size={40} />
           </span>
           <span
             aria-label="Zendesk"

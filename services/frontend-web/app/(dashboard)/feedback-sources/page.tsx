@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import { LinearIcon } from '@/components/icons/LinearIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -38,6 +39,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   webhook: Webhook,
   discord: MessageCircle,
   email: Mail,
+  linear: LinearIcon,
 };
 
 // Source type colors
@@ -47,6 +49,7 @@ const SOURCE_COLORS: Record<string, string> = {
   webhook: 'text-blue-600',
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
+  linear: 'text-[#5E6AD2]',
 };
 
 function FeedbackSourcesContent() {
@@ -398,7 +401,7 @@ function FeedbackSourcesContent() {
                           {!type.available && (
                             <Badge variant="outline" className="text-xs">Coming Soon</Badge>
                           )}
-                          {type.requires_integration && type.available && (
+                          {(type.requires_integration || type.type === 'linear') && type.available && (
                             <Badge variant="secondary" className="text-xs">Requires OAuth</Badge>
                           )}
                         </div>

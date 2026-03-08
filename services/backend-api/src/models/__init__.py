@@ -35,6 +35,7 @@ from .conversation_message import ConversationMessage
 from .query_template import QueryTemplate
 from .query_template_mapping import QueryTemplateMapping
 from .copilot_schema_whitelist import CopilotSchemaWhitelist
+from .linear_integration import LinearIntegration, LinearTeamMapping, LinearStatusMapping, FeedbackLinearIssue
 
 __all__ = [
     "Base",
@@ -75,4 +76,8 @@ __all__ = [
     "QueryTemplate",
     "QueryTemplateMapping",
     "CopilotSchemaWhitelist",
+    "LinearIntegration",
+    "LinearTeamMapping",
+    "LinearStatusMapping",
+    "FeedbackLinearIssue",
 ]
