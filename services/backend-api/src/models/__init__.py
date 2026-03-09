@@ -36,6 +36,8 @@ from .query_template import QueryTemplate
 from .query_template_mapping import QueryTemplateMapping
 from .copilot_schema_whitelist import CopilotSchemaWhitelist
 from .linear_integration import LinearIntegration, LinearTeamMapping, LinearStatusMapping, FeedbackLinearIssue
+from .response_template import ResponseTemplate
+from .feedback_response import FeedbackResponse
 
 __all__ = [
     "Base",
@@ -80,4 +82,6 @@ __all__ = [
     "LinearTeamMapping",
     "LinearStatusMapping",
     "FeedbackLinearIssue",
+    "ResponseTemplate",
+    "FeedbackResponse",
 ]

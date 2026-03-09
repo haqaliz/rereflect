@@ -432,6 +432,25 @@
   - Frontend: alert preferences row with dual threshold inputs, notification list/bell/detail with red (drop) / green (recovery) styling, score change display, risk badges, component breakdown
   - Plan gated to Pro+ (reuses `customer_health_scores` feature)
   - 90 TDD tests across 5 test files (backend alerts, preferences API, worker dispatch, frontend preferences UI, notification display)
+- **AI Response Suggestions** (M2.3, PRD-AI-RESPONSE-SUGGESTIONS.md):
+  - Response modal on feedback detail page: template suggestion, browse templates, AI generation, tone selector, copy/send actions
+  - 8 system response templates seeded on startup (Bug Report, Feature Request, Churn Risk, Positive, Complaint, Urgent, Follow-up, Onboarding)
+  - Template CRUD: system templates (read-only) + custom org templates, scoring algorithm for best-match suggestion
+  - Template browser component with search, system/custom sections
+  - Response settings per org: brand_voice, default_tone, product_name_display, support_email_display
+  - Feedback response history: tracks all responses sent per feedback item (channel, source, tone, status)
+  - AI response generation endpoint with tone selection and token tracking
+  - Send response endpoint supporting clipboard, Slack, Intercom, Linear, email channels
+  - Response usage tracking: ai_responses_generated counter, monthly limits by plan
+  - Actions dropdown: consolidated Delete, Re-analyze, Respond, Create Issue into single dropdown menu
+  - Removed standalone refresh button (realtime events via useRealtimeEvents handle auto-refresh)
+  - Create Issue stepped page (`/feedbacks/[id]/create-issue`): 3-step wizard (Select Integration → Configure → Done) matching feedback source wizard style
+  - Create Issue page: Linear form with AI-prefilled title/description, team/priority/project selectors, duplicate warning, success summary
+  - Plan gating: `response_suggestions` feature on Pro+
+  - Alembic migration (`o4p5q6r7s8t9`): Organization response columns + response_templates + feedback_responses tables
+  - Backend: 3 new route modules (response_templates, response_settings, feedback_responses), 2 new DB models, system template seeder
+  - Frontend: ResponseModal, TemplateBrowser components, responses API client, Actions dropdown, Create Issue page
+  - 10 TDD tests (FeedbackDetailActions: refresh removed, actions dropdown, create issue navigation)
 - **Linear Integration** (full-stack, Mar 2026):
   - OAuth flow: connect + callback + disconnect endpoints with state management
   - Linear API client: organizations, teams, issues, comments, labels, statuses, webhooks
@@ -499,6 +518,7 @@
 - Copilot architecture: rule-based intent classifier + LLM fallback, cosine similarity template matching (0.85 threshold), schema whitelist, read-only SQL with 3-join max/5s timeout
 - Copilot conversations: ChatGPT-style with folder organization, persistent history, auto-collapsing sidebar, org-wide shared conversations, UUID public_id for shareable URLs
 - Copilot plan gating: Free=10 queries/day + 50K tokens/mo, Pro=unlimited + 500K tokens, Business=5M tokens, with upgrade CTAs and usage display in AI Settings
+- AI Response Suggestions (M2.3): modal-based compose flow (not inline), system templates seeded at startup (idempotent), template scoring by category/sentiment/urgency/churn, Actions dropdown consolidates 4 buttons, Create Issue as stepped page (not dialog) matching feedback source wizard style
 - Linear integration: own OAuth system (separate from generic Integration model), dedicated tables (not reusing integrations table), Pro+ plan gating, webhook signature verification, team/status mappings for org-level config
 - Linear feedback sources: `requires_integration=false` in backend (uses its own OAuth), frontend adds `|| type.type === 'linear'` for "Requires OAuth" badge display
 

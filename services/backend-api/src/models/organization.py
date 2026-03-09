@@ -29,6 +29,13 @@ class Organization(Base):
     # Promo tracking
     promo_code_used = Column(String(50), nullable=True)
 
+    # Response Settings (M2.3 AI Response Suggestions)
+    brand_voice = Column(Text, nullable=True)                    # max 500 chars; prepended to LLM system prompt
+    default_tone = Column(String(50), default="professional", nullable=True)
+    product_name_display = Column(String(200), nullable=True)    # used for {{product_name}} variable
+    support_email_display = Column(String(200), nullable=True)   # used for {{support_email}} variable
+    ai_responses_generated = Column(Integer, default=0, nullable=False)
+
     # Relationships
     subscription = relationship("Subscription", back_populates="organization", uselist=False)
     usage_records = relationship("UsageRecord", back_populates="organization")

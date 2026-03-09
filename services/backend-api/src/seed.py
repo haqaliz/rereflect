@@ -67,6 +67,46 @@ def seed_admin_user():
         db.close()
 
 
+def seed_system_templates():
+    """Seed system response templates if they don't exist."""
+    from src.config.system_templates import SYSTEM_TEMPLATES
+    from src.models.response_template import ResponseTemplate
+
+    db: Session = SessionLocal()
+    try:
+        existing_count = db.query(ResponseTemplate).filter(ResponseTemplate.is_system.is_(True)).count()
+        if existing_count >= len(SYSTEM_TEMPLATES):
+            logger.info(f"System templates already seeded ({existing_count} exist)")
+            return
+
+        for tmpl_data in SYSTEM_TEMPLATES:
+            exists = db.query(ResponseTemplate).filter(
+                ResponseTemplate.name == tmpl_data["name"],
+                ResponseTemplate.is_system.is_(True),
+            ).first()
+            if not exists:
+                tmpl = ResponseTemplate(
+                    organization_id=None,
+                    name=tmpl_data["name"],
+                    category=tmpl_data["category"],
+                    body=tmpl_data["body"],
+                    is_system=True,
+                    usage_count=0,
+                )
+                db.add(tmpl)
+                logger.info(f"Seeded system template: {tmpl_data['name']}")
+
+        db.commit()
+        logger.info("System templates seeding complete")
+    except Exception as e:
+        logger.error(f"Error seeding system templates: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     seed_admin_user()
+    seed_system_templates()

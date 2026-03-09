@@ -76,6 +76,8 @@ PLANS = {
             "copilot_analysis_queries",
             "copilot_dynamic_suggestions",
             "linear_integration",
+            # AI Response Suggestions M2.3
+            "response_suggestions",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -122,6 +124,8 @@ PLANS = {
             "copilot_entity_scopes",
             "copilot_query_templates_admin",
             "linear_integration",
+            # AI Response Suggestions M2.3
+            "response_suggestions",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -167,6 +171,8 @@ PLANS = {
             "byok_keys",
             "ai_usage_dashboard",
             "linear_integration",
+            # AI Response Suggestions M2.3
+            "response_suggestions",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -221,6 +227,8 @@ FEATURE_PLANS = {
     "copilot_entity_scopes": "business",
     "copilot_query_templates_admin": "business",
     "copilot_audit_trail": "enterprise",
+    # AI Response Suggestions (M2.3)
+    "response_suggestions": "pro",
 }
 
 

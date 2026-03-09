@@ -11,7 +11,8 @@ from src.api.routes import customers, admin_backtest, admin_ai_models
 from src.api.routes import conversation_folders, conversations, copilot_ws, copilot
 from src.api.routes import events_ws
 from src.api.routes import linear_integration, linear_webhook
-from src.seed import seed_admin_user
+from src.api.routes import response_templates, response_settings, feedback_responses
+from src.seed import seed_admin_user, seed_system_templates
 import logging
 import os
 import subprocess
@@ -51,6 +52,10 @@ async def lifespan(app: FastAPI):
         seed_admin_user()
     except Exception as e:
         logger.warning(f"Could not seed admin user: {e}")
+    try:
+        seed_system_templates()
+    except Exception as e:
+        logger.warning(f"Could not seed system templates: {e}")
     try:
         from scripts.sync_changelog import run_changelog_sync
         run_changelog_sync()
@@ -150,6 +155,9 @@ app.include_router(copilot.router)
 app.include_router(events_ws.router)
 app.include_router(linear_integration.router)
 app.include_router(linear_webhook.router)
+app.include_router(response_templates.router)
+app.include_router(response_settings.router)
+app.include_router(feedback_responses.router)
 
 
 @app.get("/")

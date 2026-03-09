@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { customerHealthAPI, CustomerHealthData } from '@/lib/api/customer-health';
@@ -62,7 +62,10 @@ import {
   PenLine,
   User,
   ExternalLink,
-  HeartPulse
+  HeartPulse,
+  Reply,
+  MoreHorizontal,
+  GitBranch
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -82,8 +85,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { ChurnFactorBreakdown } from '@/components/feedbacks/ChurnFactorBreakdown';
 import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
-import { CreateIssueDialog } from '@/components/integrations/CreateIssueDialog';
 import { LinkedIssuesCard } from '@/components/feedback/LinkedIssuesCard';
+import { ResponseModal } from '@/components/feedback/ResponseModal';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 export default function FeedbackDetailPage() {
   return (
@@ -134,10 +144,10 @@ function FeedbackDetailContent() {
   const [feedback, setFeedback] = useState<FeedbackItem | null>(null);
   const [customerHealth, setCustomerHealth] = useState<CustomerHealthData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [respondModalOpen, setRespondModalOpen] = useState(false);
 
   useEffect(() => {
     if (feedbackId) {
@@ -190,18 +200,6 @@ function FeedbackDetailContent() {
   // Listen for workflow + feedback events on this item
   useRealtimeEvents('workflow:*', silentRefetch);
   useRealtimeEvents('feedback:*', silentRefetch);
-
-  const handleRefresh = async () => {
-    try {
-      setRefreshing(true);
-      const data = await feedbackAPI.get(feedbackId);
-      setFeedback(data);
-    } catch (err) {
-      console.error('Refresh failed:', err);
-    } finally {
-      setRefreshing(false);
-    }
-  };
 
   const handleAnalyze = async () => {
     if (!feedback) return;
@@ -385,38 +383,37 @@ function FeedbackDetailContent() {
               <TabsTrigger value="analysis" className="text-xs px-2 h-6">Analysis</TabsTrigger>
               <TabsTrigger value="timeline" className="text-xs px-2 h-6">Timeline</TabsTrigger>
             </TabsList>
-            <Button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-            >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            </Button>
-            <CreateIssueDialog
-              feedbackId={feedbackId}
-              aiTitle={feedback?.extracted_issue ?? undefined}
-              aiDescription={feedback?.text ?? undefined}
-            />
-            <Button
-              onClick={handleAnalyze}
-              disabled={analyzing}
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <RefreshCw className={`w-4 h-4 ${analyzing ? 'animate-spin' : ''}`} />
-              {analyzing ? 'Analyzing...' : 'Re-analyze'}
-            </Button>
-            <Button
-              onClick={handleDelete}
-              disabled={deleting}
-              variant="destructive"
-              className="flex items-center gap-2"
-            >
-              <Trash2 className="w-4 h-4" />
-              {deleting ? 'Deleting...' : 'Delete'}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <MoreHorizontal className="w-4 h-4" />
+                  Actions
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setRespondModalOpen(true)}>
+                  <Reply className="w-4 h-4" />
+                  Respond
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleAnalyze} disabled={analyzing}>
+                  <RefreshCw className={`w-4 h-4 ${analyzing ? 'animate-spin' : ''}`} />
+                  {analyzing ? 'Analyzing...' : 'Re-analyze'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => router.push(`/feedbacks/${feedbackId}/create-issue`)}>
+                  <GitBranch className="w-4 h-4" />
+                  Create Issue
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {deleting ? 'Deleting...' : 'Delete'}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -931,6 +928,22 @@ function FeedbackDetailContent() {
           </TabsContent>
       </main>
       </Tabs>
+
+      {/* Response Modal */}
+      {feedback && (
+        <ResponseModal
+          open={respondModalOpen}
+          onClose={() => setRespondModalOpen(false)}
+          feedback={feedback}
+          connectedChannels={
+            feedback.source === 'slack'
+              ? ['slack']
+              : feedback.customer_email
+              ? ['email']
+              : []
+          }
+        />
+      )}
     </div>
   );
 }

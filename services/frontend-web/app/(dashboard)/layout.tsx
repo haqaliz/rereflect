@@ -44,6 +44,7 @@ const pageTitles: Record<string, string> = {
   '/shared-links': 'Shared Links',
   '/workflow': 'Workflow',
   '/settings/workflow': 'Workflow Settings',
+  '/settings/response-templates': 'Response Templates',
   '/system/ai-models': 'AI Models',
   '/conversations': 'AI Copilot',
 };
