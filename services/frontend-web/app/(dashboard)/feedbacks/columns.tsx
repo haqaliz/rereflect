@@ -220,6 +220,8 @@ export const createColumns = (
   {
     accessorKey: "tags",
     header: "Categories",
+    size: 200,
+    minSize: 180,
     cell: ({ row }) => {
       const tags = row.getValue("tags") as string[] | null
 
@@ -227,16 +229,19 @@ export const createColumns = (
         return <span className="text-muted-foreground text-sm">-</span>
       }
 
+      const visible = tags.slice(0, 2)
+      const overflow = tags.length - 2
+
       return (
-        <div className="flex flex-wrap gap-1.5">
-          {tags.map((tag) => {
+        <div className="flex items-center gap-1.5 flex-nowrap">
+          {visible.map((tag) => {
             const tagStyle = getTagStyles(tag)
             const badgeStyle = getCategoryBadgeStyle(tagStyle.color)
             return (
               <Link key={tag} href={`/categories/${tag}`}>
                 <Badge
                   variant="outline"
-                  className="hover:scale-105 transition-transform cursor-pointer"
+                  className="hover:scale-105 transition-transform cursor-pointer whitespace-nowrap"
                   style={badgeStyle}
                 >
                   {tagStyle.displayName}
@@ -244,6 +249,11 @@ export const createColumns = (
               </Link>
             )
           })}
+          {overflow > 0 && (
+            <Badge variant="outline" className="text-muted-foreground whitespace-nowrap">
+              +{overflow}
+            </Badge>
+          )}
         </div>
       )
     },

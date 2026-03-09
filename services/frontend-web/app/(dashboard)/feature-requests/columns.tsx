@@ -156,9 +156,12 @@ export const createColumns = (): ColumnDef<FeedbackItem>[] => [
         return <span className="text-xs text-muted-foreground italic">No tags</span>
       }
 
+      const visible = tags.slice(0, 2)
+      const overflow = tags.length - 2
+
       return (
         <div className="flex flex-wrap gap-1.5">
-          {tags.map((tag) => {
+          {visible.map((tag) => {
             const tagStyle = getTagStyles(tag)
             const badgeStyle = getCategoryBadgeStyle(tagStyle.color)
             return (
@@ -173,6 +176,11 @@ export const createColumns = (): ColumnDef<FeedbackItem>[] => [
               </Link>
             )
           })}
+          {overflow > 0 && (
+            <Badge variant="outline" className="text-muted-foreground">
+              +{overflow}
+            </Badge>
+          )}
         </div>
       )
     },
