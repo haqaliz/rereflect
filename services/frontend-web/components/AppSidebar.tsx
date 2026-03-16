@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   UserX,
   ChevronUp,
+  ChevronRight,
   FileText,
   Bell,
   CreditCard,
@@ -43,8 +44,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarSeparator,
 } from '@/components/ui/sidebar';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,6 +131,14 @@ const settingsNavItems = [
   { title: 'Billing', href: '/settings/billing', icon: CreditCard, requiredRole: 'owner' as const },
 ];
 
+const systemNavItems = [
+  { title: 'Changelog', href: '/system/changelog', icon: FileText },
+  { title: 'Users', href: '/system/users', icon: Users },
+  { title: 'Organizations', href: '/system/organizations', icon: Building2 },
+  { title: 'Promo Codes', href: '/system/promo-codes', icon: Tag },
+  { title: 'AI Models', href: '/system/ai-models', icon: Brain },
+];
+
 const hasRole = (userRole: string | undefined, requiredRole?: 'owner' | 'admin' | 'member'): boolean => {
   if (!requiredRole) return true;
   if (!userRole) return false;
@@ -172,6 +185,11 @@ export function AppSidebar() {
     return pathname === href;
   };
 
+  // Auto-expand: section is open if any child route is active
+  const isAnalysisActive = analysisNavItems.some(item => isActive(item.href));
+  const isSettingsActive = settingsNavItems.some(item => isActive(item.href));
+  const isSystemActive = systemNavItems.some(item => isActive(item.href));
+
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
@@ -187,7 +205,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         {/* Main Navigation */}
-        <SidebarGroup>
+        <SidebarGroup className="pb-0">
           <SidebarGroupContent>
             <SidebarMenu>
               {mainNavItems.map((item) => (
@@ -213,129 +231,107 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarSeparator />
-
-        {/* Analysis Section */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Analysis</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {analysisNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive(item.href)}
-                    tooltip={item.title}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="w-4 h-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarSeparator />
-
-        {/* Settings Section */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Settings</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {settingsNavItems
-                .filter(item => hasRole(user?.role, item.requiredRole))
-                .map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive(item.href)}
-                      tooltip={item.title}
-                    >
-                      <Link href={item.href}>
-                        <item.icon className="w-4 h-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* System Section (System Admins only) */}
-        {user?.is_system_admin && (
-          <>
-            <SidebarSeparator />
-            <SidebarGroup>
-              <SidebarGroupLabel>System</SidebarGroupLabel>
+        
+        {/* Analysis Section — Collapsible */}
+        <Collapsible defaultOpen={isAnalysisActive}>
+          <SidebarGroup className="py-0">
+            <CollapsibleTrigger className="w-full">
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover:text-sidebar-foreground transition-colors">
+                <span>Analysis</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform duration-200 [[data-state=open]>&]:rotate-90" />
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive('/system/changelog')}
-                      tooltip="Changelog"
-                    >
-                      <Link href="/system/changelog">
-                        <FileText className="w-4 h-4" />
-                        <span>Changelog</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive('/system/users')}
-                      tooltip="Users"
-                    >
-                      <Link href="/system/users">
-                        <Users className="w-4 h-4" />
-                        <span>Users</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive('/system/organizations')}
-                      tooltip="Organizations"
-                    >
-                      <Link href="/system/organizations">
-                        <Building2 className="w-4 h-4" />
-                        <span>Organizations</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive('/system/promo-codes')}
-                      tooltip="Promo Codes"
-                    >
-                      <Link href="/system/promo-codes">
-                        <Tag className="w-4 h-4" />
-                        <span>Promo Codes</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActive('/system/ai-models')}
-                      tooltip="AI Models"
-                    >
-                      <Link href="/system/ai-models">
-                        <Brain className="w-4 h-4" />
-                        <span>AI Models</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                  {analysisNavItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.href)}
+                        tooltip={item.title}
+                      >
+                        <Link href={item.href}>
+                          <item.icon className="w-4 h-4" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
                 </SidebarMenu>
               </SidebarGroupContent>
-            </SidebarGroup>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        
+        {/* Settings Section — Collapsible */}
+        <Collapsible defaultOpen={isSettingsActive}>
+          <SidebarGroup className="py-0">
+            <CollapsibleTrigger className="w-full">
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover:text-sidebar-foreground transition-colors">
+                <span>Settings</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform duration-200 [[data-state=open]>&]:rotate-90" />
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {settingsNavItems
+                    .filter(item => hasRole(user?.role, item.requiredRole))
+                    .map((item) => (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive(item.href)}
+                          tooltip={item.title}
+                        >
+                          <Link href={item.href}>
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+
+        {/* System Section — Collapsible (System Admins only) */}
+        {user?.is_system_admin && (
+          <>
+                        <Collapsible defaultOpen={isSystemActive}>
+              <SidebarGroup className="py-0">
+                <CollapsibleTrigger className="w-full">
+                  <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover:text-sidebar-foreground transition-colors">
+                    <span>System</span>
+                    <ChevronRight className="w-3.5 h-3.5 transition-transform duration-200 [[data-state=open]>&]:rotate-90" />
+                  </SidebarGroupLabel>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {systemNavItems.map((item) => (
+                        <SidebarMenuItem key={item.title}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isActive(item.href)}
+                            tooltip={item.title}
+                          >
+                            <Link href={item.href}>
+                              <item.icon className="w-4 h-4" />
+                              <span>{item.title}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </CollapsibleContent>
+              </SidebarGroup>
+            </Collapsible>
           </>
         )}
       </SidebarContent>
