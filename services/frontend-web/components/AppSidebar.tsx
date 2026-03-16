@@ -57,7 +57,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-const mainNavItems = [
+const workspaceNavItems = [
   {
     title: 'Dashboard',
     href: '/dashboard',
@@ -186,6 +186,7 @@ export function AppSidebar() {
   };
 
   // Auto-expand: section is open if any child route is active
+  const isWorkspaceActive = workspaceNavItems.some(item => isActive(item.href)) || isActive('/dashboard');
   const isAnalysisActive = analysisNavItems.some(item => isActive(item.href));
   const isSettingsActive = settingsNavItems.some(item => isActive(item.href));
   const isSystemActive = systemNavItems.some(item => isActive(item.href));
@@ -204,32 +205,42 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Main Navigation */}
-        <SidebarGroup className="pb-0">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {mainNavItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive(item.href)}
-                    tooltip={item.title}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="w-4 h-4" />
-                      <span>{item.title}</span>
-                      {item.proBadge && user?.plan === 'free' && (
-                        <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary leading-none">
-                          Pro
-                        </span>
-                      )}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {/* Workspace Section — Collapsible */}
+        <Collapsible defaultOpen={isWorkspaceActive}>
+          <SidebarGroup className="pb-0">
+            <CollapsibleTrigger className="w-full">
+              <SidebarGroupLabel className="flex items-center justify-between cursor-pointer hover:text-sidebar-foreground transition-colors">
+                <span>Workspace</span>
+                <ChevronRight className="w-3.5 h-3.5 transition-transform duration-200 [[data-state=open]>&]:rotate-90" />
+              </SidebarGroupLabel>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {workspaceNavItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.href)}
+                        tooltip={item.title}
+                      >
+                        <Link href={item.href}>
+                          <item.icon className="w-4 h-4" />
+                          <span>{item.title}</span>
+                          {item.proBadge && user?.plan === 'free' && (
+                            <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary leading-none">
+                              Pro
+                            </span>
+                          )}
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
 
         
         {/* Analysis Section — Collapsible */}
