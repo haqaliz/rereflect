@@ -126,6 +126,16 @@ def analyze_single_feedback(self, feedback_id: int) -> dict:
             from src.tasks.workflow import auto_assign_feedback_batch
             auto_assign_feedback_batch.delay(org_id, [feedback_id])
 
+            # Dispatch webhook events (fire-and-forget — never blocks analysis)
+            try:
+                from src.tasks.webhook_delivery import _dispatch_analysis_webhooks
+                _dispatch_analysis_webhooks(feedback, db)
+            except Exception as exc:
+                logger.warning(
+                    "Webhook dispatch failed after analysis for feedback %s: %s",
+                    feedback_id, exc,
+                )
+
             logger.info(f"Successfully analyzed feedback {feedback_id}")
             return {
                 "status": "success",

@@ -11,6 +11,18 @@ analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "
 if analysis_engine_path not in sys.path:
     sys.path.insert(0, analysis_engine_path)
 
+# ---------------------------------------------------------------------------
+# Sentry error tracking (free tier)
+# ---------------------------------------------------------------------------
+import sentry_sdk
+
+sentry_sdk.init(
+    dsn="https://2b2ca3ad26940c13fbf60d94b877505a@o4511048843788288.ingest.us.sentry.io/4511050724737024",
+    send_default_pii=True,
+    traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+    environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
+)
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -30,6 +42,7 @@ celery_app = Celery(
         "src.tasks.anomaly",
         "src.tasks.insights",
         "src.tasks.workflow",
+        "src.tasks.webhook_delivery",
     ],
 )
 
@@ -159,6 +172,11 @@ celery_app.conf.beat_schedule = {
     "auto-assign-unassigned-feedback": {
         "task": "src.tasks.workflow.auto_assign_unassigned_feedback",
         "schedule": 60.0,
+    },
+    # Purge webhook delivery logs older than 30 days — weekly on Sunday at 2:15 AM
+    "purge-old-webhook-deliveries": {
+        "task": "src.tasks.webhook_delivery.purge_old_webhook_deliveries",
+        "schedule": crontab(hour=2, minute=15, day_of_week=0),
     },
 }
 

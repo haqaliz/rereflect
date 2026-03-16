@@ -33,3 +33,6 @@ cryptography>=43.0.0         # Fernet symmetric encryption for LLM API keys
 openai>=1.82.0               # OpenAI API client
 anthropic>=0.40.0            # Anthropic API client
 google-generativeai>=0.8.0   # Google Generative AI client
+
+# Error tracking (Sentry free tier — 5K errors/mo)
+sentry-sdk[fastapi]==2.22.0  # Sentry SDK with FastAPI + SQLAlchemy integrations

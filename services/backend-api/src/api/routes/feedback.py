@@ -219,6 +219,18 @@ async def create_feedback(
     # Queue for analysis via Celery worker
     queue_analyze_feedback(feedback.id)
 
+    # Dispatch webhook event (fire-and-forget — never blocks the response)
+    try:
+        from src.services.webhook_dispatcher import dispatch_webhook_event
+        dispatch_webhook_event(
+            db=db,
+            org_id=current_org.id,
+            event_type="feedback.created",
+            feedback=feedback,
+        )
+    except Exception:
+        pass
+
     await emit_event(
         org_id=current_org.id,
         event_type="feedback:created",

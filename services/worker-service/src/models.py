@@ -567,6 +567,52 @@ class LLMUsageLog(Base):
     )
 
 
+class WebhookEndpoint(Base):
+    """Webhook endpoint model — mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "webhook_endpoints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    name = Column(String(200), nullable=False)
+    url = Column(String(2048), nullable=False)
+    signing_secret = Column(String(500), nullable=False)  # Fernet-encrypted HMAC secret
+    events = Column(JSON, default=list)
+    category_filters = Column(JSON, default=list)
+    custom_headers = Column(String, nullable=True)  # Fernet-encrypted JSON key-value pairs
+    retry_mode = Column(String(50), nullable=False, default="fire_and_forget")
+    is_active = Column(Boolean, default=True, nullable=False)
+    consecutive_failures = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_wh_endpoint_org", "organization_id"),
+        Index("ix_wh_endpoint_org_active", "organization_id", "is_active"),
+    )
+
+
+class WebhookDelivery(Base):
+    """Webhook delivery log — mirrors backend-api model (lightweight, no FKs)."""
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    webhook_id = Column(Integer, nullable=False)
+    event = Column(String(100), nullable=False)
+    feedback_id = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=False)  # sent | failed | retrying
+    attempt = Column(Integer, default=1, nullable=False)
+    response_code = Column(Integer, nullable=True)
+    response_body = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_wh_delivery_webhook_created", "webhook_id", "created_at"),
+    )
+
+
 class LLMModelPrice(Base):
     """System-wide model pricing table."""
     __tablename__ = "llm_model_prices"

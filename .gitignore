@@ -323,6 +323,7 @@ docker-compose.override.yml
 .env.development.local
 .env.test.local
 .env.production.local
+.env.sentry-build-plugin
 secrets/
 credentials/
 *.pem

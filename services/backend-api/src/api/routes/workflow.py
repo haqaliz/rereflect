@@ -154,6 +154,7 @@ async def change_status(
         raise HTTPException(status_code=404, detail="No matching feedback found")
 
     updated = 0
+    status_changes: list = []  # [(feedback, old_status)] for webhook dispatch
     for fb in feedbacks:
         old_status = fb.workflow_status
         if old_status == data.new_status:
@@ -167,6 +168,7 @@ async def change_status(
             "status_changed", old_value=old_status, new_value=data.new_status,
             metadata=meta if meta else None,
         )
+        status_changes.append((fb, old_status))
         updated += 1
 
     db.commit()
@@ -180,6 +182,24 @@ async def change_status(
     try:
         from src.notification_dispatch_helpers import dispatch_status_changed
         dispatch_status_changed(current_org.id, current_user, feedbacks, data.new_status)
+    except Exception:
+        pass
+
+    # Dispatch webhook events for status changes (fire-and-forget)
+    try:
+        from src.services.webhook_dispatcher import dispatch_webhook_event
+        for fb, old_status in status_changes:
+            dispatch_webhook_event(
+                db=db,
+                org_id=current_org.id,
+                event_type="feedback.status_changed",
+                feedback=fb,
+                changes={
+                    "old_status": old_status,
+                    "new_status": data.new_status,
+                    "changed_by": current_user.email,
+                },
+            )
     except Exception:
         pass
 

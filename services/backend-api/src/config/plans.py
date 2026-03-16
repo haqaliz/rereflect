@@ -36,6 +36,8 @@ PLANS = {
             "sentiment_analysis",
             "email_support",
             # Copilot: free users get basic access (no folders, no analysis)
+            # Custom Webhooks M3.1 (limited: 2 endpoints, fire-and-forget only, 2 headers)
+            "custom_webhooks",
         ],
         "stripe_price_monthly": None,
         "stripe_price_annual": None,
@@ -78,6 +80,8 @@ PLANS = {
             "linear_integration",
             # AI Response Suggestions M2.3
             "response_suggestions",
+            # Custom Webhooks M3.1
+            "custom_webhooks",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -126,6 +130,8 @@ PLANS = {
             "linear_integration",
             # AI Response Suggestions M2.3
             "response_suggestions",
+            # Custom Webhooks M3.1
+            "custom_webhooks",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -173,6 +179,8 @@ PLANS = {
             "linear_integration",
             # AI Response Suggestions M2.3
             "response_suggestions",
+            # Custom Webhooks M3.1
+            "custom_webhooks",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -229,6 +237,8 @@ FEATURE_PLANS = {
     "copilot_audit_trail": "enterprise",
     # AI Response Suggestions (M2.3)
     "response_suggestions": "pro",
+    # Custom Webhooks (M3.1) - free gets limited access
+    "custom_webhooks": "free",
 }
 
 
@@ -274,6 +284,24 @@ def get_saved_views_limit(plan_id: str) -> Optional[int]:
     """Get saved views limit for a plan. None means unlimited."""
     plan = get_plan(plan_id)
     return plan.get("saved_views_limit")
+
+
+def get_webhook_limit(plan_id: str) -> Optional[int]:
+    """Get max webhook endpoint count for a plan. None means unlimited."""
+    limits = {
+        "free": 2,
+        "pro": 5,
+        "business": 10,
+        "enterprise": None,
+    }
+    return limits.get(plan_id, 2)
+
+
+def get_webhook_header_limit(plan_id: str) -> int:
+    """Get max custom headers per webhook for a plan."""
+    if plan_id in ("pro", "business", "enterprise"):
+        return 5
+    return 2  # free
 
 
 def get_stripe_price_id(plan_id: str, billing_cycle: str) -> Optional[str]:

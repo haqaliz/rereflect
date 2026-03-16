@@ -38,6 +38,8 @@ from .copilot_schema_whitelist import CopilotSchemaWhitelist
 from .linear_integration import LinearIntegration, LinearTeamMapping, LinearStatusMapping, FeedbackLinearIssue
 from .response_template import ResponseTemplate
 from .feedback_response import FeedbackResponse
+from .webhook_endpoint import WebhookEndpoint
+from .webhook_delivery import WebhookDelivery
 
 __all__ = [
     "Base",
@@ -84,4 +86,6 @@ __all__ = [
     "FeedbackLinearIssue",
     "ResponseTemplate",
     "FeedbackResponse",
+    "WebhookEndpoint",
+    "WebhookDelivery",
 ]

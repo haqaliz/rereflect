@@ -45,9 +45,9 @@ export default function PreferencesPage() {
   const [savingDigest, setSavingDigest] = useState(false);
   const [savingAlerts, setSavingAlerts] = useState(false);
 
-  // Only access theme context after mounting (client-side only)
-  const themeContext = mounted ? useTheme() : { theme: 'system', setTheme: () => {} };
-  const { theme, setTheme } = themeContext;
+  // Always call useTheme (Rules of Hooks) — values are safe to read after mount
+  const { theme: currentTheme, setTheme } = useTheme();
+  const theme = mounted ? currentTheme : 'system';
 
   // Helper to get role display name
   const getRoleDisplayName = (role: string) => {

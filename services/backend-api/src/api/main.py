@@ -12,10 +12,24 @@ from src.api.routes import conversation_folders, conversations, copilot_ws, copi
 from src.api.routes import events_ws
 from src.api.routes import linear_integration, linear_webhook
 from src.api.routes import response_templates, response_settings, feedback_responses
+from src.api.routes import webhooks as webhooks_router
+from src.api.routes import health as health_routes
 from src.seed import seed_admin_user, seed_system_templates
 import logging
 import os
 import subprocess
+
+# ---------------------------------------------------------------------------
+# Sentry error tracking (free tier — 5K errors/mo)
+# ---------------------------------------------------------------------------
+import sentry_sdk
+
+sentry_sdk.init(
+    dsn="https://6b7b81ce181d7a0cad75dbd92f9a49d0@o4511048843788288.ingest.us.sentry.io/4511050543005696",
+    send_default_pii=True,
+    traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+    environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -112,6 +126,7 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CacheControlMiddleware)
 
+
 # Include routers
 app.include_router(auth.router)
 app.include_router(organizations.router)
@@ -158,6 +173,9 @@ app.include_router(linear_webhook.router)
 app.include_router(response_templates.router)
 app.include_router(response_settings.router)
 app.include_router(feedback_responses.router)
+# Custom Webhooks (M3.1)
+app.include_router(webhooks_router.router)
+app.include_router(health_routes.router)
 
 
 @app.get("/")
