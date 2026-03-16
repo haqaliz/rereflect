@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-02-25
+**Last Updated**: 2026-03-17
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -28,6 +28,7 @@
 | **AI reports** | On-demand report generation via copilot |
 | **Languages** | English only (for now) |
 | **AI budget** | Minimal now ($50-100/mo), pass-through to customers via BYOK/usage pricing as we scale |
+| **Custom webhooks** | 5 event types with tag-based filtering, plan-gated limits, configurable retry |
 
 ---
 
@@ -43,25 +44,29 @@
 | Customer health scores (4-component weighted) | Yes | Dashboard widget (top 5 at-risk) | Pro+ |
 | Weekly LLM churn deep-dive | Yes | Dashboard widget expandable section | Pro+ |
 | Tag extraction (TF-IDF) | Yes | Feedback detail tags | Free |
+| Multi-model LLM support (OpenAI, Anthropic, Google) | Yes | AI Settings page (providers, usage, budget) | Pro+ (BYOK) |
+| AI Copilot (natural language queries) | Yes | /conversations page, Cmd+K | Tiered by plan |
+| AI Response Suggestions | Yes | Feedback detail ResponseModal, template browser | Pro+ |
+| Customer sentiment alerts | Yes | Notification center, Slack, email | Pro+ |
 
 ---
 
 ## Frontend Gaps (Data exists, not surfaced)
 
 ### 1. Feedback Detail: Customer Health Badge
-- **Status**: Not built
+- **Status**: COMPLETE (built in M1.1)
 - **Scope**: Small — frontend-only
 - **What**: Show health score badge on `/feedbacks/[id]` when item has `customer_email`
 - **PRD Reference**: PRD-PREDICTIVE-ANALYTICS.md Phase 4.3
 
 ### 2. Feedbacks List: Churn Risk Indicator
-- **Status**: Not built
+- **Status**: COMPLETE (built in M1.1)
 - **Scope**: Small — frontend column + backend already returns field
 - **What**: Add `churn_risk_score` as a visual indicator column on feedbacks list table
 - **Why**: Users can't scan for high-risk items without opening each one
 
 ### 3. Dedicated /customers Page
-- **Status**: Not built
+- **Status**: COMPLETE (built in M1.2)
 - **Scope**: Medium — new page + API endpoint
 - **What**: Full customer list with sortable health scores, search, filters, risk level breakdown
 - **Why**: Dashboard only shows top 5 at-risk. No way to browse all customers or see healthy ones
@@ -134,12 +139,12 @@
 - [x] Plan gating: Free = 10 queries/day + 50K tokens/mo, Pro = unlimited + 500K tokens, Business = 5M tokens
 - [x] Usage display: copilot usage section in AI Settings, token budget bars, upgrade CTAs
 
-#### M2.3 — AI Response Suggestions (2 weeks)
-- [ ] Response templates library: pre-written templates per category (bug report response, feature request acknowledgment, churn risk outreach, etc.)
-- [ ] Template suggestion on feedback detail: AI picks best template based on category + sentiment
-- [ ] Custom response generation: "Generate response" button → LLM drafts personalized response using customer context + feedback history
-- [ ] Copy-to-clipboard + edit before sending (no auto-send)
-- [ ] Plan gate: templates = Pro+, generated responses = Business+ (with monthly limit: Pro=50, Business=500, Enterprise=unlimited)
+#### M2.3 — AI Response Suggestions (2 weeks) — COMPLETE
+- [x] Response templates library: 8 system templates seeded on startup (Bug Report, Feature Request, Churn Risk, Positive, Complaint, Urgent, Follow-up, Onboarding) with template CRUD and scoring algorithm for best-match suggestion
+- [x] Template suggestion on feedback detail: AI picks best template based on category + sentiment via scoring algorithm
+- [x] Custom response generation: ResponseModal with template browser, AI generation, and tone selector; Actions dropdown consolidating respond/re-analyze/create issue/delete
+- [x] Copy-to-clipboard + edit before sending (no auto-send)
+- [x] Plan gate: response_suggestions on Pro+; response settings per org (brand_voice, default_tone, product_name, support_email)
 
 #### M2.4 — On-Demand AI Reports (2 weeks)
 - [ ] Via copilot: "Generate a report on churn trends this quarter"
@@ -148,7 +153,7 @@
 - [ ] Export as PDF (reuse existing PDF export infrastructure)
 - [ ] Plan gate: Business+ feature
 
-**Q2 Deliverables**: Multi-model LLM, AI copilot (Cmd+K), response suggestions, on-demand reports
+**Q2 Deliverables**: Multi-model LLM (M2.1 COMPLETE), AI copilot (M2.2 COMPLETE), response suggestions (M2.3 COMPLETE), on-demand reports (M2.4 planned)
 **Plan Gating**: Copilot queries tiered by plan, response generation Business+, reports Business+
 
 ---

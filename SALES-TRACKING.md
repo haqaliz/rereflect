@@ -2,7 +2,7 @@
 
 **Product**: Rereflect - AI-powered customer feedback analysis
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-02-15
+**Last Updated**: 2026-03-17
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| Signups | 100 | 0 | 🔴 Not Started |
-| Paying Customers | 10 | 0 | 🔴 Not Started |
+| Signups | 100 | 0 | 🟡 Building traffic |
+| Paying Customers | 10 | 0 | 🟡 Need signups first |
 | MRR | $500 | $0 | 🔴 Not Started |
 | Trial → Paid Conversion | 10% | - | - |
 
@@ -31,6 +31,29 @@
 - Can't afford dedicated customer research team
 - Need to prioritize features based on real feedback
 - Want to reduce churn by catching issues early
+
+---
+
+## Phase 2: First 10 Paying Customers
+
+The product is feature-rich (AI analysis, copilot, response suggestions, webhooks, integrations). The bottleneck is traffic and signups, not features. This phase focuses on converting awareness into paying customers.
+
+### Growth Levers (Priority Order)
+
+1. **SEO Content** (highest ROI) — 22 blog posts planned through Dec 2026, competitor comparisons drive bottom-funnel traffic
+2. **Social proof** — Get 3-5 case studies from free users, add testimonials to landing page
+3. **Community presence** — Weekly posting on r/SaaS, Indie Hackers, Twitter #buildinpublic
+4. **Demo video** — Embed on landing page, share on social channels
+5. **Integration directories** — Slack App Directory (needs 5 installs), Intercom already listed
+
+### Key Actions (next 4 weeks)
+
+- [ ] Record updated product demo (show AI Copilot, Response Suggestions, Webhooks)
+- [ ] Get 3 free users to try the product and provide testimonials
+- [ ] Publish blog post #4 (Rereflect vs Productboard comparison)
+- [ ] Set up email drip for new signups (welcome → activation → value → upgrade)
+- [ ] Add live chat or Intercom widget on landing page
+- [ ] Create a "How it works" section on landing page showing the AI analysis flow
 
 ---
 
@@ -157,7 +180,7 @@ Cheers,
 - [x] Write 2 blog posts (SEO-focused): /blog/how-to-organize-customer-feedback, /blog/customer-feedback-analysis-manual-vs-ai
 - [x] Post first "building in public" update (X/Twitter thread)
 
-### Week 3: Content & Community - IN PROGRESS
+### Week 3: Content & Community - COMPLETE
 - [x] Join 3 founder communities, start participating (Indie Hackers, r/SaaS, r/startups)
 - [x] Write a Twitter thread on "5 feedback mistakes that kill startups"
 - [ ] Record a Loom: "How I analyze 500 feedbacks in 5 minutes"
@@ -379,3 +402,10 @@ Website Visit → Signup → Activate → Trial → Paid
 *(Add insights as you learn what works)*
 
 - ...
+
+### Decisions (2026-03-17)
+
+- Focusing on SMB SaaS (5-50 employees) for first 10 customers
+- Traffic/awareness is the #1 blocker, not features
+- Product is feature-rich enough for first customers (AI analysis, copilot, responses, webhooks, integrations)
+- Pricing needs validation with real users before adjusting

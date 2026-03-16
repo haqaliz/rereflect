@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-03-09
+**Last Updated**: 2026-03-17
 
 ---
 
@@ -172,8 +172,47 @@
 - [ ] JIRA integration
 - [x] Linear integration
 - [ ] Asana integration
-- [ ] Custom webhooks (trigger on events)
+- [x] Custom webhooks (trigger on events)
 - [ ] Auto-routing rules
+
+### M3.2 — JIRA Integration (2-3 weeks)
+- [ ] JIRA OAuth flow (connect/disconnect via Atlassian OAuth 2.0)
+- [ ] JIRA API client: projects, issue types, priorities, labels, users
+- [ ] Create issue from feedback: team/project/priority selection (reuse Create Issue page)
+- [ ] Webhook receiver: issue status sync back to Rereflect
+- [ ] Feedback source type: `jira` (pull comments from JIRA issues)
+- [ ] Plan gate: Pro+ (same as Linear)
+
+### M3.3 — Asana Integration (2 weeks)
+- [ ] Asana OAuth flow
+- [ ] Asana API client: workspaces, projects, tasks
+- [ ] Create task from feedback: workspace/project selection
+- [ ] Plan gate: Pro+
+
+### M3.4 — Zendesk Integration (2 weeks)
+- [ ] Zendesk OAuth flow
+- [ ] Zendesk API client: tickets, comments, users
+- [ ] Feedback source type: `zendesk` (pull ticket data as feedback)
+- [ ] Plan gate: Pro+
+
+### M3.5 — HubSpot CRM Integration (3 weeks)
+- [ ] HubSpot OAuth flow
+- [ ] Sync contacts: company, deal stage, ARR, renewal date
+- [ ] Match by email: link HubSpot contacts to Rereflect customers
+- [ ] Customer 360 enrichment: CRM data on customer profile
+- [ ] Plan gate: Business+
+
+### M3.6 — SSO/SAML (3 weeks)
+- [ ] SAML 2.0 SSP integration (Okta, Azure AD, Google Workspace)
+- [ ] Auto-provisioning: create users on first SSO login
+- [ ] Settings page: SSO configuration (Entity ID, ACS URL, certificate)
+- [ ] Plan gate: Enterprise only
+
+### M3.7 — Advanced RBAC & GDPR (2 weeks)
+- [ ] Custom roles with granular permissions
+- [ ] GDPR data export: user can export all their data as JSON/CSV
+- [ ] GDPR data deletion: user can request full account + data deletion
+- [ ] Plan gate: Enterprise (RBAC), all plans (GDPR)
 
 ### Predictive Analytics — COMPLETE
 - [x] Improved churn prediction (9-factor: sentiment, urgency, churn keywords, frustration keywords, sentiment trend, feedback frequency, resolution time, pain severity, feature request density)
@@ -196,8 +235,8 @@
 - [x] Add comprehensive test coverage (billing/Stripe tests + Vitest frontend setup)
 - [x] Performance optimization (Redis server-side caching + React Query client-side caching)
 - [x] Database query optimization (4 indexes, eager loading, SQL tag aggregation)
-- [ ] Error tracking (Sentry) — deferred (cost)
-- [ ] Monitoring dashboard (DataDog) — deferred (cost)
+- [x] Error tracking (Sentry) — COMPLETE (free tier across all 3 services)
+- [x] Monitoring dashboard — COMPLETE (health endpoint: /health/detailed)
 
 ---
 
@@ -468,6 +507,18 @@
   - Alembic migration: linear_integration tables (linear_integrations, linear_team_mappings, linear_status_mappings, linear_issue_templates)
   - Backend tests: 7 test files (client, config, issues, models, OAuth, plan gating, webhook)
   - Frontend tests: 4 test files (CreateIssueButton, CreateIssueDialog, LinearSettings, LinkedIssuesCard)
+- **Custom Webhooks & Tech Debt** (M3.1, PRD-CUSTOM-WEBHOOKS-AND-TECH-DEBT.md):
+  - Webhook endpoints CRUD API: HMAC-SHA256 signing, custom headers (Fernet-encrypted), configurable retry (fire-and-forget or exponential backoff)
+  - Plan-gated endpoint limits: Free=2, Pro=5, Business=10, Enterprise=unlimited
+  - 5 event types: feedback.created, feedback.analyzed, feedback.status_changed, feedback.urgent, feedback.category_match (tag-based filtering)
+  - Dispatch engine: async Celery tasks, exponential backoff (1m/5m/30m), auto-disable after 10 consecutive failures
+  - Delivery log with 30-day retention (weekly purge via Celery Beat)
+  - Frontend: Settings > Webhooks pages (list, create, detail/edit with delivery log), shadcn Checkbox/ToggleGroup components
+  - Sentry error tracking: free tier across backend-api (FastAPI), worker-service (Celery), frontend-web (Next.js)
+  - Health endpoint: /health/detailed (system-admin only) with DB, Redis, Celery, memory, uptime checks
+  - Collapsible sidebar sections (Workspace, Analysis, Settings, System) with auto-expand on active route
+  - Alembic migration: webhook_endpoints + webhook_deliveries tables
+  - 60 webhook + 24 Sentry + 17 health = 101 TDD tests
 
 ---
 
@@ -521,6 +572,10 @@
 - AI Response Suggestions (M2.3): modal-based compose flow (not inline), system templates seeded at startup (idempotent), template scoring by category/sentiment/urgency/churn, Actions dropdown consolidates 4 buttons, Create Issue as stepped page (not dialog) matching feedback source wizard style
 - Linear integration: own OAuth system (separate from generic Integration model), dedicated tables (not reusing integrations table), Pro+ plan gating, webhook signature verification, team/status mappings for org-level config
 - Linear feedback sources: `requires_integration=false` in backend (uses its own OAuth), frontend adds `|| type.type === 'linear'` for "Requires OAuth" badge display
+- Custom webhooks (M3.1): 5 event types, plan-gated endpoint limits, user-configurable retry mode (fire-and-forget or exponential backoff), HMAC-SHA256 signing, Fernet-encrypted headers, auto-disable after 10 failures
+- Sentry: free tier (5K errors/mo) across all 3 services, hardcoded DSN (safe per Sentry docs), separate projects for backend vs worker
+- Health endpoint: /health/detailed returns DB/Redis/Celery/memory/uptime, system-admin gated, always 200 (reports health, doesn't fail on unhealthy)
+- Sidebar: all sections collapsible with Radix Collapsible, auto-expand based on active route, no localStorage persistence
 
 ---
 

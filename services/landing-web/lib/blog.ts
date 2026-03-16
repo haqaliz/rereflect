@@ -506,7 +506,7 @@ const posts: BlogPost[] = [
     slug: 'how-to-prioritize-features-customer-feedback',
     title: 'How to Prioritize Features Using Customer Feedback',
     excerpt: 'Feature requests pile up fast. Without a system to prioritize them using actual customer data, product teams end up building for the loudest voice instead of the biggest impact. Here is a practical framework.',
-    date: '2026-04-01',
+    date: '2026-03-05',
     readTime: '9 min read',
     author: 'Rereflect Team',
     tags: ['Product Management', 'Feature Prioritization', 'Customer Feedback', 'SaaS'],
@@ -623,7 +623,7 @@ const posts: BlogPost[] = [
     slug: 'rereflect-vs-canny',
     title: 'Rereflect vs Canny: Feedback Collection vs Feedback Intelligence',
     excerpt: 'Canny is a popular feedback board for collecting and voting on feature requests. Rereflect uses AI to analyze feedback from all your channels. This comparison helps you understand which approach your team needs.',
-    date: '2026-04-15',
+    date: '2026-03-10',
     readTime: '10 min read',
     author: 'Rereflect Team',
     tags: ['Comparison', 'Canny', 'Feature Requests', 'Feedback Analysis'],
@@ -786,6 +786,155 @@ const posts: BlogPost[] = [
           'Rereflect is a feedback intelligence tool. It analyzes conversations that are already happening across your channels and uses AI to extract insights — sentiment, pain points, feature requests, and churn risk — without requiring customers to change their behavior or visit a separate tool.',
           'For most SaaS teams between 5 and 50 employees, the deciding question is: do you need more feedback (Canny), or do you need more insight from the feedback you already have (Rereflect)?',
           'If the answer is insight, you can try Rereflect free at app.rereflect.ca. Connect your Slack or upload a CSV and see AI analysis on your actual feedback within minutes.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: '5-signs-customers-about-to-churn-feedback',
+    title: '5 Signs Your Customers Are About to Churn (Hidden in Their Feedback)',
+    excerpt: 'Most SaaS companies only notice churn when a customer cancels. But the warning signs were in their feedback weeks or months earlier. Here are the five hidden signals you should be watching for.',
+    date: '2026-03-17',
+    readTime: '10 min read',
+    author: 'Rereflect Team',
+    tags: ['Churn Prediction', 'Customer Feedback', 'SaaS', 'AI'],
+    seoTitle: '5 Signs Your Customers Are About to Churn (Hidden in Their Feedback) | Rereflect',
+    seoDescription: 'Learn to spot the 5 hidden churn signals buried in customer feedback. From sentiment shifts to silence patterns, discover how to predict churn 30-60 days before it happens.',
+    sections: [
+      {
+        heading: 'The churn signal hiding in plain sight',
+        content: [
+          'Every SaaS company has a churn problem it does not know about yet. Not the customers who cancel — you know about those. The problem is the customers who are going to cancel next month, and the month after that, whose intentions are already visible in the feedback they have been sending you.',
+          'Most teams treat churn as a billing event. A customer cancels, someone flags it in a meeting, and the post-mortem begins. But by the time a customer hits the cancel button, the decision was made weeks or months earlier. The frustration accumulated gradually, the alternatives were researched quietly, and the migration plan was already in motion before anyone on your team noticed.',
+          'The signals were there the entire time — buried in support tickets, scattered across Slack messages, hidden in the phrasing of feature requests. The problem is not that churn signals do not exist. The problem is that they are easy to miss when you are not looking for them.',
+          'Here are five patterns that reliably predict churn 30 to 60 days before it happens, all of them hiding in the feedback your customers are already sending you.',
+        ],
+      },
+      {
+        heading: 'Sign 1: The sentiment shift',
+        content: [
+          'A single negative review is not a churn signal. Every product has bad days, and every customer has moments of frustration. What matters is the trajectory.',
+          'When a customer who used to send positive feedback starts sending neutral feedback, and then shifts to negative, you are watching a relationship deteriorate in real time. This is not a bad day — it is a pattern. And by the time the sentiment reaches consistently negative, the customer is already comparing alternatives.',
+        ],
+        listItems: [
+          'Month 1: "Loving the new dashboard update, exactly what we needed!" — Positive',
+          'Month 2: "The export feature works, but it could be faster." — Neutral',
+          'Month 3: "We are still waiting on the CSV formatting fix." — Neutral with frustration',
+          'Month 4: "This workflow is really slowing our team down." — Negative',
+          'Month 5: Silence — and then cancellation',
+        ],
+        content2: [
+          'The critical insight is that no single message in this sequence looks alarming on its own. A product manager reading message three in isolation would tag it as a minor bug report. But plotted on a timeline, the trajectory is unmistakable. The customer went from advocate to critic in four months, and each piece of feedback was a data point on a downward curve.',
+          'Sentiment shift detection requires tracking per-customer sentiment over time, not just measuring aggregate sentiment across your entire user base. Your overall sentiment score might be stable while individual customers are on a clear decline. The aggregate number masks the individual trajectories that actually predict churn.',
+        ],
+      },
+      {
+        heading: 'Sign 2: Repeated pain points without resolution',
+        content: [
+          'When a customer reports the same issue twice, they are being patient. When they report it three times, they are frustrated. When they report it a fourth time, they are documenting a reason to leave.',
+          'Repeated pain points are one of the strongest churn predictors because they signal something specific: the customer depends on a workflow that your product is failing to support, and they have given you multiple chances to fix it. Each repetition is an escalation, even if the tone stays polite.',
+        ],
+        listItems: [
+          '"The export is still generating broken CSV files." — Reported for the second time',
+          '"I mentioned this last month — the date filter resets every time I navigate away." — Frustration with lack of progress',
+          '"We have reported the sync issue three times now. Is this on your roadmap?" — Directly questioning commitment',
+          '"Still cannot bulk-edit tags. This has been an issue since we onboarded." — Linking the problem to their entire customer lifecycle',
+          '"Our team has to use a workaround for this every single day." — Quantifying the ongoing cost',
+        ],
+        content2: [
+          'The danger of repeated pain points is that each individual report looks like a standard bug report or feature request. Support teams close the ticket, tag it as a known issue, and move on. But from the customer\'s perspective, each repetition represents a growing body of evidence that your product is not improving in the areas they care about most.',
+          'Pay particular attention when the repeated issue affects a core workflow. A customer can tolerate a cosmetic bug indefinitely, but a problem in their daily critical path erodes trust with every occurrence. The combination of high frequency and high impact is where churn risk concentrates.',
+        ],
+      },
+      {
+        heading: 'Sign 3: Competitor mentions and comparison language',
+        content: [
+          'When customers start mentioning competitors in their feedback, they are telling you something important: they are aware of alternatives, and they are actively evaluating whether those alternatives are better. This is not casual conversation. Research shows that customers who mention competitors in feedback are significantly more likely to churn within 90 days.',
+          'Competitor signals come in two forms: direct and indirect. Direct mentions name specific products. Indirect mentions describe capabilities that competing products offer without naming them explicitly.',
+        ],
+        listItems: [
+          '"I noticed [Competitor] just launched a feature that does exactly this." — Active awareness of competitor development',
+          '"Other tools in this space let us automate this workflow." — Comparison shopping without naming names',
+          '"We are evaluating a few options for next quarter." — Explicit evaluation disclosure',
+          '"Can you match what [Competitor] offers for reporting?" — Direct feature comparison',
+          '"Our team has been testing [Competitor] alongside your product." — Active trial of alternatives',
+          '"The industry standard for this feature is [description]." — Framing your product as below standard',
+        ],
+        content2: [
+          'Indirect signals are often more dangerous than direct mentions because they indicate that the customer has already internalized the competitor\'s value proposition. When someone says "other tools let me do X," they are not asking a question — they are making a statement about what they believe they deserve. The mental comparison has already happened.',
+          'Competitor mentions also tend to cluster with other churn signals. A customer who mentions a competitor while also reporting a repeated pain point is essentially saying: "You are not fixing this, and I know someone who has." That combination should trigger immediate attention from your customer success team.',
+        ],
+      },
+      {
+        heading: 'Sign 4: The silence before the storm',
+        content: [
+          'This is the most counterintuitive churn signal, and also one of the most reliable: customers who suddenly stop giving feedback are often at higher risk than customers who complain.',
+          'Active feedback — even negative feedback — is a sign of engagement. A customer who writes a frustrated support ticket is a customer who still believes your product can improve. They are investing time in the relationship. Silence, on the other hand, means they have stopped investing.',
+        ],
+        listItems: [
+          'A customer who submitted feedback weekly for three months suddenly goes quiet for four weeks',
+          'A previously active beta tester stops responding to release announcements',
+          'A power user who regularly reported bugs has not contacted support in six weeks',
+          'A customer who attended every webinar and community event disappears from all channels',
+        ],
+        content2: [
+          'The psychology behind silence is straightforward: people stop giving feedback when they no longer believe it will lead to change. They have mentally checked out. The product is no longer something they are trying to improve — it is something they are planning to replace.',
+          'Detecting silence requires establishing baselines. You need to know how often each customer typically provides feedback, and then flag deviations from that pattern. A customer who never gives feedback going quiet means nothing. A customer who gave feedback every week going quiet for a month is a red flag that demands attention.',
+          'The challenge is that silence is invisible in most feedback systems. Your dashboard shows you what people are saying, not what they are not saying. You need to track engagement patterns at the individual customer level to spot the absence of signal, which is itself a signal.',
+        ],
+      },
+      {
+        heading: 'Sign 5: Escalation in urgency and tone',
+        content: [
+          'Feedback language follows a predictable escalation pattern as customers move toward churn. The words change, the framing shifts, and the urgency increases — often in a sequence that is remarkably consistent across industries and company sizes.',
+          'Understanding this escalation ladder lets you gauge exactly how far along the churn trajectory a customer has traveled:',
+        ],
+        listItems: [
+          'Stage 1 — Suggestion: "It would be nice if we could customize the report format." — Low stakes, collaborative tone. The customer is invested in the product improving.',
+          'Stage 2 — Request: "We really need customizable reports for our quarterly reviews." — Specific use case attached. The need is becoming concrete and time-bound.',
+          'Stage 3 — Demand: "We need this by end of quarter. Our team cannot keep using manual workarounds." — Deadlines appear. The cost of the gap is now explicit.',
+          'Stage 4 — Ultimatum: "If we cannot get this resolved, we will need to evaluate other options." — The alternative is stated. The customer is formally putting you on notice.',
+          'Stage 5 — Resignation: "We have decided to move to a solution that better fits our needs." — Past tense. The decision is made.',
+        ],
+        content2: [
+          'Most teams only react at Stage 4 or Stage 5, when the customer explicitly threatens to leave or announces their departure. But the intervention window is Stages 2 and 3, when the customer is still engaged enough to articulate specific needs and timelines.',
+          'The shift from suggestion to request to demand often happens over weeks or months, making it difficult to spot without tracking individual customer feedback histories. A demand in isolation looks like an urgent feature request. In context, it might be the third escalation from a customer who started with polite suggestions six months ago.',
+        ],
+      },
+      {
+        heading: 'Why manual detection fails',
+        content: [
+          'Each of these five signals is individually recognizable. A thoughtful customer success manager could spot any one of them in a conversation. The problem is scale, not perception.',
+          'Consider a SaaS company with 500 active customers generating an average of 3 feedback items per month. That is 1,500 feedback items to process. To detect these churn signals, you would need to:',
+        ],
+        listItems: [
+          'Track per-customer sentiment trends across all 1,500 items — requiring historical context for each customer, not just the latest message',
+          'Cross-reference repeated pain points — matching new complaints against every previous complaint from the same customer across all channels',
+          'Flag competitor mentions — scanning every message for direct and indirect references to alternatives, including subtle phrasing that does not name specific products',
+          'Monitor silence patterns — maintaining engagement baselines for 500 customers and flagging deviations from their individual norms',
+          'Detect tone escalation — comparing current language against previous feedback from the same customer to identify progression through the escalation stages',
+        ],
+        content2: [
+          'No human can do this consistently across hundreds of customers and thousands of feedback items. The patterns are too gradual, the data is too distributed, and the comparisons require too much memory. Manual churn detection works for your top 10 accounts. For the rest, the signals pass unnoticed until the cancellation email arrives.',
+          'This is compounded by channel fragmentation. Churn signals rarely appear in one place. A sentiment shift might show up in support tickets, a competitor mention might appear in a Slack message, and the silence pattern is only visible when you aggregate activity across all channels. Without centralized tracking, each signal exists in isolation, invisible to the people who could act on it.',
+        ],
+      },
+      {
+        heading: 'Catching churn signals early',
+        content: [
+          'Preventing churn starts with making these hidden signals visible. Here is a practical framework for building churn detection into your feedback process:',
+        ],
+        listItems: [
+          'Centralize all feedback — Every support ticket, Slack message, survey response, and email needs to flow into a single system. Churn signals that are split across five different tools are effectively invisible.',
+          'Track per-customer sentiment over time — Aggregate sentiment scores are useful for product health, but churn prediction requires individual customer trajectories. Build or adopt a system that maintains sentiment history at the customer level.',
+          'Set up alerts for risk indicators — Define triggers for the five signals: sentiment declining over three or more data points, same issue reported more than twice, competitor mentions, activity dropping below baseline, and language escalating past the request stage.',
+          'Create a response playbook — When a churn signal fires, your team needs a clear action plan. Who reaches out? Within what timeframe? What do they offer? Signals without response processes are just noise.',
+          'Review and calibrate regularly — Not every flagged signal leads to churn. Review your predictions monthly, track accuracy, and adjust your thresholds to reduce false positives without missing true risks.',
+        ],
+        content2: [
+          'For teams processing more than a few hundred feedback items per month, AI-powered analysis makes this framework practical at scale. Rereflect\'s churn prediction system uses a 9-factor scoring model that tracks all five of these signals automatically — per-customer sentiment trends, pain point repetition, competitor mentions, engagement patterns, and tone escalation. The customer health dashboard surfaces at-risk accounts before they reach the cancellation stage, and automated alerts notify your team when intervention is most likely to succeed.',
+          'Whether you build this capability internally or use a purpose-built tool, the principle is the same: churn signals exist in your feedback data right now. The question is whether you have a system that can find them.',
+          'The best time to prevent churn is 30 days before it happens. The second best time is today.',
         ],
       },
     ],

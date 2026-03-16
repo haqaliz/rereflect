@@ -5,6 +5,9 @@
 **Primary Channel**: LinkedIn DMs
 **Incentive**: 3 months free Pro plan
 **Start Date**: 2026-02-17
+**Last Updated**: 2026-03-17
+
+> **Note:** Outreach paused while focusing on content marketing and SEO. Will resume when blog traffic generates warm leads.
 
 ---
 
@@ -139,6 +142,8 @@ Ali
 - Shows signs of growth (recent launch, hiring, funding)
 
 ### Prospect List
+
+> **Paused** — focusing on inbound marketing channels first. Will activate outreach when we have case studies and social proof to reference.
 
 | # | Name | Company | Role | LinkedIn | Status | DM Sent | Replied | Signed Up | Notes |
 |---|------|---------|------|----------|--------|---------|---------|-----------|-------|
