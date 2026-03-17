@@ -71,6 +71,19 @@ _GENERAL_PATTERNS = [
     r"\bcan you\b",
 ]
 
+_REPORT_PATTERNS = [
+    r"\breport\b",
+    r"\bgenerate\b.*\breport\b",
+    r"\bcreate\b.*\breport\b",
+    r"\bexecutive\s+summary\b",
+    r"\bhealth\s+report\b",
+    r"\bchurn\s+(risk\s+)?analysis\b",
+    r"\bfeature\s+(request\s+)?prioriti",
+    r"\bmonthly\s+summary\b",
+    r"\bquarterly\s+review\b",
+    r"\bweekly\s+summary\b",
+]
+
 # Minimum confidence for rule-based classification (below = LLM fallback)
 _RULE_CONFIDENCE_THRESHOLD = 0.6
 
@@ -86,10 +99,11 @@ def _score_patterns(text: str, patterns: list[str]) -> float:
 
 class IntentClassifier:
     """
-    Classifies user messages into one of three intents:
+    Classifies user messages into one of four intents:
     - data: Requests for specific data/metrics
     - analysis: Requests for interpretation/trends
     - general: Help, greetings, meta-questions
+    - report: Requests to generate structured reports
     """
 
     def classify(self, query: str) -> dict:
@@ -98,7 +112,7 @@ class IntentClassifier:
 
         Returns:
             {
-                "intent": "data" | "analysis" | "general",
+                "intent": "data" | "analysis" | "general" | "report",
                 "confidence": float (0-1),
                 "parameters": dict
             }
@@ -126,6 +140,7 @@ class IntentClassifier:
         data_score = _score_patterns(query, _DATA_PATTERNS)
         analysis_score = _score_patterns(query, _ANALYSIS_PATTERNS)
         general_score = _score_patterns(query, _GENERAL_PATTERNS)
+        report_score = _score_patterns(query, _REPORT_PATTERNS)
 
         # Boost: "how many" and similar are unambiguous data queries
         text_lower = query.lower()
@@ -146,11 +161,21 @@ class IntentClassifier:
         # If analysis keywords are strong, override weaker data signals
         if analysis_score >= 0.85 and data_score < analysis_score:
             data_score = min(data_score, 0.3)
+        # Boost: report-specific high-signal patterns
+        if re.search(r"\bexecutive\s+summary\b|\bhealth\s+report\b|\bchurn\s+(risk\s+)?analysis\b", text_lower):
+            report_score = max(report_score, 0.9)
+        if re.search(r"\bgenerate\b.*\breport\b|\bcreate\b.*\breport\b", text_lower):
+            report_score = max(report_score, 0.9)
+        # If a strong report signal exists, suppress data/analysis scores
+        if report_score >= 0.85:
+            data_score = min(data_score, 0.3)
+            analysis_score = min(analysis_score, 0.3)
 
         scores = {
             "data": data_score,
             "analysis": analysis_score,
             "general": general_score,
+            "report": report_score,
         }
 
         best_intent = max(scores, key=lambda k: scores[k])

@@ -40,6 +40,7 @@ from .response_template import ResponseTemplate
 from .feedback_response import FeedbackResponse
 from .webhook_endpoint import WebhookEndpoint
 from .webhook_delivery import WebhookDelivery
+from .report import Report
 
 __all__ = [
     "Base",
@@ -88,4 +89,5 @@ __all__ = [
     "FeedbackResponse",
     "WebhookEndpoint",
     "WebhookDelivery",
+    "Report",
 ]

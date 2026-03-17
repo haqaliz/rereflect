@@ -29,6 +29,7 @@ import {
   Sparkles,
   MessageSquarePlus,
   Webhook,
+  FileBarChart,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -88,6 +89,11 @@ const workspaceNavItems = [
     title: 'Shared Links',
     href: '/shared-links',
     icon: Share2,
+  },
+  {
+    title: 'Reports',
+    href: '/reports',
+    icon: FileBarChart,
   },
 ];
 

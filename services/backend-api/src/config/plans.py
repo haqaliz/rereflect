@@ -132,6 +132,8 @@ PLANS = {
             "response_suggestions",
             # Custom Webhooks M3.1
             "custom_webhooks",
+            # On-Demand AI Reports M2.4
+            "ai_reports",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -181,6 +183,8 @@ PLANS = {
             "response_suggestions",
             # Custom Webhooks M3.1
             "custom_webhooks",
+            # On-Demand AI Reports M2.4
+            "ai_reports",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -239,6 +243,8 @@ FEATURE_PLANS = {
     "response_suggestions": "pro",
     # Custom Webhooks (M3.1) - free gets limited access
     "custom_webhooks": "free",
+    # On-Demand AI Reports (M2.4)
+    "ai_reports": "business",
 }
 
 

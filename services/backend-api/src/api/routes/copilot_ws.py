@@ -42,7 +42,10 @@ from src.services.copilot.sql_executor import SQLExecutor, QueryTimeoutError, Qu
 from src.services.copilot.template_matcher import TemplateMatcher
 from src.services.copilot.template_saver import TemplateSaver
 from src.services.copilot.response_formatter import format_response
+from src.services.copilot.report_generator import ReportGenerator
 from src.models.subscription import Subscription
+from src.models.report import Report
+from src.config.plans import has_feature
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +120,250 @@ def _authenticate_ws(token: Optional[str], db: Session):
     return user, user.organization
 
 
+# -- Report handler -----------------------------------------------------------
+
+
+async def _handle_report(
+    websocket: WebSocket,
+    db: Session,
+    user,
+    org,
+    conversation: "Conversation",
+    content: str,
+    context_scope: str,
+    message_id: str,
+    plan: str,
+    provider: str,
+    model: str,
+    api_key: Optional[str],
+) -> None:
+    """
+    Handle a 'report' intent: generate a structured AI report, stream section
+    narratives, persist the Report and a ConversationMessage, then send
+    report_complete.
+
+    Plan gate: Business+ only.  Free/Pro receive an upgrade prompt instead.
+    """
+    # 1. Plan gate
+    if not has_feature(plan, "ai_reports"):
+        # Stream an upgrade message (same pattern as general intent)
+        upgrade_msg = (
+            "Report generation is available on the Business plan. "
+            "Upgrade to generate comprehensive PDF reports from your feedback data."
+        )
+        await manager.send(websocket, {
+            "type": "status",
+            "message_id": message_id,
+            "status": "generating",
+        })
+        await manager.send(websocket, {
+            "type": "stream",
+            "message_id": message_id,
+            "delta": upgrade_msg,
+            "done": False,
+        })
+        await manager.send(websocket, {
+            "type": "stream",
+            "message_id": message_id,
+            "delta": "",
+            "done": True,
+            "metadata": {"query_type": "report", "model": model, "provider": provider},
+        })
+        # Persist only the AI assistant message (user message already saved by _handle_query step 1)
+        _persist_report_assistant_message(
+            db=db,
+            conversation=conversation,
+            ai_content=upgrade_msg,
+            context_scope=context_scope,
+            query_type="report",
+        )
+        return
+
+    # 2. Extract report type and date range from query
+    generator = ReportGenerator()
+    report_type = generator.extract_report_type(content)
+    date_range_days = generator.extract_date_range(content)
+
+    await manager.send(websocket, {
+        "type": "status",
+        "message_id": message_id,
+        "status": "generating",
+    })
+
+    try:
+        # 3. Generate report data (synchronous DB queries)
+        # Run in the current thread to avoid SQLite thread-safety issues
+        # and to keep the sync SQLAlchemy session on the same thread.
+        report_data = generator.generate(
+            db=db,
+            org_id=org.id,
+            report_type=report_type,
+            date_range_days=date_range_days,
+        )
+
+        title = report_data.get("title", f"{report_type.replace('_', ' ').title()} Report")
+        sections = report_data.get("sections", [])
+        total_sections = len(sections)
+
+        # 4. For each section: stream LLM narrative, send report_section message
+        completed_sections = []
+
+        for idx, section in enumerate(sections):
+            section_narrative = ""
+
+            # Build LLM prompt for this section
+            import json as _json
+            data_summary = _json.dumps(section.get("data", {}), default=str)[:1000]
+            llm_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a data analyst writing a section of a feedback analysis report. "
+                        "Write in a professional, concise tone. Use specific numbers from the data provided. "
+                        "Do not make up data. If data is insufficient, say so briefly."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f'Write the "{section["heading"]}" section for a '
+                        f"{report_type.replace('_', ' ')} report covering the last "
+                        f"{date_range_days} days.\n\n"
+                        f"Data:\n{data_summary}\n\n"
+                        "Write 2-3 sentences summarizing the key findings. "
+                        "Be specific with numbers."
+                    ),
+                },
+            ]
+
+            # Stream narrative for this section
+            try:
+                async for chunk in call_llm_stream(
+                    messages=llm_messages,
+                    provider=provider,
+                    model=model,
+                    api_key=api_key,
+                ):
+                    delta = ""
+                    if hasattr(chunk, "choices") and chunk.choices:
+                        delta_obj = chunk.choices[0].delta
+                        if hasattr(delta_obj, "content") and delta_obj.content:
+                            delta = delta_obj.content
+                    if delta:
+                        section_narrative += delta
+            except Exception as llm_err:
+                logger.warning(f"Section LLM stream failed for '{section['heading']}': {llm_err}")
+                section_narrative = section.get("narrative", "")
+
+            # Build complete section with narrative
+            completed_section = {**section, "narrative": section_narrative}
+            completed_sections.append(completed_section)
+
+            # 4c. Send report_section WebSocket message
+            await manager.send(websocket, {
+                "type": "report_section",
+                "message_id": message_id,
+                "section_index": idx,
+                "section": completed_section,
+                "total_sections": total_sections,
+                "done": idx == total_sections - 1,
+            })
+
+        # 5. Save Report to DB
+        report_record = Report(
+            organization_id=org.id,
+            created_by_user_id=user.id,
+            conversation_id=conversation.id,
+            report_type=report_type,
+            date_range_days=date_range_days,
+            title=title,
+            sections=completed_sections,
+            report_metadata={
+                "generated_at": datetime.utcnow().isoformat(),
+                "model_used": model,
+                "date_range_days": date_range_days,
+            },
+            pdf_generated=False,
+        )
+        db.add(report_record)
+        db.commit()
+        db.refresh(report_record)
+
+        # 6. Send report_complete
+        await manager.send(websocket, {
+            "type": "report_complete",
+            "message_id": message_id,
+            "report_id": report_record.id,
+            "title": title,
+            "total_sections": total_sections,
+            "pdf_available": False,
+        })
+
+        # 7. Persist ConversationMessage with query_type="report"
+        report_summary = f"[Report: {title}] {total_sections} sections generated."
+        _persist_report_assistant_message(
+            db=db,
+            conversation=conversation,
+            ai_content=report_summary,
+            context_scope=context_scope,
+            query_type="report",
+        )
+
+    except Exception as e:
+        logger.error(f"Report generation error: {e}", exc_info=True)
+        try:
+            await manager.send(websocket, {
+                "type": "error",
+                "message_id": message_id,
+                "error": f"Report generation failed: {str(e)}",
+                "suggestions": [
+                    "Try again in a few seconds",
+                    "Check your API key configuration in settings",
+                ],
+            })
+        except Exception:
+            pass
+
+
+def _persist_report_assistant_message(
+    db: Session,
+    conversation: "Conversation",
+    ai_content: str,
+    context_scope: str,
+    query_type: str,
+) -> None:
+    """
+    Persist the AI assistant ConversationMessage for a report response.
+    The user message was already persisted by _handle_query step 1.
+    Silently ignores errors to avoid disrupting WebSocket flow.
+    """
+    try:
+        # Check session health
+        from sqlalchemy import text as sa_text
+        try:
+            db.execute(sa_text("SELECT 1"))
+        except Exception:
+            db.rollback()
+
+        ai_msg = ConversationMessage(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=ai_content,
+            context_scope=context_scope,
+            query_type=query_type,
+            created_at=datetime.utcnow(),
+        )
+        db.add(ai_msg)
+        conversation.updated_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to persist report assistant message: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 # -- Query handler ------------------------------------------------------------
 
 
@@ -167,6 +414,60 @@ async def _handle_query(
                 plan = sub.plan
         except Exception:
             pass
+
+        # 4b. If intent == "report", delegate to the report pipeline
+        if intent == "report":
+            # Resolve LLM config first (same as below, duplicated for clarity)
+            import os as _os
+            _provider = "openai"
+            _model = "gpt-4o-mini"
+            _api_key = None
+            try:
+                from src.models.org_ai_config import OrgAIConfig
+                from src.models.org_api_key import OrgApiKey
+                from src.utils.encryption import decrypt_api_key
+
+                _config = db.query(OrgAIConfig).filter_by(organization_id=org.id).first()
+                if _config:
+                    _provider = _config.default_provider
+                    _model = _config.model_analysis
+
+                _byok = db.query(OrgApiKey).filter_by(
+                    organization_id=org.id,
+                    provider=_provider,
+                    is_valid=True,
+                ).first()
+                if _byok:
+                    _api_key = decrypt_api_key(_byok.encrypted_key)
+                else:
+                    _key_env = {
+                        "openai": "OPENAI_API_KEY",
+                        "anthropic": "ANTHROPIC_API_KEY",
+                        "google": "GOOGLE_AI_API_KEY",
+                    }
+                    _api_key = _os.environ.get(_key_env.get(_provider, "OPENAI_API_KEY"), "")
+            except Exception as _cfg_err:
+                logger.warning(f"Could not load org LLM config for report: {_cfg_err}")
+                db.rollback()
+
+            if not _api_key:
+                _api_key = _os.environ.get("OPENAI_API_KEY", "")
+
+            await _handle_report(
+                websocket=websocket,
+                db=db,
+                user=user,
+                org=org,
+                conversation=conversation,
+                content=content,
+                context_scope=context_scope,
+                message_id=message_id,
+                plan=plan,
+                provider=_provider,
+                model=_model,
+                api_key=_api_key,
+            )
+            return
 
         # 5. Resolve context
         resolver = ContextResolver()

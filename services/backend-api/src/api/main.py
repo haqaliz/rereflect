@@ -14,6 +14,7 @@ from src.api.routes import linear_integration, linear_webhook
 from src.api.routes import response_templates, response_settings, feedback_responses
 from src.api.routes import webhooks as webhooks_router
 from src.api.routes import health as health_routes
+from src.api.routes import reports as reports_router
 from src.seed import seed_admin_user, seed_system_templates
 import logging
 import os
@@ -176,6 +177,8 @@ app.include_router(feedback_responses.router)
 # Custom Webhooks (M3.1)
 app.include_router(webhooks_router.router)
 app.include_router(health_routes.router)
+# On-Demand AI Reports (M2.4)
+app.include_router(reports_router.router)
 
 
 @app.get("/")

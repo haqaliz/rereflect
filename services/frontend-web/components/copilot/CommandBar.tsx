@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Wand2, Loader2 } from 'lucide-react';
+import { Sparkles, Wand2, Loader2, FileBarChart, HeartPulse, Lightbulb, UserMinus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { copilotAPI, CopilotUsage } from '@/lib/api/copilot';
 
@@ -22,6 +22,13 @@ const STATIC_TEMPLATES = [
   'Sentiment trends over the last 30 days',
 ];
 
+const REPORT_TEMPLATES = [
+  { label: 'Executive summary this month', icon: FileBarChart },
+  { label: 'Customer health report', icon: HeartPulse },
+  { label: 'Feature request priorities', icon: Lightbulb },
+  { label: 'Churn risk analysis', icon: UserMinus },
+];
+
 export function CommandBar({ open, onClose }: CommandBarProps) {
   const router = useRouter();
   const { user } = useAuth();
@@ -33,8 +40,9 @@ export function CommandBar({ open, onClose }: CommandBarProps) {
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [usage, setUsage] = useState<CopilotUsage | null>(null);
 
-  // All chips: static templates + dynamic suggestions
-  const allChips = [...STATIC_TEMPLATES, ...dynamicSuggestions];
+  // All chips: static templates + report templates + dynamic suggestions
+  const reportTemplateLabels = REPORT_TEMPLATES.map((t) => t.label);
+  const allChips = [...STATIC_TEMPLATES, ...reportTemplateLabels, ...dynamicSuggestions];
 
   const limitReached =
     usage !== null &&
@@ -205,9 +213,31 @@ export function CommandBar({ open, onClose }: CommandBarProps) {
             </button>
           ))}
 
+          {/* Report template chips */}
+          {REPORT_TEMPLATES.map((template, i) => {
+            const index = STATIC_TEMPLATES.length + i;
+            const Icon = template.icon;
+            return (
+              <button
+                key={template.label}
+                data-testid={`template-chip-${index}`}
+                data-highlighted={highlightedIndex === index ? 'true' : undefined}
+                className={`text-left text-sm px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                  highlightedIndex === index
+                    ? 'bg-primary/10 text-primary highlighted'
+                    : 'text-foreground hover:bg-muted'
+                }`}
+                onClick={() => navigate(template.label)}
+              >
+                <Icon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                {template.label}
+              </button>
+            );
+          })}
+
           {/* Dynamic suggestions */}
           {dynamicSuggestions.map((suggestion, i) => {
-            const index = STATIC_TEMPLATES.length + i;
+            const index = STATIC_TEMPLATES.length + REPORT_TEMPLATES.length + i;
             return (
               <button
                 key={suggestion}

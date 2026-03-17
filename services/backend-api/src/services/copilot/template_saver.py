@@ -19,6 +19,48 @@ logger = logging.getLogger(__name__)
 
 # ── System templates (pre-built) ──────────────────────────────────────────────
 
+# ── Report system templates (for Cmd+K CommandBar chips, M2.4) ───────────────
+
+SYSTEM_REPORT_TEMPLATES = [
+    {
+        "label": "Executive summary this month",
+        "report_type": "executive_summary",
+        "description": (
+            "High-level overview of feedback, sentiment, pain points, feature requests, "
+            "and churn risk for the current month."
+        ),
+        "default_date_range_days": 30,
+    },
+    {
+        "label": "Customer health report",
+        "report_type": "customer_health",
+        "description": (
+            "Per-cohort customer health distribution, at-risk customers, "
+            "health score trends, and top risk factors."
+        ),
+        "default_date_range_days": 30,
+    },
+    {
+        "label": "Feature request priorities",
+        "report_type": "feature_prioritization",
+        "description": (
+            "Data-driven feature prioritization: ranked requests by frequency, "
+            "unique customers, source breakdown, and priority matrix."
+        ),
+        "default_date_range_days": 30,
+    },
+    {
+        "label": "Churn risk analysis",
+        "report_type": "churn_risk",
+        "description": (
+            "Deep dive into churn signals: risk overview, high-risk customer details, "
+            "churn trends, and pain-point correlation."
+        ),
+        "default_date_range_days": 30,
+    },
+]
+
+
 SYSTEM_TEMPLATES = [
     {
         "description": "Count total feedbacks",
