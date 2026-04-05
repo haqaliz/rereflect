@@ -425,7 +425,7 @@ class ReportGenerator:
         urgent_row = db.execute(
             text(
                 "SELECT COUNT(*) FROM feedback_items "
-                "WHERE organization_id = :org AND is_urgent = 1 AND created_at >= :start"
+                "WHERE organization_id = :org AND is_urgent = true AND created_at >= :start"
             ),
             {"org": org_id, "start": start},
         ).fetchone()

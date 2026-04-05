@@ -45,9 +45,9 @@ export interface ReportsListResponse {
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 export const reportsAPI = {
-  async list(): Promise<ReportsListResponse> {
+  async list(): Promise<Report[]> {
     const response = await apiClient.get('/api/v1/reports');
-    return response.data;
+    return Array.isArray(response.data) ? response.data : response.data.reports ?? [];
   },
 
   async get(id: number): Promise<Report> {

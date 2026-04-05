@@ -205,69 +205,101 @@ async def _handle_report(
         sections = report_data.get("sections", [])
         total_sections = len(sections)
 
-        # 4. For each section: stream LLM narrative, send report_section message
-        completed_sections = []
+        # 4. Build a single LLM prompt with ALL section data and stream the
+        #    response using the standard "stream" message type that the
+        #    frontend already handles.
+        import json as _json
 
-        for idx, section in enumerate(sections):
-            section_narrative = ""
+        # Compile data summaries for all sections
+        section_summaries = []
+        for section in sections:
+            data_str = _json.dumps(section.get("data", {}), default=str)[:600]
+            section_summaries.append(
+                f"### {section['heading']}\n{data_str}"
+            )
 
-            # Build LLM prompt for this section
-            import json as _json
-            data_summary = _json.dumps(section.get("data", {}), default=str)[:1000]
-            llm_messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a data analyst writing a section of a feedback analysis report. "
-                        "Write in a professional, concise tone. Use specific numbers from the data provided. "
-                        "Do not make up data. If data is insufficient, say so briefly."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f'Write the "{section["heading"]}" section for a '
-                        f"{report_type.replace('_', ' ')} report covering the last "
-                        f"{date_range_days} days.\n\n"
-                        f"Data:\n{data_summary}\n\n"
-                        "Write 2-3 sentences summarizing the key findings. "
-                        "Be specific with numbers."
-                    ),
-                },
-            ]
+        llm_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a data analyst writing a feedback analysis report. "
+                    "Write in a professional, concise tone. Use specific numbers. "
+                    "Do not make up data. Use markdown headings (##) for each section."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Write a {report_type.replace('_', ' ')} report for the last "
+                    f"{date_range_days} days.\n\n"
+                    f"Report title: {title}\n\n"
+                    f"Data per section:\n\n"
+                    + "\n\n".join(section_summaries)
+                    + "\n\nWrite 2-3 paragraphs per section with specific numbers. "
+                    "Use ## headings for each section."
+                ),
+            },
+        ]
 
-            # Stream narrative for this section
-            try:
-                async for chunk in call_llm_stream(
-                    messages=llm_messages,
-                    provider=provider,
-                    model=model,
-                    api_key=api_key,
-                ):
-                    delta = ""
-                    if hasattr(chunk, "choices") and chunk.choices:
-                        delta_obj = chunk.choices[0].delta
-                        if hasattr(delta_obj, "content") and delta_obj.content:
-                            delta = delta_obj.content
-                    if delta:
-                        section_narrative += delta
-            except Exception as llm_err:
-                logger.warning(f"Section LLM stream failed for '{section['heading']}': {llm_err}")
-                section_narrative = section.get("narrative", "")
-
-            # Build complete section with narrative
-            completed_section = {**section, "narrative": section_narrative}
-            completed_sections.append(completed_section)
-
-            # 4c. Send report_section WebSocket message
+        # Stream the full report as regular chat stream messages
+        full_content = ""
+        try:
+            async for chunk in call_llm_stream(
+                messages=llm_messages,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+            ):
+                delta = ""
+                if hasattr(chunk, "choices") and chunk.choices:
+                    delta_obj = chunk.choices[0].delta
+                    if hasattr(delta_obj, "content") and delta_obj.content:
+                        delta = delta_obj.content
+                if delta:
+                    full_content += delta
+                    await manager.send(websocket, {
+                        "type": "stream",
+                        "message_id": message_id,
+                        "delta": delta,
+                        "done": False,
+                    })
+        except Exception as llm_err:
+            logger.warning(f"Report LLM stream failed: {llm_err}")
+            # Fallback: build a text summary from the raw data
+            fallback_parts = [f"## {title}\n"]
+            for section in sections:
+                fallback_parts.append(f"### {section['heading']}")
+                data = section.get("data", {})
+                if isinstance(data, dict) and "rows" in data:
+                    for row in data["rows"][:5]:
+                        fallback_parts.append(f"- {row}")
+            full_content = "\n\n".join(fallback_parts)
             await manager.send(websocket, {
-                "type": "report_section",
+                "type": "stream",
                 "message_id": message_id,
-                "section_index": idx,
-                "section": completed_section,
-                "total_sections": total_sections,
-                "done": idx == total_sections - 1,
+                "delta": full_content,
+                "done": False,
             })
+
+        # Send final stream done message
+        await manager.send(websocket, {
+            "type": "stream",
+            "message_id": message_id,
+            "delta": "",
+            "done": True,
+            "metadata": {
+                "query_type": "report",
+                "model": model,
+                "provider": provider,
+                "report_type": report_type,
+                "date_range_days": date_range_days,
+            },
+        })
+
+        # Build completed sections with narrative from LLM content
+        completed_sections = []
+        for section in sections:
+            completed_sections.append({**section, "narrative": ""})
 
         # 5. Save Report to DB
         report_record = Report(
@@ -289,22 +321,11 @@ async def _handle_report(
         db.commit()
         db.refresh(report_record)
 
-        # 6. Send report_complete
-        await manager.send(websocket, {
-            "type": "report_complete",
-            "message_id": message_id,
-            "report_id": report_record.id,
-            "title": title,
-            "total_sections": total_sections,
-            "pdf_available": False,
-        })
-
-        # 7. Persist ConversationMessage with query_type="report"
-        report_summary = f"[Report: {title}] {total_sections} sections generated."
+        # 6. Persist ConversationMessage with query_type="report"
         _persist_report_assistant_message(
             db=db,
             conversation=conversation,
-            ai_content=report_summary,
+            ai_content=full_content,
             context_scope=context_scope,
             query_type="report",
         )

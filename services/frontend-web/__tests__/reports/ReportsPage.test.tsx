@@ -69,9 +69,11 @@ const mockReports: Report[] = [
   },
 ];
 
-const mockList = vi.fn().mockResolvedValue({ reports: mockReports, total: 2 });
-const mockDelete = vi.fn().mockResolvedValue(undefined);
-const mockDownloadPDF = vi.fn().mockResolvedValue(undefined);
+const { mockList, mockDelete, mockDownloadPDF } = vi.hoisted(() => ({
+  mockList: vi.fn(),
+  mockDelete: vi.fn(),
+  mockDownloadPDF: vi.fn(),
+}));
 
 vi.mock('@/lib/api/reports', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api/reports')>();
@@ -108,7 +110,7 @@ describe('ReportsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset mocks to default resolved values
-    mockList.mockResolvedValue({ reports: mockReports, total: 2 });
+    mockList.mockResolvedValue(mockReports);
     mockDelete.mockResolvedValue(undefined);
     mockDownloadPDF.mockResolvedValue(undefined);
     // Reset user to business plan
@@ -123,7 +125,7 @@ describe('ReportsPage', () => {
   });
 
   it('test_renders_empty_state', async () => {
-    mockList.mockResolvedValueOnce({ reports: [], total: 0 });
+    mockList.mockResolvedValueOnce([]);
 
     render(<ReportsPage />);
 

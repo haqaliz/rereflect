@@ -18,6 +18,11 @@ const STATIC_TEMPLATES = [
   'Healthiest customers',
   'Customers with declining health scores',
   'Sentiment trends over the last 30 days',
+  // Report templates (M2.4)
+  'Executive summary this month',
+  'Customer health report',
+  'Feature request priorities',
+  'Churn risk analysis',
 ];
 
 function ConversationsPageInner() {

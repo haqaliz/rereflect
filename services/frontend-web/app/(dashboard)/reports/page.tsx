@@ -70,7 +70,7 @@ export default function ReportsPage() {
     const fetchReports = async () => {
       try {
         const res = await reportsAPI.list();
-        setReports(res.reports);
+        setReports(res);
       } catch {
         toast.error('Failed to load reports');
       } finally {

@@ -3,6 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, FolderPlus, ChevronDown, ChevronRight, Folder, MessageSquare, Loader2, Trash2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { conversationsAPI } from '@/lib/api/conversations';
 import type { Conversation, ConversationFolder } from '@/lib/api/conversations';
 
@@ -312,7 +321,7 @@ export function ConversationList({
               </button>
               <button
                 className="w-full text-left px-3 py-1.5 hover:bg-muted text-destructive transition-colors"
-                onClick={() => handleDeleteConversation(contextMenu.id)}
+                onClick={() => { setConfirmDeleteId(contextMenu.id); setContextMenu(null); }}
               >
                 Delete
               </button>
@@ -322,7 +331,7 @@ export function ConversationList({
               <button
                 data-testid={`folder-delete-${contextMenu.id}`}
                 className="w-full text-left px-3 py-1.5 hover:bg-muted text-destructive transition-colors"
-                onClick={() => handleDeleteFolder(Number(contextMenu.id))}
+                onClick={() => { setConfirmDeleteId(contextMenu.id); setContextMenu(null); }}
               >
                 Delete
               </button>
@@ -332,36 +341,29 @@ export function ConversationList({
       )}
 
       {/* Delete confirmation dialog */}
-      {confirmDeleteId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setConfirmDeleteId(null)}>
-          <div
-            className="bg-background border border-border rounded-xl shadow-2xl p-5 mx-4 max-w-sm w-full space-y-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Delete conversation?</h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                This will permanently delete this conversation and all its messages.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setConfirmDeleteId(null)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                data-testid="confirm-delete-btn"
-                onClick={() => handleDeleteConversation(confirmDeleteId)}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog open={confirmDeleteId !== null} onOpenChange={(open) => { if (!open) setConfirmDeleteId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete conversation?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete this conversation and all its messages. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setConfirmDeleteId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              data-testid="confirm-delete-btn"
+              onClick={() => { if (confirmDeleteId) handleDeleteConversation(confirmDeleteId); }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -401,7 +403,7 @@ function ConversationItem({
     <div
       data-testid={`conversation-item-${conv.public_id}`}
       data-active={isActive ? 'true' : undefined}
-      className={`group mx-2 flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${
+      className={`group mx-2 flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors overflow-hidden min-w-0 ${
         isActive
           ? 'bg-primary/10 text-primary'
           : 'text-foreground hover:bg-muted'

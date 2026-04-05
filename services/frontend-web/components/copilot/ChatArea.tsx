@@ -310,7 +310,7 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
 
       {/* Messages */}
       <ScrollArea className="flex-1 overflow-x-hidden">
-      <div className="px-4 py-4 space-y-0">
+      <div className="px-4 sm:px-6 py-4 space-y-0">
         {messages.map((msg) => (
           <MessageBubble
             key={msg.id}
