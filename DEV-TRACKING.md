@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-03-17
+**Last Updated**: 2026-03-18
 
 ---
 
@@ -158,7 +158,7 @@
 - [ ] Advanced RBAC (custom roles)
 - [ ] Data residency (US/EU/APAC)
 - [ ] SOC 2 Type II certification
-- [ ] GDPR compliance tools
+- [x] GDPR compliance tools
 - [ ] IP whitelisting
 
 ### Enterprise Features
@@ -208,10 +208,15 @@
 - [ ] Settings page: SSO configuration (Entity ID, ACS URL, certificate)
 - [ ] Plan gate: Enterprise only
 
-### M3.7 — Advanced RBAC & GDPR (2 weeks)
+### M3.7 — Advanced RBAC & GDPR (2 weeks) — GDPR COMPLETE
 - [ ] Custom roles with granular permissions
-- [ ] GDPR data export: user can export all their data as JSON/CSV
-- [ ] GDPR data deletion: user can request full account + data deletion
+- [x] GDPR data export: user can export all their data as ZIP (JSON+CSV)
+- [x] GDPR data deletion: user can request full account + data deletion (30-day grace period, deactivation, cancel flow)
+- [x] Auth middleware blocks deactivated users
+- [x] GDPR purge background task
+- [x] Settings > Preferences: Export/Delete buttons with shadcn Dialog
+- [x] Landing page: GDPR badge, Privacy Policy update, 2 FAQ entries, Bento card
+- [x] 7 backend tests
 - [ ] Plan gate: Enterprise (RBAC), all plans (GDPR)
 
 ### Predictive Analytics — COMPLETE
@@ -507,6 +512,22 @@
   - Alembic migration: linear_integration tables (linear_integrations, linear_team_mappings, linear_status_mappings, linear_issue_templates)
   - Backend tests: 7 test files (client, config, issues, models, OAuth, plan gating, webhook)
   - Frontend tests: 4 test files (CreateIssueButton, CreateIssueDialog, LinearSettings, LinkedIssuesCard)
+- **On-Demand AI Reports** (M2.4):
+  - 4 report types via Copilot: Executive Summary, Customer Health, Feature Prioritization, Churn Risk
+  - Report model + Alembic migration, ReportGenerator service, CRUD API (Business+)
+  - Intent classifier: 'report' as 4th intent type
+  - WebSocket streaming via regular chat messages
+  - Frontend: My Reports page, ReportPreview component, 4 Cmd+K template chips
+  - Reports in sidebar under Workspace
+  - 105 backend + 36 WS + 10 frontend tests
+- **GDPR + AI Trust + Blog Engine** (M3.8):
+  - GDPR (Track A): Data export endpoint (ZIP with JSON+CSV), account deletion with 30-day grace period, deactivation, cancel flow, auth middleware blocks deactivated users, GDPR purge background task, Settings > Preferences: Export/Delete buttons, landing page GDPR badge + Privacy Policy update + FAQ entries + Bento card, 7 backend tests
+  - AI Trust — Human-in-the-Loop (Track B): ai_corrections model + CRUD API (submit, stats, list), thumbs up/down on Copilot responses with feedback Dialog, category/sentiment correction on feedback detail page, health score flag icon on customer profile, AI Accuracy stats tab in AI Settings, 9 backend + 7 frontend tests
+  - Blog Engine (Track C): Status field (draft/scheduled/published) on BlogPost, date-based filter (scheduled posts auto-show after date), wrote all 17 remaining posts (#8-#24) with scheduled dates (Apr 1 - Dec 1)
+- **Other fixes** (Mar 2026):
+  - Changelog: full descriptions with bullet list rendering, CORS fix, build fix
+  - Sidebar: collapsible sections, conversation delete confirmation dialog
+  - Footer consistency, API docs link removed
 - **Custom Webhooks & Tech Debt** (M3.1, PRD-CUSTOM-WEBHOOKS-AND-TECH-DEBT.md):
   - Webhook endpoints CRUD API: HMAC-SHA256 signing, custom headers (Fernet-encrypted), configurable retry (fire-and-forget or exponential backoff)
   - Plan-gated endpoint limits: Free=2, Pro=5, Business=10, Enterprise=unlimited
@@ -576,6 +597,10 @@
 - Sentry: free tier (5K errors/mo) across all 3 services, hardcoded DSN (safe per Sentry docs), separate projects for backend vs worker
 - Health endpoint: /health/detailed returns DB/Redis/Celery/memory/uptime, system-admin gated, always 200 (reports health, doesn't fail on unhealthy)
 - Sidebar: all sections collapsible with Radix Collapsible, auto-expand based on active route, no localStorage persistence
+- On-Demand AI Reports (M2.4): 4 report types via Copilot Cmd+K template chips, 'report' as 4th intent type in classifier, WebSocket streaming via regular chat messages, My Reports page under Workspace sidebar, Business+ plan gating
+- GDPR (M3.8 Track A): data export as ZIP (JSON+CSV), account deletion with 30-day grace period + deactivation + cancel flow, auth middleware blocks deactivated users, GDPR purge Celery task, all plans have access
+- AI Trust Human-in-the-Loop (M3.8 Track B): ai_corrections model for thumbs up/down + category/sentiment correction, AI Accuracy stats tab in AI Settings, corrections stored as training signals for future fine-tuning
+- Blog Engine (M3.8 Track C): draft/scheduled/published status field, date-based auto-publish filter, all 17 remaining posts (#8-#24) written with scheduled dates (bi-weekly Apr 1 - Dec 1)
 
 ---
 

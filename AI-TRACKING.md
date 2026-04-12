@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-03-17
+**Last Updated**: 2026-03-18
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -48,6 +48,8 @@
 | AI Copilot (natural language queries) | Yes | /conversations page, Cmd+K | Tiered by plan |
 | AI Response Suggestions | Yes | Feedback detail ResponseModal, template browser | Pro+ |
 | Customer sentiment alerts | Yes | Notification center, Slack, email | Pro+ |
+| On-Demand AI Reports | Yes | My Reports page, Copilot Cmd+K chips, PDF export | Business+ |
+| AI Trust: Human-in-the-Loop | Yes | Thumbs up/down on Copilot, category/sentiment corrections, AI Accuracy tab | Pro+ |
 
 ---
 
@@ -146,14 +148,20 @@
 - [x] Copy-to-clipboard + edit before sending (no auto-send)
 - [x] Plan gate: response_suggestions on Pro+; response settings per org (brand_voice, default_tone, product_name, support_email)
 
-#### M2.4 — On-Demand AI Reports (2 weeks)
-- [ ] Via copilot: "Generate a report on churn trends this quarter"
-- [ ] Report types: executive summary, customer health report, feature request prioritization, sentiment analysis
-- [ ] Structured output: sections with headers, key metrics, charts data, recommendations
-- [ ] Export as PDF (reuse existing PDF export infrastructure)
-- [ ] Plan gate: Business+ feature
+#### M2.4 — On-Demand AI Reports (2 weeks) — COMPLETE
+- [x] Via copilot: "Generate a report on churn trends this quarter" (4 report types via Cmd+K template chips)
+- [x] Report types: executive summary, customer health report, feature request prioritization, churn risk
+- [x] Structured output: sections with headers, key metrics, charts data, recommendations
+- [x] Export as PDF (reuse existing PDF export infrastructure)
+- [x] Plan gate: Business+ feature
+- [x] Report model + Alembic migration, ReportGenerator service, CRUD API
+- [x] Intent classifier: 'report' as 4th intent type
+- [x] WebSocket streaming via regular chat messages
+- [x] Frontend: My Reports page, ReportPreview component, 4 Cmd+K template chips
+- [x] Reports in sidebar under Workspace
+- [x] 105 backend + 36 WS + 10 frontend tests
 
-**Q2 Deliverables**: Multi-model LLM (M2.1 COMPLETE), AI copilot (M2.2 COMPLETE), response suggestions (M2.3 COMPLETE), on-demand reports (M2.4 planned)
+**Q2 Deliverables**: Multi-model LLM (M2.1 COMPLETE), AI copilot (M2.2 COMPLETE), response suggestions (M2.3 COMPLETE), on-demand reports (M2.4 COMPLETE)
 **Plan Gating**: Copilot queries tiered by plan, response generation Business+, reports Business+
 
 ---
@@ -179,11 +187,13 @@
 - [ ] Health score enrichment: add usage frequency as 5th component (declining usage = warning)
 - [ ] Plan gate: Business+ feature
 
-#### M3.3 — AI Trust: Human-in-the-Loop (2 weeks)
-- [ ] Feedback on AI outputs: thumbs up/down on copilot answers, health scores, categorizations
-- [ ] Category correction: user can override AI category → stored as training signal
-- [ ] Sentiment correction: user can override sentiment label → stored as training signal
-- [ ] Correction dashboard: see all AI corrections, accuracy over time, drift detection
+#### M3.3 — AI Trust: Human-in-the-Loop (2 weeks) — COMPLETE
+- [x] Feedback on AI outputs: thumbs up/down on copilot answers, health scores, categorizations
+- [x] Category correction: user can override AI category → stored as training signal
+- [x] Sentiment correction: user can override sentiment label → stored as training signal
+- [x] Correction dashboard: AI Accuracy stats tab in AI Settings, accuracy over time
+- [x] Health score flag icon on customer profile
+- [x] 9 backend + 7 frontend tests
 - [ ] Corrections feed into fine-tuning pipeline (M4.2)
 
 #### M3.4 — Enhanced Customer 360 (2 weeks)
@@ -193,7 +203,7 @@
 - [ ] Customer 360 API (for external consumption)
 - [ ] Health score API endpoint for programmatic access
 
-**Q3 Deliverables**: HubSpot integration, Segment integration, human-in-the-loop, enriched Customer 360
+**Q3 Deliverables**: HubSpot integration, Segment integration, human-in-the-loop (M3.3 COMPLETE), enriched Customer 360
 **Plan Gating**: CRM/usage integrations = Business+, corrections = Pro+
 
 ---
