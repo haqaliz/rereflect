@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-03-18
+**Last Updated**: 2026-04-13
 
 ---
 
@@ -173,7 +173,7 @@
 - [x] Linear integration
 - [ ] Asana integration
 - [x] Custom webhooks (trigger on events)
-- [ ] Auto-routing rules
+- [x] Auto-routing rules
 
 ### M3.2 — JIRA Integration (2-3 weeks)
 - [ ] JIRA OAuth flow (connect/disconnect via Atlassian OAuth 2.0)
@@ -524,6 +524,23 @@
   - GDPR (Track A): Data export endpoint (ZIP with JSON+CSV), account deletion with 30-day grace period, deactivation, cancel flow, auth middleware blocks deactivated users, GDPR purge background task, Settings > Preferences: Export/Delete buttons, landing page GDPR badge + Privacy Policy update + FAQ entries + Bento card, 7 backend tests
   - AI Trust — Human-in-the-Loop (Track B): ai_corrections model + CRUD API (submit, stats, list), thumbs up/down on Copilot responses with feedback Dialog, category/sentiment correction on feedback detail page, health score flag icon on customer profile, AI Accuracy stats tab in AI Settings, 9 backend + 7 frontend tests
   - Blog Engine (Track C): Status field (draft/scheduled/published) on BlogPost, date-based filter (scheduled posts auto-show after date), wrote all 17 remaining posts (#8-#24) with scheduled dates (Apr 1 - Dec 1)
+- **AI Workflow Automation** (M4.4, Apr 2026):
+  - 4 trigger types: health score threshold, sentiment pattern, churn risk level change, feedback category match
+  - 4 action types: auto-assign (user/role/round-robin), change status, send notification, draft AI response
+  - Multiple actions per rule, configurable cooldown (1h-7d), active/paused toggle
+  - 5 pre-built templates (Churn Prevention, Critical Bug Escalation, Feature Request Triage, Negative Sentiment Alert, Positive Feedback Follow-up)
+  - Real-time event-driven execution (fires on feedback analysis + health score update)
+  - Redis cooldown per customer per rule
+  - Execution audit log with 90-day retention
+  - Settings > Automations pages (list, create, detail with execution log, template picker)
+  - Plan gated: Pro=5, Business=20, Enterprise=unlimited
+  - 17 backend API + 16 engine + 10 frontend = 43 TDD tests
+- **UI Consistency Audit** (Apr 2026):
+  - Replaced all 17 native confirm() calls with shadcn Dialog across 15+ files
+  - Replaced 4 alert() calls with sonner toast
+  - Replaced 2 native `<select>` with shadcn Select
+  - Reports page: background pattern fix + View button error fix
+  - Landing page: AI Workflow Automation bento card + FAQ entry
 - **Other fixes** (Mar 2026):
   - Changelog: full descriptions with bullet list rendering, CORS fix, build fix
   - Sidebar: collapsible sections, conversation delete confirmation dialog
@@ -597,6 +614,8 @@
 - Sentry: free tier (5K errors/mo) across all 3 services, hardcoded DSN (safe per Sentry docs), separate projects for backend vs worker
 - Health endpoint: /health/detailed returns DB/Redis/Celery/memory/uptime, system-admin gated, always 200 (reports health, doesn't fail on unhealthy)
 - Sidebar: all sections collapsible with Radix Collapsible, auto-expand based on active route, no localStorage persistence
+- AI Workflow Automation (M4.4): 4 trigger types × 4 action types, event-driven execution, Redis cooldown, 5 pre-built templates, execution audit log with 90-day retention, plan-gated limits (Pro=5, Business=20, Enterprise=unlimited)
+- UI Consistency Audit (Apr 2026): replaced all 26 native browser elements (17 confirm(), 4 alert(), 2 select, 3 misc) with shadcn Dialog, sonner toast, and shadcn Select across 15+ files — zero native browser dialogs remain
 - On-Demand AI Reports (M2.4): 4 report types via Copilot Cmd+K template chips, 'report' as 4th intent type in classifier, WebSocket streaming via regular chat messages, My Reports page under Workspace sidebar, Business+ plan gating
 - GDPR (M3.8 Track A): data export as ZIP (JSON+CSV), account deletion with 30-day grace period + deactivation + cancel flow, auth middleware blocks deactivated users, GDPR purge Celery task, all plans have access
 - AI Trust Human-in-the-Loop (M3.8 Track B): ai_corrections model for thumbs up/down + category/sentiment correction, AI Accuracy stats tab in AI Settings, corrections stored as training signals for future fine-tuning

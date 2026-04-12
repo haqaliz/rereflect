@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-03-18
+**Last Updated**: 2026-04-13
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -50,6 +50,7 @@
 | Customer sentiment alerts | Yes | Notification center, Slack, email | Pro+ |
 | On-Demand AI Reports | Yes | My Reports page, Copilot Cmd+K chips, PDF export | Business+ |
 | AI Trust: Human-in-the-Loop | Yes | Thumbs up/down on Copilot, category/sentiment corrections, AI Accuracy tab | Pro+ |
+| AI Workflow Automation | Yes | Settings > Automations (list, create, detail, templates, execution log) | Pro+ (5 rules), Business (20), Enterprise (unlimited) |
 
 ---
 
@@ -239,16 +240,23 @@
 - [ ] Privacy: only aggregate metrics (counts, averages, percentiles). Zero text, zero emails, zero PII.
 - [ ] Plan gate: Pro+ (incentive to upgrade)
 
-#### M4.4 — AI Workflow Automation (3 weeks)
-- [ ] Auto-escalation rules: "If health score drops below 30, auto-assign to CS lead + create urgent notification"
-- [ ] Auto-response triggers: "If category is bug_report and severity is critical, draft response from template and suggest to user"
-- [ ] AI-powered auto-routing: feedback → AI determines best team/person based on content, history, and workload
-- [ ] Workflow templates: pre-built automation recipes ("Churn Prevention", "Feature Request Triage", "Critical Bug Response")
-- [ ] Automation audit log: every AI action is logged with reasoning and can be reviewed/overridden
-- [ ] Plan gate: Business+ (basic auto-routing Pro+)
+#### M4.4 — AI Workflow Automation (3 weeks) — COMPLETE
+- [x] Auto-escalation rules: "If health score drops below 30, auto-assign to CS lead + create urgent notification"
+- [x] Auto-response triggers: "If category is bug_report and severity is critical, draft response from template and suggest to user"
+- [x] AI-powered auto-routing: feedback → AI determines best team/person based on content, history, and workload
+- [x] Workflow templates: pre-built automation recipes ("Churn Prevention", "Feature Request Triage", "Critical Bug Response", "Negative Sentiment Alert", "Positive Feedback Follow-up")
+- [x] Automation audit log: every AI action is logged with reasoning and can be reviewed/overridden (90-day retention)
+- [x] Plan gate: Pro (5 rules), Business (20 rules), Enterprise (unlimited)
+- [x] 4 trigger types: health score threshold, sentiment pattern, churn risk level change, feedback category match
+- [x] 4 action types: auto-assign (user/role/round-robin), change status, send notification, draft AI response
+- [x] Multiple actions per rule, configurable cooldown (1h-7d), active/paused toggle
+- [x] Real-time event-driven execution (fires on feedback analysis + health score update)
+- [x] Redis cooldown per customer per rule
+- [x] Settings > Automations pages (list, create, detail with execution log, template picker)
+- [x] 17 backend API + 16 engine + 10 frontend = 43 TDD tests
 
-**Q4 Deliverables**: Advanced churn prediction, custom models, benchmarks, workflow automation
-**Plan Gating**: Custom models = Enterprise, benchmarks = Pro+, automation = Business+
+**Q4 Deliverables**: Advanced churn prediction, custom models, benchmarks, workflow automation (M4.4 COMPLETE)
+**Plan Gating**: Custom models = Enterprise, benchmarks = Pro+, automation = Pro+ (5 rules) / Business (20) / Enterprise (unlimited)
 
 ---
 

@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { AISettingsGeneral } from '@/components/settings/AISettingsGeneral';
 import { AISettingsProviders } from '@/components/settings/AISettingsProviders';
 import { AISettingsUsage } from '@/components/settings/AISettingsUsage';
@@ -125,7 +126,7 @@ function AISettingsContent() {
     } catch (err: any) {
       console.error('Failed to create category:', err);
       if (err?.response?.status === 409) {
-        alert('A category with this name already exists');
+        toast.error('A category with this name already exists');
       }
     } finally {
       setSavingCategory(false);

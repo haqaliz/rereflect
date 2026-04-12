@@ -14,6 +14,14 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   AlertCircle,
   CheckCircle,
   ExternalLink,
@@ -42,6 +50,13 @@ export function LinearSettings() {
   const [statusMappings, setStatusMappings] = useState<LinearStatusMapping[]>([]);
   const [savingTeamMappings, setSavingTeamMappings] = useState(false);
   const [savingStatusMappings, setSavingStatusMappings] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
@@ -98,22 +113,26 @@ export function LinearSettings() {
     }
   };
 
-  const handleDisconnect = async () => {
-    if (!confirm('Disconnect Linear? Existing issue links will be preserved.')) return;
-    setDisconnecting(true);
-    try {
-      await linearAPI.disconnect();
-      const s = await fetchStatus();
-      if (!s?.connected) {
-        setTeams([]);
-        setTeamMappings([]);
-        setStatusMappings([]);
+  const handleDisconnect = () => {
+    requestConfirm(
+      'Disconnect Linear? Existing issue links will be preserved.',
+      async () => {
+        setDisconnecting(true);
+        try {
+          await linearAPI.disconnect();
+          const s = await fetchStatus();
+          if (!s?.connected) {
+            setTeams([]);
+            setTeamMappings([]);
+            setStatusMappings([]);
+          }
+        } catch {
+          // ignore
+        } finally {
+          setDisconnecting(false);
+        }
       }
-    } catch {
-      // ignore
-    } finally {
-      setDisconnecting(false);
-    }
+    );
   };
 
   const handleTeamMappingChange = (category: string, teamId: string) => {
@@ -221,6 +240,20 @@ export function LinearSettings() {
 
   return (
     <div className="space-y-4">
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Disconnection banner */}
       {showBanner && (
         <Alert variant="destructive">

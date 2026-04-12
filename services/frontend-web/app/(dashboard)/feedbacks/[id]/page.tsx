@@ -98,6 +98,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -170,6 +171,13 @@ function FeedbackDetailContent() {
   const [correctingField, setCorrectingField] = useState<null | 'sentiment' | 'pain_point' | 'feature_request'>(null);
   const [correctedValue, setCorrectedValue] = useState('');
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   useEffect(() => {
     if (feedbackId) {
@@ -235,17 +243,22 @@ function FeedbackDetailContent() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!feedback || !confirm('Are you sure you want to delete this feedback?')) return;
-    try {
-      setDeleting(true);
-      await feedbackAPI.delete(feedback.id);
-      router.push('/feedbacks');
-    } catch (err) {
-      console.error('Delete failed:', err);
-    } finally {
-      setDeleting(false);
-    }
+  const handleDelete = () => {
+    if (!feedback) return;
+    requestConfirm(
+      'Are you sure you want to delete this feedback?',
+      async () => {
+        try {
+          setDeleting(true);
+          await feedbackAPI.delete(feedback.id);
+          router.push('/feedbacks');
+        } catch (err) {
+          console.error('Delete failed:', err);
+        } finally {
+          setDeleting(false);
+        }
+      }
+    );
   };
 
 
@@ -1009,6 +1022,20 @@ function FeedbackDetailContent() {
           </TabsContent>
       </main>
       </Tabs>
+
+      {/* Confirm Delete Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Response Modal */}
       {feedback && (

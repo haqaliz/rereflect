@@ -2,6 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { workflowAPI, FeedbackNote } from '@/lib/api/workflow';
 import { formatRelativeTime } from '@/lib/workflow-utils';
 import { Pencil, Trash2, X, Check } from 'lucide-react';
@@ -22,6 +30,13 @@ export function NotesList({ feedbackId, currentUserId }: NotesListProps) {
   const [editingContent, setEditingContent] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
   const [deletingNoteId, setDeletingNoteId] = useState<number | null>(null);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   // Fetch notes on mount
   useEffect(() => {
@@ -82,18 +97,21 @@ export function NotesList({ feedbackId, currentUserId }: NotesListProps) {
     }
   };
 
-  const handleDeleteNote = async (noteId: number) => {
-    if (!confirm('Are you sure you want to delete this note?')) return;
-
-    try {
-      setDeletingNoteId(noteId);
-      await workflowAPI.deleteNote(noteId);
-      setNotes((prev) => prev.filter((note) => note.id !== noteId));
-    } catch (error) {
-      console.error('Failed to delete note:', error);
-    } finally {
-      setDeletingNoteId(null);
-    }
+  const handleDeleteNote = (noteId: number) => {
+    requestConfirm(
+      'Are you sure you want to delete this note?',
+      async () => {
+        try {
+          setDeletingNoteId(noteId);
+          await workflowAPI.deleteNote(noteId);
+          setNotes((prev) => prev.filter((note) => note.id !== noteId));
+        } catch (error) {
+          console.error('Failed to delete note:', error);
+        } finally {
+          setDeletingNoteId(null);
+        }
+      }
+    );
   };
 
   if (isLoading) {
@@ -102,6 +120,20 @@ export function NotesList({ feedbackId, currentUserId }: NotesListProps) {
 
   return (
     <div className="space-y-4">
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Create Note Form */}
       <div className="space-y-2">
         <MarkdownEditor

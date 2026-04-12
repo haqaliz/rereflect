@@ -52,6 +52,8 @@ export function SlackIntegration() {
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<{ id: number; success: boolean; message: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
 
   // Create form state
   const [createForm, setCreateForm] = useState({
@@ -136,14 +138,23 @@ export function SlackIntegration() {
     }
   };
 
-  const handleDelete = async (integration: Integration) => {
-    if (!confirm(`Delete integration "${integration.name}"? This cannot be undone.`)) return;
-    try {
-      await integrationsAPI.delete(integration.id);
-      await fetchIntegrations();
-    } catch (err) {
-      console.error('Failed to delete integration:', err);
-    }
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
+
+  const handleDelete = (integration: Integration) => {
+    requestConfirm(
+      `Delete integration "${integration.name}"? This cannot be undone.`,
+      async () => {
+        try {
+          await integrationsAPI.delete(integration.id);
+          await fetchIntegrations();
+        } catch (err) {
+          console.error('Failed to delete integration:', err);
+        }
+      }
+    );
   };
 
   const openConfig = (integration: Integration) => {
@@ -478,6 +489,20 @@ export function SlackIntegration() {
           </div>
         )}
       </CardContent>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Config Dialog */}
       <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>

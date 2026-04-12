@@ -24,6 +24,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -149,6 +151,13 @@ export default function ResponseTemplatesPage() {
   // Template form dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ResponseTemplate | null>(null);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   useEffect(() => {
     if (!isAdminOrOwner) {
@@ -210,15 +219,19 @@ export default function ResponseTemplatesPage() {
     setEditingTemplate(null);
   }, [editingTemplate]);
 
-  const handleDeleteTemplate = useCallback(async (template: ResponseTemplate) => {
-    if (!confirm(`Delete "${template.name}"? This cannot be undone.`)) return;
-    try {
-      await responsesAPI.deleteTemplate(template.id);
-      setTemplates(prev => prev.filter(t => t.id !== template.id));
-      toast.success('Template deleted');
-    } catch {
-      toast.error('Failed to delete template');
-    }
+  const handleDeleteTemplate = useCallback((template: ResponseTemplate) => {
+    requestConfirm(
+      `Delete "${template.name}"? This cannot be undone.`,
+      async () => {
+        try {
+          await responsesAPI.deleteTemplate(template.id);
+          setTemplates(prev => prev.filter(t => t.id !== template.id));
+          toast.success('Template deleted');
+        } catch {
+          toast.error('Failed to delete template');
+        }
+      }
+    );
   }, []);
 
   const systemTemplates = templates.filter(t => t.is_system);
@@ -454,6 +467,20 @@ export default function ResponseTemplatesPage() {
         onSave={editingTemplate ? handleUpdateTemplate : handleCreateTemplate}
         initial={editingTemplate}
       />
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

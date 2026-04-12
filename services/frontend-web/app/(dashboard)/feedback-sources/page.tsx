@@ -6,6 +6,14 @@ import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   feedbackSourcesAPI,
   FeedbackSource,
   SourceTypeInfo,
@@ -58,6 +66,13 @@ function FeedbackSourcesContent() {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   useEffect(() => {
     fetchData();
@@ -79,19 +94,22 @@ function FeedbackSourcesContent() {
     }
   };
 
-  const handleDelete = async (source: FeedbackSource) => {
+  const handleDelete = (source: FeedbackSource) => {
     const name = source.name || `${source.source_type} source`;
-    if (!confirm(`Delete "${name}"? This will stop receiving feedback from this source and cannot be undone.`)) return;
-
-    try {
-      setDeletingId(source.id);
-      await feedbackSourcesAPI.delete(source.id);
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to delete source:', err);
-    } finally {
-      setDeletingId(null);
-    }
+    requestConfirm(
+      `Delete "${name}"? This will stop receiving feedback from this source and cannot be undone.`,
+      async () => {
+        try {
+          setDeletingId(source.id);
+          await feedbackSourcesAPI.delete(source.id);
+          await fetchData();
+        } catch (err) {
+          console.error('Failed to delete source:', err);
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    );
   };
 
   const handleToggleActive = async (source: FeedbackSource) => {
@@ -370,6 +388,20 @@ function FeedbackSourcesContent() {
             )}
           </CardContent>
         </Card>
+
+        {/* Confirm Dialog */}
+        <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Confirm Action</DialogTitle>
+              <DialogDescription>{confirmMessage}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Available Source Types */}
         <Card className="animate-slide-up">

@@ -12,6 +12,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Table,
   TableBody,
   TableCell,
@@ -214,28 +221,34 @@ export default function QueryTemplatesAdminPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <select
-          data-testid="filter-created-by"
+        <Select
           value={filterCreatedBy}
-          onChange={(e) => setFilterCreatedBy(e.target.value)}
-          className="text-sm px-3 py-1.5 rounded-lg border border-border bg-background text-foreground outline-none focus:ring-1 focus:ring-primary"
+          onValueChange={(val) => setFilterCreatedBy(val)}
         >
-          <option value="all">All Sources</option>
-          <option value="system">system</option>
-          <option value="llm">llm</option>
-          <option value="admin">admin</option>
-        </select>
+          <SelectTrigger data-testid="filter-created-by" className="w-[140px] h-9 text-sm">
+            <SelectValue placeholder="All Sources" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Sources</SelectItem>
+            <SelectItem value="system">system</SelectItem>
+            <SelectItem value="llm">llm</SelectItem>
+            <SelectItem value="admin">admin</SelectItem>
+          </SelectContent>
+        </Select>
 
-        <select
-          data-testid="filter-status"
+        <Select
           value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="text-sm px-3 py-1.5 rounded-lg border border-border bg-background text-foreground outline-none focus:ring-1 focus:ring-primary"
+          onValueChange={(val) => setFilterStatus(val)}
         >
-          <option value="all">All Statuses</option>
-          <option value="active">Active</option>
-          <option value="disabled">Disabled</option>
-        </select>
+          <SelectTrigger data-testid="filter-status" className="w-[140px] h-9 text-sm">
+            <SelectValue placeholder="All Statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="disabled">Disabled</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Table */}

@@ -43,6 +43,7 @@ celery_app = Celery(
         "src.tasks.insights",
         "src.tasks.workflow",
         "src.tasks.webhook_delivery",
+        "src.tasks.automation",
     ],
 )
 
@@ -177,6 +178,11 @@ celery_app.conf.beat_schedule = {
     "purge-old-webhook-deliveries": {
         "task": "src.tasks.webhook_delivery.purge_old_webhook_deliveries",
         "schedule": crontab(hour=2, minute=15, day_of_week=0),
+    },
+    # Purge automation execution logs older than 90 days — weekly on Sunday at 2:30 AM
+    "purge-old-automation-executions": {
+        "task": "src.tasks.automation.purge_old_automation_executions",
+        "schedule": crontab(hour=2, minute=30, day_of_week=0),
     },
 }
 

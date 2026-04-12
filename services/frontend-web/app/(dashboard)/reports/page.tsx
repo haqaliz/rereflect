@@ -59,6 +59,7 @@ export default function ReportsPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [previewReport, setPreviewReport] = useState<Report | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   // Plan gate: Business+ only
@@ -94,6 +95,23 @@ export default function ReportsPage() {
     }
   };
 
+  const handleViewReport = async (report: Report) => {
+    // Use sections from the list item if already present, otherwise fetch the full report
+    if (report.sections && report.sections.length > 0) {
+      setPreviewReport(report);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const full = await reportsAPI.get(report.id);
+      setPreviewReport(full);
+    } catch {
+      toast.error('Failed to load report');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleDownloadPDF = async (id: number) => {
     setDownloadingId(id);
     try {
@@ -106,6 +124,7 @@ export default function ReportsPage() {
   };
 
   return (
+    <div className="min-h-screen pattern-bg">
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -227,11 +246,16 @@ export default function ReportsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setPreviewReport(report)}
+                            onClick={() => handleViewReport(report)}
+                            disabled={previewLoading}
                             data-testid={`view-report-${report.id}`}
                             className="gap-1.5"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            {previewLoading ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
                             View
                           </Button>
                           <Button
@@ -315,7 +339,7 @@ export default function ReportsPage() {
           </DialogHeader>
           {previewReport && (
             <ReportPreview
-              sections={previewReport.sections}
+              sections={previewReport.sections ?? []}
               title={undefined}
               isStreaming={false}
               reportId={previewReport.id}
@@ -324,6 +348,7 @@ export default function ReportsPage() {
           )}
         </DialogContent>
       </Dialog>
+    </div>
     </div>
   );
 }

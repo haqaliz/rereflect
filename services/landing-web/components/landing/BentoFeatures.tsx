@@ -15,6 +15,7 @@ import {
   Brain,
   Sparkles,
   ShieldCheck,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -170,6 +171,14 @@ const smallCards: {
     title: 'Data Privacy & GDPR',
     description:
       'Export your data anytime. Request account deletion with a 30-day grace period. Full GDPR compliance with data portability and right to erasure.',
+    animation: 'pulse',
+  },
+  {
+    id: 'card-ai-workflow-automation',
+    icon: Zap,
+    title: 'AI Workflow Automation',
+    description:
+      'Create IF/THEN rules that auto-assign, escalate, notify, and draft responses when churn risk spikes, bugs are reported, or sentiment drops.',
     animation: 'pulse',
   },
 ];

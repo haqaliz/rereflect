@@ -49,6 +49,14 @@ import {
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 export default function IntegrationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -64,6 +72,13 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
   const [defaultTemplate, setDefaultTemplate] = useState('');
   const [logsPage, setLogsPage] = useState(0);
   const logsPerPage = 10;
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   const [form, setForm] = useState({
     name: '',
@@ -147,14 +162,18 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Delete this integration? This cannot be undone.')) return;
-    try {
-      await integrationsAPI.delete(parseInt(id));
-      router.push('/settings/integrations');
-    } catch (err) {
-      console.error('Failed to delete integration:', err);
-    }
+  const handleDelete = () => {
+    requestConfirm(
+      'Delete this integration? This cannot be undone.',
+      async () => {
+        try {
+          await integrationsAPI.delete(parseInt(id));
+          router.push('/settings/integrations');
+        } catch (err) {
+          console.error('Failed to delete integration:', err);
+        }
+      }
+    );
   };
 
   const toggleTrigger = (trigger: string) => {
@@ -598,6 +617,20 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
           </Button>
         </div>
       </main>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

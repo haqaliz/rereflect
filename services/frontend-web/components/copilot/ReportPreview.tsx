@@ -185,10 +185,10 @@ export function ReportPreview({
         <h2 className="text-lg font-bold text-foreground">{title}</h2>
       )}
 
-      {sections.map((section, index) => (
+      {(sections ?? []).map((section, index) => (
         <div key={index}>
           <ReportSectionView section={section} />
-          {index < sections.length - 1 && (
+          {index < (sections ?? []).length - 1 && (
             <hr className="mt-6 border-border" />
           )}
         </div>

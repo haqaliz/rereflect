@@ -44,6 +44,10 @@ const faqs = [
     q: 'Can I delete my account?',
     a: "Yes. Go to Settings > Preferences and click 'Delete My Account.' Your account will be deactivated immediately and all data permanently deleted after a 30-day grace period. During this window, you can cancel the deletion by simply logging back in. This complies with GDPR's right to erasure.",
   },
+  {
+    q: 'Can I automate actions based on feedback events?',
+    a: "Yes. Create automation rules that trigger when specific conditions are met — like a customer's health score dropping below a threshold or receiving multiple negative feedbacks. Rules can auto-assign team members, change workflow status, send notifications, and even draft AI responses. Choose from 5 pre-built templates or create custom rules.",
+  },
 ];
 
 export default function FAQ() {

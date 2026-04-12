@@ -181,6 +181,25 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             },
             db=db,
         )
+
+        # Automation rules — health_score_threshold and churn_risk_level_change triggers
+        try:
+            from src.services.automation_engine import AutomationEngine
+            engine = AutomationEngine(db)
+            health_context = {
+                "health_score": new_score,
+                "new_risk_level": result["risk_level"],
+                "old_risk_level": old_risk_level,
+                "customer_email": customer_email,
+                "feedback_id": None,
+            }
+            engine.evaluate(org_id, "health_score_threshold", health_context)
+            engine.evaluate(org_id, "churn_risk_level_change", health_context)
+        except Exception as _ae:
+            logger.warning(
+                "Automation engine dispatch failed after health score update for %s: %s",
+                customer_email, _ae,
+            )
     else:
         health = CustomerHealth(
             organization_id=org_id,

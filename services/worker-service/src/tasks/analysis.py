@@ -136,6 +136,22 @@ def analyze_single_feedback(self, feedback_id: int) -> dict:
                     feedback_id, exc,
                 )
 
+            # Automation rules — feedback_category_match and sentiment_pattern triggers
+            try:
+                from src.services.automation_engine import AutomationEngine
+                engine = AutomationEngine(db)
+                context = {
+                    "customer_email": feedback.customer_email or "",
+                    "feedback_id": feedback.id,
+                }
+                engine.evaluate(feedback.organization_id, "feedback_category_match", context)
+                engine.evaluate(feedback.organization_id, "sentiment_pattern", context)
+            except Exception as exc:
+                logger.warning(
+                    "Automation engine dispatch failed after analysis for feedback %s: %s",
+                    feedback_id, exc,
+                )
+
             logger.info(f"Successfully analyzed feedback {feedback_id}")
             return {
                 "status": "success",

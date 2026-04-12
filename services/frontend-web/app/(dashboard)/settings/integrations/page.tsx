@@ -27,6 +27,14 @@ import {
   MessageSquare,
   Users,
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
@@ -46,6 +54,13 @@ function IntegrationsContent() {
   const [linearStatus, setLinearStatus] = useState<LinearConnectionStatus | null>(null);
   const [linearTesting, setLinearTesting] = useState(false);
   const [linearTestResult, setLinearTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   // Only admin/owner can manage integrations
   const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
@@ -119,14 +134,18 @@ function IntegrationsContent() {
     }
   };
 
-  const handleDelete = async (integration: Integration) => {
-    if (!confirm(`Delete integration "${integration.name}"? This cannot be undone.`)) return;
-    try {
-      await integrationsAPI.delete(integration.id);
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to delete integration:', err);
-    }
+  const handleDelete = (integration: Integration) => {
+    requestConfirm(
+      `Delete integration "${integration.name}"? This cannot be undone.`,
+      async () => {
+        try {
+          await integrationsAPI.delete(integration.id);
+          await fetchData();
+        } catch (err) {
+          console.error('Failed to delete integration:', err);
+        }
+      }
+    );
   };
 
   if (loading) {
@@ -430,14 +449,18 @@ function IntegrationsContent() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={async () => {
-                              if (!confirm('Disconnect Linear? Existing issue links will be preserved.')) return;
-                              try {
-                                await linearAPI.disconnect();
-                                await fetchData();
-                              } catch (err) {
-                                console.error('Failed to disconnect Linear:', err);
-                              }
+                            onClick={() => {
+                              requestConfirm(
+                                'Disconnect Linear? Existing issue links will be preserved.',
+                                async () => {
+                                  try {
+                                    await linearAPI.disconnect();
+                                    await fetchData();
+                                  } catch (err) {
+                                    console.error('Failed to disconnect Linear:', err);
+                                  }
+                                }
+                              );
                             }}
                             className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
                             title="Disconnect"
@@ -623,6 +646,20 @@ function IntegrationsContent() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

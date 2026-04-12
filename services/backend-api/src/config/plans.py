@@ -82,6 +82,8 @@ PLANS = {
             "response_suggestions",
             # Custom Webhooks M3.1
             "custom_webhooks",
+            # AI Workflow Automation M4.4
+            "workflow_automation",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -134,6 +136,8 @@ PLANS = {
             "custom_webhooks",
             # On-Demand AI Reports M2.4
             "ai_reports",
+            # AI Workflow Automation M4.4
+            "workflow_automation",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -185,6 +189,8 @@ PLANS = {
             "custom_webhooks",
             # On-Demand AI Reports M2.4
             "ai_reports",
+            # AI Workflow Automation M4.4
+            "workflow_automation",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -245,6 +251,8 @@ FEATURE_PLANS = {
     "custom_webhooks": "free",
     # On-Demand AI Reports (M2.4)
     "ai_reports": "business",
+    # AI Workflow Automation (M4.4)
+    "workflow_automation": "pro",
 }
 
 
@@ -316,3 +324,17 @@ def get_stripe_price_id(plan_id: str, billing_cycle: str) -> Optional[str]:
     if billing_cycle == "annual":
         return plan.get("stripe_price_annual")
     return plan.get("stripe_price_monthly")
+
+
+def get_automation_rule_limit(plan_id: str) -> Optional[int]:
+    """Get maximum automation rules allowed for a plan. None means unlimited.
+
+    free=0, pro=5, business=20, enterprise=None (unlimited)
+    """
+    limits: dict[str, Optional[int]] = {
+        "free": 0,
+        "pro": 5,
+        "business": 20,
+        "enterprise": None,
+    }
+    return limits.get(plan_id, 0)

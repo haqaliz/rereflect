@@ -18,6 +18,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
@@ -81,6 +89,13 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   // Form state
   const [form, setForm] = useState<{
@@ -153,15 +168,18 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Delete this feedback source? This cannot be undone.')) return;
-
-    try {
-      await feedbackSourcesAPI.delete(sourceId);
-      router.push('/feedback-sources');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete source');
-    }
+  const handleDelete = () => {
+    requestConfirm(
+      'Delete this feedback source? This cannot be undone.',
+      async () => {
+        try {
+          await feedbackSourcesAPI.delete(sourceId);
+          router.push('/feedback-sources');
+        } catch (err: any) {
+          setError(err.response?.data?.detail || 'Failed to delete source');
+        }
+      }
+    );
   };
 
   const copyWebhookUrl = () => {
@@ -769,6 +787,20 @@ requests.post(
             )}
           </CardContent>
         </Card>
+
+        {/* Confirm Dialog */}
+        <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Confirm Action</DialogTitle>
+              <DialogDescription>{confirmMessage}</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Save Button */}
         <div className="flex justify-end">

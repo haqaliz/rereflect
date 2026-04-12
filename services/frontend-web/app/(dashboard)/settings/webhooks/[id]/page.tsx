@@ -19,6 +19,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -121,6 +123,13 @@ export default function WebhookDetailPage() {
 
   // Delete
   const [deleting, setDeleting] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   // Expandable delivery rows
   const [expandedDelivery, setExpandedDelivery] = useState<number | null>(null);
@@ -193,34 +202,42 @@ export default function WebhookDetailPage() {
     }
   }, [webhook, name, url, selectedEvents, categoryFilters, retryMode, customHeaders, isActive]);
 
-  const handleRotateSecret = useCallback(async () => {
+  const handleRotateSecret = useCallback(() => {
     if (!webhook) return;
-    if (!confirm('Rotate the signing secret? Your receiver will need updating with the new secret.')) return;
-    setRotating(true);
-    try {
-      const result = await webhooksAPI.rotateSecret(webhook.id);
-      setNewSecret(result.signing_secret);
-      setWebhook(result);
-      toast.success('Signing secret rotated');
-    } catch {
-      toast.error('Failed to rotate secret');
-    } finally {
-      setRotating(false);
-    }
+    requestConfirm(
+      'Rotate the signing secret? Your receiver will need updating with the new secret.',
+      async () => {
+        setRotating(true);
+        try {
+          const result = await webhooksAPI.rotateSecret(webhook.id);
+          setNewSecret(result.signing_secret);
+          setWebhook(result);
+          toast.success('Signing secret rotated');
+        } catch {
+          toast.error('Failed to rotate secret');
+        } finally {
+          setRotating(false);
+        }
+      }
+    );
   }, [webhook]);
 
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
     if (!webhook) return;
-    if (!confirm(`Delete "${webhook.name}"? This cannot be undone.`)) return;
-    setDeleting(true);
-    try {
-      await webhooksAPI.delete(webhook.id);
-      toast.success('Webhook deleted');
-      router.push('/settings/webhooks');
-    } catch {
-      toast.error('Failed to delete webhook');
-      setDeleting(false);
-    }
+    requestConfirm(
+      `Delete "${webhook.name}"? This cannot be undone.`,
+      async () => {
+        setDeleting(true);
+        try {
+          await webhooksAPI.delete(webhook.id);
+          toast.success('Webhook deleted');
+          router.push('/settings/webhooks');
+        } catch {
+          toast.error('Failed to delete webhook');
+          setDeleting(false);
+        }
+      }
+    );
   }, [webhook, router]);
 
   const addHeader = () => setCustomHeaders(prev => [...prev, { key: '', value: '' }]);
@@ -607,6 +624,20 @@ export default function WebhookDetailPage() {
 
         </Tabs>
       </main>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Rotate Secret Confirmation Dialog (unused — handled via confirm() inline) */}
       <Dialog open={rotateDialogOpen} onOpenChange={setRotateDialogOpen}>

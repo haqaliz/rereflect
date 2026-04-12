@@ -33,6 +33,7 @@ import {
   User,
 } from 'lucide-react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { FeedbackPageProvider, useFeedbackPage } from '@/contexts/FeedbackPageContext';
 import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import { DataTable } from '@/components/shared/data-table';
@@ -53,6 +54,8 @@ function FeedbackPageContent() {
   const [deletingFeedback, setDeletingFeedback] = useState<FeedbackItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [pendingBulkDeleteIds, setPendingBulkDeleteIds] = useState<number[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<CSVImportResponse | null>(null);
@@ -179,20 +182,23 @@ function FeedbackPageContent() {
     }
   };
 
-  const handleBulkDelete = async (selectedItems?: FeedbackItem[]) => {
+  const handleBulkDelete = (selectedItems?: FeedbackItem[]) => {
     const idsToDelete = selectedItems ? selectedItems.map(item => item.id) : selectedIds;
     if (idsToDelete.length === 0) return;
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${idsToDelete.length} feedback item(s)? This action cannot be undone.`
-    );
-    if (!confirmed) return;
+    setPendingBulkDeleteIds(idsToDelete);
+    setBulkDeleteConfirmOpen(true);
+  };
+
+  const confirmBulkDelete = async () => {
+    setBulkDeleteConfirmOpen(false);
     try {
-      await feedbackAPI.bulkDelete(idsToDelete);
+      await feedbackAPI.bulkDelete(pendingBulkDeleteIds);
       setSelectedIds([]);
+      setPendingBulkDeleteIds([]);
       queryClient.invalidateQueries({ queryKey: ['feedback'] });
     } catch (err) {
       console.error('Failed to bulk delete feedback:', err);
-      alert('Failed to delete feedback items. Please try again.');
+      toast.error('Failed to delete feedback items. Please try again.');
     }
   };
 
@@ -597,6 +603,22 @@ function FeedbackPageContent() {
               <Trash2 className="w-5 h-5" />
               <span>Delete</span>
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={bulkDeleteConfirmOpen} onOpenChange={(open) => { if (!open) setBulkDeleteConfirmOpen(false); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete {pendingBulkDeleteIds.length} feedback item(s)? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeleteConfirmOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmBulkDelete}>Confirm</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

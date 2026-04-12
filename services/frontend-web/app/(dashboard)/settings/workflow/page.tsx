@@ -13,6 +13,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { workflowAPI, AssignmentRule } from '@/lib/api/workflow';
 import { teamAPI, TeamMember } from '@/lib/api/team';
@@ -47,6 +55,14 @@ export default function WorkflowPage() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingAutoAssign, setSavingAutoAssign] = useState(false);
+
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   // Form state
   const [isAddingRule, setIsAddingRule] = useState(false);
@@ -184,19 +200,20 @@ export default function WorkflowPage() {
     setIsAddingRule(true);
   };
 
-  const handleDeleteRule = async (ruleId: number) => {
-    if (!confirm('Are you sure you want to delete this rule?')) {
-      return;
-    }
-
-    try {
-      await workflowAPI.deleteRule(ruleId);
-      setRules((prev) => prev.filter((r) => r.id !== ruleId));
-      toast.success('Rule deleted successfully');
-    } catch (err) {
-      console.error('Failed to delete rule:', err);
-      toast.error('Failed to delete rule');
-    }
+  const handleDeleteRule = (ruleId: number) => {
+    requestConfirm(
+      'Are you sure you want to delete this rule?',
+      async () => {
+        try {
+          await workflowAPI.deleteRule(ruleId);
+          setRules((prev) => prev.filter((r) => r.id !== ruleId));
+          toast.success('Rule deleted successfully');
+        } catch (err) {
+          console.error('Failed to delete rule:', err);
+          toast.error('Failed to delete rule');
+        }
+      }
+    );
   };
 
   if (loading) {
@@ -437,6 +454,20 @@ export default function WorkflowPage() {
         </Card>
 
       </main>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -15,6 +15,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Webhook,
   Plus,
   Trash2,
@@ -77,6 +85,13 @@ export default function WebhooksPage() {
   const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   const plan = user?.plan ?? 'free';
   const planLimit = PLAN_WEBHOOK_LIMITS[plan];
@@ -96,18 +111,22 @@ export default function WebhooksPage() {
     load();
   }, []);
 
-  const handleDelete = useCallback(async (webhook: WebhookEndpoint) => {
-    if (!confirm(`Delete "${webhook.name}"? This cannot be undone.`)) return;
-    setDeletingId(webhook.id);
-    try {
-      await webhooksAPI.delete(webhook.id);
-      setWebhooks(prev => prev.filter(w => w.id !== webhook.id));
-      toast.success('Webhook deleted');
-    } catch {
-      toast.error('Failed to delete webhook');
-    } finally {
-      setDeletingId(null);
-    }
+  const handleDelete = useCallback((webhook: WebhookEndpoint) => {
+    requestConfirm(
+      `Delete "${webhook.name}"? This cannot be undone.`,
+      async () => {
+        setDeletingId(webhook.id);
+        try {
+          await webhooksAPI.delete(webhook.id);
+          setWebhooks(prev => prev.filter(w => w.id !== webhook.id));
+          toast.success('Webhook deleted');
+        } catch {
+          toast.error('Failed to delete webhook');
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    );
   }, []);
 
   const handleTest = useCallback(async (webhook: WebhookEndpoint) => {
@@ -280,6 +299,20 @@ export default function WebhooksPage() {
         </Card>
 
       </main>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

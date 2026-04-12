@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { toast } from 'sonner';
 
 function getRelativeTime(dateStr: string | null): string {
   if (!dateStr) return 'Never';
@@ -171,9 +172,9 @@ export default function CustomersPage() {
     setReanalyzing(true);
     try {
       const result = await customersAPI.batchAnalyze();
-      alert(`Analysis queued for ${result.customer_count} customers`);
+      toast.success(`Analysis queued for ${result.customer_count} customers`);
     } catch {
-      alert('Failed to queue batch analysis');
+      toast.error('Failed to queue batch analysis');
     } finally {
       setReanalyzing(false);
     }

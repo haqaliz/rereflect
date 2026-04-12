@@ -30,6 +30,7 @@ import {
   MessageSquarePlus,
   Webhook,
   FileBarChart,
+  Zap,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -133,6 +134,7 @@ const settingsNavItems = [
   { title: 'AI', href: '/settings/ai', icon: Brain, requiredRole: 'admin' as const },
   { title: 'Response Templates', href: '/settings/response-templates', icon: MessageSquarePlus, requiredRole: 'admin' as const },
   { title: 'Webhooks', href: '/settings/webhooks', icon: Webhook },
+  { title: 'Automations', href: '/settings/automations', icon: Zap },
   { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },
   { title: 'Billing', href: '/settings/billing', icon: CreditCard, requiredRole: 'owner' as const },
 ];

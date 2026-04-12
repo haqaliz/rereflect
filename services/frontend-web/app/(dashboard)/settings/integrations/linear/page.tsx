@@ -17,6 +17,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -69,6 +77,13 @@ export default function LinearSettingsPage() {
 
   // Form state for toggle
   const [isActive, setIsActive] = useState(true);
+  const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
+  const [confirmMessage, setConfirmMessage] = useState('');
+
+  const requestConfirm = (message: string, action: () => void) => {
+    setConfirmMessage(message);
+    setConfirmAction(() => action);
+  };
 
   const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
@@ -155,14 +170,18 @@ export default function LinearSettingsPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Disconnect Linear? Existing issue links will be preserved.')) return;
-    try {
-      await linearAPI.disconnect();
-      router.push('/settings/integrations');
-    } catch (err) {
-      console.error('Failed to disconnect Linear:', err);
-    }
+  const handleDelete = () => {
+    requestConfirm(
+      'Disconnect Linear? Existing issue links will be preserved.',
+      async () => {
+        try {
+          await linearAPI.disconnect();
+          router.push('/settings/integrations');
+        } catch (err) {
+          console.error('Failed to disconnect Linear:', err);
+        }
+      }
+    );
   };
 
   const handleSave = async () => {
@@ -658,6 +677,20 @@ export default function LinearSettingsPage() {
           </Button>
         </div>
       </main>
+
+      {/* Confirm Dialog */}
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Action</DialogTitle>
+            <DialogDescription>{confirmMessage}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { confirmAction?.(); setConfirmAction(null); }}>Confirm</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
