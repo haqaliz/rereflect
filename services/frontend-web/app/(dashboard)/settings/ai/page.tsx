@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { aiSettingsAPI, type AISettings } from '@/lib/api/ai-settings';
 import { categoriesAPI, type CustomCategory } from '@/lib/api/categories';
+import { aiCorrectionsAPI, type CorrectionStats } from '@/lib/api/ai-corrections';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +20,8 @@ import {
   Check,
   X,
   Sparkles,
+  ShieldCheck,
+  Loader2,
 } from 'lucide-react';
 import { AISettingsGeneral } from '@/components/settings/AISettingsGeneral';
 import { AISettingsProviders } from '@/components/settings/AISettingsProviders';
@@ -32,8 +35,15 @@ const CATEGORY_TYPE_LABELS: Record<CategoryType, string> = {
   general: 'General',
 };
 
-const VALID_TABS = ['general', 'providers', 'usage', 'categories'] as const;
+const VALID_TABS = ['general', 'providers', 'usage', 'categories', 'accuracy'] as const;
 type TabValue = typeof VALID_TABS[number];
+
+const CORRECTION_TYPE_LABELS: Record<string, string> = {
+  copilot_response: 'Copilot Response',
+  sentiment: 'Sentiment',
+  category: 'Category',
+  churn_risk: 'Churn Risk',
+};
 
 function AISettingsContent() {
   const router = useRouter();
@@ -46,6 +56,8 @@ function AISettingsContent() {
   const [loading, setLoading] = useState(true);
   const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
   const [categories, setCategories] = useState<CustomCategory[]>([]);
+  const [accuracyStats, setAccuracyStats] = useState<CorrectionStats | null>(null);
+  const [accuracyLoading, setAccuracyLoading] = useState(false);
 
   // New category form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -80,6 +92,16 @@ function AISettingsContent() {
 
     fetchData();
   }, [router]);
+
+  useEffect(() => {
+    if (activeTab === 'accuracy' && !accuracyStats && !accuracyLoading) {
+      setAccuracyLoading(true);
+      aiCorrectionsAPI.getStats()
+        .then(setAccuracyStats)
+        .catch((err) => console.error('Failed to load accuracy stats:', err))
+        .finally(() => setAccuracyLoading(false));
+    }
+  }, [activeTab, accuracyStats, accuracyLoading]);
 
   const handleTabChange = (value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -167,6 +189,7 @@ function AISettingsContent() {
             <TabsTrigger value="providers">Providers</TabsTrigger>
             <TabsTrigger value="usage">Usage</TabsTrigger>
             <TabsTrigger value="categories">Categories</TabsTrigger>
+            <TabsTrigger value="accuracy">AI Accuracy</TabsTrigger>
           </TabsList>
 
           {/* General Tab */}
@@ -327,6 +350,106 @@ function AISettingsContent() {
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          {/* AI Accuracy Tab */}
+          <TabsContent value="accuracy" className="mt-6">
+            <Card>
+              <CardHeader className="border-b border-border">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-secondary rounded-lg">
+                    <ShieldCheck className="w-5 h-5 text-primary" />
+                  </div>
+                  <CardTitle>AI Accuracy</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <p className="text-sm text-muted-foreground mb-6">
+                  Track how often users flag AI outputs as inaccurate. Use this to identify areas where the model needs improvement.
+                </p>
+
+                {accuracyLoading && (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+
+                {!accuracyLoading && !accuracyStats && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <ShieldCheck className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>No accuracy data available yet.</p>
+                  </div>
+                )}
+
+                {accuracyStats && (
+                  <div className="space-y-6">
+                    {/* Summary Stats */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 rounded-lg border border-border bg-secondary/30">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                          Total Corrections
+                        </p>
+                        <p className="text-2xl font-bold text-foreground">
+                          {accuracyStats.total.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">All time</p>
+                      </div>
+                      <div className="p-4 rounded-lg border border-border bg-secondary/30">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                          This Month
+                        </p>
+                        <p className="text-2xl font-bold text-foreground">
+                          {accuracyStats.this_month.toLocaleString()}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">Current month</p>
+                      </div>
+                    </div>
+
+                    {/* By Type */}
+                    {Object.keys(accuracyStats.by_type).length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-foreground mb-3">Corrections by Type</p>
+                        <div className="space-y-2">
+                          {Object.entries(accuracyStats.by_type).map(([type, count]) => (
+                            <div key={type} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                              <span className="text-sm text-foreground">
+                                {CORRECTION_TYPE_LABELS[type] ?? type}
+                              </span>
+                              <span className="text-sm font-medium tabular-nums">
+                                {count.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Most Corrected */}
+                    {accuracyStats.most_corrected.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-foreground mb-3">Most Corrected Labels</p>
+                        <div className="space-y-2">
+                          {accuracyStats.most_corrected.slice(0, 5).map((item, idx) => (
+                            <div key={item.category} className="flex items-center gap-3">
+                              <span className="text-xs text-muted-foreground w-4 tabular-nums">{idx + 1}</span>
+                              <span className="flex-1 text-sm text-foreground truncate">{item.category}</span>
+                              <span
+                                className="px-2 py-0.5 rounded text-xs font-medium tabular-nums"
+                                style={{
+                                  backgroundColor: 'color-mix(in oklch, var(--destructive) 12%, transparent)',
+                                  color: 'var(--destructive)',
+                                }}
+                              >
+                                {item.count.toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>

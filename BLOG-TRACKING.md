@@ -42,63 +42,63 @@
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
 | 7 | 5 Signs Your Customers Are About to Churn (Hidden in Their Feedback) | `5-signs-customers-about-to-churn-feedback` | Mar 17 | Thought Leadership | Founders, CS | "churn signals customer feedback" | Published |
-| 8 | Rereflect vs UserVoice: Modern AI Analysis vs Traditional Feedback Boards | `rereflect-vs-uservoice` | May 15 | Comparison | PMs, Founders | "UserVoice alternative" | Planned |
+| 8 | Rereflect vs UserVoice: Modern AI Analysis vs Traditional Feedback Boards | `rereflect-vs-uservoice` | May 15 | Comparison | PMs, Founders | "UserVoice alternative" | Written |
 
 ### June 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 9 | How Support Teams Can Turn Ticket Data Into Product Insights | `support-tickets-product-insights` | Jun 1 | SEO | CS/Support | "support tickets product insights" | Planned |
-| 10 | Rereflect vs MonkeyLearn: Purpose-Built Feedback AI vs Generic Text Analysis | `rereflect-vs-monkeylearn` | Jun 15 | Comparison | PMs, Founders | "MonkeyLearn alternative feedback" | Planned |
+| 9 | How Support Teams Can Turn Ticket Data Into Product Insights | `support-tickets-product-insights` | Jun 1 | SEO | CS/Support | "support tickets product insights" | Written |
+| 10 | Rereflect vs MonkeyLearn: Purpose-Built Feedback AI vs Generic Text Analysis | `rereflect-vs-monkeylearn` | Jun 15 | Comparison | PMs, Founders | "MonkeyLearn alternative feedback" | Written |
 
 ### July 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 11 | The Data-Driven Product Roadmap: Stop Building What the Loudest Customer Wants | `data-driven-product-roadmap-customer-feedback` | Jul 1 | Thought Leadership | Founders, PMs | "data driven product roadmap" | Planned |
-| 12 | Rereflect vs Thematic: Real-Time Feedback Analysis for Growing SaaS Teams | `rereflect-vs-thematic` | Jul 15 | Comparison | PMs | "Thematic alternative" | Planned |
+| 11 | The Data-Driven Product Roadmap: Stop Building What the Loudest Customer Wants | `data-driven-product-roadmap-customer-feedback` | Jul 1 | Thought Leadership | Founders, PMs | "data driven product roadmap" | Written |
+| 12 | Rereflect vs Thematic: Real-Time Feedback Analysis for Growing SaaS Teams | `rereflect-vs-thematic` | Jul 15 | Comparison | PMs | "Thematic alternative" | Written |
 
 ### August 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 13 | NPS Is Not Enough: Why Qualitative Feedback Analysis Matters More | `nps-not-enough-qualitative-feedback-analysis` | Aug 1 | Thought Leadership | Founders, CS | "NPS qualitative feedback" | Planned |
-| 14 | Rereflect vs Idiomatic: AI Feedback Analysis Compared | `rereflect-vs-idiomatic` | Aug 15 | Comparison | PMs, Founders | "Idiomatic alternative" | Planned |
+| 13 | NPS Is Not Enough: Why Qualitative Feedback Analysis Matters More | `nps-not-enough-qualitative-feedback-analysis` | Aug 1 | Thought Leadership | Founders, CS | "NPS qualitative feedback" | Written |
+| 14 | Rereflect vs Idiomatic: AI Feedback Analysis Compared | `rereflect-vs-idiomatic` | Aug 15 | Comparison | PMs, Founders | "Idiomatic alternative" | Written |
 
 ### September 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 15 | How to Build a Voice-of-Customer Program Without a Dedicated Team | `voice-of-customer-program-small-team` | Sep 1 | SEO | Founders, CS | "voice of customer program small team" | Planned |
-| 16 | Best Customer Feedback Tools for SaaS in 2026 (Honest Roundup) | `best-customer-feedback-tools-saas-2026` | Sep 15 | SEO / Comparison | All | "best customer feedback tools 2026" | Planned |
+| 15 | How to Build a Voice-of-Customer Program Without a Dedicated Team | `voice-of-customer-program-small-team` | Sep 1 | SEO | Founders, CS | "voice of customer program small team" | Written |
+| 16 | Best Customer Feedback Tools for SaaS in 2026 (Honest Roundup) | `best-customer-feedback-tools-saas-2026` | Sep 15 | SEO / Comparison | All | "best customer feedback tools 2026" | Written |
 
 ### October 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 17 | From Slack Messages to Product Strategy: A Feedback Pipeline Guide | `slack-messages-to-product-strategy-feedback` | Oct 1 | SEO | PMs, Founders | "Slack customer feedback analysis" | Planned |
-| 18 | Why Most SaaS Companies Ignore 80% of Their Customer Feedback | `saas-companies-ignore-customer-feedback` | Oct 15 | Thought Leadership | Founders | "SaaS customer feedback ignored" | Planned |
+| 17 | From Slack Messages to Product Strategy: A Feedback Pipeline Guide | `slack-messages-to-product-strategy-feedback` | Oct 1 | SEO | PMs, Founders | "Slack customer feedback analysis" | Written |
+| 18 | Why Most SaaS Companies Ignore 80% of Their Customer Feedback | `saas-companies-ignore-customer-feedback` | Oct 15 | Thought Leadership | Founders | "SaaS customer feedback ignored" | Written |
 
 ### November 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 19 | Customer Feedback Categories: A Framework for SaaS Teams | `customer-feedback-categories-framework-saas` | Nov 1 | SEO | PMs, CS | "customer feedback categories" | Planned |
-| 20 | How AI Copilot Turns Natural Language Questions Into Feedback Insights | `ai-copilot-natural-language-feedback-insights` | Nov 15 | Conversion / Product | All | "AI feedback copilot" | Planned |
+| 19 | Customer Feedback Categories: A Framework for SaaS Teams | `customer-feedback-categories-framework-saas` | Nov 1 | SEO | PMs, CS | "customer feedback categories" | Written |
+| 20 | How AI Copilot Turns Natural Language Questions Into Feedback Insights | `ai-copilot-natural-language-feedback-insights` | Nov 15 | Conversion / Product | All | "AI feedback copilot" | Written |
 
 ### December 2026
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 21 | Year-End Customer Feedback Review: What to Analyze Before 2027 Planning | `year-end-customer-feedback-review-2027` | Dec 1 | Thought Leadership | Founders, PMs | "year end customer feedback review" | Planned |
-| 22 | The Real Cost of Not Analyzing Customer Feedback | `real-cost-not-analyzing-customer-feedback` | Dec 15 | Conversion | Founders | "cost of ignoring customer feedback" | Planned |
+| 21 | Year-End Customer Feedback Review: What to Analyze Before 2027 Planning | `year-end-customer-feedback-review-2027` | Dec 1 | Thought Leadership | Founders, PMs | "year end customer feedback review" | Written |
+| 22 | The Real Cost of Not Analyzing Customer Feedback | `real-cost-not-analyzing-customer-feedback` | Dec 15 | Conversion | Founders | "cost of ignoring customer feedback" | Written |
 
 ### January 2027 (Planning Ahead)
 
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
-| 23 | How to Set Up Custom Webhooks for Real-Time Feedback Alerts | `custom-webhooks-real-time-feedback-alerts` | Jan 1 | Product / SEO | PMs, Engineers | "webhook feedback alerts" | Planned |
-| 24 | AI Response Suggestions: How to Reply to Customer Feedback 10x Faster | `ai-response-suggestions-reply-customer-feedback-faster` | Jan 15 | Conversion / Product | CS, PMs | "AI customer feedback response" | Planned |
+| 23 | How to Set Up Custom Webhooks for Real-Time Feedback Alerts | `custom-webhooks-real-time-feedback-alerts` | Jan 1 | Product / SEO | PMs, Engineers | "webhook feedback alerts" | Written |
+| 24 | AI Response Suggestions: How to Reply to Customer Feedback 10x Faster | `ai-response-suggestions-reply-customer-feedback-faster` | Jan 15 | Conversion / Product | CS, PMs | "AI customer feedback response" | Written |
 
 ---
 

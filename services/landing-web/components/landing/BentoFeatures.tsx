@@ -14,6 +14,7 @@ import {
   Users,
   Brain,
   Sparkles,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -162,6 +163,14 @@ const smallCards: {
     description:
       'Slack, Intercom, email, webhooks — connect your feedback sources in 2 minutes',
     animation: 'spin',
+  },
+  {
+    id: 'card-data-privacy',
+    icon: ShieldCheck,
+    title: 'Data Privacy & GDPR',
+    description:
+      'Export your data anytime. Request account deletion with a 30-day grace period. Full GDPR compliance with data portability and right to erasure.',
+    animation: 'pulse',
   },
 ];
 

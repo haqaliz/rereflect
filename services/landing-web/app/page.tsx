@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { TrendingUp, Zap, Shield, ArrowRight, Sparkles, ChevronRight, Check } from 'lucide-react';
+import { TrendingUp, Zap, Shield, ShieldCheck, ArrowRight, Sparkles, ChevronRight, Check } from 'lucide-react';
 import { Navigation } from '@/components/landing/Navigation';
 import { Footer } from '@/components/landing/Footer';
 import { IntegrationBar } from '@/components/landing/IntegrationBar';
@@ -300,6 +300,12 @@ export default function Home() {
                     <Shield className="w-3 h-3 text-success-text" />
                   </div>
                   <span>SOC 2 Compliant</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-success-bg flex items-center justify-center">
+                    <ShieldCheck className="w-3 h-3 text-success-text" />
+                  </div>
+                  <span>GDPR Compliant</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">

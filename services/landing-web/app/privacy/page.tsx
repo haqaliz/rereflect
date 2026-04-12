@@ -27,7 +27,7 @@ export default function PrivacyPolicyPage() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-6 py-16">
         <h1 className="text-4xl font-bold text-foreground mb-4">Privacy Policy</h1>
-        <p className="text-muted-foreground mb-12">Last updated: January 25, 2025</p>
+        <p className="text-muted-foreground mb-12">Last updated: March 2026</p>
 
         <div className="prose prose-neutral dark:prose-invert max-w-none space-y-8">
           <section>
@@ -103,21 +103,47 @@ export default function PrivacyPolicyPage() {
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">8. Cookies</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">8. How to Exercise Your Data Rights</h2>
+
+            <h3 className="text-lg font-medium text-foreground mb-2">Export Your Data</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4 mb-6">
+              <li>Go to Settings &gt; Preferences in your Rereflect dashboard</li>
+              <li>Click &quot;Export My Data&quot;</li>
+              <li>A ZIP file will download containing your profile, feedbacks, conversations, notes, and preferences in JSON and CSV formats</li>
+            </ul>
+
+            <h3 className="text-lg font-medium text-foreground mb-2">Request Account Deletion</h3>
+            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4 mb-6">
+              <li>Go to Settings &gt; Preferences</li>
+              <li>Click &quot;Delete My Account&quot;</li>
+              <li>Confirm in the dialog</li>
+              <li>Your account will be deactivated immediately and you will be logged out</li>
+              <li>All data will be permanently deleted after 30 days</li>
+              <li>To cancel: simply log back in during the 30-day grace period</li>
+            </ul>
+
+            <h3 className="text-lg font-medium text-foreground mb-2">Contact Us</h3>
+            <p className="text-muted-foreground leading-relaxed">
+              For any privacy-related questions: privacy@rereflect.ca
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">9. Cookies</h2>
             <p className="text-muted-foreground leading-relaxed">
               We use cookies and similar tracking technologies to enhance your experience. You can control cookie preferences through your browser settings.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">9. Changes to This Policy</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">10. Changes to This Policy</h2>
             <p className="text-muted-foreground leading-relaxed">
               We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new policy on this page and updating the &quot;Last updated&quot; date.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">10. Contact Us</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">11. Contact Us</h2>
             <p className="text-muted-foreground leading-relaxed">
               If you have questions about this Privacy Policy, please contact us at privacy@rereflect.com.
             </p>

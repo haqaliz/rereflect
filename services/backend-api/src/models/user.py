@@ -32,6 +32,10 @@ class User(Base):
     weekly_digest_day = Column(Integer, default=1, nullable=False, server_default="1")  # 0=Mon, 6=Sun
     weekly_digest_hour = Column(Integer, default=9, nullable=False, server_default="9")  # 0-23 UTC
 
+    # GDPR compliance fields
+    is_deactivated = Column(Boolean, default=False, nullable=False, server_default="false")
+    deletion_requested_at = Column(DateTime, nullable=True)
+
     # Team management fields
     last_active_at = Column(DateTime, nullable=True)
     invited_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

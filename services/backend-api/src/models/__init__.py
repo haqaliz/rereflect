@@ -41,6 +41,7 @@ from .feedback_response import FeedbackResponse
 from .webhook_endpoint import WebhookEndpoint
 from .webhook_delivery import WebhookDelivery
 from .report import Report
+from .ai_correction import AICorrection
 
 __all__ = [
     "Base",
@@ -90,4 +91,5 @@ __all__ = [
     "WebhookEndpoint",
     "WebhookDelivery",
     "Report",
+    "AICorrection",
 ]

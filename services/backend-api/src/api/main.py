@@ -15,6 +15,8 @@ from src.api.routes import response_templates, response_settings, feedback_respo
 from src.api.routes import webhooks as webhooks_router
 from src.api.routes import health as health_routes
 from src.api.routes import reports as reports_router
+from src.api.routes import account as account_router
+from src.api.routes import ai_corrections as ai_corrections_router  # noqa: E402 — M3.8 Track B
 from src.seed import seed_admin_user, seed_system_templates
 import logging
 import os
@@ -179,6 +181,10 @@ app.include_router(webhooks_router.router)
 app.include_router(health_routes.router)
 # On-Demand AI Reports (M2.4)
 app.include_router(reports_router.router)
+# GDPR Compliance (M3.7)
+app.include_router(account_router.router)
+# AI Trust — Human-in-the-Loop corrections (M3.8 Track B)
+app.include_router(ai_corrections_router.router)
 
 
 @app.get("/")

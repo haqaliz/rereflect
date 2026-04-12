@@ -65,7 +65,8 @@ import {
   HeartPulse,
   Reply,
   MoreHorizontal,
-  GitBranch
+  GitBranch,
+  ThumbsDown
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -94,6 +95,24 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { aiCorrectionsAPI } from '@/lib/api/ai-corrections';
+import { toast } from 'sonner';
 
 export default function FeedbackDetailPage() {
   return (
@@ -148,6 +167,9 @@ function FeedbackDetailContent() {
   const [analyzing, setAnalyzing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [respondModalOpen, setRespondModalOpen] = useState(false);
+  const [correctingField, setCorrectingField] = useState<null | 'sentiment' | 'pain_point' | 'feature_request'>(null);
+  const [correctedValue, setCorrectedValue] = useState('');
+  const [submittingCorrection, setSubmittingCorrection] = useState(false);
 
   useEffect(() => {
     if (feedbackId) {
@@ -226,6 +248,38 @@ function FeedbackDetailContent() {
     }
   };
 
+
+  const handleCorrectionSubmit = async () => {
+    if (!feedback || !correctingField || !correctedValue.trim()) return;
+    setSubmittingCorrection(true);
+    try {
+      const correctionTypeMap = {
+        sentiment: 'sentiment',
+        pain_point: 'category',
+        feature_request: 'category',
+      };
+      const originalValueMap = {
+        sentiment: feedback.sentiment_label,
+        pain_point: feedback.pain_point_category,
+        feature_request: feedback.feature_request_category,
+      };
+      await aiCorrectionsAPI.submit({
+        correction_type: correctionTypeMap[correctingField],
+        entity_type: 'feedback_item',
+        entity_id: feedback.id,
+        signal: 'correction',
+        original_value: originalValueMap[correctingField] ?? null,
+        corrected_value: correctedValue.trim(),
+      });
+      toast.success('Correction submitted. Thank you for the feedback!');
+      setCorrectingField(null);
+      setCorrectedValue('');
+    } catch {
+      toast.error('Failed to submit correction. Please try again.');
+    } finally {
+      setSubmittingCorrection(false);
+    }
+  };
 
   const getPainPointIcon = (category: string) => {
     const iconMap: Record<string, React.ReactNode> = {
@@ -533,13 +587,22 @@ function FeedbackDetailContent() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Sentiment</span>
-                        <Badge
-                          variant="outline"
-                          className="capitalize transition-all"
-                          style={getCategoryBadgeStyle(sentimentColor)}
-                        >
-                          {feedback.sentiment_label}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            variant="outline"
+                            className="capitalize transition-all"
+                            style={getCategoryBadgeStyle(sentimentColor)}
+                          >
+                            {feedback.sentiment_label}
+                          </Badge>
+                          <button
+                            onClick={() => { setCorrectingField('sentiment'); setCorrectedValue(''); }}
+                            className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Flag as incorrect"
+                          >
+                            <ThumbsDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       {feedback.sentiment_score !== null && (
                         <div className="flex items-center justify-between">
@@ -722,14 +785,23 @@ function FeedbackDetailContent() {
                         const color = getPainPointColor(feedback.pain_point_category);
                         return (
                           <>
-                            <Badge
-                              variant="outline"
-                              className="flex items-center gap-1.5 w-fit transition-all"
-                              style={getCategoryBadgeStyle(color)}
-                            >
-                              {getPainPointIcon(feedback.pain_point_category)}
-                              {getPainPointLabel(feedback.pain_point_category)}
-                            </Badge>
+                            <div className="flex items-center gap-1.5">
+                              <Badge
+                                variant="outline"
+                                className="flex items-center gap-1.5 w-fit transition-all"
+                                style={getCategoryBadgeStyle(color)}
+                              >
+                                {getPainPointIcon(feedback.pain_point_category)}
+                                {getPainPointLabel(feedback.pain_point_category)}
+                              </Badge>
+                              <button
+                                onClick={() => { setCorrectingField('pain_point'); setCorrectedValue(''); }}
+                                className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                title="Flag as incorrect"
+                              >
+                                <ThumbsDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                             <div className="flex items-center justify-between text-sm">
                               <span className="text-muted-foreground">Severity</span>
                               <span className="capitalize font-medium" style={{ color }}>
@@ -766,14 +838,23 @@ function FeedbackDetailContent() {
                         const color = getFeatureRequestColor(feedback.feature_request_category);
                         return (
                           <>
-                            <Badge
-                              variant="outline"
-                              className="flex items-center gap-1.5 w-fit transition-all"
-                              style={getCategoryBadgeStyle(color)}
-                            >
-                              {getFeatureRequestIcon(feedback.feature_request_category)}
-                              {getFeatureRequestLabel(feedback.feature_request_category)}
-                            </Badge>
+                            <div className="flex items-center gap-1.5">
+                              <Badge
+                                variant="outline"
+                                className="flex items-center gap-1.5 w-fit transition-all"
+                                style={getCategoryBadgeStyle(color)}
+                              >
+                                {getFeatureRequestIcon(feedback.feature_request_category)}
+                                {getFeatureRequestLabel(feedback.feature_request_category)}
+                              </Badge>
+                              <button
+                                onClick={() => { setCorrectingField('feature_request'); setCorrectedValue(''); }}
+                                className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                title="Flag as incorrect"
+                              >
+                                <ThumbsDown className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                             <div className="flex items-center justify-between text-sm">
                               <span className="text-muted-foreground">Priority</span>
                               <span className="capitalize font-medium" style={{ color }}>
@@ -944,6 +1025,72 @@ function FeedbackDetailContent() {
           }
         />
       )}
+
+      {/* AI Correction Dialog */}
+      <Dialog
+        open={correctingField !== null}
+        onOpenChange={(open) => {
+          if (!open) { setCorrectingField(null); setCorrectedValue(''); }
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {correctingField === 'sentiment' && 'Correct Sentiment'}
+              {correctingField === 'pain_point' && 'Correct Pain Point Category'}
+              {correctingField === 'feature_request' && 'Correct Feature Request Category'}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {correctingField === 'sentiment' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="sentiment-select">Correct sentiment</Label>
+                <Select value={correctedValue} onValueChange={setCorrectedValue}>
+                  <SelectTrigger id="sentiment-select">
+                    <SelectValue placeholder="Select sentiment..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="positive">Positive</SelectItem>
+                    <SelectItem value="neutral">Neutral</SelectItem>
+                    <SelectItem value="negative">Negative</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="category-input">
+                  {correctingField === 'pain_point' ? 'Correct pain point category' : 'Correct feature request category'}
+                </Label>
+                <Input
+                  id="category-input"
+                  value={correctedValue}
+                  onChange={(e) => setCorrectedValue(e.target.value)}
+                  placeholder="Enter correct category..."
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setCorrectingField(null); setCorrectedValue(''); }}
+              disabled={submittingCorrection}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleCorrectionSubmit}
+              disabled={!correctedValue.trim() || submittingCorrection}
+            >
+              {submittingCorrection ? 'Submitting...' : 'Submit Correction'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

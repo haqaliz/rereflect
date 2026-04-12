@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { organizationAPI, Organization, OrganizationStats } from '@/lib/api/organization';
 import { preferencesAPI, Preferences } from '@/lib/api/preferences';
+import { accountAPI } from '@/lib/api/account';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
@@ -29,12 +30,24 @@ import {
   ChevronRight,
   Bell,
   AlertTriangle,
+  Download,
+  Trash2,
+  Shield,
 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import Link from 'next/link';
 
 export default function PreferencesPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [org, setOrg] = useState<Organization | null>(null);
   const [stats, setStats] = useState<OrganizationStats | null>(null);
@@ -44,6 +57,9 @@ export default function PreferencesPage() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [savingDigest, setSavingDigest] = useState(false);
   const [savingAlerts, setSavingAlerts] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Always call useTheme (Rules of Hooks) — values are safe to read after mount
   const { theme: currentTheme, setTheme } = useTheme();
@@ -146,6 +162,30 @@ export default function PreferencesPage() {
   const handleCancelEdit = () => {
     setEditedOrgName(org?.name || '');
     setIsEditing(false);
+  };
+
+  const handleExportData = async () => {
+    setExportLoading(true);
+    try {
+      await accountAPI.exportData();
+    } catch (err) {
+      console.error('Failed to export data:', err);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleteLoading(true);
+    try {
+      await accountAPI.requestDeletion();
+      setDeleteDialogOpen(false);
+      logout();
+      router.push('/login');
+    } catch (err) {
+      console.error('Failed to request deletion:', err);
+      setDeleteLoading(false);
+    }
   };
 
   if (loading) {
@@ -470,6 +510,94 @@ export default function PreferencesPage() {
                 >
                   {getRoleDisplayName(user?.role || 'member')}
                 </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Data & Privacy */}
+        <Card className="animate-slide-up stagger-7">
+          <CardHeader className="border-b border-border">
+            <div className="flex items-center space-x-2">
+              <div className="p-2 bg-secondary rounded-lg">
+                <Shield className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <CardTitle>Data &amp; Privacy</CardTitle>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Manage your personal data in accordance with GDPR
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="space-y-6">
+              {/* Export */}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-foreground">Export My Data</h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Download a ZIP archive containing all your personal data — profile, feedbacks,
+                    conversations, notes, and preferences.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportData}
+                  disabled={exportLoading}
+                  className="shrink-0"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  {exportLoading ? 'Preparing…' : 'Export Data'}
+                </Button>
+              </div>
+
+              <div className="border-t border-border" />
+
+              {/* Delete */}
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-destructive">Delete My Account</h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Permanently delete your account and all associated data. You have a 30-day
+                    grace period to cancel after requesting deletion.
+                  </p>
+                </div>
+                <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="destructive" size="sm" className="shrink-0">
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Account
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Delete your account?</DialogTitle>
+                      <DialogDescription>
+                        This will permanently delete your account and all data after{' '}
+                        <strong>30 days</strong>. You will be logged out immediately. You can
+                        cancel within the grace period by logging back in.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setDeleteDialogOpen(false)}
+                        disabled={deleteLoading}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={handleDeleteAccount}
+                        disabled={deleteLoading}
+                      >
+                        {deleteLoading ? 'Scheduling deletion…' : 'Yes, delete my account'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
           </CardContent>

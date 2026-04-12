@@ -46,10 +46,52 @@ def get_current_user(
             detail="User not found"
         )
 
+    # Block deactivated accounts (GDPR deletion grace period)
+    if user.is_deactivated:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated. Log in to cancel scheduled deletion."
+        )
+
     # Update last_active_at on each authenticated request
     user.last_active_at = datetime.utcnow()
     db.commit()
     db.refresh(user)
+
+    return user
+
+
+def get_current_user_allow_deactivated(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """Like get_current_user but does NOT block deactivated accounts.
+
+    Used exclusively by the cancel-deletion endpoint so users can recover
+    their account during the 30-day grace period.
+    """
+    token = credentials.credentials
+    payload = decode_access_token(token)
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+
+    user_id = payload.get("user_id")
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload"
+        )
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
 
     return user
 

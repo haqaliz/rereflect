@@ -36,6 +36,14 @@ const faqs = [
     q: 'What integrations do you support?',
     a: 'Currently: Slack (OAuth), Intercom (OAuth + webhooks), email forwarding, CSV import, and webhooks for custom sources. Zendesk and HubSpot integrations are coming soon.',
   },
+  {
+    q: 'How do I download my data?',
+    a: "You can export all your personal data at any time from Settings > Preferences. Click 'Export My Data' to download a ZIP file containing your profile information, feedback items, AI conversations, notes, and preferences in both JSON and CSV formats.",
+  },
+  {
+    q: 'Can I delete my account?',
+    a: "Yes. Go to Settings > Preferences and click 'Delete My Account.' Your account will be deactivated immediately and all data permanently deleted after a 30-day grace period. During this window, you can cancel the deletion by simply logging back in. This complies with GDPR's right to erasure.",
+  },
 ];
 
 export default function FAQ() {

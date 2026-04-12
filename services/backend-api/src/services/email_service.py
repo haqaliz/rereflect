@@ -379,3 +379,20 @@ def send_alert_email(
         html=rendered_html,
         from_email=ALERT_FROM_EMAIL,
     )
+
+
+def send_deletion_request_email(to_email: str) -> bool:
+    """Send a confirmation email when a user requests account deletion.
+
+    Uses a plain _send_email call (no Resend template required).
+    The email reminds the user they can cancel within 30 days.
+    """
+    cancel_url = f"{APP_URL}/settings/preferences"
+    subject = "[Rereflect] Your account deletion has been scheduled"
+    html = f"""
+    <p>Your Rereflect account has been scheduled for deletion in <strong>30 days</strong>.</p>
+    <p>If you change your mind, you can cancel the deletion by logging in at:
+    <a href="{cancel_url}">{cancel_url}</a></p>
+    <p>After 30 days, all your data will be permanently deleted and cannot be recovered.</p>
+    """
+    return _send_email(to=to_email, subject=subject, html=html)

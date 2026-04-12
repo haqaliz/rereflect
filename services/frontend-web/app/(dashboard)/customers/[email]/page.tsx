@@ -5,9 +5,11 @@ import { useRouter, useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, Eye, Square, CheckSquare, X } from 'lucide-react';
+import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, Eye, Square, CheckSquare, X, Flag } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { customersAPI, CustomerProfileData, ActionItem } from '@/lib/api/customers';
+import { aiCorrectionsAPI } from '@/lib/api/ai-corrections';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
 import { ComponentProgressBars } from '@/components/customers/ComponentProgressBars';
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
@@ -19,6 +21,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Tooltip,
   TooltipContent,
@@ -409,6 +420,68 @@ function LLMSection({ profile, email, hasLLMFeature, hasActionsFeature, onAnalys
   );
 }
 
+interface FlagDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  healthScore: number | null;
+}
+
+function FlagDialog({ open, onOpenChange, healthScore }: FlagDialogProps) {
+  const [feedbackText, setFeedbackText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      await aiCorrectionsAPI.submit({
+        correction_type: 'churn_risk',
+        entity_type: 'customer_health',
+        entity_id: null,
+        signal: 'thumbs_down',
+        original_value: healthScore !== null ? String(healthScore) : undefined,
+        feedback_text: feedbackText.trim() || null,
+      });
+      toast.success('Thank you! Your feedback helps improve AI accuracy.');
+      setFeedbackText('');
+      onOpenChange(false);
+    } catch {
+      toast.error('Failed to submit feedback. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Flag Health Score as Inaccurate</DialogTitle>
+          <DialogDescription>
+            Help us improve by explaining why this health score seems wrong.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-2">
+          <Textarea
+            placeholder="e.g., This customer is churning but shows a healthy score..."
+            value={feedbackText}
+            onChange={(e) => setFeedbackText(e.target.value)}
+            rows={4}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={submitting}>
+            {submitting && <Loader2 className="w-3 h-3 mr-2 animate-spin" />}
+            Submit
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function CustomerProfilePage() {
   const router = useRouter();
   const params = useParams();
@@ -425,6 +498,7 @@ export default function CustomerProfilePage() {
   }, [user, router]);
 
   const [analysisRefetchToken, setAnalysisRefetchToken] = useState(0);
+  const [flagDialogOpen, setFlagDialogOpen] = useState(false);
 
   const { data: profile, isLoading, error } = useQuery({
     queryKey: ['customer-profile', emailParam, analysisRefetchToken],
@@ -474,7 +548,22 @@ export default function CustomerProfilePage() {
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-start gap-4">
-              <HealthScoreCircle score={profile.health_score} size="lg" />
+              <div className="relative">
+                <HealthScoreCircle score={profile.health_score} size="lg" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setFlagDialogOpen(true)}
+                      className="absolute -top-1 -left-1 p-1 rounded-full bg-background border border-border text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors shadow-sm"
+                    >
+                      <Flag className="w-3 h-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p>Flag score as inaccurate</p>
+                  </TooltipContent>
+                </Tooltip>
+              </div>
 
               <div className="flex-1 min-w-0">
                 <h1 className="text-lg font-bold text-foreground truncate">
@@ -613,6 +702,12 @@ export default function CustomerProfilePage() {
             <CustomerFeedbackList email={profile.customer_email} />
           </TabsContent>
         </Tabs>
+
+        <FlagDialog
+          open={flagDialogOpen}
+          onOpenChange={setFlagDialogOpen}
+          healthScore={profile.health_score}
+        />
       </div>
     </TooltipProvider>
   );
