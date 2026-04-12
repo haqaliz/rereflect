@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
 import { ArrowLeft, ArrowRight, Calendar, Clock, User } from 'lucide-react';
 import { getAllPosts, getPostBySlug, getRelatedPosts } from '@/lib/blog';
+import { Footer } from '@/components/landing/Footer';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
@@ -243,43 +244,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       </article>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-border bg-card/50 py-16">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-3 gap-12 mb-12">
-            <div className="md:col-span-2">
-              <Link href="/" className="flex items-center gap-3 mb-4">
-                <Logo size="lg" />
-                <span className="text-xl font-bold">
-                  <span className="text-muted-foreground">Re</span>
-                  <span className="text-foreground">reflect</span>
-                </span>
-              </Link>
-              <p className="text-muted-foreground max-w-sm mb-6">
-                Transform overwhelming customer feedback into clear, actionable insights with AI-powered analysis.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-semibold text-foreground mb-4">Product</h4>
-              <ul className="space-y-3 text-muted-foreground">
-                <li><Link href="/#features" className="hover:text-foreground transition-colors">Features</Link></li>
-                <li><Link href="/#pricing" className="hover:text-foreground transition-colors">Pricing</Link></li>
-                <li><Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link></li>
-                <li><Link href="/blog" className="hover:text-foreground transition-colors">Blog</Link></li>
-              </ul>
-            </div>
-          </div>
-          <div className="pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
-            <p>2025 Rereflect. All rights reserved.</p>
-            <div className="flex gap-6">
-              <Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link>
-              <Link href="/blog" className="hover:text-foreground transition-colors">Blog</Link>
-              <Link href="/changelog" className="hover:text-foreground transition-colors">Changelog</Link>
-              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
-              <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
-            </div>
-          </div>
-        </div>
-      </footer>
+      <Footer />
 
     </div>
   );

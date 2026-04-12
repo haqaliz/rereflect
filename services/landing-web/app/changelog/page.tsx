@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowLeft, AlertTriangle, Loader2 } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Loader2, Sparkles, Wrench, Settings, RefreshCw } from 'lucide-react';
+import { Footer } from '@/components/landing/Footer';
 import { getPublicChangelog, type ChangelogEntry } from '@/lib/changelog-api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@rereflect/ui';
 
@@ -24,11 +25,20 @@ const DATE_RANGES = [
 ] as const;
 
 const BADGE_STYLES: Record<string, string> = {
-  feature: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  fix: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  feature: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  fix: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
   improvement: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   breaking_change: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   chore: 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
+  refactor: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+};
+
+const BADGE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  feature: Sparkles,
+  fix: Wrench,
+  improvement: RefreshCw,
+  chore: Settings,
+  refactor: RefreshCw,
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -37,6 +47,7 @@ const TYPE_LABELS: Record<string, string> = {
   improvement: 'Improvement',
   breaking_change: 'Breaking Change',
   chore: 'Chore',
+  refactor: 'Refactor',
 };
 
 const PAGE_SIZE = 20;
@@ -91,6 +102,20 @@ export default function ChangelogPage() {
       month: 'long',
       day: 'numeric',
     });
+  };
+
+  /** Strip conventional commit prefix (e.g. "feat: ", "fix: ") from a title string */
+  const stripPrefix = (text: string) => {
+    return text.replace(/^(feat|fix|chore|refactor|improvement|perf|docs|style|test|ci|build)(\(.+?\))?:\s*/i, '');
+  };
+
+  /** Filter out Co-Authored-By and empty lines from description */
+  const parseDescription = (desc: string | null): string[] => {
+    if (!desc) return [];
+    return desc
+      .split('\n')
+      .filter(line => !line.trim().toLowerCase().startsWith('co-authored-by:'))
+      .filter(line => line.trim().length > 0);
   };
 
   return (
@@ -163,23 +188,36 @@ export default function ChangelogPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {entries.map(entry => (
-              <div key={entry.id} className="border-b border-border pb-6 last:border-b-0">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-medium rounded-full ${BADGE_STYLES[entry.entry_type] || BADGE_STYLES.chore}`}>
-                    {entry.is_breaking && <AlertTriangle className="w-3 h-3" />}
-                    {TYPE_LABELS[entry.entry_type] || entry.entry_type}
-                  </span>
-                  <span className="text-sm text-muted-foreground">
-                    {formatDate(entry.committed_at)}
-                  </span>
+            {entries.map(entry => {
+              const BadgeIcon = BADGE_ICONS[entry.entry_type];
+              const descriptionLines = parseDescription(entry.description);
+
+              return (
+                <div key={entry.id} className="border-b border-border pb-6 last:border-b-0">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded-full ${BADGE_STYLES[entry.entry_type] || BADGE_STYLES.chore}`}>
+                      {entry.is_breaking ? (
+                        <AlertTriangle className="w-3 h-3" />
+                      ) : BadgeIcon ? (
+                        <BadgeIcon className="w-3 h-3" />
+                      ) : null}
+                      {TYPE_LABELS[entry.entry_type] || entry.entry_type}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {formatDate(entry.committed_at)}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-semibold text-foreground">{stripPrefix(entry.title)}</h3>
+                  {descriptionLines.length > 0 && (
+                    <div className="mt-1.5 space-y-1">
+                      {descriptionLines.map((line, i) => (
+                        <p key={i} className="text-sm text-muted-foreground leading-relaxed">{line}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <h3 className="text-lg font-semibold text-foreground">{entry.title}</h3>
-                {entry.description && (
-                  <p className="text-muted-foreground mt-1 leading-relaxed">{entry.description}</p>
-                )}
-              </div>
-            ))}
+              );
+            })}
 
             {/* Load more */}
             {hasMore && (
@@ -205,11 +243,7 @@ export default function ChangelogPage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border py-8 mt-16">
-        <div className="max-w-4xl mx-auto px-6 text-center text-sm text-muted-foreground">
-          <p>2025 Rereflect. All rights reserved.</p>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }
