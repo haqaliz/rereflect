@@ -57,7 +57,9 @@ CONVENTIONAL_RE = re.compile(
 def parse_git_log(limit=None):
     """Parse git log and return list of commit dicts."""
     sep = "<CHANGELOG_SEP>"
-    fmt = f"%H{sep}%aI{sep}%s{sep}%b"
+    # Use %x00 as record separator in git format (git interprets %x00 itself)
+    # so multi-line commit bodies don't break parsing
+    fmt = f"%H{sep}%aI{sep}%s{sep}%b%x00"
 
     cmd = ["git", "log", f"--format={fmt}", "--no-merges"]
     if limit:
@@ -69,10 +71,11 @@ def parse_git_log(limit=None):
         return []
 
     commits = []
-    for line in result.stdout.strip().split("\n"):
-        if not line:
+    for record in result.stdout.split("\x00"):
+        record = record.strip()
+        if not record:
             continue
-        parts = line.split(sep, 3)
+        parts = record.split(sep, 3)
         if len(parts) < 3:
             continue
         commits.append({

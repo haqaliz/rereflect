@@ -94,7 +94,7 @@ app = FastAPI(
 )
 
 # CORS - configurable via environment variable
-cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
 cors_origins = [origin.strip() for origin in cors_origins_env.split(",")]
 
 app.add_middleware(

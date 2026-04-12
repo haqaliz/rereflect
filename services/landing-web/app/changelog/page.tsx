@@ -209,10 +209,38 @@ export default function ChangelogPage() {
                   </div>
                   <h3 className="text-lg font-semibold text-foreground">{stripPrefix(entry.title)}</h3>
                   {descriptionLines.length > 0 && (
-                    <div className="mt-1.5 space-y-1">
-                      {descriptionLines.map((line, i) => (
-                        <p key={i} className="text-sm text-muted-foreground leading-relaxed">{line}</p>
-                      ))}
+                    <div className="mt-2 space-y-1.5">
+                      {(() => {
+                        const elements: React.ReactNode[] = [];
+                        let bulletBuffer: string[] = [];
+
+                        const flushBullets = () => {
+                          if (bulletBuffer.length > 0) {
+                            elements.push(
+                              <ul key={`ul-${elements.length}`} className="list-disc list-inside space-y-1 text-sm text-muted-foreground ml-1">
+                                {bulletBuffer.map((item, j) => (
+                                  <li key={j} className="leading-relaxed">{item}</li>
+                                ))}
+                              </ul>
+                            );
+                            bulletBuffer = [];
+                          }
+                        };
+
+                        descriptionLines.forEach((line, i) => {
+                          const bulletMatch = line.match(/^[-*]\s+(.+)/);
+                          if (bulletMatch) {
+                            bulletBuffer.push(bulletMatch[1]);
+                          } else {
+                            flushBullets();
+                            elements.push(
+                              <p key={`p-${i}`} className="text-sm text-muted-foreground leading-relaxed font-medium">{line}</p>
+                            );
+                          }
+                        });
+                        flushBullets();
+                        return elements;
+                      })()}
                     </div>
                   )}
                 </div>
