@@ -300,7 +300,7 @@ export default function NewAutomationPage() {
         name: name.trim(),
         description: description.trim() || null,
         trigger: { type: triggerType, config: triggerConfig },
-        actions: actions.map(a => ({ type: a.type, config: a.config })),
+        actions: actions.map(a => ({ type: a.type as ActionType, config: a.config })),
         cooldown_hours: cooldownHours,
       });
       toast.success('Automation rule created');

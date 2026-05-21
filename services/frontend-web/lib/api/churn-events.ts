@@ -10,6 +10,7 @@ export type ChurnReasonCode =
 
 export interface ChurnEvent {
   id: number;
+  organization_id: number;
   customer_email: string;
   churned_at: string;
   reason_code: ChurnReasonCode;

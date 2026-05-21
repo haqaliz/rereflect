@@ -355,7 +355,7 @@ export default function AutomationDetailPage() {
         name,
         description: description.trim() || null,
         trigger: { type: triggerType as TriggerType, config: triggerConfig },
-        actions: actions.map(a => ({ type: a.type, config: a.config })),
+        actions: actions.map(a => ({ type: a.type as ActionType, config: a.config })),
         cooldown_hours: cooldownHours,
         is_active: isActive,
       });
