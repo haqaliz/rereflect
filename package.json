@@ -1,6 +1,7 @@
 {
   "name": "rereflect",
   "private": true,
+  "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev:landing": "pnpm --filter landing-web dev",
     "dev:app": "pnpm --filter customer-feedback-frontend dev",
