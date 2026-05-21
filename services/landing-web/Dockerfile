@@ -1,7 +1,7 @@
 # Landing Page Dockerfile - Static export with pnpm workspaces
 # Root Directory must be set to repo root in Railway
 FROM node:20-alpine AS base
-RUN corepack enable pnpm
+RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 
 # Install dependencies
 FROM base AS deps
