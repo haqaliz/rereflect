@@ -1,7 +1,7 @@
 # AI Feature Tracking & 1-Year Roadmap
 
 **Product**: Rereflect
-**Last Updated**: 2026-04-13
+**Last Updated**: 2026-05-21
 **Killer Feature**: Churn prediction that actually works (predict 30-60 days before churn with actionable reasons)
 
 ---
@@ -51,6 +51,7 @@
 | On-Demand AI Reports | Yes | My Reports page, Copilot Cmd+K chips, PDF export | Business+ |
 | AI Trust: Human-in-the-Loop | Yes | Thumbs up/down on Copilot, category/sentiment corrections, AI Accuracy tab | Pro+ |
 | AI Workflow Automation | Yes | Settings > Automations (list, create, detail, templates, execution log) | Pro+ (5 rules), Business (20), Enterprise (unlimited) |
+| Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
 
 ---
 
@@ -214,14 +215,14 @@
 
 **Goal**: Enterprise customers have custom-trained AI. Churn prediction accuracy is demonstrably high. Industry benchmarks create network effects.
 
-#### M4.1 — Advanced Churn Prediction (3 weeks)
-- [ ] 30-day churn probability score (percentage, not just risk level)
-- [ ] Churn prediction model: train on historical churn data (customers who stopped sending feedback or had subscription cancelled)
-- [ ] Churn timeline: "This customer is likely to churn within 2-4 weeks based on: [factors]"
-- [ ] Churn cohort analysis: which customer segments have highest churn rate
-- [ ] Churn prevention playbooks: automated action plans per risk profile
-- [ ] Accuracy tracking: compare predictions vs actual churn, show precision/recall metrics
-- [ ] Plan gate: Business+ (Pro gets basic risk level only)
+#### M4.1 — Advanced Churn Prediction (3 weeks) — COMPLETE
+- [x] 30-day churn probability score (percentage, not just risk level)
+- [x] Churn prediction model: calibrated heuristic with label collection (train on customer-marked churn events + CSV import)
+- [x] Churn timeline: time_to_churn_bucket (immediate / 2w / 2-4w / 1-3m / low) derived from probability + sentiment trend
+- [x] Churn cohort analysis: 3 dimensions (source, acquisition month, volume segment) with heatmap + breakdown charts
+- [x] Churn prevention playbooks: 7 pre-built templates (Critical Save, Prevention, At-Risk Outreach, etc.) + clone/edit with probability range binding
+- [x] Accuracy tracking: precision/recall/F1/AUC metrics on organization + system admin accuracy dashboards, weekly refit Mondays 07:45 UTC
+- [x] Plan gate: Business+ (Pro gets enhanced risk_level + factor breakdown)
 
 #### M4.2 — Custom AI Models (3 weeks)
 - [ ] Custom category configuration (Enterprise): org-specific pain point categories, feature request categories, urgency definitions

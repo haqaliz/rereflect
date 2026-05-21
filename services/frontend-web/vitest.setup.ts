@@ -9,3 +9,8 @@ global.ResizeObserver = class ResizeObserver {
 
 // scrollIntoView polyfill for jsdom
 window.HTMLElement.prototype.scrollIntoView = function () {};
+
+// Radix UI pointer capture polyfill for jsdom
+window.Element.prototype.hasPointerCapture = function () { return false; };
+window.Element.prototype.setPointerCapture = function () {};
+window.Element.prototype.releasePointerCapture = function () {};

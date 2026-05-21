@@ -188,7 +188,7 @@ describe('BentoFeatures', () => {
   });
 
   // Total count
-  it('renders exactly 11 feature cards total (1 large + 2 medium + 8 small)', () => {
+  it('renders exactly 14 feature cards total (1 large + 2 medium + 11 small)', () => {
     render(<BentoFeatures />);
     const largeCards = document.querySelectorAll('[data-size="large"]');
     const mediumCards = document.querySelectorAll('[data-size="medium"]');
@@ -196,6 +196,20 @@ describe('BentoFeatures', () => {
 
     expect(largeCards).toHaveLength(1);
     expect(mediumCards).toHaveLength(2);
-    expect(smallCards).toHaveLength(8);
+    expect(smallCards).toHaveLength(11);
+  });
+
+  // Churn prediction card
+  it('renders "30-Day Churn Probability" small card', () => {
+    render(<BentoFeatures />);
+    expect(screen.getByTestId('card-churn-prediction')).toBeInTheDocument();
+    expect(screen.getByTestId('card-churn-prediction')).toHaveTextContent('30-Day Churn Probability');
+  });
+
+  it('churn prediction card describes calibrated probabilities and prevention playbooks', () => {
+    render(<BentoFeatures />);
+    const card = screen.getByTestId('card-churn-prediction');
+    expect(card).toHaveTextContent('calibrated probabilities');
+    expect(card).toHaveTextContent('prevention playbooks');
   });
 });

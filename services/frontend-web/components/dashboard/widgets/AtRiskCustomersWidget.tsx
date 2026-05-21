@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lightbulb, ArrowRight, ChevronDown, ChevronUp, HeartPulse } from 'lucide-react';
 import { CustomerHealthSummary } from '@/lib/api/dashboard';
+import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 
 interface AtRiskCustomersWidgetProps {
   customers: CustomerHealthSummary[];
@@ -66,15 +67,10 @@ export function AtRiskCustomersWidget({ customers }: AtRiskCustomersWidgetProps)
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0 ml-3">
-                    <span
-                      className="px-2 py-0.5 text-xs font-semibold rounded-md capitalize"
-                      style={{
-                        backgroundColor: `color-mix(in oklch, ${healthColor} 15%, transparent)`,
-                        color: healthColor,
-                      }}
-                    >
-                      {customer.risk_level.replace('_', ' ')}
-                    </span>
+                    <ChurnProbabilityBadge
+                      probability={customer.churn_probability ?? null}
+                      size="sm"
+                    />
                     <span className="text-xs text-muted-foreground font-mono">
                       {customer.feedback_count} feedback{customer.feedback_count !== 1 ? 's' : ''}
                     </span>

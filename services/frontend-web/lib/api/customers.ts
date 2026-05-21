@@ -16,6 +16,10 @@ export interface CustomerListItem {
   sentiment_trend: SentimentTrend;
   is_archived: boolean;
   has_llm_analysis: boolean;
+  // M4.1 churn probability fields (Business+ only; null for lower plans)
+  churn_probability?: number | null;
+  churn_probability_low?: number | null;
+  churn_probability_high?: number | null;
 }
 
 export interface RiskDistribution {
@@ -83,6 +87,12 @@ export interface CustomerProfileData {
   llm_analysis: string | null;
   is_archived: boolean;
   created_at: string;
+  // M4.1 churn probability fields (Business+ only; null for lower plans)
+  churn_probability?: number | null;
+  churn_probability_low?: number | null;
+  churn_probability_high?: number | null;
+  time_to_churn_bucket?: 'immediate' | '2w' | '2-4w' | '1-3m' | 'low' | null;
+  has_potential_winback?: boolean;
 }
 
 export interface HealthHistoryEntry {

@@ -16,9 +16,14 @@ import {
   Sparkles,
   Brain,
   Loader2,
+  UserX,
+  FileUp,
 } from 'lucide-react';
 import { customersAPI, CustomerListItem, CustomerListParams } from '@/lib/api/customers';
+import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { useAuth } from '@/contexts/AuthContext';
+import { BulkMarkChurnedDialog } from '@/components/customers/BulkMarkChurnedDialog';
+import { ChurnCsvImportDialog } from '@/components/customers/ChurnCsvImportDialog';
 import { StatCard } from '@/components/StatCard';
 import { RiskDistributionBar } from '@/components/customers/RiskDistributionBar';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
@@ -110,6 +115,9 @@ export default function CustomersPage() {
   const [sortBy, setSortBy] = useState<CustomerListParams['sort_by']>('health_score');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [bulkChurnOpen, setBulkChurnOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
 
   // Debounce search
   useEffect(() => {
@@ -234,24 +242,38 @@ export default function CustomersPage() {
     },
     {
       accessorKey: 'risk_level',
-      header: 'Risk Level',
+      header: 'Churn Probability',
       cell: ({ row }) => {
-        const { label, color } = getRiskBadgeStyle(row.original.risk_level);
         const blurred = isFree
           ? { filter: 'blur(4px)', userSelect: 'none' as const }
           : {};
+        const { churn_probability, churn_probability_low, churn_probability_high } = row.original;
+        // Fall back to risk_level color hint when probability is null (Pro/Free)
+        if (churn_probability === null || churn_probability === undefined) {
+          const { label, color } = getRiskBadgeStyle(row.original.risk_level);
+          return (
+            <Badge
+              variant="outline"
+              style={{
+                backgroundColor: `color-mix(in oklch, ${color} 15%, transparent)`,
+                color,
+                borderColor: `color-mix(in oklch, ${color} 30%, transparent)`,
+                ...blurred,
+              }}
+            >
+              {label}
+            </Badge>
+          );
+        }
         return (
-          <Badge
-            variant="outline"
-            style={{
-              backgroundColor: `color-mix(in oklch, ${color} 15%, transparent)`,
-              color,
-              borderColor: `color-mix(in oklch, ${color} 30%, transparent)`,
-              ...blurred,
-            }}
-          >
-            {label}
-          </Badge>
+          <span style={blurred}>
+            <ChurnProbabilityBadge
+              probability={churn_probability}
+              probabilityLow={churn_probability_low ?? undefined}
+              probabilityHigh={churn_probability_high ?? undefined}
+              size="sm"
+            />
+          </span>
         );
       },
     },
@@ -344,21 +366,43 @@ export default function CustomersPage() {
                 </p>
               </div>
             </div>
-            {user?.is_system_admin && (
+            <div className="flex items-center gap-2">
+              {selectedEmails.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkChurnOpen(true)}
+                  className="flex items-center gap-2"
+                >
+                  <UserX className="w-4 h-4" />
+                  Mark {selectedEmails.length} as churned
+                </Button>
+              )}
               <Button
                 variant="outline"
-                onClick={handleBatchAnalyze}
-                disabled={reanalyzing}
+                size="sm"
+                onClick={() => setCsvImportOpen(true)}
                 className="flex items-center gap-2"
               >
-                {reanalyzing ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Brain className="w-4 h-4" />
-                )}
-                Re-analyze All
+                <FileUp className="w-4 h-4" />
+                Import CSV
               </Button>
-            )}
+              {user?.is_system_admin && (
+                <Button
+                  variant="outline"
+                  onClick={handleBatchAnalyze}
+                  disabled={reanalyzing}
+                  className="flex items-center gap-2"
+                >
+                  {reanalyzing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Brain className="w-4 h-4" />
+                  )}
+                  Re-analyze All
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -482,6 +526,18 @@ export default function CustomersPage() {
           </Card>
         )}
       </main>
+
+      <BulkMarkChurnedDialog
+        open={bulkChurnOpen}
+        onOpenChange={setBulkChurnOpen}
+        selectedEmails={selectedEmails}
+        onSuccess={() => setSelectedEmails([])}
+      />
+
+      <ChurnCsvImportDialog
+        open={csvImportOpen}
+        onOpenChange={setCsvImportOpen}
+      />
     </div>
   );
 }

@@ -42,6 +42,8 @@ export interface FeedbackItem {
   churn_risk_score: number | null;
   churn_risk_factors: Record<string, { score: number; max: number; label: string }> | null;
   customer_confidence_score: number | null;
+  // M4.1 customer-level probability (Business+ only; null for lower plans)
+  customer_churn_probability?: number | null;
   suggested_action: string | null;
   // Customer
   customer_email: string | null;

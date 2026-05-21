@@ -6,7 +6,7 @@ Note: In production, these should be in a shared package.
 For now, we duplicate the essential models.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON, Numeric, UniqueConstraint, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -459,6 +459,15 @@ class CustomerHealth(Base):
     is_archived = Column(Boolean, default=False, server_default="false")
     confidence_level = Column(String(20), default="low")
 
+    # M4.1: Advanced Churn Prediction — calibrated probability + CI + timeline
+    churn_probability = Column(Numeric(5, 4), nullable=True)           # 0.0000–1.0000
+    churn_probability_low = Column(Numeric(5, 4), nullable=True)       # 90% CI lower bound
+    churn_probability_high = Column(Numeric(5, 4), nullable=True)      # 90% CI upper bound
+    time_to_churn_bucket = Column(String(20), nullable=True)           # immediate | 2w | 2-4w | 1-3m | low
+    calibration_model_id = Column(Integer, nullable=True)              # FK to churn_calibration_models (no FK constraint — worker is read-only for that table)
+    probability_computed_at = Column(DateTime, nullable=True)
+    has_potential_winback = Column(Boolean, nullable=False, default=False, server_default="false")
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -466,6 +475,56 @@ class CustomerHealth(Base):
         Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),
         Index('ix_customer_health_org_score', 'organization_id', 'health_score'),
         Index('ix_customer_health_risk', 'organization_id', 'risk_level'),
+    )
+
+
+class CustomerHealthHistory(Base):
+    """Snapshot of health score changes for a customer over time — mirrors backend-api model."""
+    __tablename__ = "customer_health_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_health_id = Column(Integer, nullable=False)  # FK in real DB; no FK constraint in worker
+    organization_id = Column(Integer, nullable=False)
+
+    # Score snapshot
+    health_score = Column(Integer, nullable=False)
+    churn_risk_component = Column(Integer, nullable=True)
+    sentiment_component = Column(Integer, nullable=True)
+    resolution_component = Column(Integer, nullable=True)
+    frequency_component = Column(Integer, nullable=True)
+    risk_level = Column(String(20), nullable=True)
+
+    recorded_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_health_history_customer_date", "customer_health_id", "recorded_at"),
+        Index("ix_health_history_org_date", "organization_id", "recorded_at"),
+    )
+
+
+class ChurnCalibrationModel(Base):
+    """Versioned isotonic calibration model — read-only mirror for worker queries."""
+    __tablename__ = "churn_calibration_models"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=True)  # NULL = global fallback
+
+    model_json = Column(JSON, nullable=False)
+    label_count = Column(Integer, nullable=False)
+    positive_count = Column(Integer, nullable=False)
+
+    precision = Column(Numeric(5, 4), nullable=True)
+    recall = Column(Numeric(5, 4), nullable=True)
+    f1 = Column(Numeric(5, 4), nullable=True)
+    auc = Column(Numeric(5, 4), nullable=True)
+
+    threshold_bands = Column(JSON, nullable=False)
+
+    fit_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("ix_churn_cal_model_org_fit", "organization_id", "fit_at"),
     )
 
 
@@ -613,6 +672,29 @@ class WebhookDelivery(Base):
     )
 
 
+class CustomerChurnEvent(Base):
+    """Churn label — manual mark, CSV import, or auto-suggested event — mirrors backend-api model."""
+    __tablename__ = "customer_churn_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    churned_at = Column(DateTime, nullable=False)
+    reason_code = Column(String(40), nullable=False)
+    reason_text = Column(Text, nullable=True)
+    recovered_at = Column(DateTime, nullable=True)
+    marked_by_user_id = Column(Integer, nullable=True)
+    source = Column(String(20), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "customer_email", "churned_at", name="uq_churn_event_org_email_date"),
+        Index("ix_churn_event_org_date", "organization_id", "churned_at"),
+        Index("ix_churn_event_org_email", "organization_id", "customer_email"),
+    )
+
+
 class LLMModelPrice(Base):
     """System-wide model pricing table."""
     __tablename__ = "llm_model_prices"
@@ -635,4 +717,72 @@ class LLMModelPrice(Base):
 
     __table_args__ = (
         UniqueConstraint('provider', 'model_id', name='uq_llm_model_price_provider_model'),
+    )
+
+
+class ChurnBacktestRun(Base):
+    """Weekly calibration observability record — mirrors backend-api model (M4.1)."""
+    __tablename__ = "churn_backtest_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=True)   # NULL = global
+    calibration_model_id = Column(Integer, nullable=False)
+    run_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    label_count = Column(Integer, nullable=False)
+    precision = Column(Numeric(5, 4), nullable=True)
+    recall = Column(Numeric(5, 4), nullable=True)
+    f1 = Column(Numeric(5, 4), nullable=True)
+    auc = Column(Numeric(5, 4), nullable=True)
+    optimal_threshold = Column(Numeric(5, 4), nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_churn_backtest_org_run", "organization_id", "run_at"),
+    )
+
+
+class ChurnPlaybook(Base):
+    """Reusable churn-prevention playbook — mirrors backend-api model (M4.1)."""
+    __tablename__ = "churn_playbooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=True)  # NULL = system template
+    name = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    probability_min = Column(Numeric(3, 2), nullable=False)
+    probability_max = Column(Numeric(3, 2), nullable=False)
+    action_sequence = Column(JSON, nullable=False, default=list)
+    is_template = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    source_template_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_churn_playbook_org_active", "organization_id", "is_active"),
+    )
+
+
+class ChurnPlaybookExecution(Base):
+    """Audit log + status for a single playbook run — mirrors backend-api model (M4.1)."""
+    __tablename__ = "churn_playbook_executions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    playbook_id = Column(Integer, nullable=False)
+    organization_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    triggered_by = Column(String(40), nullable=False)
+    triggered_by_user_id = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False)  # queued | running | done | failed | cancelled
+    action_log = Column(JSON, nullable=False, default=list)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_playbook_exec_org_created", "organization_id", "created_at"),
+        Index("ix_playbook_exec_playbook_created", "playbook_id", "created_at"),
+        Index("ix_playbook_exec_email_created", "customer_email", "created_at"),
     )

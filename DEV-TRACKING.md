@@ -2,7 +2,7 @@
 
 **Vision**: AI-powered feedback analysis SaaS
 **Target**: $50K MRR in 12 months
-**Last Updated**: 2026-04-13
+**Last Updated**: 2026-05-21
 
 ---
 
@@ -280,7 +280,7 @@
 
 ---
 
-## Recent Completions (Feb–Mar 2026)
+## Recent Completions (Feb–May 2026)
 
 - **Predictive Analytics** (4 phases, PRD-PREDICTIVE-ANALYTICS.md):
   - Phase 1 — Enhanced Churn Scoring: `customer_email` column + index on feedback_items, email extraction from source_metadata + CSV import + all adapters, 9-factor churn risk scoring (up from 4), backfill script for existing data
@@ -541,7 +541,19 @@
   - Replaced 2 native `<select>` with shadcn Select
   - Reports page: background pattern fix + View button error fix
   - Landing page: AI Workflow Automation bento card + FAQ entry
-- **Other fixes** (Mar 2026):
+- **Advanced Churn Prediction (M4.1)** (May 2026, 7 phases):
+  - Phase 1 — Foundation: Alembic migration (5 new tables + 7 columns on customer_health_scores), ChurnCalibrator service (isotonic regression, bootstrap CI), seeded global model
+  - Phase 2 — Labeling UI + CSV import: MarkAsChurnedDialog, RecoverCustomerDialog, BulkMarkChurnedDialog, ChurnCsvImportDialog, `/system/churn-events` admin page, CSV validation + dedup
+  - Phase 3 — Probability integration + winback: Probability recomputation on feedback ingest (worker-service), has_potential_winback auto-flag, PotentialWinbackBanner, ChurnProbabilityBadge, ChurnTimelineBadge, risk_level derived from probability bands
+  - Phase 4 — Cohort analytics: `/analytics/churn-cohorts` page with 3 dimensions (source/month/volume), heatmap + bar chart + reason-code breakdown, Business+ gated
+  - Phase 5 — Playbooks: Full CRUD + run + run-batch + executions, 7 pre-built templates (Critical Save, Prevention, At-Risk Outreach, Light-Touch Nudge, Power-User Recovery, New-Customer Save, Silent-Churn Watch), playbook_seeder.py (idempotent startup)
+  - Phase 6 — Accuracy dashboard + weekly calibration: Celery Beat (refit Mondays 07:45 UTC, global refit daily 03:00 UTC), `/analytics/churn-accuracy` (org) + `/system/churn-accuracy` (admin), ModelAccuracyCard dashboard widget (Business+)
+  - Phase 7 — Polish: Cross-page UI audit (probability badges everywhere), landing page bento card + FAQ, blog post draft, E2E test (label → refit → predict), performance check
+  - 409 new tests (60 backend + 40 frontend + 309 worker), zero regressions
+  - New tables: customer_churn_events, churn_calibration_models, churn_backtest_runs, churn_playbooks, churn_playbook_executions
+  - New pages: /churn-cohorts (analytics), /playbooks (settings), /churn-accuracy (system admin)
+  - New components: ChurnProbabilityBadge, ChurnTimelineBadge, CohortHeatmap, ReasonCodeBreakdown, ModelAccuracyCard, PlaybookTemplateCard, RunPlaybookDropdown
+- **Other fixes** (Mar–May 2026):
   - Changelog: full descriptions with bullet list rendering, CORS fix, build fix
   - Sidebar: collapsible sections, conversation delete confirmation dialog
   - Footer consistency, API docs link removed
@@ -620,6 +632,13 @@
 - GDPR (M3.8 Track A): data export as ZIP (JSON+CSV), account deletion with 30-day grace period + deactivation + cancel flow, auth middleware blocks deactivated users, GDPR purge Celery task, all plans have access
 - AI Trust Human-in-the-Loop (M3.8 Track B): ai_corrections model for thumbs up/down + category/sentiment correction, AI Accuracy stats tab in AI Settings, corrections stored as training signals for future fine-tuning
 - Blog Engine (M3.8 Track C): draft/scheduled/published status field, date-based auto-publish filter, all 17 remaining posts (#8-#24) written with scheduled dates (bi-weekly Apr 1 - Dec 1)
+- Advanced Churn Prediction (M4.1): Calibrated heuristic now (isotonic regression on 9-factor score), real ML model in v2 once labels ≥ 500 per org
+- Churn Calibration: Weekly refit Mondays 07:45 UTC with bootstrap 90% CI, idempotent per-org + global fallback, model versioning with precision/recall/F1/AUC tracking
+- Churn Probability Display: Replaces risk_level as primary signal (risk_level still shown as color hint, derived from probability bands), percentage + CI tooltip across all surfaces
+- Churn Labeling: Structured reason codes (price, competitor, product_quality, no_longer_needed, silent_churn, other), manual + CSV import + auto-suggested sources, recovered_at winback tracking
+- Churn Playbooks: 7 pre-built templates with probability-range binding, rate-limited 60min per (playbook, customer), actions reuse existing Automations engine
+- Churn Plan Gating: Probability + timeline + cohorts + playbooks + accuracy = Business+. Existing risk_level + factor breakdown stays Pro+. Enterprise = unlimited playbooks + custom probability bands
+- Churn Data Model: 5 new tables, BigInteger PKs (per codebase convention, not UUID), unique constraint on (org_id, email, churned_at) for dedup
 
 ---
 

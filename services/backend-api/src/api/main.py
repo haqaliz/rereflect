@@ -18,6 +18,10 @@ from src.api.routes import reports as reports_router
 from src.api.routes import account as account_router
 from src.api.routes import ai_corrections as ai_corrections_router  # noqa: E402 — M3.8 Track B
 from src.api.routes import automations as automations_router  # noqa: E402 — M4.4 AI Workflow Automation
+from src.api.routes import churn_events as churn_events_router  # noqa: E402 — M4.1 Advanced Churn Prediction
+from src.api.routes import churn_analytics as churn_analytics_router  # noqa: E402 — M4.1 Cohort Analytics
+from src.api.routes import churn_accuracy as churn_accuracy_router  # noqa: E402 — M4.1 Accuracy API
+from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 Churn Playbooks
 from src.seed import seed_admin_user, seed_system_templates
 import logging
 import os
@@ -74,6 +78,16 @@ async def lifespan(app: FastAPI):
         seed_system_templates()
     except Exception as e:
         logger.warning(f"Could not seed system templates: {e}")
+    try:
+        from src.services.playbook_seeder import seed_playbook_templates
+        from src.database.session import SessionLocal
+        _pb_db = SessionLocal()
+        try:
+            seed_playbook_templates(_pb_db)
+        finally:
+            _pb_db.close()
+    except Exception as e:
+        logger.warning(f"Could not seed playbook templates: {e}")
     try:
         from scripts.sync_changelog import run_changelog_sync
         run_changelog_sync()
@@ -165,6 +179,15 @@ app.include_router(admin_users.router)
 app.include_router(admin_orgs.router)
 app.include_router(admin_backtest.router)
 app.include_router(admin_ai_models.router)
+# Advanced Churn Prediction — Churn Events (M4.1)
+# NOTE: must be included BEFORE customers.router — its static paths (/churn-events/bulk, etc.)
+# must win over customers.router's /{email} wildcard.
+app.include_router(churn_events_router.router)
+# Advanced Churn Prediction — Cohort Analytics (M4.1 Phase 4)
+app.include_router(churn_analytics_router.router)
+# Advanced Churn Prediction — Accuracy API (M4.1 Phase 6.2a)
+app.include_router(churn_accuracy_router.analytics_router)
+app.include_router(churn_accuracy_router.system_router)
 app.include_router(customers.router)
 # AI Copilot (M2.2) — folder router MUST come before conversations to avoid route conflicts
 app.include_router(conversation_folders.router)
@@ -188,6 +211,10 @@ app.include_router(account_router.router)
 app.include_router(ai_corrections_router.router)
 # AI Workflow Automation (M4.4)
 app.include_router(automations_router.router)
+# Churn Playbooks (M4.1 Phase 5.1)
+# NOTE: executions static route must win over {playbook_id} wildcard — router
+# handles this via ordering of routes within the module.
+app.include_router(playbooks_router.router)
 
 
 @app.get("/")

@@ -5,17 +5,23 @@ import { useRouter, useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, Eye, Square, CheckSquare, X, Flag } from 'lucide-react';
+import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, Eye, Square, CheckSquare, X, Flag, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { customersAPI, CustomerProfileData, ActionItem } from '@/lib/api/customers';
 import { aiCorrectionsAPI } from '@/lib/api/ai-corrections';
+import { MarkAsChurnedDialog } from '@/components/customers/MarkAsChurnedDialog';
+import { PotentialWinbackBanner } from '@/components/customers/PotentialWinbackBanner';
+import { RunPlaybookDropdown } from '@/components/customers/RunPlaybookDropdown';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
+import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
+import { ChurnTimelineBadge } from '@/components/customers/ChurnTimelineBadge';
 import { ComponentProgressBars } from '@/components/customers/ComponentProgressBars';
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
 import { ActivityTimeline } from '@/components/customers/ActivityTimeline';
 import { CustomerFeedbackList } from '@/components/customers/CustomerFeedbackList';
 import { ChurnRiskDrivers } from '@/components/customers/ChurnRiskDrivers';
+import { ModelAccuracyCard } from '@/components/dashboard/widgets/ModelAccuracyCard';
 import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -499,6 +505,7 @@ export default function CustomerProfilePage() {
 
   const [analysisRefetchToken, setAnalysisRefetchToken] = useState(0);
   const [flagDialogOpen, setFlagDialogOpen] = useState(false);
+  const [markChurnedOpen, setMarkChurnedOpen] = useState(false);
 
   const { data: profile, isLoading, error } = useQuery({
     queryKey: ['customer-profile', emailParam, analysisRefetchToken],
@@ -576,16 +583,25 @@ export default function CustomerProfilePage() {
                 )}
 
                 <div className="flex flex-wrap items-center gap-2 mt-2 text-sm text-muted-foreground">
-                  <Badge
-                    variant="outline"
-                    style={{
-                      color: riskColor,
-                      borderColor: `color-mix(in oklch, ${riskColor} 30%, transparent)`,
-                      backgroundColor: `color-mix(in oklch, ${riskColor} 10%, transparent)`,
-                    }}
-                  >
-                    {getRiskLabel(profile.risk_level)}
-                  </Badge>
+                  {profile.churn_probability !== null && profile.churn_probability !== undefined ? (
+                    <ChurnProbabilityBadge
+                      probability={profile.churn_probability}
+                      probabilityLow={profile.churn_probability_low ?? undefined}
+                      probabilityHigh={profile.churn_probability_high ?? undefined}
+                    />
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      style={{
+                        color: riskColor,
+                        borderColor: `color-mix(in oklch, ${riskColor} 30%, transparent)`,
+                        backgroundColor: `color-mix(in oklch, ${riskColor} 10%, transparent)`,
+                      }}
+                    >
+                      {getRiskLabel(profile.risk_level)}
+                    </Badge>
+                  )}
+                  <ChurnTimelineBadge bucket={profile.time_to_churn_bucket ?? null} />
                   <span>{profile.feedback_count} feedbacks</span>
                   {profile.last_feedback_at && (
                     <span>Last active {getRelativeTime(profile.last_feedback_at)}</span>
@@ -628,15 +644,36 @@ export default function CustomerProfilePage() {
                 )}
               </div>
 
-              <Button variant="outline" size="sm" asChild>
-                <Link href={`/feedbacks?customer_email=${encodeURIComponent(profile.customer_email)}`}>
-                  <ExternalLink className="w-3.5 h-3.5 mr-2" />
-                  View All Feedbacks
-                </Link>
-              </Button>
+              <div className="flex items-center gap-2">
+                <RunPlaybookDropdown
+                  customerEmail={profile.customer_email}
+                  churnProbability={profile.churn_probability ?? null}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMarkChurnedOpen(true)}
+                >
+                  <UserX className="w-3.5 h-3.5 mr-2" />
+                  Mark as churned
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/feedbacks?customer_email=${encodeURIComponent(profile.customer_email)}`}>
+                    <ExternalLink className="w-3.5 h-3.5 mr-2" />
+                    View All Feedbacks
+                  </Link>
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
+
+        {/* Potential winback banner */}
+        <PotentialWinbackBanner
+          has_potential_winback={(profile as CustomerProfileData & { has_potential_winback?: boolean }).has_potential_winback ?? false}
+          customerEmail={profile.customer_email}
+          onRecovered={() => setAnalysisRefetchToken((t) => t + 1)}
+        />
 
         {/* Tabs */}
         <Tabs defaultValue="overview">
@@ -686,6 +723,11 @@ export default function CustomerProfilePage() {
               <ChurnRiskDrivers email={profile.customer_email} />
             )}
 
+            {/* Model Accuracy Card (Business+ only) */}
+            {hasActionsFeature && (
+              <ModelAccuracyCard />
+            )}
+
             {/* Recent Activity */}
             <Card>
               <CardHeader className="pb-3">
@@ -707,6 +749,13 @@ export default function CustomerProfilePage() {
           open={flagDialogOpen}
           onOpenChange={setFlagDialogOpen}
           healthScore={profile.health_score}
+        />
+
+        <MarkAsChurnedDialog
+          open={markChurnedOpen}
+          onOpenChange={setMarkChurnedOpen}
+          customerEmail={profile.customer_email}
+          onSuccess={() => setAnalysisRefetchToken((t) => t + 1)}
         />
       </div>
     </TooltipProvider>

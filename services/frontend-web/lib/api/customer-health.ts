@@ -15,6 +15,11 @@ export interface CustomerHealthData {
   confidence_level: string | null;
   llm_analysis: string | null;
   llm_analyzed_at: string | null;
+  // M4.1 churn probability fields (Business+ only; null for lower plans)
+  churn_probability?: number | null;
+  churn_probability_low?: number | null;
+  churn_probability_high?: number | null;
+  time_to_churn_bucket?: 'immediate' | '2w' | '2-4w' | '1-3m' | 'low' | null;
 }
 
 export const customerHealthAPI = {

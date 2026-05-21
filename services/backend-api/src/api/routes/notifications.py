@@ -26,6 +26,7 @@ DEFAULT_ALERT_TYPES = [
     "churn_risk",
     "volume_spike",
     "customer_health_drop",
+    "winback_suggested",
 ]
 
 # Internal alert type key used to store drop_threshold for customer_health_drop

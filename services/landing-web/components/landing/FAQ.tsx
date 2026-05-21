@@ -48,6 +48,10 @@ const faqs = [
     q: 'Can I automate actions based on feedback events?',
     a: "Yes. Create automation rules that trigger when specific conditions are met — like a customer's health score dropping below a threshold or receiving multiple negative feedbacks. Rules can auto-assign team members, change workflow status, send notifications, and even draft AI responses. Choose from 5 pre-built templates or create custom rules.",
   },
+  {
+    q: 'How accurate is the churn prediction?',
+    a: "Probabilities are calibrated against your team's labeled churn outcomes. Each prediction includes a 90% confidence interval, so you see when the model is sure vs. estimating. You can mark customers as churned to improve accuracy continuously, and a precision/recall dashboard shows you exactly how well the model performs for your data. With <100 labels we use a global model; org-specific models kick in once you've labeled at least 20 customers.",
+  },
 ];
 
 export default function FAQ() {

@@ -154,7 +154,7 @@ describe('CustomersPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Customer')).toBeInTheDocument();
       expect(screen.getByText('Health Score')).toBeInTheDocument();
-      expect(screen.getByText('Risk Level')).toBeInTheDocument();
+      expect(screen.getByText('Churn Probability')).toBeInTheDocument();
       expect(screen.getByText('Feedbacks')).toBeInTheDocument();
       expect(screen.getByText('Last Active')).toBeInTheDocument();
       expect(screen.getByText('Trend')).toBeInTheDocument();

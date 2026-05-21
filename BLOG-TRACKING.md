@@ -4,7 +4,7 @@
 **Cadence**: 2 posts per month (1st and 15th)
 **Goal**: Mix of SEO, thought leadership, comparisons, and conversion content
 **Audiences**: SaaS founders/CEOs, Product Managers, CS/Support teams
-**Last Updated**: 2026-03-18
+**Last Updated**: 2026-05-21
 
 ---
 
@@ -70,6 +70,7 @@
 | # | Title | Slug | Target Date | Type | Audience | Target Keyword | Status |
 |---|-------|------|-------------|------|----------|----------------|--------|
 | 16 | Best Customer Feedback Tools for SaaS in 2026 (Honest Roundup) | `best-customer-feedback-tools-saas-2026` | Aug 1 | SEO / Comparison | All | "best customer feedback tools 2026" | Scheduled |
+| 16.5 | How Rereflect Predicts Churn 30 Days Out (Honestly) | `how-rereflect-predicts-churn-30-days-out` | Aug 8 | Thought Leadership / Product | Founders, CS, PMs | "30-day churn prediction" | Drafted |
 | 17 | From Slack Messages to Product Strategy: A Feedback Pipeline Guide | `slack-messages-to-product-strategy-feedback` | Aug 15 | SEO | PMs, Founders | "Slack customer feedback analysis" | Scheduled |
 
 ### September 2026

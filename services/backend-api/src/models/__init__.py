@@ -44,6 +44,9 @@ from .report import Report
 from .ai_correction import AICorrection
 from .automation_rule import AutomationRule
 from .automation_execution import AutomationExecution
+from .churn_event import CustomerChurnEvent
+from .churn_calibration import ChurnCalibrationModel, ChurnBacktestRun
+from .churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
 
 __all__ = [
     "Base",
@@ -96,4 +99,9 @@ __all__ = [
     "AICorrection",
     "AutomationRule",
     "AutomationExecution",
+    "CustomerChurnEvent",
+    "ChurnCalibrationModel",
+    "ChurnBacktestRun",
+    "ChurnPlaybook",
+    "ChurnPlaybookExecution",
 ]

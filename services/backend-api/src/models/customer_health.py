@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index, JSON, Numeric
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -45,6 +45,19 @@ class CustomerHealth(Base):
     # LLM model tracking (which provider/model analyzed this customer)
     llm_provider = Column(String(20), nullable=True)  # openai, anthropic, google
     llm_model = Column(String(50), nullable=True)  # gpt-4o-mini, claude-haiku-4-5, etc.
+
+    # M4.1: Advanced Churn Prediction — calibrated probability + CI + timeline
+    churn_probability = Column(Numeric(5, 4), nullable=True)           # 0.0000–1.0000
+    churn_probability_low = Column(Numeric(5, 4), nullable=True)       # 90% CI lower bound
+    churn_probability_high = Column(Numeric(5, 4), nullable=True)      # 90% CI upper bound
+    time_to_churn_bucket = Column(String(20), nullable=True)           # immediate | 2w | 2-4w | 1-3m | low
+    calibration_model_id = Column(
+        Integer,
+        ForeignKey("churn_calibration_models.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    probability_computed_at = Column(DateTime, nullable=True)
+    has_potential_winback = Column(Boolean, nullable=False, default=False, server_default="false")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

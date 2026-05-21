@@ -151,6 +151,17 @@ rereflect/
 - `src/models/` - SQLAlchemy ORM models
 - `src/background/scheduler.py` - Background job scheduler
 
+### Advanced Churn Prediction (M4.1)
+- `services/backend-api/src/services/churn_calibrator.py` - Isotonic regression, bootstrap CI, timeline bucketing
+- `services/backend-api/src/api/routes/churn_events.py` - Label CRUD + CSV import + recovery
+- `services/backend-api/src/api/routes/churn_analytics.py` - Cohort analytics + accuracy metrics
+- `services/backend-api/src/api/routes/playbooks.py` - Playbook CRUD + execution
+- `services/backend-api/src/services/playbook_seeder.py` - 7 pre-built templates (idempotent)
+- `services/worker-service/src/tasks/churn_calibration.py` - Weekly refit (Mondays 07:45 UTC)
+- `services/frontend-web/app/(dashboard)/churn-cohorts/page.tsx` - Cohort heatmap + breakdown
+- `services/frontend-web/app/(dashboard)/settings/playbooks/page.tsx` - Playbook editor + templates
+- `services/frontend-web/components/customers/` - ChurnProbabilityBadge, MarkAsChurnedDialog, RunPlaybookDropdown
+
 ## Theme System
 
 The app uses a custom "Sunset Horizon" theme with CSS variables:
@@ -255,9 +266,23 @@ Features are gated by plan level using the `require_feature` dependency:
 
 Feature IDs by tier:
 - **Free**: `basic_dashboard`, `csv_import`, `sentiment_analysis`, `email_support`
-- **Pro**: + `slack_integration`, `webhooks`, `data_export`, `trends_analytics`, `priority_support`
-- **Business**: + `api_access`, `advanced_analytics`, `custom_categories`, `dedicated_support`
-- **Enterprise**: + `sso_saml`, `custom_integrations`, `sla`, `dedicated_csm`, `audit_logs`, `custom_retention`
+- **Pro**: + `slack_integration`, `webhooks`, `data_export`, `trends_analytics`, `priority_support`, `enhanced_churn_prediction`, `customer_health_scores`, `churn_llm_insights`
+- **Business**: + `api_access`, `advanced_analytics`, `custom_categories`, `dedicated_support`, `advanced_churn_prediction`, `churn_cohorts`, `churn_playbooks` (limit 20), `churn_accuracy_card`, `churn_event_csv_import`
+- **Enterprise**: + `sso_saml`, `custom_integrations`, `sla`, `dedicated_csm`, `audit_logs`, `custom_retention`, `custom_probability_bands`, `churn_playbooks` (unlimited)
+
+### Plan Gating Matrix
+
+| Feature | Free | Pro | Business | Enterprise |
+|---------|------|-----|----------|------------|
+| Dashboard + CSV import | ✓ | ✓ | ✓ | ✓ |
+| Sentiment analysis (VADER) | ✓ | ✓ | ✓ | ✓ |
+| Enhanced churn prediction (9-factor, factor breakdown) | – | ✓ | ✓ | ✓ |
+| Customer health scores + alerts | – | ✓ | ✓ | ✓ |
+| Advanced churn prediction (probability %, CI, timeline bucket) | – | – | ✓ | ✓ |
+| Churn cohort analytics (source, month, volume) | – | – | ✓ | ✓ |
+| Churn playbooks (templates, execution) | – | – | ✓ (20 limit) | ✓ (unlimited) |
+| Churn accuracy dashboard + metrics | – | – | ✓ | ✓ |
+| Custom probability bands | – | – | – | ✓ |
 
 ### Billing Enforcement
 

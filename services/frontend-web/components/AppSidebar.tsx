@@ -31,6 +31,11 @@ import {
   Webhook,
   FileBarChart,
   Zap,
+  AlertOctagon,
+  BarChart3,
+  Lock,
+  ListChecks,
+  Gauge,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -124,6 +129,12 @@ const analysisNavItems = [
     href: '/churn-risks',
     icon: UserX,
   },
+  {
+    title: 'Churn Cohorts',
+    href: '/analytics/churn-cohorts',
+    icon: BarChart3,
+    businessBadge: true,
+  },
 ];
 
 const settingsNavItems = [
@@ -135,6 +146,7 @@ const settingsNavItems = [
   { title: 'Response Templates', href: '/settings/response-templates', icon: MessageSquarePlus, requiredRole: 'admin' as const },
   { title: 'Webhooks', href: '/settings/webhooks', icon: Webhook },
   { title: 'Automations', href: '/settings/automations', icon: Zap },
+  { title: 'Playbooks', href: '/settings/playbooks', icon: ListChecks, businessBadge: true as const },
   { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },
   { title: 'Billing', href: '/settings/billing', icon: CreditCard, requiredRole: 'owner' as const },
 ];
@@ -145,6 +157,8 @@ const systemNavItems = [
   { title: 'Organizations', href: '/system/organizations', icon: Building2 },
   { title: 'Promo Codes', href: '/system/promo-codes', icon: Tag },
   { title: 'AI Models', href: '/system/ai-models', icon: Brain },
+  { title: 'Churn Events', href: '/system/churn-events', icon: AlertOctagon },
+  { title: 'Churn Accuracy', href: '/system/churn-accuracy', icon: Gauge },
 ];
 
 const hasRole = (userRole: string | undefined, requiredRole?: 'owner' | 'admin' | 'member'): boolean => {
@@ -263,20 +277,27 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {analysisNavItems.map((item) => (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive(item.href)}
-                        tooltip={item.title}
-                      >
-                        <Link href={item.href}>
-                          <item.icon className="w-4 h-4" />
-                          <span>{item.title}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {analysisNavItems.map((item) => {
+                    const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
+                    const isLocked = 'businessBadge' in item && item.businessBadge && !isBusiness;
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive(item.href)}
+                          tooltip={item.title}
+                        >
+                          <Link href={item.href}>
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.title}</span>
+                            {isLocked && (
+                              <Lock className="ml-auto w-3 h-3 opacity-40" />
+                            )}
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </CollapsibleContent>
@@ -298,20 +319,27 @@ export function AppSidebar() {
                 <SidebarMenu>
                   {settingsNavItems
                     .filter(item => hasRole(user?.role, item.requiredRole))
-                    .map((item) => (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isActive(item.href)}
-                          tooltip={item.title}
-                        >
-                          <Link href={item.href}>
-                            <item.icon className="w-4 h-4" />
-                            <span>{item.title}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
+                    .map((item) => {
+                      const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
+                      const isLocked = 'businessBadge' in item && item.businessBadge && !isBusiness;
+                      return (
+                        <SidebarMenuItem key={item.title}>
+                          <SidebarMenuButton
+                            asChild
+                            isActive={isActive(item.href)}
+                            tooltip={item.title}
+                          >
+                            <Link href={item.href}>
+                              <item.icon className="w-4 h-4" />
+                              <span>{item.title}</span>
+                              {isLocked && (
+                                <Lock className="ml-auto w-3 h-3 opacity-40" />
+                              )}
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </CollapsibleContent>

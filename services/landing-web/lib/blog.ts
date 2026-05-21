@@ -2722,6 +2722,181 @@ const posts: BlogPost[] = [
       },
     ],
   },
+  {
+    slug: 'how-rereflect-predicts-churn-30-days-out',
+    title: 'How Rereflect Predicts Churn 30 Days Out (Honestly)',
+    excerpt: 'Most churn prediction tools hide behind vague "risk scores" with no honesty about accuracy. Here is how Rereflect does it differently: calibrated probabilities, structured labels, and a transparent accuracy dashboard.',
+    date: '2026-08-08',
+    status: 'scheduled',
+    readTime: '10 min read',
+    author: 'Rereflect Team',
+    tags: ['Churn Prediction', 'Product Analytics', 'Customer Health'],
+    seoTitle: 'How Rereflect Predicts Churn 30 Days Out (Honestly) | Rereflect',
+    seoDescription: 'Discover how Rereflect predicts customer churn with calibrated probabilities, confidence intervals, and transparent accuracy metrics. No vague risk scores.',
+    sections: [
+      {
+        heading: 'The churn prediction problem',
+        content: [
+          'Every SaaS company understands its biggest vulnerability: the silent churn. A customer stops using the product. They do not complain. They do not email support. One day, they just do not log in anymore. By the time you notice, they are three weeks into their decision to leave.',
+          'This is why churn prediction has become a fixture in modern SaaS tools. If you could predict which customers are likely to churn 30 days before it happens, you could intervene. You could reach out, solve their problem, or even negotiate a better plan. Early churn detection is worth millions.',
+          'The problem: most "churn prediction" tools ship a vague risk pill. "This customer is high risk," they say. No probability. No confidence interval. No honest accounting of how often that prediction is actually correct. You are supposed to trust the tool, but the tool gives you no basis for trust.',
+          'Rereflect takes a different approach. Every probability comes with a confidence interval. Every accuracy metric is visible. And the system tells you exactly what it does not know.',
+        ],
+      },
+      {
+        heading: 'The foundation: a 9-factor heuristic',
+        content: [
+          'Churn is not a sudden event. It is a pattern of signals in customer feedback and behavior. Rereflect monitors nine factors that correlate with churn risk:',
+        ],
+        listItems: [
+          'Sentiment trend — Is the customer\'s recent feedback more negative than their historical average?',
+          'Urgency language — Do they use words associated with cancellation, switching, or frustration?',
+          'Churn keywords — Do they mention specific triggers like "too expensive," "needs improvement," or "competitor"?',
+          'Frustration density — How much of their feedback contains complaints vs praise?',
+          'Feedback frequency — Are they submitting more feedback (escalation signal) or less (disengagement)?',
+          'Resolution time — How long are their issues taking to get resolved?',
+          'Pain severity — How critical are the problems they are reporting?',
+          'Feature request density — Are they asking for features you have not built yet?',
+          'Churn risk component — A weighted aggregate of the above',
+        ],
+        content2: [
+          'These nine factors are real signals. Combined, they correlate strongly with actual churn. But correlation is not causation, and correlation is not prediction accuracy. This is where calibration comes in.',
+        ],
+      },
+      {
+        heading: 'From score to probability: isotonic regression',
+        content: [
+          'The 9-factor heuristic produces a score from 0 to 100 per customer. This score is useful for relative ranking — "which of my customers are most at risk?" — but it tells you nothing about absolute probability. A score of 75 might mean 70% churn risk or 30%. You do not know.',
+          'Rereflect uses isotonic regression to map the heuristic score to a probability. Here is how it works:',
+        ],
+        listItems: [
+          'Customers mark themselves as churned when they cancel, or when they clearly state they are leaving.',
+          'CSV import lets you backfill historical churn labels.',
+          'These labels become the training set.',
+          'Isotonic regression learns the relationship: "when the heuristic score is X, what fraction of customers actually churn?"',
+          'Once fit, the model transforms future scores into probabilities with 90% confidence intervals (computed via bootstrap resampling).',
+        ],
+        content2: [
+          'The result: instead of "high risk" or a 0-100 score, you get "73% probability of churn within 30 days (65%-81% confidence interval)." That is a number you can act on.',
+          'Isotonic regression is deliberately simple. It does not claim to be a machine learning model. It is a statistical calibration tool, which is exactly what it is.',
+        ],
+      },
+      {
+        heading: 'The honest part: confidence intervals',
+        content: [
+          'Every prediction shows its uncertainty. The 90% confidence interval is computed via bootstrap resampling: we retrain the model hundreds of times with random subsamples of your data, generate predictions for each, and extract the 5th and 95th percentiles.',
+          'When you have only 10 churn labels, the interval is wide: maybe 73% (55%-89%). This honestly reflects the uncertainty.',
+          'When you have 200 labels, the interval tightens: maybe 73% (70%-76%). The prediction becomes more reliable.',
+          'The confidence interval grows narrower as you collect more labels. The system shows you exactly when it becomes trustworthy. This is the opposite of black-box tools that act confident regardless of data volume.',
+        ],
+      },
+      {
+        heading: 'Weekly recalibration',
+        content: [
+          'Once per week (Mondays at 07:45 UTC), Rereflect refits the isotonic model against all your labeled churn events. The probabilities get updated for every customer. The model tracks its own accuracy: precision, recall, F1, and AUC.',
+          'If the accuracy drops significantly, the system alerts. This might mean your business has changed (perhaps churn is driven by different factors now) or your product has improved (churn signals are no longer predictive).',
+          'You can see the full model history: when it was last retrained, how many labels were used, which metrics improved or declined. This is observability for your churn model, not a black box.',
+        ],
+      },
+      {
+        heading: 'Time-to-churn buckets',
+        content: [
+          'Raw probability is useful, but context is better. Rereflect derives time-to-churn buckets from the probability and recent sentiment trend:',
+        ],
+        listItems: [
+          'Immediate — Probability 85%+ or (probability 70%+ AND negative sentiment trend)',
+          '2 weeks — Probability 70-85%',
+          '2-4 weeks — Probability 50-70%',
+          '1-3 months — Probability 30-50%',
+          'Low — Probability <30%',
+        ],
+        content2: [
+          'These buckets let you triage. "Immediate" customers get crisis-mode outreach. "1-3 months" customers get gentler check-ins. "Low" customers you do not need to worry about yet.',
+        ],
+      },
+      {
+        heading: 'Playbooks: from prediction to action',
+        content: [
+          'A prediction is only useful if it leads to action. Rereflect ships with 7 pre-built playbooks, each designed for a churn probability range:',
+        ],
+        listItems: [
+          'Critical Save (85-100%) — Escalate to leadership, send urgent Slack alert, assign to CS lead',
+          'Churn Prevention (70-85%) — Assign to CS owner, draft empathetic response, schedule check-in',
+          'At-Risk Outreach (50-70%) — Send email digest, tag customer, notify assignee',
+          'Light-Touch Nudge (30-50%) — Tag for monitoring, add to weekly review queue',
+          'Power-User Recovery (50%+, if power user) — Escalate to founder/exec channel, personalized outreach',
+          'New-Customer Save (40%+, if <1 month old) — Trigger onboarding playbook, assign CS',
+          'Silent-Churn Watch (manual trigger) — Send re-engagement email, flag for follow-up',
+        ],
+        content2: [
+          'Each playbook is a sequence of actions (reusing the same automation engine Rereflect uses for workflows). You can clone templates and customize them, or create your own.',
+          'Playbooks are rate-limited to prevent spam: maximum once per customer per 60 minutes. You can manually trigger them or run them in batch against all customers in a probability range.',
+        ],
+      },
+      {
+        heading: 'The accuracy dashboard: no BS',
+        content: [
+          'Here is what makes this different from other churn tools. You can see the actual accuracy metrics:',
+        ],
+        listItems: [
+          'Precision — Of the customers we predicted would churn, what fraction actually did?',
+          'Recall — Of all the customers who actually churned, what fraction did we flag in advance?',
+          'F1 score — A balanced measure of precision and recall',
+          'AUC-ROC — How well does the probability rank at-risk customers vs low-risk ones?',
+          'Label count — How many churn events we trained on',
+          'Last refit — When the model was last retrained',
+        ],
+        content2: [
+          'You can see these metrics for your organization and compare to the global baseline. You can drill into the history: did accuracy improve when we added the "retention outreach" playbook? Did it drop when competitors launched a new feature?',
+          'This is not a feature we hide. It is front and center. Because we believe that churn prediction without transparency is just fortune-telling.',
+        ],
+      },
+      {
+        heading: 'The honest limitations',
+        content: [
+          'Isotonic regression is not a magic algorithm. Here are the real limitations:',
+        ],
+        listItems: [
+          'Label scarcity — If you have only 10 churn labels, the model will be unreliable. The confidence interval will be huge. We recommend collecting at least 50 labels before relying on the predictions.',
+          'Label quality — If you label churned customers inconsistently (some after they missed a payment, others when they complained), the model learns noise, not signal.',
+          'Silent churn problem — If customers churn without sending feedback or submitting a cancel request, you can not label them. The system only learns from observed churn. (This is why we have CSV import: you can bring in data from your billing system.)',
+          'Feedback bias — If only unhappy customers give feedback, the model thinks all churn risk comes from negative sentiment. Happy customers who quietly churn will surprise you.',
+          'Temporal drift — Your customers today might churn for different reasons than customers in the past. When your product changes, the model needs to refit.',
+        ],
+        content2: [
+          'The point is not that these limitations do not exist. The point is that they are visible and honest. You see the label count. You see the confidence interval. You can anticipate the blind spots.',
+        ],
+      },
+      {
+        heading: 'The future: real ML when it is earned',
+        content: [
+          'Isotonic regression is the right model for now. It is interpretable, it works with limited data, and it is genuinely calibrated.',
+          'Once an organization accumulates 500+ churn labels (or the global system has 5,000+), we will swap in a more sophisticated model: logistic regression or gradient boosting. The API contract will not change. The probability + confidence interval will still be the output. But the underlying model will be more powerful.',
+          'We will tell you when the upgrade happens. And we will show you if it actually improves accuracy. If it does not, we will revert.',
+          'This is the opposite of the "black-box AI" approach where companies quietly swap algorithms and customers never know. We believe churn prediction should be transparent, trustworthy, and continually improving based on evidence.',
+        ],
+      },
+      {
+        heading: 'Getting started',
+        content: [
+          'If you are using Rereflect, churn probabilities are already showing on your customers page. You will see the percentage and the confidence interval.',
+          'To improve the model, start marking customers as churned:',
+        ],
+        listItems: [
+          'Click "Mark as Churned" on any customer profile',
+          'Select the reason (price, competitor, product quality, no longer needed, etc.)',
+          'The customer is immediately removed from "active" status',
+          'The model refits the next Monday and the probability updates system-wide',
+        ],
+        content2: [
+          'Alternatively, use CSV import to backfill historical churn data from your billing system. Include email, churn date, and reason.',
+          'Start with playbooks for your "Immediate" and "2 weeks" buckets. Watch what works. Iterate.',
+          'Check the accuracy dashboard weekly. Within a month of label collection, you will see whether the predictions are actually correlated with real churn in your business.',
+          'This is not magic. This is statistics, transparency, and a willingness to be honest about uncertainty. And that is how you actually build churn prediction that works.',
+        ],
+      },
+    ],
+  },
 ];
 
 function isVisible(post: BlogPost): boolean {

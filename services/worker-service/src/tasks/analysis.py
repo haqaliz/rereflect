@@ -395,6 +395,26 @@ def _analyze_feedback_item(feedback, db=None) -> None:
         except Exception as e:
             logger.warning(f"Failed to update customer health for {feedback.customer_email}: {e}")
 
+        try:
+            from src.services.probability_updater import update as update_churn_probability
+            update_churn_probability(feedback.organization_id, feedback.customer_email, db)
+        except Exception:
+            logger.exception(
+                "probability_updater failed for %s/%s",
+                feedback.organization_id,
+                feedback.customer_email,
+            )
+
+        try:
+            from src.services.winback_detector import check as check_winback
+            check_winback(feedback.organization_id, feedback.customer_email, db)
+        except Exception:
+            logger.exception(
+                "winback_detector failed for %s/%s",
+                feedback.organization_id,
+                feedback.customer_email,
+            )
+
 
 def _apply_llm_result(feedback, result: dict) -> None:
     """Apply LLM categorization result to a feedback item."""

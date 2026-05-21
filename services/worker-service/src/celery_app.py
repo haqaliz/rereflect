@@ -44,6 +44,8 @@ celery_app = Celery(
         "src.tasks.workflow",
         "src.tasks.webhook_delivery",
         "src.tasks.automation",
+        "src.tasks.churn_playbooks",
+        "src.tasks.churn_calibration",
     ],
 )
 
@@ -183,6 +185,26 @@ celery_app.conf.beat_schedule = {
     "purge-old-automation-executions": {
         "task": "src.tasks.automation.purge_old_automation_executions",
         "schedule": crontab(hour=2, minute=30, day_of_week=0),
+    },
+    # Purge churn playbook execution logs older than 90 days — Sundays 03:00 UTC
+    "purge-playbook-executions": {
+        "task": "tasks.churn_playbooks.purge_old_executions",
+        "schedule": crontab(hour=3, minute=0, day_of_week=0),
+    },
+    # Refit per-org churn calibration models — Mondays 07:45 UTC
+    "refit-churn-calibration-weekly": {
+        "task": "src.tasks.churn_calibration.refit_all_orgs",
+        "schedule": crontab(hour=7, minute=45, day_of_week=1),
+    },
+    # Refit global churn calibration model — Daily 03:00 UTC
+    "refit-global-calibration-daily": {
+        "task": "src.tasks.churn_calibration.refit_global_calibration",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    # Purge old (inactive, >90d) calibration models — Sundays 03:30 UTC
+    "purge-old-calibration-models": {
+        "task": "src.tasks.churn_calibration.purge_old_calibration_models",
+        "schedule": crontab(hour=3, minute=30, day_of_week=0),
     },
 }
 

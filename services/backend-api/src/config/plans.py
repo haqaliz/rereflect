@@ -138,6 +138,12 @@ PLANS = {
             "ai_reports",
             # AI Workflow Automation M4.4
             "workflow_automation",
+            # Advanced Churn Prediction M4.1
+            "advanced_churn_prediction",
+            "churn_event_csv_import",
+            "churn_cohorts",
+            "churn_playbooks",
+            "churn_accuracy_card",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -191,6 +197,13 @@ PLANS = {
             "ai_reports",
             # AI Workflow Automation M4.4
             "workflow_automation",
+            # Advanced Churn Prediction M4.1
+            "advanced_churn_prediction",
+            "churn_event_csv_import",
+            "churn_cohorts",
+            "churn_playbooks",
+            "churn_accuracy_card",
+            "custom_probability_bands",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -253,6 +266,13 @@ FEATURE_PLANS = {
     "ai_reports": "business",
     # AI Workflow Automation (M4.4)
     "workflow_automation": "pro",
+    # Advanced Churn Prediction (M4.1)
+    "advanced_churn_prediction": "business",
+    "churn_event_csv_import": "business",
+    "churn_cohorts": "business",
+    "churn_playbooks": "business",
+    "churn_accuracy_card": "business",
+    "custom_probability_bands": "enterprise",
 }
 
 

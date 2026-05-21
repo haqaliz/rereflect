@@ -36,3 +36,7 @@ google-generativeai>=0.8.0   # Google Generative AI client
 
 # Error tracking (Sentry free tier — 5K errors/mo)
 sentry-sdk[fastapi]==2.22.0  # Sentry SDK with FastAPI + SQLAlchemy integrations
+
+# Churn calibration (ChurnCalibrator service — M4.1)
+scikit-learn==1.5.2          # IsotonicRegression for probability calibration
+numpy>=1.26.4                # Array math for bootstrap CI

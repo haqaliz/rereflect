@@ -9,6 +9,7 @@ import {
   Lightbulb,
   BarChart3,
   TrendingUp,
+  TrendingDown,
   Layers,
   Bot,
   Users,
@@ -179,6 +180,14 @@ const smallCards: {
     title: 'AI Workflow Automation',
     description:
       'Create IF/THEN rules that auto-assign, escalate, notify, and draft responses when churn risk spikes, bugs are reported, or sentiment drops.',
+    animation: 'pulse',
+  },
+  {
+    id: 'card-churn-prediction',
+    icon: TrendingDown,
+    title: '30-Day Churn Probability',
+    description:
+      'Predict 30-60 days out which customers will churn — with calibrated probabilities, factor breakdowns, and prevention playbooks. Honest accuracy tracking included.',
     animation: 'pulse',
   },
 ];

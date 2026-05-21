@@ -26,6 +26,7 @@ import { FeedbackItem } from "@/lib/api/feedback"
 import { getTagStyles, getCategoryBadgeStyle } from "@/lib/category-utils"
 import { getStatusColor, getStatusLabel } from "@/lib/workflow-utils"
 import { LowConfidenceWarning } from "@/components/feedbacks/LowConfidenceWarning"
+import { ChurnProbabilityBadge } from "@/components/customers/ChurnProbabilityBadge"
 
 const getSentimentIcon = (sentiment: string) => {
   switch (sentiment) {
@@ -287,6 +288,7 @@ export const createColumns = (
 
       const risk = getRiskLevel(score)
 
+      const customerProb = row.original.customer_churn_probability;
       return (
         <div className="flex items-center gap-2">
           <div
@@ -299,6 +301,9 @@ export const createColumns = (
           >
             {score}%
           </Badge>
+          {customerProb !== null && customerProb !== undefined && (
+            <ChurnProbabilityBadge probability={customerProb} size="sm" />
+          )}
           <LowConfidenceWarning confidenceScore={row.original.customer_confidence_score} />
         </div>
       )

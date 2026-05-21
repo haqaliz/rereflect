@@ -76,6 +76,8 @@ export interface CustomerHealthSummary {
   llm_analysis_summary: string | null;
   llm_analysis_type: string | null;
   llm_urgency: string | null;
+  // M4.1 churn probability (Business+ only; null for lower plans)
+  churn_probability?: number | null;
 }
 
 export interface DashboardData {

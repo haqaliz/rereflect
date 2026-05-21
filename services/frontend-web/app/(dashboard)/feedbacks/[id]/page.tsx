@@ -86,6 +86,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { ChurnFactorBreakdown } from '@/components/feedbacks/ChurnFactorBreakdown';
 import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
+import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
+import { ChurnTimelineBadge } from '@/components/customers/ChurnTimelineBadge';
 import { LinkedIssuesCard } from '@/components/feedback/LinkedIssuesCard';
 import { ResponseModal } from '@/components/feedback/ResponseModal';
 import {
@@ -760,6 +762,18 @@ function FeedbackDetailContent() {
                                 }}
                               />
                             </div>
+                            {(customerHealth?.churn_probability !== null && customerHealth?.churn_probability !== undefined) && (
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs text-muted-foreground">30-day probability:</span>
+                                <ChurnProbabilityBadge
+                                  probability={customerHealth.churn_probability}
+                                  probabilityLow={customerHealth.churn_probability_low ?? undefined}
+                                  probabilityHigh={customerHealth.churn_probability_high ?? undefined}
+                                  size="sm"
+                                />
+                                <ChurnTimelineBadge bucket={customerHealth.time_to_churn_bucket ?? null} size="sm" />
+                              </div>
+                            )}
                             {feedback.customer_confidence_score !== null && feedback.customer_confidence_score !== undefined && (
                               <ConfidenceBadge
                                 confidenceScore={feedback.customer_confidence_score}
