@@ -27,125 +27,77 @@ export default function PrivacyPolicyPage() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-6 py-16">
         <h1 className="text-4xl font-bold text-foreground mb-4">Privacy Policy</h1>
-        <p className="text-muted-foreground mb-12">Last updated: March 2026</p>
+        <p className="text-muted-foreground mb-12">Last updated: June 14, 2026</p>
 
         <div className="prose prose-neutral dark:prose-invert max-w-none space-y-8">
           <section>
             <h2 className="text-2xl font-semibold text-foreground mb-4">1. Introduction</h2>
             <p className="text-muted-foreground leading-relaxed">
-              Rereflect (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;) is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our customer feedback analysis platform.
+              Rereflect is an open-source, self-hosted software project. This Privacy Policy explains what information this marketing website (rereflect.ca) collects, and how we handle it. It does not govern your self-hosted Rereflect deployment — your deployment runs on your infrastructure and you control all data within it.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">2. Information We Collect</h2>
-            <h3 className="text-lg font-medium text-foreground mb-2">Personal Information</h3>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">2. What This Website Collects</h2>
+            <h3 className="text-lg font-medium text-foreground mb-2">Website Analytics</h3>
             <p className="text-muted-foreground leading-relaxed mb-4">
-              We may collect personal information that you voluntarily provide when using our services, including:
+              This marketing website may collect basic analytics data (page views, referrers, browser type) to understand how visitors discover Rereflect. We do not sell this data.
+            </p>
+
+            <h3 className="text-lg font-medium text-foreground mb-2 mt-6">No User Accounts Here</h3>
+            <p className="text-muted-foreground leading-relaxed">
+              This website does not have user accounts, does not collect payment information, and does not store personal data beyond what is submitted via any contact forms.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">3. Your Self-Hosted Deployment</h2>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              When you self-host Rereflect, all data — including customer feedback, user accounts, and analysis results — resides entirely on your infrastructure. The Rereflect project maintainers have no access to this data. You are the data controller for your deployment and are responsible for:
             </p>
             <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Name and email address</li>
-              <li>Organization name and business information</li>
-              <li>Account credentials</li>
-              <li>Payment information (processed securely through third-party providers)</li>
-            </ul>
-
-            <h3 className="text-lg font-medium text-foreground mb-2 mt-6">Usage Data</h3>
-            <p className="text-muted-foreground leading-relaxed">
-              We automatically collect certain information when you access our platform, including your IP address, browser type, device information, and usage patterns to improve our services.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">3. How We Use Your Information</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">We use the collected information to:</p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Provide, operate, and maintain our services</li>
-              <li>Process and analyze customer feedback data</li>
-              <li>Improve and personalize user experience</li>
-              <li>Communicate with you about updates and support</li>
-              <li>Ensure security and prevent fraud</li>
-              <li>Comply with legal obligations</li>
+              <li>Complying with applicable data protection laws (GDPR, CCPA, etc.)</li>
+              <li>Securing your server and database</li>
+              <li>Handling user data export and deletion requests from your users</li>
+              <li>Any third-party API keys you configure (e.g., LLM providers)</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">4. Data Security</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">4. Data Security (This Website)</h2>
             <p className="text-muted-foreground leading-relaxed">
-              We implement industry-standard security measures to protect your data, including encryption in transit and at rest, secure access controls, and regular security audits. Our platform is SOC 2 compliant, demonstrating our commitment to data security.
+              This marketing website uses HTTPS to encrypt data in transit. Because no personal data or accounts are stored here, the attack surface is minimal. For your self-hosted deployment, security is governed by how you configure and maintain your own server.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">5. Data Retention</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">5. Third-Party Services</h2>
             <p className="text-muted-foreground leading-relaxed">
-              We retain your personal information for as long as your account is active or as needed to provide services. You may request deletion of your data at any time by contacting us.
+              This website may use third-party services for analytics or hosting (e.g., Vercel). These services have their own privacy policies. Your self-hosted Rereflect instance may optionally integrate with third parties (LLM providers, Slack, etc.) — those are entirely under your control and governed by those providers&apos; policies.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">6. Third-Party Services</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">6. Cookies</h2>
             <p className="text-muted-foreground leading-relaxed">
-              We may use third-party services for analytics, payment processing, and infrastructure. These providers are bound by confidentiality agreements and are only permitted to use your data as necessary to provide services to us.
+              This website may use cookies for basic session or analytics purposes. You can control cookie preferences through your browser settings.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">7. Your Rights</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">You have the right to:</p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Access and receive a copy of your personal data</li>
-              <li>Rectify inaccurate personal data</li>
-              <li>Request deletion of your personal data</li>
-              <li>Object to processing of your personal data</li>
-              <li>Data portability</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">8. How to Exercise Your Data Rights</h2>
-
-            <h3 className="text-lg font-medium text-foreground mb-2">Export Your Data</h3>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4 mb-6">
-              <li>Go to Settings &gt; Preferences in your Rereflect dashboard</li>
-              <li>Click &quot;Export My Data&quot;</li>
-              <li>A ZIP file will download containing your profile, feedbacks, conversations, notes, and preferences in JSON and CSV formats</li>
-            </ul>
-
-            <h3 className="text-lg font-medium text-foreground mb-2">Request Account Deletion</h3>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4 mb-6">
-              <li>Go to Settings &gt; Preferences</li>
-              <li>Click &quot;Delete My Account&quot;</li>
-              <li>Confirm in the dialog</li>
-              <li>Your account will be deactivated immediately and you will be logged out</li>
-              <li>All data will be permanently deleted after 30 days</li>
-              <li>To cancel: simply log back in during the 30-day grace period</li>
-            </ul>
-
-            <h3 className="text-lg font-medium text-foreground mb-2">Contact Us</h3>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">7. Changes to This Policy</h2>
             <p className="text-muted-foreground leading-relaxed">
-              For any privacy-related questions: privacy@rereflect.ca
+              We may update this Privacy Policy from time to time. Changes will be noted in the repository. Continued use of this website after changes constitutes acceptance of the updated policy.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">9. Cookies</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">8. Contact</h2>
             <p className="text-muted-foreground leading-relaxed">
-              We use cookies and similar tracking technologies to enhance your experience. You can control cookie preferences through your browser settings.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">10. Changes to This Policy</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new policy on this page and updating the &quot;Last updated&quot; date.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">11. Contact Us</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              If you have questions about this Privacy Policy, please contact us at privacy@rereflect.com.
+              For privacy questions related to this website, please open an issue on the{' '}
+              <a href="https://github.com/haqaliz/rereflect" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                GitHub repository
+              </a>.
             </p>
           </section>
         </div>
@@ -154,7 +106,7 @@ export default function PrivacyPolicyPage() {
       {/* Footer */}
       <footer className="border-t border-border py-8 mt-16">
         <div className="max-w-4xl mx-auto px-6 text-center text-sm text-muted-foreground">
-          <p>2025 Rereflect. All rights reserved.</p>
+          <p>2026 Rereflect. MIT licensed — free to use, fork, and self-host.</p>
         </div>
       </footer>
     </div>

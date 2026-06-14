@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Menu, X } from 'lucide-react';
+import { Github, Menu, X } from 'lucide-react';
 import { Logo } from '@rereflect/ui';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
 interface NavigationProps {
   isSticky: boolean;
@@ -55,7 +56,7 @@ export function Navigation({ isSticky, onScrollToSection }: NavigationProps) {
             onClick={onScrollToSection ? (e) => onScrollToSection(e, 'pricing') : undefined}
             className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            Pricing
+            Open source
           </a>
           <Link
             href="/integrations"
@@ -72,18 +73,18 @@ export function Navigation({ isSticky, onScrollToSection }: NavigationProps) {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Sign In - hidden on mobile when menu is closed to save space */}
-          <a href={`${APP_URL}/login`} className="hidden sm:block">
+          {/* Self-host guide link */}
+          <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer" className="hidden sm:block">
             <button className="px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-              Sign In
+              Self-host guide
             </button>
           </a>
-          <a href={`${APP_URL}/signup`} className="hidden sm:block">
+          <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hidden sm:block">
             <button className="group relative px-5 py-2.5 text-sm font-semibold text-primary-foreground rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02]">
               <div className="absolute inset-0 bg-gradient-to-r from-primary via-chart-5 to-primary bg-[length:200%_100%] animate-[shimmer_3s_ease-in-out_infinite]" />
               <span className="relative flex items-center gap-1.5">
-                Get Started
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                <Github className="w-4 h-4" />
+                View on GitHub
               </span>
             </button>
           </a>
@@ -118,7 +119,7 @@ export function Navigation({ isSticky, onScrollToSection }: NavigationProps) {
               onClick={(e) => handleMobileNavClick(e, 'pricing')}
               className="px-4 py-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-primary/5 rounded-lg transition-colors"
             >
-              Pricing
+              Open source
             </a>
             <Link
               href="/integrations"
@@ -135,14 +136,15 @@ export function Navigation({ isSticky, onScrollToSection }: NavigationProps) {
               Blog
             </Link>
             <div className="mt-6 pt-4 border-t border-border/50 flex flex-col gap-2 px-4">
-              <a href={`${APP_URL}/login`}>
+              <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer">
                 <button className="w-full py-3 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors rounded-lg border border-border">
-                  Sign In
+                  Self-host guide
                 </button>
               </a>
-              <a href={`${APP_URL}/signup`}>
-                <button className="w-full py-3 text-sm font-semibold text-primary-foreground rounded-lg bg-gradient-to-r from-primary to-chart-5">
-                  Get Started
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+                <button className="w-full py-3 text-sm font-semibold text-primary-foreground rounded-lg bg-gradient-to-r from-primary to-chart-5 flex items-center justify-center gap-2">
+                  <Github className="w-4 h-4" />
+                  View on GitHub
                 </button>
               </a>
             </div>

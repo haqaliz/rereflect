@@ -5,52 +5,44 @@ import { ChevronDown } from 'lucide-react';
 
 const faqs = [
   {
-    q: 'How accurate is the AI analysis?',
-    a: "Rereflect achieves 85-95% accuracy on sentiment classification and 80-90% on topic categorization. The system improves over time as it processes more of your data. For edge cases, you can manually adjust categories.",
+    q: 'Is it really free?',
+    a: 'Yes, completely. Rereflect is MIT-licensed open-source software. There are no plans, seats, usage caps, or fees of any kind. You clone the repo, deploy it on your own infrastructure, and run it forever at no cost.',
   },
   {
-    q: 'Is my data secure?',
-    a: "Yes. All data is encrypted in transit (TLS) and at rest. We use SOC 2 compliant infrastructure. Each organization's data is fully isolated — no cross-tenant access. We never use your data to train AI models.",
+    q: 'How do I self-host it?',
+    a: 'Clone the repository from GitHub and follow the self-hosting guide in the README. The stack is Docker-friendly: you will need a PostgreSQL database, a Redis instance, and optionally an LLM API key. Most setups are running in under 30 minutes.',
   },
   {
-    q: 'Can I use my own AI provider?',
-    a: 'Absolutely. Pro plans can use any OpenAI model. Business and Enterprise plans support Anthropic (Claude) and Google (Gemini) as well. Bring your own API keys for full control over model selection and costs.',
+    q: 'Do I need an LLM API key?',
+    a: 'No. Rereflect ships with VADER sentiment analysis, which runs entirely locally with no external API calls and no cost. If you want richer AI features — the Copilot, LLM-powered categorization, or churn insights — you can add an OpenAI, Anthropic, or Google API key. Your key, your cost, no markup.',
   },
   {
-    q: 'How long does setup take?',
-    a: 'Under 5 minutes. Sign up, connect your feedback sources (Slack, Intercom, or email), and upload a CSV of existing feedback. AI analysis starts immediately.',
+    q: 'Can I use it without sending any data to an external LLM?',
+    a: 'Yes. With the VADER-only configuration, all processing happens on your own server. No feedback data leaves your infrastructure. You can also run a local LLM (e.g. via Ollama) and point Rereflect at it — see the README for BYOK/local model configuration.',
   },
   {
-    q: "What happens when I hit my plan's feedback limit?",
-    a: 'Pro and Business plans allow overage at a small per-item cost ($0.02 and $0.01 respectively). You\'ll see a usage warning before you hit the limit. Free plans stop processing new feedback at the cap — upgrade anytime to continue.',
+    q: 'What is the license?',
+    a: 'MIT. You can use it, fork it, modify it, and redistribute it — commercially or otherwise — with no restrictions. The only requirement is to retain the copyright notice.',
   },
   {
-    q: 'Can I cancel anytime?',
-    a: "Yes, all plans are month-to-month with no annual commitment required. Cancel from the billing settings page and you'll retain access until the end of your billing period.",
+    q: 'What integrations are included?',
+    a: 'Slack (OAuth), Intercom (OAuth + webhooks), email forwarding, CSV import, webhooks for custom sources, and Linear. Zendesk and HubSpot integrations are planned. All integrations are configured in your self-hosted instance — no hosted service required.',
   },
   {
-    q: 'Do you offer a free trial?',
-    a: 'Yes. All paid plans include a 14-day free trial with full feature access. No credit card required to start.',
+    q: 'Who owns my data?',
+    a: 'You do, entirely. Because Rereflect runs on your infrastructure, your feedback data never leaves your servers (unless you configure an external LLM key). There is no cloud service, no analytics pipeline, and no third party with access to your data.',
   },
   {
-    q: 'What integrations do you support?',
-    a: 'Currently: Slack (OAuth), Intercom (OAuth + webhooks), email forwarding, CSV import, and webhooks for custom sources. Zendesk and HubSpot integrations are coming soon.',
+    q: 'Can I contribute or request features?',
+    a: 'Absolutely. Open an issue or pull request on GitHub. The project welcomes bug reports, feature ideas, and code contributions. Check CONTRIBUTING.md in the repository for guidelines.',
   },
   {
-    q: 'How do I download my data?',
-    a: "You can export all your personal data at any time from Settings > Preferences. Click 'Export My Data' to download a ZIP file containing your profile information, feedback items, AI conversations, notes, and preferences in both JSON and CSV formats.",
-  },
-  {
-    q: 'Can I delete my account?',
-    a: "Yes. Go to Settings > Preferences and click 'Delete My Account.' Your account will be deactivated immediately and all data permanently deleted after a 30-day grace period. During this window, you can cancel the deletion by simply logging back in. This complies with GDPR's right to erasure.",
+    q: 'How does churn prediction work without sending data to a hosted service?',
+    a: 'Churn prediction uses a calibrated model trained on your own labeled outcomes — customers you have marked as churned. The model runs in your instance. Each prediction includes a confidence interval so you can see how certain the model is. Org-specific models activate once you have labeled at least 20 customers; before that a global baseline model is used.',
   },
   {
     q: 'Can I automate actions based on feedback events?',
-    a: "Yes. Create automation rules that trigger when specific conditions are met — like a customer's health score dropping below a threshold or receiving multiple negative feedbacks. Rules can auto-assign team members, change workflow status, send notifications, and even draft AI responses. Choose from 5 pre-built templates or create custom rules.",
-  },
-  {
-    q: 'How accurate is the churn prediction?',
-    a: "Probabilities are calibrated against your team's labeled churn outcomes. Each prediction includes a 90% confidence interval, so you see when the model is sure vs. estimating. You can mark customers as churned to improve accuracy continuously, and a precision/recall dashboard shows you exactly how well the model performs for your data. With <100 labels we use a global model; org-specific models kick in once you've labeled at least 20 customers.",
+    a: 'Yes. Create IF/THEN automation rules that trigger when specific conditions are met — like a health score dropping below a threshold or multiple negative feedbacks arriving. Rules can auto-assign team members, change workflow status, send Slack notifications, and draft AI responses. Pre-built templates are included.',
   },
 ];
 

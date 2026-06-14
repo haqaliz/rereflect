@@ -1,7 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { Github } from 'lucide-react';
 import { Logo } from '@rereflect/ui';
+
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
 interface FooterProps {
   onScrollToSection?: (e: React.MouseEvent<HTMLAnchorElement>, targetId: string) => void;
@@ -21,7 +25,7 @@ export function Footer({ onScrollToSection }: FooterProps) {
             </span>
           </Link>
           <p className="text-muted-foreground max-w-sm mb-6">
-            Transform overwhelming customer feedback into clear, actionable insights with AI-powered analysis.
+            Open-source AI feedback analysis. Self-host it, own your data, and analyze customer feedback without vendor lock-in.
           </p>
         </div>
 
@@ -46,17 +50,12 @@ export function Footer({ onScrollToSection }: FooterProps) {
                   onClick={onScrollToSection ? (e) => onScrollToSection(e, 'pricing') : undefined}
                   className="hover:text-foreground transition-colors cursor-pointer"
                 >
-                  Pricing
+                  Open source
                 </a>
               </li>
               <li>
                 <Link href="/integrations" className="hover:text-foreground transition-colors">
                   Integrations
-                </Link>
-              </li>
-              <li>
-                <Link href="/customers" className="hover:text-foreground transition-colors">
-                  Customers
                 </Link>
               </li>
             </ul>
@@ -70,6 +69,26 @@ export function Footer({ onScrollToSection }: FooterProps) {
                 <Link href="/blog" className="hover:text-foreground transition-colors">
                   Blog
                 </Link>
+              </li>
+              <li>
+                <a
+                  href={SELFHOST_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-foreground transition-colors"
+                >
+                  Self-host guide
+                </a>
+              </li>
+              <li>
+                <a
+                  href={GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-foreground transition-colors"
+                >
+                  README
+                </a>
               </li>
             </ul>
           </div>
@@ -97,6 +116,17 @@ export function Footer({ onScrollToSection }: FooterProps) {
             <ul className="space-y-3 text-muted-foreground">
               <li>
                 <a
+                  href={GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 hover:text-foreground transition-colors"
+                >
+                  <Github className="w-4 h-4" />
+                  <span>GitHub</span>
+                </a>
+              </li>
+              <li>
+                <a
                   href="https://twitter.com/rereflectapp"
                   target="_blank"
                   rel="noopener noreferrer"
@@ -122,14 +152,6 @@ export function Footer({ onScrollToSection }: FooterProps) {
                   />
                 </a>
               </li>
-              <li>
-                <a
-                  href="mailto:support@rereflect.com"
-                  className="hover:text-foreground transition-colors"
-                >
-                  support@rereflect.com
-                </a>
-              </li>
             </ul>
           </div>
         </div>
@@ -137,6 +159,7 @@ export function Footer({ onScrollToSection }: FooterProps) {
         {/* Footer Bottom */}
         <div className="pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
           <p>© 2026 Rereflect. All rights reserved.</p>
+          <p>MIT licensed — free to use, fork, and self-host.</p>
         </div>
       </div>
     </footer>

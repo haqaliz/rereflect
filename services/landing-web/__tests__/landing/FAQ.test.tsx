@@ -12,16 +12,18 @@ describe('FAQ', () => {
     expect(screen.getByRole('heading', { name: /Frequently Asked Questions/i })).toBeInTheDocument();
   });
 
-  it('renders all 8 FAQ questions as visible text', () => {
+  it('renders all 10 FAQ questions as visible text', () => {
     render(<FAQ />);
-    expect(screen.getByText('How accurate is the AI analysis?')).toBeInTheDocument();
-    expect(screen.getByText('Is my data secure?')).toBeInTheDocument();
-    expect(screen.getByText('Can I use my own AI provider?')).toBeInTheDocument();
-    expect(screen.getByText('How long does setup take?')).toBeInTheDocument();
-    expect(screen.getByText("What happens when I hit my plan's feedback limit?")).toBeInTheDocument();
-    expect(screen.getByText('Can I cancel anytime?')).toBeInTheDocument();
-    expect(screen.getByText('Do you offer a free trial?')).toBeInTheDocument();
-    expect(screen.getByText('What integrations do you support?')).toBeInTheDocument();
+    expect(screen.getByText('Is it really free?')).toBeInTheDocument();
+    expect(screen.getByText('How do I self-host it?')).toBeInTheDocument();
+    expect(screen.getByText('Do I need an LLM API key?')).toBeInTheDocument();
+    expect(screen.getByText('Can I use it without sending any data to an external LLM?')).toBeInTheDocument();
+    expect(screen.getByText('What is the license?')).toBeInTheDocument();
+    expect(screen.getByText('What integrations are included?')).toBeInTheDocument();
+    expect(screen.getByText('Who owns my data?')).toBeInTheDocument();
+    expect(screen.getByText('Can I contribute or request features?')).toBeInTheDocument();
+    expect(screen.getByText('How does churn prediction work without sending data to a hosted service?')).toBeInTheDocument();
+    expect(screen.getByText('Can I automate actions based on feedback events?')).toBeInTheDocument();
   });
 
   // Expand/collapse behavior
@@ -91,30 +93,29 @@ describe('FAQ', () => {
     expect(isClosed).toBe(true);
   });
 
-  // Content verification (spot check 3)
-  it('question "How accurate is the AI analysis?" has answer mentioning "85-95%"', async () => {
+  // Content verification (spot check 3 OSS answers)
+  it('question "Is it really free?" has answer mentioning "MIT"', async () => {
     const user = userEvent.setup();
     render(<FAQ />);
-    const question = screen.getByText('How accurate is the AI analysis?').closest('button')!;
+    const question = screen.getByText('Is it really free?').closest('button')!;
     await user.click(question);
-    // After opening, the answer should contain 85-95%
-    expect(screen.getByTestId('faq-answer-0')).toHaveTextContent('85-95%');
+    expect(screen.getByTestId('faq-answer-0')).toHaveTextContent('MIT');
   });
 
-  it('question "Is my data secure?" has answer mentioning "SOC 2"', async () => {
+  it('question "Who owns my data?" has answer mentioning "your infrastructure"', async () => {
     const user = userEvent.setup();
     render(<FAQ />);
-    const question = screen.getByText('Is my data secure?').closest('button')!;
+    const question = screen.getByText('Who owns my data?').closest('button')!;
     await user.click(question);
-    expect(screen.getByTestId('faq-answer-1')).toHaveTextContent('SOC 2');
+    expect(screen.getByTestId('faq-answer-6')).toHaveTextContent('your infrastructure');
   });
 
-  it('question "Do you offer a free trial?" has answer mentioning "14-day"', async () => {
+  it('question "What is the license?" has answer mentioning "MIT"', async () => {
     const user = userEvent.setup();
     render(<FAQ />);
-    const question = screen.getByText('Do you offer a free trial?').closest('button')!;
+    const question = screen.getByText('What is the license?').closest('button')!;
     await user.click(question);
-    expect(screen.getByTestId('faq-answer-6')).toHaveTextContent('14-day');
+    expect(screen.getByTestId('faq-answer-4')).toHaveTextContent('MIT');
   });
 
   // Accessibility

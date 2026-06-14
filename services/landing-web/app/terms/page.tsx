@@ -27,121 +27,110 @@ export default function TermsOfServicePage() {
       {/* Content */}
       <main className="max-w-4xl mx-auto px-6 py-16">
         <h1 className="text-4xl font-bold text-foreground mb-4">Terms of Service</h1>
-        <p className="text-muted-foreground mb-12">Last updated: January 25, 2025</p>
+        <p className="text-muted-foreground mb-12">Last updated: June 14, 2026</p>
 
         <div className="prose prose-neutral dark:prose-invert max-w-none space-y-8">
           <section>
             <h2 className="text-2xl font-semibold text-foreground mb-4">1. Acceptance of Terms</h2>
             <p className="text-muted-foreground leading-relaxed">
-              By accessing or using Rereflect&apos;s services, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use our services.
+              By accessing or using Rereflect&apos;s software and associated documentation (&quot;the Software&quot;), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the Software.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">2. Description of Service</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">2. Description of Software</h2>
             <p className="text-muted-foreground leading-relaxed">
-              Rereflect provides an AI-powered customer feedback analysis platform that helps businesses analyze sentiment, detect pain points, extract feature requests, and identify urgent feedback from customer communications.
+              Rereflect is an open-source, self-hosted AI-powered customer feedback analysis platform. The Software is provided free of charge under the MIT License. It helps teams analyze sentiment, detect pain points, extract feature requests, and identify churn risk from customer communications, running on infrastructure you control.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">3. Account Registration</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">To use our services, you must:</p>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">3. MIT License</h2>
+            <p className="text-muted-foreground leading-relaxed">
+              Rereflect is distributed under the MIT License. You are free to use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the Software, subject to the conditions of the MIT License included in the repository. The MIT License governs your rights to the Software; these Terms of Service supplement it for the purpose of this website and related materials.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">4. Self-Hosted Deployment</h2>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              Rereflect is designed to run on infrastructure you own and control. As a self-hosted deployment:
+            </p>
             <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Provide accurate and complete registration information</li>
-              <li>Maintain the security of your account credentials</li>
-              <li>Promptly update any changes to your information</li>
-              <li>Be at least 18 years old or have parental consent</li>
+              <li>You are responsible for securing and maintaining your deployment</li>
+              <li>You are responsible for protecting your users&apos; data</li>
+              <li>You are responsible for complying with applicable data protection laws</li>
+              <li>No data is transmitted to Rereflect project maintainers from your deployment</li>
             </ul>
-            <p className="text-muted-foreground leading-relaxed mt-4">
-              You are responsible for all activities that occur under your account.
-            </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">4. Acceptable Use</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">You agree not to:</p>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">5. Acceptable Use</h2>
+            <p className="text-muted-foreground leading-relaxed mb-4">You agree not to use the Software to:</p>
             <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
               <li>Violate any applicable laws or regulations</li>
               <li>Infringe on intellectual property rights of others</li>
-              <li>Upload malicious code or attempt to hack our systems</li>
-              <li>Use the service to process illegal or harmful content</li>
-              <li>Resell or redistribute our services without permission</li>
-              <li>Interfere with other users&apos; access to the service</li>
+              <li>Process illegal or harmful content</li>
+              <li>Misrepresent the origin or authorship of the Software</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">5. Data Ownership</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">6. Data Ownership</h2>
             <p className="text-muted-foreground leading-relaxed">
-              You retain ownership of all data you upload to our platform. By using our services, you grant us a limited license to process your data solely for the purpose of providing our services to you. We do not sell your data to third parties.
+              Because Rereflect is self-hosted, all data you process remains entirely within your infrastructure. The Rereflect project maintainers have no access to your data and make no claims over it. You retain full ownership and responsibility for all data you process using the Software.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">6. Payment Terms</h2>
-            <p className="text-muted-foreground leading-relaxed mb-4">For paid plans:</p>
-            <ul className="list-disc list-inside text-muted-foreground space-y-2 ml-4">
-              <li>Fees are billed in advance on a monthly or annual basis</li>
-              <li>All fees are non-refundable unless otherwise stated</li>
-              <li>We may change pricing with 30 days notice</li>
-              <li>Failed payments may result in service suspension</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">7. Service Availability</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">7. No Fees or Subscriptions</h2>
             <p className="text-muted-foreground leading-relaxed">
-              We strive to maintain 99.9% uptime but do not guarantee uninterrupted access. We may perform scheduled maintenance with advance notice. We are not liable for any downtime or service interruptions.
+              Rereflect is provided free of charge. There are no subscription tiers, no seat limits, no usage caps, and no payment terms. Third-party costs (such as LLM API usage from providers like OpenAI or Anthropic) are subject to those providers&apos; own terms and pricing and are your responsibility.
             </p>
           </section>
 
           <section>
             <h2 className="text-2xl font-semibold text-foreground mb-4">8. Intellectual Property</h2>
             <p className="text-muted-foreground leading-relaxed">
-              All intellectual property rights in our platform, including software, designs, and trademarks, belong to Rereflect. You may not copy, modify, or reverse engineer any part of our service.
+              The Rereflect source code is MIT licensed. The Rereflect name and branding remain the property of the project maintainers. The MIT License grants you broad rights to modify and distribute the code, but does not grant rights to use the Rereflect name or branding in ways that imply official affiliation without permission.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">9. Limitation of Liability</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">9. Disclaimer of Warranties</h2>
             <p className="text-muted-foreground leading-relaxed">
-              To the maximum extent permitted by law, Rereflect shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of profits, data, or business opportunities.
+              The Software is provided &quot;as is&quot;, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. The project maintainers make no guarantee of accuracy, completeness, or fitness for any particular use case.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">10. Indemnification</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">10. Limitation of Liability</h2>
             <p className="text-muted-foreground leading-relaxed">
-              You agree to indemnify and hold harmless Rereflect from any claims, damages, or expenses arising from your use of our services or violation of these terms.
+              To the maximum extent permitted by law, the Rereflect project maintainers shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of profits, data, or business opportunities arising from use of the Software.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">11. Termination</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">11. Changes to Terms</h2>
             <p className="text-muted-foreground leading-relaxed">
-              Either party may terminate this agreement at any time. Upon termination, your right to use the service ceases immediately. We may retain your data for a reasonable period to comply with legal obligations.
+              We reserve the right to modify these terms at any time. Material changes will be noted in the repository changelog. Continued use of this website after changes constitutes acceptance of the updated terms.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">12. Changes to Terms</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">12. Governing Law</h2>
             <p className="text-muted-foreground leading-relaxed">
-              We reserve the right to modify these terms at any time. We will notify users of significant changes via email or through our platform. Continued use after changes constitutes acceptance of the new terms.
+              These terms shall be governed by and construed in accordance with applicable laws. Any disputes shall be resolved in a competent court of jurisdiction.
             </p>
           </section>
 
           <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">13. Governing Law</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-4">13. Contact</h2>
             <p className="text-muted-foreground leading-relaxed">
-              These terms shall be governed by and construed in accordance with applicable laws. Any disputes shall be resolved through binding arbitration.
-            </p>
-          </section>
-
-          <section>
-            <h2 className="text-2xl font-semibold text-foreground mb-4">14. Contact</h2>
-            <p className="text-muted-foreground leading-relaxed">
-              For questions about these Terms of Service, please contact us at legal@rereflect.com.
+              For questions about these Terms of Service, please open an issue on the{' '}
+              <a href="https://github.com/haqaliz/rereflect" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                GitHub repository
+              </a>.
             </p>
           </section>
         </div>
@@ -150,7 +139,7 @@ export default function TermsOfServicePage() {
       {/* Footer */}
       <footer className="border-t border-border py-8 mt-16">
         <div className="max-w-4xl mx-auto px-6 text-center text-sm text-muted-foreground">
-          <p>2025 Rereflect. All rights reserved.</p>
+          <p>2026 Rereflect. MIT licensed — free to use, fork, and self-host.</p>
         </div>
       </footer>
     </div>

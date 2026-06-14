@@ -15,18 +15,18 @@ vi.mock('@rereflect/ui', () => ({
 }));
 
 describe('Navigation', () => {
-  it('renders nav links: Features, Pricing, Integrations, Blog', () => {
+  it('renders nav links: Features, Open source, Integrations, Blog', () => {
     render(<Navigation isSticky={false} />);
     expect(screen.getByText('Features')).toBeInTheDocument();
-    expect(screen.getByText('Pricing')).toBeInTheDocument();
+    expect(screen.getByText('Open source')).toBeInTheDocument();
     expect(screen.getByText('Integrations')).toBeInTheDocument();
     expect(screen.getByText('Blog')).toBeInTheDocument();
   });
 
-  it('renders Sign In and Get Started buttons', () => {
+  it('renders View on GitHub and Self-host guide CTAs', () => {
     render(<Navigation isSticky={false} />);
-    expect(screen.getByText('Sign In')).toBeInTheDocument();
-    expect(screen.getByText(/Get Started/)).toBeInTheDocument();
+    expect(screen.getAllByText('View on GitHub').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Self-host guide').length).toBeGreaterThan(0);
   });
 
   it('renders Rereflect logo/brand text', () => {
@@ -74,7 +74,7 @@ describe('Navigation', () => {
     const mobileMenu = screen.getByTestId('mobile-menu');
     expect(mobileMenu).toBeInTheDocument();
     expect(mobileMenu).toHaveTextContent('Features');
-    expect(mobileMenu).toHaveTextContent('Pricing');
+    expect(mobileMenu).toHaveTextContent('Open source');
     expect(mobileMenu).toHaveTextContent('Integrations');
     expect(mobileMenu).toHaveTextContent('Blog');
   });

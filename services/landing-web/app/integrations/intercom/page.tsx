@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowRight, ChevronRight, ChevronDown, MessageCircle, RefreshCw, Star, TrendingUp, AlertTriangle, Shield } from 'lucide-react';
+import { ArrowRight, ChevronRight, ChevronDown, MessageCircle, RefreshCw, Star, TrendingUp, AlertTriangle, Github } from 'lucide-react';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { getIntegration } from '@/lib/integrations';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
 export default function IntercomIntegrationPage() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -21,7 +22,6 @@ export default function IntercomIntegrationPage() {
     Star,
     TrendingUp,
     AlertTriangle,
-    Shield,
   };
 
   useEffect(() => {
@@ -187,7 +187,7 @@ export default function IntercomIntegrationPage() {
               href="/#pricing"
               className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
             >
-              Pricing
+              Open source
             </Link>
             <Link
               href="/integrations"
@@ -198,17 +198,12 @@ export default function IntercomIntegrationPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <a href={`${APP_URL}/login`}>
-              <button className="px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-                Sign In
-              </button>
-            </a>
-            <a href={`${APP_URL}/signup`}>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
               <button className="group relative px-5 py-2.5 text-sm font-semibold text-primary-foreground rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02]">
                 <div className="absolute inset-0 bg-gradient-to-r from-primary via-chart-5 to-primary bg-[length:200%_100%] animate-[shimmer_3s_ease-in-out_infinite]" />
                 <span className="relative flex items-center gap-1.5">
-                  Get Started
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Github className="w-4 h-4" />
+                  View on GitHub
                 </span>
               </button>
             </a>
@@ -234,13 +229,13 @@ export default function IntercomIntegrationPage() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <a href={`${APP_URL}/settings/integrations`} className="hero-cta">
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hero-cta">
                 <button className="group relative px-8 py-4 text-base font-semibold text-primary-foreground rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02]">
                   <div className="absolute inset-0 bg-gradient-to-r from-primary to-chart-5" />
                   <div className="absolute inset-0 bg-gradient-to-r from-chart-5 to-primary opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                   <span className="relative flex items-center justify-center gap-2">
-                    Connect Intercom
-                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                    <Github className="w-5 h-5" />
+                    View on GitHub
                   </span>
                 </button>
               </a>
@@ -426,16 +421,24 @@ export default function IntercomIntegrationPage() {
 
             <div className="relative text-center">
               <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-6">
-                Ready to connect Intercom?
+                Self-host and connect Intercom.
               </h2>
               <p className="text-xl text-white/80 mb-10 max-w-2xl mx-auto">
-                Start analyzing support conversations in minutes. No credit card required.
+                Deploy Rereflect on your own infrastructure and start analyzing support conversations in minutes.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <a href={`${APP_URL}/signup`}>
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
                   <button className="group px-8 py-4 text-base font-semibold text-primary bg-white rounded-2xl transition-all duration-300 hover:shadow-2xl hover:shadow-white/25 hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
-                      Start Your Free Trial
+                      <Github className="w-5 h-5" />
+                      View on GitHub
+                    </span>
+                  </button>
+                </a>
+                <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer">
+                  <button className="group px-8 py-4 text-base font-semibold text-white bg-white/10 border-2 border-white/30 rounded-2xl transition-all duration-300 hover:bg-white/20 hover:scale-[1.02]">
+                    <span className="flex items-center justify-center gap-2">
+                      Self-host guide
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </span>
                   </button>
@@ -486,7 +489,7 @@ export default function IntercomIntegrationPage() {
 
           {/* Footer Bottom */}
           <div className="pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
-            <p>2025 Rereflect. All rights reserved.</p>
+            <p>© 2026 Rereflect. All rights reserved.</p>
             <div className="flex gap-6">
               <Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link>
               <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>

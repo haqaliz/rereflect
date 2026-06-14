@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowLeft, ArrowRight, Calendar, Clock, User } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Calendar, Clock, User, Github } from 'lucide-react';
 import { getAllPosts, getPostBySlug, getRelatedPosts } from '@/lib/blog';
 import { Footer } from '@/components/landing/Footer';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
 export function generateStaticParams() {
   return getAllPosts().map((post) => ({ slug: post.slug }));
@@ -66,7 +67,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
               Features
             </Link>
             <Link href="/#pricing" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-              Pricing
+              Open source
             </Link>
             <Link href="/integrations" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
               Integrations
@@ -77,17 +78,12 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
           </div>
 
           <div className="flex items-center gap-3">
-            <a href={`${APP_URL}/login`}>
-              <button className="px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-                Sign In
-              </button>
-            </a>
-            <a href={`${APP_URL}/signup`}>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
               <button className="group relative px-5 py-2.5 text-sm font-semibold text-primary-foreground rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02]">
                 <div className="absolute inset-0 bg-gradient-to-r from-primary via-chart-5 to-primary bg-[length:200%_100%] animate-[shimmer_3s_ease-in-out_infinite]" />
                 <span className="relative flex items-center gap-1.5">
-                  Get Started
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Github className="w-4 h-4" />
+                  View on GitHub
                 </span>
               </button>
             </a>
@@ -208,16 +204,26 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
               Ready to organize your feedback?
             </h3>
             <p className="text-muted-foreground mb-6 max-w-lg mx-auto">
-              Rereflect automatically analyzes customer feedback with AI-powered sentiment analysis, pain point detection, and urgency flagging.
+              Rereflect is free, open-source, and self-hosted. Automatically analyze customer feedback with AI-powered sentiment analysis, pain point detection, and urgency flagging — on your own infrastructure.
             </p>
-            <a href={`${APP_URL}/signup`}>
-              <button className="group px-8 py-3.5 text-base font-semibold text-primary-foreground bg-gradient-to-r from-primary to-chart-5 rounded-2xl transition-all duration-300 hover:shadow-xl hover:shadow-primary/25 hover:scale-[1.02]">
-                <span className="flex items-center justify-center gap-2">
-                  Try Rereflect Free
-                  <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                </span>
-              </button>
-            </a>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+                <button className="group px-8 py-3.5 text-base font-semibold text-primary-foreground bg-gradient-to-r from-primary to-chart-5 rounded-2xl transition-all duration-300 hover:shadow-xl hover:shadow-primary/25 hover:scale-[1.02]">
+                  <span className="flex items-center justify-center gap-2">
+                    <Github className="w-5 h-5" />
+                    View on GitHub
+                  </span>
+                </button>
+              </a>
+              <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer">
+                <button className="group px-8 py-3.5 text-base font-semibold text-foreground border-2 border-border rounded-2xl transition-all duration-300 hover:border-primary/50 hover:bg-card hover:scale-[1.02]">
+                  <span className="flex items-center justify-center gap-2">
+                    Self-host guide
+                    <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+                  </span>
+                </button>
+              </a>
+            </div>
           </div>
 
           {/* Related Posts */}

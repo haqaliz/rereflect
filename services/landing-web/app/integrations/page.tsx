@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowRight, Puzzle, Zap, Clock } from 'lucide-react';
+import { ArrowRight, Puzzle, Zap, Clock, Github } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { EmailIcon } from '@/components/icons/EmailIcon';
@@ -12,7 +12,8 @@ import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { getAvailableIntegrations, getComingSoonIntegrations } from '@/lib/integrations';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
 export default function IntegrationsPage() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -190,17 +191,12 @@ export default function IntegrationsPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <a href={`${APP_URL}/login`}>
-              <button className="px-4 py-2.5 text-sm font-medium text-foreground/80 hover:text-foreground transition-colors">
-                Sign In
-              </button>
-            </a>
-            <a href={`${APP_URL}/signup`}>
+            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
               <button className="group relative px-5 py-2.5 text-sm font-semibold text-primary-foreground rounded-xl overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02]">
                 <div className="absolute inset-0 bg-gradient-to-r from-primary via-chart-5 to-primary bg-[length:200%_100%] animate-[shimmer_3s_ease-in-out_infinite]" />
                 <span className="relative flex items-center gap-1.5">
-                  Get Started
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                  <Github className="w-4 h-4" />
+                  View on GitHub
                 </span>
               </button>
             </a>
@@ -291,7 +287,9 @@ export default function IntegrationsPage() {
             {comingSoonIntegrations.map((integration) => (
               <a
                 key={integration.slug}
-                href={`${APP_URL}/signup`}
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="coming-soon-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-300 hover:shadow-lg"
               >
                 <div className="relative">
@@ -303,7 +301,7 @@ export default function IntegrationsPage() {
                     {integration.tagline}
                   </p>
                   <div className="flex items-center gap-2 text-primary font-semibold group-hover:gap-3 transition-all">
-                    Get notified
+                    View on GitHub
                     <ArrowRight className="w-4 h-4" />
                   </div>
                 </div>
@@ -325,16 +323,24 @@ export default function IntegrationsPage() {
 
             <div className="relative text-center">
               <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-6">
-                Ready to connect your tools?
+                Self-host and connect your tools.
               </h2>
               <p className="text-xl text-white/80 mb-10 max-w-2xl mx-auto">
-                Start analyzing feedback from every channel in minutes.
+                Deploy Rereflect on your own infrastructure and connect every feedback channel in minutes.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <a href={`${APP_URL}/signup`}>
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
                   <button className="group px-8 py-4 text-base font-semibold text-primary bg-white rounded-2xl transition-all duration-300 hover:shadow-2xl hover:shadow-white/25 hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
-                      Start Your Free Trial
+                      <Github className="w-5 h-5" />
+                      View on GitHub
+                    </span>
+                  </button>
+                </a>
+                <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer">
+                  <button className="group px-8 py-4 text-base font-semibold text-white bg-white/10 border-2 border-white/30 rounded-2xl transition-all duration-300 hover:bg-white/20 hover:scale-[1.02]">
+                    <span className="flex items-center justify-center gap-2">
+                      Self-host guide
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </span>
                   </button>
@@ -370,7 +376,7 @@ export default function IntegrationsPage() {
                 </li>
                 <li>
                   <Link href="/#pricing" className="hover:text-foreground transition-colors">
-                    Pricing
+                    Open source
                   </Link>
                 </li>
                 <li>
@@ -383,7 +389,7 @@ export default function IntegrationsPage() {
           </div>
 
           <div className="pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
-            <p>2025 Rereflect. All rights reserved.</p>
+            <p>© 2026 Rereflect. All rights reserved.</p>
             <div className="flex gap-6">
               <Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link>
               <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>

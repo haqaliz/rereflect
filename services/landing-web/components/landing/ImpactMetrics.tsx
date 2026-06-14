@@ -29,7 +29,7 @@ export default function ImpactMetrics() {
             <span className="text-sm font-semibold text-primary">Real Impact</span>
           </div>
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Before vs. After Rereflect
+            What changes when feedback is organized
           </h2>
         </div>
 

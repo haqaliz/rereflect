@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { TrendingUp, Zap, Shield, ShieldCheck, ArrowRight, Sparkles, ChevronRight, Check } from 'lucide-react';
+import { Shield, ArrowRight, Sparkles, ChevronRight, Check, Github, Key, Server } from 'lucide-react';
 import { Navigation } from '@/components/landing/Navigation';
 import { Footer } from '@/components/landing/Footer';
 import { IntegrationBar } from '@/components/landing/IntegrationBar';
@@ -10,7 +10,8 @@ import HeroDemo from '@/components/landing/HeroDemo';
 import ImpactMetrics from '@/components/landing/ImpactMetrics';
 import FAQ from '@/components/landing/FAQ';
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
 
 export default function Home() {
@@ -259,7 +260,7 @@ export default function Home() {
             <div className="text-center lg:text-left">
               <div className="hero-badge inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-8">
                 <Sparkles className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold text-primary">AI-Powered Feedback Intelligence</span>
+                <span className="text-sm font-semibold text-primary">Open-Source Feedback Intelligence</span>
               </div>
 
               <h1 className="hero-title text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-foreground mb-6 leading-[1.1]">
@@ -274,20 +275,20 @@ export default function Home() {
               </p>
 
               <div className="hero-cta flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                <a href={`${APP_URL}/signup`}>
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
                   <button className="group relative px-8 py-4 text-base font-semibold text-primary-foreground rounded-2xl overflow-hidden transition-all duration-300 hover:shadow-xl hover:shadow-primary/30 hover:scale-[1.02]">
                     <div className="absolute inset-0 bg-gradient-to-r from-primary to-chart-5" />
                     <div className="absolute inset-0 bg-gradient-to-r from-chart-5 to-primary opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                     <span className="relative flex items-center justify-center gap-2">
-                      Start Free Trial
-                      <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                      <Github className="w-5 h-5" />
+                      View on GitHub
                     </span>
                   </button>
                 </a>
-                <a href={`${APP_URL}/login`}>
+                <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer">
                   <button className="group px-8 py-4 text-base font-semibold text-foreground bg-transparent border-2 border-foreground/20 rounded-2xl transition-all duration-300 hover:border-primary/50 hover:bg-card hover:shadow-lg hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
-                      View Demo
+                      Self-host guide
                       <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                     </span>
                   </button>
@@ -296,28 +297,28 @@ export default function Home() {
 
               <div className="hero-trust mt-12 flex flex-wrap items-center justify-center lg:justify-start gap-6 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-success-bg flex items-center justify-center">
-                    <Shield className="w-3 h-3 text-success-text" />
-                  </div>
-                  <span>SOC 2 Compliant</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded-full bg-success-bg flex items-center justify-center">
-                    <ShieldCheck className="w-3 h-3 text-success-text" />
-                  </div>
-                  <span>GDPR Compliant</span>
-                </div>
-                <div className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Zap className="w-3 h-3 text-primary" />
+                    <Github className="w-3 h-3 text-primary" />
                   </div>
-                  <span>Real-time Analysis</span>
+                  <span>100% Open Source (MIT)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-success-bg flex items-center justify-center">
+                    <Server className="w-3 h-3 text-success-text" />
+                  </div>
+                  <span>Self-Hosted — Your Data</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-full bg-accent/10 flex items-center justify-center">
-                    <TrendingUp className="w-3 h-3 text-accent-foreground" />
+                    <Key className="w-3 h-3 text-accent-foreground" />
                   </div>
-                  <span>98% Accuracy</span>
+                  <span>Bring Your Own LLM Key</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-5 h-5 rounded-full bg-success-bg flex items-center justify-center">
+                    <Shield className="w-3 h-3 text-success-text" />
+                  </div>
+                  <span>No Vendor Lock-In</span>
                 </div>
               </div>
             </div>
@@ -337,20 +338,20 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-primary to-chart-5 bg-clip-text text-transparent">10K+</div>
-              <div className="text-sm text-muted-foreground mt-2">Insights Generated</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-primary to-chart-5 bg-clip-text text-transparent">$0</div>
+              <div className="text-sm text-muted-foreground mt-2">Free forever, self-hosted</div>
             </div>
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-5 to-accent bg-clip-text text-transparent">120+</div>
-              <div className="text-sm text-muted-foreground mt-2">Features Shipped</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-5 to-accent bg-clip-text text-transparent">100%</div>
+              <div className="text-sm text-muted-foreground mt-2">Open source (MIT)</div>
             </div>
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-accent to-chart-3 bg-clip-text text-transparent">60%</div>
-              <div className="text-sm text-muted-foreground mt-2">Avg Churn Reduction</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-accent to-chart-3 bg-clip-text text-transparent">6+</div>
+              <div className="text-sm text-muted-foreground mt-2">Built-in integrations</div>
             </div>
             <div className="stat-item text-center">
-              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-3 to-primary bg-clip-text text-transparent">4.2</div>
-              <div className="text-sm text-muted-foreground mt-2">Hours Saved Per Week</div>
+              <div className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-chart-3 to-primary bg-clip-text text-transparent">BYOK</div>
+              <div className="text-sm text-muted-foreground mt-2">Bring your own LLM key</div>
             </div>
           </div>
         </div>
@@ -372,175 +373,61 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-16">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">Simple Pricing</span>
+              <Github className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold text-primary">Open Source</span>
             </div>
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              Choose the plan that&apos;s
-              <span className="block text-primary">right for you</span>
+              Free and open source.
+              <span className="block text-primary">Forever.</span>
             </h2>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Start free and scale as you grow. No hidden fees, no surprises.
+              Self-host Rereflect with every feature unlocked. No tiers, no seats, no usage caps — just clone, deploy, and own your data.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
-            {/* Free Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border border-border p-6 transition-all duration-300 hover:shadow-lg hover:border-border/80">
-              <div className="mb-5">
-                <h3 className="text-xl font-bold text-foreground mb-2">Free</h3>
-                <p className="text-muted-foreground text-sm">For individuals getting started</p>
-              </div>
-              <div className="mb-5">
-                <span className="text-4xl font-bold text-foreground">$0</span>
-                <span className="text-muted-foreground">/month</span>
-              </div>
-              <ul className="space-y-2.5 mb-6">
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>250 feedback/month</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>2 team members</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Basic sentiment analysis</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>CSV import</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Email support</span>
-                </li>
-              </ul>
-              <a href={`${APP_URL}/signup`} className="block">
-                <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-                  Get Started Free
-                </button>
-              </a>
-            </div>
-
-            {/* Pro Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border-2 border-primary p-6 transition-all duration-300 hover:shadow-xl hover:shadow-primary/20 scale-[1.02]">
+          <div className="max-w-2xl mx-auto">
+            <div className="pricing-card relative bg-card rounded-3xl border-2 border-primary p-8 md:p-10 transition-all duration-300 hover:shadow-xl hover:shadow-primary/20">
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-primary to-chart-5 rounded-full">
-                <span className="text-xs font-semibold text-white">Most Popular</span>
+                <span className="text-xs font-semibold text-white">Everything included</span>
               </div>
-              <div className="mb-5">
-                <h3 className="text-xl font-bold text-foreground mb-2">Pro</h3>
-                <p className="text-muted-foreground text-sm">For growing teams</p>
+              <div className="text-center mb-6">
+                <h3 className="text-2xl font-bold text-foreground mb-2">Self-Hosted</h3>
+                <p className="text-muted-foreground text-sm">Run it on your own infrastructure</p>
               </div>
-              <div className="mb-5">
-                <span className="text-4xl font-bold text-foreground">$29</span>
-                <span className="text-muted-foreground">/month</span>
+              <div className="text-center mb-8">
+                <span className="text-5xl font-bold text-foreground">$0</span>
+                <span className="text-muted-foreground"> / forever</span>
               </div>
-              <ul className="space-y-2.5 mb-6">
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>2,500 feedback/month</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>10 team members</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Slack, Intercom & more</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Webhooks</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Priority support</span>
-                </li>
+              <ul className="grid sm:grid-cols-2 gap-3 mb-8">
+                {[
+                  'All features unlocked',
+                  'Unlimited feedback & team members',
+                  'Sentiment, pain points & feature requests',
+                  '30-day churn prediction & health scores',
+                  'AI Copilot — ask your feedback anything',
+                  '6+ integrations: Slack, Intercom, Linear…',
+                  'Bring your own LLM key — or run free on VADER',
+                  'MIT licensed — fork it, change it, own it',
+                ].map((feat) => (
+                  <li key={feat} className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-success-text shrink-0 mt-0.5" />
+                    <span>{feat}</span>
+                  </li>
+                ))}
               </ul>
-              <a href={`${APP_URL}/signup`} className="block">
-                <button className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-primary to-chart-5 text-white font-semibold hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300">
-                  Start 14-Day Trial
-                </button>
-              </a>
-            </div>
-
-            {/* Business Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border border-border p-6 transition-all duration-300 hover:shadow-lg hover:border-border/80">
-              <div className="mb-5">
-                <h3 className="text-xl font-bold text-foreground mb-2">Business</h3>
-                <p className="text-muted-foreground text-sm">For scaling companies</p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="block flex-1">
+                  <button className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-primary to-chart-5 text-white font-semibold hover:shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all duration-300 flex items-center justify-center gap-2">
+                    <Github className="w-5 h-5" />
+                    View on GitHub
+                  </button>
+                </a>
+                <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer" className="block flex-1">
+                  <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
+                    Self-host guide
+                  </button>
+                </a>
               </div>
-              <div className="mb-5">
-                <span className="text-4xl font-bold text-foreground">$99</span>
-                <span className="text-muted-foreground">/month</span>
-              </div>
-              <ul className="space-y-2.5 mb-6">
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>25,000 feedback/month</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>25 team members</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>API access</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Advanced analytics</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Custom categories</span>
-                </li>
-              </ul>
-              <a href={`${APP_URL}/signup`} className="block">
-                <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-                  Start 14-Day Trial
-                </button>
-              </a>
-            </div>
-
-            {/* Enterprise Plan */}
-            <div className="pricing-card relative bg-card rounded-3xl border border-border p-6 transition-all duration-300 hover:shadow-lg hover:border-border/80">
-              <div className="mb-5">
-                <h3 className="text-xl font-bold text-foreground mb-2">Enterprise</h3>
-                <p className="text-muted-foreground text-sm">Custom solutions</p>
-              </div>
-              <div className="mb-5">
-                <span className="text-4xl font-bold text-foreground">Custom</span>
-              </div>
-              <ul className="space-y-2.5 mb-6">
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Unlimited feedback</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Unlimited team members</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>SSO / SAML</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>Dedicated support</span>
-                </li>
-                <li className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                  <Check className="w-4 h-4 text-success-text shrink-0" />
-                  <span>SLA guarantee</span>
-                </li>
-              </ul>
-              <a href="mailto:sales@rereflect.com" className="block">
-                <button className="w-full py-3 px-6 rounded-xl border-2 border-border text-foreground font-semibold hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-                  Contact Sales
-                </button>
-              </a>
             </div>
           </div>
         </div>
@@ -564,16 +451,24 @@ export default function Home() {
 
             <div className="relative text-center">
               <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-6">
-                Ready to transform your feedback?
+                Own your customer feedback stack.
               </h2>
               <p className="text-xl text-white/80 mb-10 max-w-2xl mx-auto">
-                Join 500+ companies already making better decisions with AI-powered customer insights.
+                Deploy Rereflect on your own infrastructure in minutes. Your data, your keys, your rules — and the whole thing is open source.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <a href={`${APP_URL}/signup`}>
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
                   <button className="group px-8 py-4 text-base font-semibold text-primary bg-white rounded-2xl transition-all duration-300 hover:shadow-2xl hover:shadow-white/25 hover:scale-[1.02]">
                     <span className="flex items-center justify-center gap-2">
-                      Start Your Free Trial
+                      <Github className="w-5 h-5" />
+                      View on GitHub
+                    </span>
+                  </button>
+                </a>
+                <a href={SELFHOST_URL} target="_blank" rel="noopener noreferrer">
+                  <button className="group px-8 py-4 text-base font-semibold text-white bg-white/10 border-2 border-white/30 rounded-2xl transition-all duration-300 hover:bg-white/20 hover:scale-[1.02]">
+                    <span className="flex items-center justify-center gap-2">
+                      Self-host guide
                       <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                     </span>
                   </button>

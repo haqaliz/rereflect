@@ -1,8 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
 
 import {
   AlertTriangle,
@@ -18,8 +16,9 @@ import {
   Users,
   Brain,
   Sparkles,
-  ShieldCheck,
+  Server,
   Zap,
+  Github,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -171,10 +170,10 @@ const smallCards: {
   },
   {
     id: 'card-data-privacy',
-    icon: ShieldCheck,
-    title: 'Data Privacy & GDPR',
+    icon: Server,
+    title: 'Self-Hosted & Private',
     description:
-      'Export your data anytime. Request account deletion with a 30-day grace period. Full GDPR compliance with data portability and right to erasure.',
+      'Your data never leaves your infrastructure. No SaaS vendor has access. Export data anytime. Run fully air-gapped if needed.',
     animation: 'pulse',
   },
   {
@@ -294,10 +293,13 @@ export default function BentoFeatures() {
               ))}
             </ul>
             <a
-              href={`${APP_URL}/signup`}
-              className="text-primary hover:underline text-sm font-medium w-fit"
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline text-sm font-medium w-fit flex items-center gap-1.5"
             >
-              Try it free &rarr;
+              <Github className="w-4 h-4" />
+              View on GitHub &rarr;
             </a>
           </div>
 
