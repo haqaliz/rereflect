@@ -167,21 +167,14 @@ export function CommandBar({ open, onClose }: CommandBarProps) {
           />
         </div>
 
-        {/* Plan gating: upgrade CTA when limit reached */}
+        {/* Daily limit reached notice */}
         {limitReached && (
           <div
             data-testid="upgrade-cta"
             className="px-4 py-3 bg-destructive/10 border-b border-border"
           >
             <p className="text-sm text-destructive font-medium">
-              You&apos;ve used your daily query allowance.{' '}
-              <button
-                onClick={() => router.push('/settings/billing')}
-                className="underline hover:no-underline"
-              >
-                Upgrade to Pro
-              </button>{' '}
-              for unlimited queries.
+              You&apos;ve used your daily query allowance. Limit resets tomorrow.
             </p>
           </div>
         )}

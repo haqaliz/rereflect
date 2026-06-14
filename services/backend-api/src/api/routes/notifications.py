@@ -485,10 +485,11 @@ def update_retention(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Update per-type notification retention days. Triggers Stripe billing for extra days beyond 30."""
-    from src.models.subscription import Subscription
-    from src.services.stripe_service import get_stripe_service
+    """Update per-type notification retention days.
 
+    SELF-HOSTED OSS NOTE (B3): Stripe retention add-on billing has been
+    removed. Retention is now unlimited — no extra charge applies.
+    """
     for item in body.retentions:
         pref = db.query(UserAlertPreference).filter(
             UserAlertPreference.user_id == current_user.id,
@@ -506,25 +507,6 @@ def update_retention(
             db.add(pref)
 
     db.commit()
-
-    # Compute total extra days across all types for Stripe billing
-    all_prefs = db.query(UserAlertPreference).filter(
-        UserAlertPreference.user_id == current_user.id,
-    ).all()
-    total_extra = sum(max(0, (p.retention_days or 30) - 30) for p in all_prefs)
-
-    # Manage Stripe add-on if org has an active subscription
-    subscription = db.query(Subscription).filter(
-        Subscription.organization_id == current_user.organization_id,
-        Subscription.status.in_(["active", "trialing"]),
-    ).first()
-
-    if subscription and subscription.stripe_subscription_id:
-        stripe_service = get_stripe_service()
-        stripe_service.manage_retention_addon(
-            subscription_id=subscription.stripe_subscription_id,
-            extra_days=total_extra,
-        )
 
     return _build_retention_response(current_user, db)
 

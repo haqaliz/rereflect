@@ -2,18 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
-// Mock next/navigation
-const mockPush = vi.fn();
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
-}));
-
-// Mock AuthContext
-const mockUseAuth = vi.fn();
-vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => mockUseAuth(),
-}));
-
 // Mock AI settings API
 vi.mock('@/lib/api/ai-settings', () => ({
   aiSettingsAPI: {
@@ -40,17 +28,6 @@ vi.mock('recharts', () => ({
 
 import { aiSettingsAPI } from '@/lib/api/ai-settings';
 import { AISettingsUsage } from '@/components/settings/AISettingsUsage';
-
-const proUser = {
-  id: 1,
-  email: 'user@test.com',
-  role: 'owner',
-  plan: 'pro',
-  organization_id: 1,
-  is_system_admin: false,
-};
-
-const freeUser = { ...proUser, plan: 'free' };
 
 const mockUsage = {
   month: '2026-02',
@@ -79,81 +56,62 @@ describe('AISettingsUsage', () => {
     vi.mocked(aiSettingsAPI.getUsageDaily).mockResolvedValue(mockDaily);
   });
 
-  describe('Pro plan users', () => {
-    beforeEach(() => {
-      mockUseAuth.mockReturnValue({ user: proUser, isLoading: false, isAuthenticated: true });
-    });
-
-    it('shows stat cards with total tokens', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByText(/125,400|125400/)).toBeInTheDocument();
-      });
-    });
-
-    it('shows stat cards with total requests', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByText(/342/)).toBeInTheDocument();
-      });
-    });
-
-    it('shows estimated cost stat card', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        // $1.23 (123 cents)
-        expect(screen.getByText(/\$1\.23/)).toBeInTheDocument();
-      });
-    });
-
-    it('renders daily bar chart', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByTestId('bar-chart')).toBeInTheDocument();
-      });
-    });
-
-    it('shows provider breakdown table', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByText('openai')).toBeInTheDocument();
-        expect(screen.getByText('anthropic')).toBeInTheDocument();
-      });
-    });
-
-    it('shows fallback count', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByText(/3.*fallback|fallback.*3/i)).toBeInTheDocument();
-      });
-    });
-
-    it('shows provider token breakdown in table', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByText(/85,000|85000/)).toBeInTheDocument();
-        expect(screen.getByText(/40,400|40400/)).toBeInTheDocument();
-      });
+  it('shows stat cards with total tokens', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(screen.getByText(/125,400|125400/)).toBeInTheDocument();
     });
   });
 
-  describe('Free plan users', () => {
-    beforeEach(() => {
-      mockUseAuth.mockReturnValue({ user: freeUser, isLoading: false, isAuthenticated: true });
+  it('shows stat cards with total requests', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(screen.getByText(/342/)).toBeInTheDocument();
     });
+  });
 
-    it('shows upgrade prompt for free plan users', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(screen.getByText(/upgrade/i)).toBeInTheDocument();
-      });
+  it('shows estimated cost stat card', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      // $1.23 (123 cents)
+      expect(screen.getByText(/\$1\.23/)).toBeInTheDocument();
     });
+  });
 
-    it('does not load usage data for free plan users', async () => {
-      render(<AISettingsUsage />);
-      await waitFor(() => {
-        expect(aiSettingsAPI.getUsage).not.toHaveBeenCalled();
-      });
+  it('renders daily bar chart', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('bar-chart')).toBeInTheDocument();
+    });
+  });
+
+  it('shows provider breakdown table', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(screen.getByText('openai')).toBeInTheDocument();
+      expect(screen.getByText('anthropic')).toBeInTheDocument();
+    });
+  });
+
+  it('shows fallback count', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(screen.getByText(/3.*fallback|fallback.*3/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows provider token breakdown in table', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(screen.getByText(/85,000|85000/)).toBeInTheDocument();
+      expect(screen.getByText(/40,400|40400/)).toBeInTheDocument();
+    });
+  });
+
+  it('always loads usage data (no plan gate)', async () => {
+    render(<AISettingsUsage />);
+    await waitFor(() => {
+      expect(aiSettingsAPI.getUsage).toHaveBeenCalled();
     });
   });
 });

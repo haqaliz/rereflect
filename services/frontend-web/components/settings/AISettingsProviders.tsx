@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
-import { Check, X, Key, Lock, Loader2, FlaskConical } from 'lucide-react';
+import { Check, X, Key, Loader2, FlaskConical } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   aiSettingsAPI,
@@ -35,8 +35,6 @@ const TASK_TYPES: Array<{ key: keyof AISettings['models']; label: string }> = [
   { key: 'analysis', label: 'Analysis' },
   { key: 'insights', label: 'Insights' },
 ];
-
-const PLAN_HIERARCHY: Record<string, number> = { free: 0, pro: 1, business: 2, enterprise: 3 };
 
 interface AISettingsProvidersProps {
   settings: AISettings;
@@ -175,7 +173,6 @@ interface ModelSelectorProps {
   currentModel: string;
   models: AIModel[];
   isAdminOrOwner: boolean;
-  userPlan: string;
   onModelChange: (taskKey: keyof AISettings['models'], modelId: string) => void;
 }
 
@@ -185,14 +182,12 @@ function ModelSelector({
   currentModel,
   models,
   isAdminOrOwner,
-  userPlan,
   onModelChange,
 }: ModelSelectorProps) {
   const [testResult, setTestResult] = useState<AIModelTestResponse | null>(null);
   const [testing, setTesting] = useState(false);
 
   const currentModelData = models.find(m => m.model_id === currentModel);
-  const userPlanLevel = PLAN_HIERARCHY[userPlan] ?? 0;
 
   const handleTest = async () => {
     if (!currentModelData) return;
@@ -228,32 +223,18 @@ function ModelSelector({
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
-            {models.map((model) => {
-              const modelPlanLevel = PLAN_HIERARCHY[model.min_plan] ?? 0;
-              const isLocked = modelPlanLevel > userPlanLevel;
-              return (
-                <SelectItem
-                  key={model.model_id}
-                  value={model.model_id}
-                  disabled={isLocked}
-                >
-                  <div className="flex items-center gap-1.5">
-                    {isLocked ? (
-                      <Lock className="w-3 h-3 text-muted-foreground" />
-                    ) : (
-                      <TierBadge tier={model.tier} />
-                    )}
-                    <span>{model.display_name}</span>
-                    <span className="text-xs text-muted-foreground capitalize">({model.provider})</span>
-                    {isLocked && (
-                      <span className="text-xs text-muted-foreground ml-1">
-                        {model.min_plan}+
-                      </span>
-                    )}
-                  </div>
-                </SelectItem>
-              );
-            })}
+            {models.map((model) => (
+              <SelectItem
+                key={model.model_id}
+                value={model.model_id}
+              >
+                <div className="flex items-center gap-1.5">
+                  <TierBadge tier={model.tier} />
+                  <span>{model.display_name}</span>
+                  <span className="text-xs text-muted-foreground capitalize">({model.provider})</span>
+                </div>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
 
@@ -304,7 +285,6 @@ export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersP
 
   const isOwner = user?.role === 'owner';
   const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
-  const userPlan = user?.plan ?? 'free';
 
   useEffect(() => {
     aiSettingsAPI.listKeys()
@@ -353,7 +333,7 @@ export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersP
         <CardHeader className="border-b border-border">
           <CardTitle>API Keys</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            By default, Rereflect uses its own API keys. Bring your own key (BYOK) for direct billing and higher limits.
+            AI features require your own API key. Add a key from OpenAI, Anthropic, or Google to activate AI-powered processing.
           </p>
         </CardHeader>
         <CardContent className="pt-4 space-y-3">
@@ -378,7 +358,7 @@ export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersP
         <CardHeader className="border-b border-border">
           <CardTitle>Model Selection</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
-            Choose which AI model to use per task type. Available models depend on your plan.
+            Choose which AI model to use per task type.
           </p>
           <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5"><TierBadge tier="cheap" /> Budget-friendly</span>
@@ -395,7 +375,6 @@ export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersP
               currentModel={settings.models[key]}
               models={models}
               isAdminOrOwner={isAdminOrOwner}
-              userPlan={userPlan}
               onModelChange={handleModelChange}
             />
           ))}

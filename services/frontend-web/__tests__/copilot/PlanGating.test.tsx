@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -49,7 +49,6 @@ import { copilotAPI } from '@/lib/api/copilot';
 import { conversationsAPI } from '@/lib/api/conversations';
 import { CommandBar } from '@/components/copilot/CommandBar';
 import { ChatArea } from '@/components/copilot/ChatArea';
-import { UpgradeCTA } from '@/components/copilot/UpgradeCTA';
 
 const mockedGetUsage = copilotAPI.getCopilotUsage as ReturnType<typeof vi.fn>;
 const mockedGetConversation = conversationsAPI.getConversation as ReturnType<typeof vi.fn>;
@@ -131,13 +130,15 @@ describe('CommandBar — plan gating', () => {
     expect(input).toBeDisabled();
   });
 
-  it('shows "Upgrade to Pro" link in upgrade CTA', async () => {
+  it('shows limit reset message (no upgrade link) in limit reached CTA', async () => {
     mockUseAuth.mockReturnValue({ user: freeUser });
     mockedGetUsage.mockResolvedValue(freeUsageAtLimit);
     render(<CommandBar open={true} onClose={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByText(/upgrade to pro/i)).toBeInTheDocument();
+      expect(screen.getByTestId('upgrade-cta')).toBeInTheDocument();
+      expect(screen.getByTestId('upgrade-cta')).toHaveTextContent(/limit resets tomorrow/i);
     });
+    expect(screen.queryByText(/upgrade to pro/i)).not.toBeInTheDocument();
   });
 
   it('does not show remaining queries for Pro tier', async () => {
@@ -177,6 +178,18 @@ describe('ChatArea — token budget gating', () => {
     });
   });
 
+  it('token budget banner shows informational message without upgrade link', async () => {
+    mockUseAuth.mockReturnValue({ user: proUser });
+    render(<ChatArea conversationId={'test-uuid-1'} copilotUsage={proUsageBudgetExceeded} />);
+    await waitFor(() => {
+      const banner = screen.getByTestId('token-budget-banner');
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveTextContent(/monthly token budget reached/i);
+    });
+    // Should NOT have an upgrade button navigating to billing
+    expect(screen.queryByRole('button', { name: /upgrade/i })).not.toBeInTheDocument();
+  });
+
   it('disables chat input when token budget is exceeded', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
     render(<ChatArea conversationId={'test-uuid-1'} copilotUsage={proUsageBudgetExceeded} />);
@@ -200,41 +213,6 @@ describe('ChatArea — token budget gating', () => {
     await waitFor(() => {
       expect(screen.getByTestId('chat-input')).not.toBeDisabled();
     });
-  });
-});
-
-// ─── UpgradeCTA component ──────────────────────────────────────────────────────
-
-describe('UpgradeCTA', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockUseAuth.mockReturnValue({ user: freeUser });
-  });
-
-  it('renders the upgrade CTA with a message', () => {
-    render(<UpgradeCTA message="Upgrade to unlock unlimited queries" variant="inline" />);
-    expect(screen.getByTestId('upgrade-cta-component')).toBeInTheDocument();
-    expect(screen.getByText('Upgrade to unlock unlimited queries')).toBeInTheDocument();
-  });
-
-  it('renders an Upgrade button linking to /settings/billing', () => {
-    render(<UpgradeCTA message="Upgrade for more" variant="inline" />);
-    const btn = screen.getByRole('button', { name: /upgrade/i });
-    expect(btn).toBeInTheDocument();
-    fireEvent.click(btn);
-    expect(mockPush).toHaveBeenCalledWith('/settings/billing');
-  });
-
-  it('renders banner variant with distinct styling', () => {
-    render(<UpgradeCTA message="Monthly token budget reached" variant="banner" />);
-    const el = screen.getByTestId('upgrade-cta-component');
-    expect(el).toHaveAttribute('data-variant', 'banner');
-  });
-
-  it('renders inline variant', () => {
-    render(<UpgradeCTA message="Inline message" variant="inline" />);
-    const el = screen.getByTestId('upgrade-cta-component');
-    expect(el).toHaveAttribute('data-variant', 'inline');
   });
 });
 

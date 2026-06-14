@@ -281,29 +281,6 @@ function LLMSection({ profile, email, hasLLMFeature, hasActionsFeature, onAnalys
   const urgencyStyle = urgency ? getUrgencyStyle(urgency) : null;
   const UrgencyIcon = urgencyStyle?.icon;
 
-  if (!hasLLMFeature) {
-    return (
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Brain className="w-4 h-4 text-[var(--chart-5)]" />
-            AI Analysis
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-4">
-            <p className="text-sm text-muted-foreground mb-3">
-              AI-powered insights require a Pro plan or higher.
-            </p>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/settings/billing">Upgrade Plan</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
   if (!hasAnalysis) {
     return (
       <Card>

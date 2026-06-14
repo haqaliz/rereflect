@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, DateTime, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -20,7 +20,6 @@ class UsageRecord(Base):
 
     # Overage tracking
     overage_feedback = Column(Integer, default=0, nullable=False)
-    overage_reported_to_stripe = Column(Boolean, default=False)
 
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

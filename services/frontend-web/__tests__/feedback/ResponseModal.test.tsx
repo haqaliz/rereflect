@@ -421,15 +421,15 @@ describe('ResponseModal - usage counter', () => {
   });
 });
 
-describe('ResponseModal - free plan upgrade CTA', () => {
+describe('ResponseModal - all plans see the modal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseAuth.mockReturnValue({ user: freeUser });
     mockSuggest.mockResolvedValue({ template: null, score: 0 });
-    mockUsage.mockResolvedValue({ ai_responses_generated: 0, monthly_limit: 0, templates_used: 0, responses_sent: 0 });
+    mockUsage.mockResolvedValue({ ai_responses_generated: 0, monthly_limit: 50, templates_used: 0, responses_sent: 0 });
   });
 
-  it('shows upgrade CTA for free plan users', async () => {
+  it('shows main modal content for free plan users (no upgrade CTA)', async () => {
+    mockUseAuth.mockReturnValue({ user: freeUser });
     render(
       <ResponseModal
         open={true}
@@ -439,26 +439,13 @@ describe('ResponseModal - free plan upgrade CTA', () => {
       />
     );
     await waitFor(() => {
-      expect(screen.getByTestId('upgrade-cta')).toBeInTheDocument();
+      expect(screen.getByText('Respond to Feedback')).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('upgrade-cta')).not.toBeInTheDocument();
+    expect(screen.queryByText(/upgrade to pro/i)).not.toBeInTheDocument();
   });
 
-  it('upgrade CTA contains link to billing page', async () => {
-    render(
-      <ResponseModal
-        open={true}
-        onClose={vi.fn()}
-        feedback={mockFeedback as any}
-        connectedChannels={[]}
-      />
-    );
-    await waitFor(() => {
-      expect(screen.getByTestId('upgrade-cta')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/upgrade to pro/i)).toBeInTheDocument();
-  });
-
-  it('does not show upgrade CTA for pro plan users', async () => {
+  it('shows main modal content for pro plan users', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
     mockUsage.mockResolvedValue(mockUsageData);
     render(

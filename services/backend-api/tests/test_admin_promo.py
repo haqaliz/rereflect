@@ -277,162 +277,102 @@ def regular_headers(regular_user: User) -> dict:
 
 
 class TestAdminPromoListRoute:
-    """Tests for GET /api/v1/admin/promo-codes."""
+    """Tests for GET /api/v1/admin/promo-codes.
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
+    OSS pivot (B3): admin_promo router removed. All route tests expect 404.
+    """
+
     def test_list_promo_codes_success(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should return list of promo codes from Stripe."""
-        mock_service = MagicMock()
-        mock_service.list_promotion_codes.return_value = [
-            MagicMock(**_make_stripe_promo_mock()),
-        ]
-        mock_get_service.return_value = mock_service
-
+        """B3: /admin/promo-codes route removed — returns 404."""
         response = client.get("/api/v1/admin/promo-codes", headers=system_admin_headers)
-        assert response.status_code == 200
-        data = response.json()
-        assert "promo_codes" in data
-        assert len(data["promo_codes"]) == 1
-        assert data["promo_codes"][0]["code"] == "EARLYPRO3"
+        assert response.status_code == 404
 
     def test_list_requires_system_admin(
         self, client: TestClient, regular_headers: dict
     ):
-        """Should return 403 for non-system-admin users."""
+        """B3: /admin/promo-codes route removed — returns 404 for any user."""
         response = client.get("/api/v1/admin/promo-codes", headers=regular_headers)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 class TestAdminPromoDetailRoute:
-    """Tests for GET /api/v1/admin/promo-codes/{id}."""
+    """Tests for GET /api/v1/admin/promo-codes/{id}.
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
+    OSS pivot (B3): admin_promo router removed. All route tests expect 404.
+    """
+
     def test_get_promo_code_detail(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict,
-        db: Session, test_organization: Organization,
+        self, client: TestClient, system_admin_headers: dict,
     ):
-        """Should return promo code detail with local redemptions."""
-        # Set promo_code_used on the org so it shows up in redemptions
-        test_organization.promo_code_used = "EARLYPRO3"
-        db.commit()
-
-        mock_service = MagicMock()
-        mock_promo = MagicMock(**_make_stripe_promo_mock())
-        mock_service.get_promotion_code.return_value = mock_promo
-        mock_get_service.return_value = mock_service
-
+        """B3: /admin/promo-codes/{id} route removed — returns 404."""
         response = client.get("/api/v1/admin/promo-codes/promo_abc123", headers=system_admin_headers)
-        assert response.status_code == 200
-        data = response.json()
-        assert data["id"] == "promo_abc123"
-        assert data["code"] == "EARLYPRO3"
-        assert "redeemed_by" in data
-        assert len(data["redeemed_by"]) == 1
-        assert data["redeemed_by"][0]["organization_name"] == "Test Company"
+        assert response.status_code == 404
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
     def test_get_promo_code_not_found(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should return 404 when promo code not found in Stripe."""
-        mock_service = MagicMock()
-        mock_service.get_promotion_code.return_value = None
-        mock_get_service.return_value = mock_service
-
+        """B3: Route removed — returns 404."""
         response = client.get("/api/v1/admin/promo-codes/promo_nonexistent", headers=system_admin_headers)
         assert response.status_code == 404
 
     def test_get_detail_requires_system_admin(
         self, client: TestClient, regular_headers: dict
     ):
-        """Should return 403 for non-system-admin users."""
+        """B3: Route removed — returns 404 for any user."""
         response = client.get("/api/v1/admin/promo-codes/promo_abc", headers=regular_headers)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 class TestAdminPromoCreateRoute:
-    """Tests for POST /api/v1/admin/promo-codes."""
+    """Tests for POST /api/v1/admin/promo-codes.
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
+    OSS pivot (B3): admin_promo router removed. All route tests expect 404.
+    """
+
     def test_create_promo_code_success(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should create coupon + promo code and return 201."""
-        mock_service = MagicMock()
-        mock_promo = MagicMock(**_make_stripe_promo_mock())
-        mock_service.create_coupon_and_promo.return_value = mock_promo
-        mock_get_service.return_value = mock_service
-
-        payload = {
-            "code": "EARLYPRO3",
-            "coupon_name": "Early Adopter — 3 Months Free Pro",
-            "discount_type": "percent",
-            "percent_off": 100,
-            "duration": "repeating",
-            "duration_in_months": 3,
-            "max_redemptions": 50,
-            "first_time_transaction": True,
-        }
-
-        response = client.post("/api/v1/admin/promo-codes", json=payload, headers=system_admin_headers)
-        assert response.status_code == 201
-        data = response.json()
-        assert data["code"] == "EARLYPRO3"
-        mock_service.create_coupon_and_promo.assert_called_once()
+        """B3: /admin/promo-codes POST route removed — returns 404."""
+        response = client.post("/api/v1/admin/promo-codes", json={}, headers=system_admin_headers)
+        assert response.status_code == 404
 
     def test_create_requires_system_admin(
         self, client: TestClient, regular_headers: dict
     ):
-        """Should return 403 for non-system-admin users."""
-        payload = {
-            "code": "TEST",
-            "coupon_name": "Test",
-            "discount_type": "percent",
-            "percent_off": 50,
-            "duration": "once",
-        }
-        response = client.post("/api/v1/admin/promo-codes", json=payload, headers=regular_headers)
-        assert response.status_code == 403
+        """B3: Route removed — returns 404 for any user."""
+        response = client.post("/api/v1/admin/promo-codes", json={}, headers=regular_headers)
+        assert response.status_code == 404
 
     def test_create_validates_required_fields(
         self, client: TestClient, system_admin_headers: dict
     ):
-        """Should return 422 when required fields are missing."""
+        """B3: Route removed — returns 404 (not 422) since route is gone."""
         response = client.post("/api/v1/admin/promo-codes", json={}, headers=system_admin_headers)
-        assert response.status_code == 422
+        assert response.status_code == 404
 
 
 class TestAdminPromoDeactivateRoute:
-    """Tests for POST /api/v1/admin/promo-codes/{id}/deactivate."""
+    """Tests for POST /api/v1/admin/promo-codes/{id}/deactivate.
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
+    OSS pivot (B3): admin_promo router removed. All route tests expect 404.
+    """
+
     def test_deactivate_success(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should deactivate a promo code and return 200."""
-        mock_service = MagicMock()
-        mock_service.deactivate_promotion_code.return_value = True
-        mock_get_service.return_value = mock_service
-
+        """B3: /admin/promo-codes/{id}/deactivate route removed — returns 404."""
         response = client.post(
             "/api/v1/admin/promo-codes/promo_abc/deactivate",
             headers=system_admin_headers,
         )
-        assert response.status_code == 200
-        assert response.json()["status"] == "deactivated"
-        mock_service.deactivate_promotion_code.assert_called_once_with("promo_abc")
+        assert response.status_code == 404
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
     def test_deactivate_not_found(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should return 404 when deactivation fails."""
-        mock_service = MagicMock()
-        mock_service.deactivate_promotion_code.return_value = False
-        mock_get_service.return_value = mock_service
-
+        """B3: Route removed — returns 404."""
         response = client.post(
             "/api/v1/admin/promo-codes/promo_nonexistent/deactivate",
             headers=system_admin_headers,
@@ -442,43 +382,34 @@ class TestAdminPromoDeactivateRoute:
     def test_deactivate_requires_system_admin(
         self, client: TestClient, regular_headers: dict
     ):
-        """Should return 403 for non-system-admin users."""
+        """B3: Route removed — returns 404 for any user."""
         response = client.post(
             "/api/v1/admin/promo-codes/promo_abc/deactivate",
             headers=regular_headers,
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 class TestAdminPromoDeleteRoute:
-    """Tests for DELETE /api/v1/admin/promo-codes/{id}."""
+    """Tests for DELETE /api/v1/admin/promo-codes/{id}.
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
+    OSS pivot (B3): admin_promo router removed. All route tests expect 404.
+    """
+
     def test_delete_success(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should deactivate promo and delete coupon, return 200."""
-        mock_service = MagicMock()
-        mock_service.delete_promotion_code.return_value = True
-        mock_get_service.return_value = mock_service
-
+        """B3: /admin/promo-codes/{id} DELETE route removed — returns 404."""
         response = client.delete(
             "/api/v1/admin/promo-codes/promo_abc?coupon_id=coupon_xyz",
             headers=system_admin_headers,
         )
-        assert response.status_code == 200
-        assert response.json()["status"] == "deleted"
-        mock_service.delete_promotion_code.assert_called_once_with("promo_abc", "coupon_xyz")
+        assert response.status_code == 404
 
-    @patch("src.api.routes.admin_promo.get_stripe_service")
     def test_delete_not_found(
-        self, mock_get_service, client: TestClient, system_admin_headers: dict
+        self, client: TestClient, system_admin_headers: dict
     ):
-        """Should return 404 when deletion fails."""
-        mock_service = MagicMock()
-        mock_service.delete_promotion_code.return_value = False
-        mock_get_service.return_value = mock_service
-
+        """B3: Route removed — returns 404."""
         response = client.delete(
             "/api/v1/admin/promo-codes/promo_nonexistent?coupon_id=coupon_xyz",
             headers=system_admin_headers,
@@ -488,19 +419,19 @@ class TestAdminPromoDeleteRoute:
     def test_delete_requires_system_admin(
         self, client: TestClient, regular_headers: dict
     ):
-        """Should return 403 for non-system-admin users."""
+        """B3: Route removed — returns 404 for any user."""
         response = client.delete(
             "/api/v1/admin/promo-codes/promo_abc?coupon_id=coupon_xyz",
             headers=regular_headers,
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
 
     def test_delete_requires_coupon_id(
         self, client: TestClient, system_admin_headers: dict
     ):
-        """Should return 422 when coupon_id query param is missing."""
+        """B3: Route removed — returns 404 (not 422) since route is gone."""
         response = client.delete(
             "/api/v1/admin/promo-codes/promo_abc",
             headers=system_admin_headers,
         )
-        assert response.status_code == 422
+        assert response.status_code == 404

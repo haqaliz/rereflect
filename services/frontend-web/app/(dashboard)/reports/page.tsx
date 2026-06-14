@@ -28,9 +28,7 @@ import {
   REPORT_TYPE_COLORS,
   formatDateRangeLabel,
 } from '@/lib/api/reports';
-import { useAuth } from '@/contexts/AuthContext';
 import { ReportPreview } from '@/components/copilot/ReportPreview';
-import { UpgradeCTA } from '@/components/copilot/UpgradeCTA';
 import {
   FileBarChart,
   Download,
@@ -52,7 +50,6 @@ function formatDate(dateString: string): string {
 
 export default function ReportsPage() {
   const router = useRouter();
-  const { user } = useAuth();
 
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,12 +59,7 @@ export default function ReportsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
-  // Plan gate: Business+ only
-  const isBusinessOrEnterprise =
-    user?.plan === 'business' || user?.plan === 'enterprise';
-
   useEffect(() => {
-    if (!isBusinessOrEnterprise) return;
     const fetchReports = async () => {
       try {
         const res = await reportsAPI.list();
@@ -79,7 +71,7 @@ export default function ReportsPage() {
       }
     };
     fetchReports();
-  }, [isBusinessOrEnterprise]);
+  }, []);
 
   const handleDelete = async (id: number) => {
     setDeletingId(id);
@@ -146,37 +138,14 @@ export default function ReportsPage() {
         </Button>
       </div>
 
-      {/* Plan gate */}
-      {!isBusinessOrEnterprise && (
-        <Card data-testid="upgrade-cta-card">
-          <CardContent className="py-12 flex flex-col items-center gap-4 text-center">
-            <div className="p-4 bg-primary/10 rounded-full">
-              <FileBarChart className="w-8 h-8 text-primary" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold">Business Plan Required</h3>
-              <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                Report generation is available on the Business plan. Upgrade to generate
-                comprehensive PDF reports from your feedback data.
-              </p>
-            </div>
-            <UpgradeCTA
-              message="Upgrade to Business to unlock AI Reports"
-              variant="inline"
-            />
-          </CardContent>
-        </Card>
-      )}
-
       {/* Report list */}
-      {isBusinessOrEnterprise && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Generated Reports</CardTitle>
-            <CardDescription>
-              Reports are saved for future access. Business plan includes up to 20 saved reports.
-            </CardDescription>
-          </CardHeader>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Generated Reports</CardTitle>
+          <CardDescription>
+            Reports are saved for future access.
+          </CardDescription>
+        </CardHeader>
           <CardContent className="p-0">
             {loading ? (
               <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground">
@@ -297,7 +266,6 @@ export default function ReportsPage() {
             )}
           </CardContent>
         </Card>
-      )}
 
       {/* Delete confirm dialog */}
       <Dialog open={confirmDeleteId !== null} onOpenChange={() => setConfirmDeleteId(null)}>

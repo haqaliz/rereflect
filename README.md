@@ -145,19 +145,24 @@ Owner (level 3) > Admin (level 2) > Member (level 1)
 | Manage integrations | Yes | Yes | No |
 | Invite/remove members | Yes | Yes | No |
 | Change member roles | Yes | Yes | No |
-| Access billing | Yes | No | No |
 | Transfer ownership | Yes | No | No |
 
 ---
 
-## Billing Tiers
+## Features & Limits
 
-| Tier | Price | Feedback/mo | Seats |
-|------|-------|-------------|-------|
-| Free | $0 | 250 | 2 |
-| Pro | $29/mo | 2,500 | 10 |
-| Business | $99/mo | 25,000 | 25 |
-| Enterprise | Contact | Unlimited | Unlimited |
+Rereflect is open source and self-hosted — **every feature is unlocked with no
+limits**. There are no paid tiers, feedback quotas, or seat caps. The
+`SELF_HOSTED=true` flag (the default) treats every instance as fully featured.
+
+| Capability | Self-hosted |
+|------------|-------------|
+| Feedback / month | Unlimited |
+| Team seats | Unlimited |
+| Sentiment, pain points, feature requests, churn | Included |
+| Advanced churn, cohorts, playbooks, analytics | Included |
+| Integrations, webhooks, data export, API access | Included |
+| AI copilot & LLM analysis (BYOK) | Included (bring your own key) |
 
 ---
 
@@ -186,38 +191,88 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 
 ---
 
-## Railway Deployment
+## Self-Hosting
 
-### Services to Deploy
-1. PostgreSQL (Database plugin)
-2. Redis (Database plugin)
-3. Backend API (Root: `services/backend-api`)
-4. Worker Service (Root: `services/`, Config: `services/worker-service/railway.toml`)
-5. Frontend (Root: `services/frontend-web`)
+Rereflect is open source (MIT) and designed to run entirely on your own
+infrastructure. **All features are unlocked** on a self-hosted instance — there
+are no paid tiers, seat limits, or feedback quotas.
 
-### Key Environment Variables
+### Prerequisites
+- Docker + Docker Compose
+- (Optional) Your own LLM API key for AI features — **not required**
 
-**Backend:**
-```
-DATABASE_URL=[Reference PostgreSQL]
-REDIS_HOST=[Reference Redis]
-REDIS_PORT=[Reference Redis]
-JWT_SECRET=[Generate random 32+ chars]
-CORS_ORIGINS=https://your-frontend.up.railway.app
-```
+### Quick Start (Docker Compose)
 
-**Frontend:**
-```
-NEXT_PUBLIC_API_URL=https://your-backend.up.railway.app
-```
-
-### Useful Commands
 ```bash
-railway login
-railway link
-railway logs -s backend-api
-railway up --service backend-api --detach
+# 1. Copy and edit the production env template
+cp .env.prod.example .env
+
+# 2. Generate secrets and fill them into .env (see "Required env vars" below)
+
+# 3. Build and start everything (Postgres, Redis, backend, worker, frontend)
+docker compose -f docker-compose.prod.yml up -d --build
 ```
+
+Then open the frontend at `http://localhost:3000` and log in with the
+`ADMIN_EMAIL` / `ADMIN_PASSWORD` you set in `.env` (the first admin user is
+seeded on startup).
+
+### Required env vars
+
+Set these in your `.env` (see `.env.prod.example` for the full annotated list):
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `JWT_SECRET` | Secret for signing auth tokens (random 32+ chars) |
+| `LLM_ENCRYPTION_KEY` | Fernet key used to encrypt stored BYOK LLM keys |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeds the first admin account |
+| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `SELF_HOSTED` | Keep `true` — unlocks all features |
+| `ai_analysis_enabled` | `false` by default — runs on free local VADER |
+
+Generate `JWT_SECRET` and `LLM_ENCRYPTION_KEY`:
+
+```bash
+# JWT_SECRET
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+# LLM_ENCRYPTION_KEY (Fernet)
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### Running with no API key ($0, fully local)
+
+Out of the box (`ai_analysis_enabled=false`, no LLM key), Rereflect runs the
+**free local VADER + keyword analysis pipeline**. Sentiment, pain-point,
+feature-request, and heuristic churn detection all work end-to-end with **no
+external API and no cost**. This is the default and recommended starting point.
+
+### Adding your own LLM key (BYOK)
+
+To enable LLM-powered analysis and the AI copilot, bring your own key:
+
+- **In-app (canonical):** Sign in, go to **Settings → AI**, and paste your
+  OpenAI / Anthropic / Google key. Keys are encrypted at rest with
+  `LLM_ENCRYPTION_KEY` (Fernet) and scoped per organization.
+- **From env (single-tenant convenience):** You may also seed an operator key
+  via `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_AI_API_KEY` in `.env`.
+  This is treated as **your own key** for your own instance — Rereflect never
+  provides or proxies a key.
+
+There is no system/vendor key. If an organization has no key configured, AI
+features degrade gracefully back to the free VADER pipeline rather than erroring.
+
+### Notes
+
+- **Frontend bakes its API URL at build time.** `NEXT_PUBLIC_API_URL` is
+  embedded into the frontend image during `docker build`. If you deploy on a
+  real host/domain, set `NEXT_PUBLIC_API_URL` to your backend's public URL and
+  **rebuild** the frontend image (`docker compose -f docker-compose.prod.yml
+  build frontend`).
+- **No TLS in the bundled compose.** Services bind plain HTTP on `:3000`
+  (frontend) and `:8000` (backend). For internet-facing deployments, put a
+  reverse proxy (Caddy, nginx, Traefik) in front for TLS.
 
 ---
 
@@ -251,13 +306,6 @@ GET    /api/v1/team                  # List members
 POST   /api/v1/team/invite           # Send invite
 PATCH  /api/v1/team/{id}/role        # Change role
 DELETE /api/v1/team/{id}             # Remove member
-```
-
-### Billing (Owner only)
-```
-GET  /api/v1/billing/subscription    # Current plan
-POST /api/v1/billing/checkout        # Stripe checkout
-POST /api/v1/billing/portal          # Billing portal
 ```
 
 ---
@@ -315,10 +363,17 @@ redis-cli ping  # Should return PONG
 
 ---
 
-## License
+## Contributing
 
-MIT
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,
+testing, and PR conventions.
 
 ---
 
-**Goal**: $50K MRR SaaS Platform
+## License
+
+MIT — see [LICENSE](LICENSE). Third-party attributions are in [NOTICE](NOTICE).
+
+---
+
+**Rereflect is free and open source. Self-host it, hack on it, make it yours.**

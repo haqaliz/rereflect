@@ -8,7 +8,6 @@ import { MessageBubble } from './MessageBubble';
 import { SCOPE_OPTIONS, type ContextScope } from './ContextScopeSelector';
 import { MentionAutocomplete, detectMention, isScopeOption, extractScope, type MentionMatch } from './MentionAutocomplete';
 import { StopButton } from './MessageActions';
-import { UpgradeCTA } from './UpgradeCTA';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 // ─── ChatMessage type (superset of ConversationMessage for optimistic updates) ─
@@ -277,11 +276,11 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
     <div data-testid="chat-area-container" className="flex flex-col h-full overflow-hidden">
       {/* Token budget exceeded banner */}
       {tokenBudgetExceeded && (
-        <div data-testid="token-budget-banner">
-          <UpgradeCTA
-            message="Monthly token budget reached. Upgrade for more."
-            variant="banner"
-          />
+        <div
+          data-testid="token-budget-banner"
+          className="px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/20 text-amber-700 dark:text-amber-400 text-sm text-center"
+        >
+          Monthly token budget reached. Add your API key in AI settings to continue.
         </div>
       )}
 

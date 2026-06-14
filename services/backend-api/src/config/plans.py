@@ -6,9 +6,20 @@ Tiers:
 - Pro: $29/mo, 2,500 feedback/mo, 10 seats
 - Business: $99/mo, 25,000 feedback/mo, 25 seats
 - Enterprise: Contact sales, unlimited
+
+SELF_HOSTED mode (default: true):
+When SELF_HOSTED=true every feature gate returns True and every limit
+returns None (unlimited). This is the normal operating mode for the
+open-source self-hosted product. Set SELF_HOSTED=false only if running
+a future hosted/paid tier.
 """
 import os
 from typing import Optional
+
+# Read at call time so tests can override with patch.dict; use a helper so the
+# value is not baked in at module import.
+def _is_self_hosted() -> bool:
+    return os.environ.get("SELF_HOSTED", "true").lower() == "true"
 
 
 # Stripe Price IDs (set via environment variables)
@@ -287,13 +298,23 @@ def get_plan_for_feature(feature: str) -> str:
 
 
 def has_feature(plan_id: str, feature: str) -> bool:
-    """Check if a plan has access to a feature."""
+    """Check if a plan has access to a feature.
+
+    In SELF_HOSTED mode every feature is available on every plan.
+    """
+    if _is_self_hosted():
+        return True
     plan = get_plan(plan_id)
     return feature in plan.get("features", [])
 
 
 def plan_includes(current_plan: str, required_plan: str) -> bool:
-    """Check if current plan includes/exceeds the required plan level."""
+    """Check if current plan includes/exceeds the required plan level.
+
+    In SELF_HOSTED mode always returns True.
+    """
+    if _is_self_hosted():
+        return True
     try:
         current_idx = PLAN_HIERARCHY.index(current_plan)
         required_idx = PLAN_HIERARCHY.index(required_plan)
@@ -303,25 +324,45 @@ def plan_includes(current_plan: str, required_plan: str) -> bool:
 
 
 def get_feedback_limit(plan_id: str) -> Optional[int]:
-    """Get feedback limit for a plan. None means unlimited."""
+    """Get feedback limit for a plan. None means unlimited.
+
+    Always returns None in SELF_HOSTED mode.
+    """
+    if _is_self_hosted():
+        return None
     plan = get_plan(plan_id)
     return plan.get("feedback_limit")
 
 
 def get_seat_limit(plan_id: str) -> Optional[int]:
-    """Get seat limit for a plan. None means unlimited."""
+    """Get seat limit for a plan. None means unlimited.
+
+    Always returns None in SELF_HOSTED mode.
+    """
+    if _is_self_hosted():
+        return None
     plan = get_plan(plan_id)
     return plan.get("seat_limit")
 
 
 def get_saved_views_limit(plan_id: str) -> Optional[int]:
-    """Get saved views limit for a plan. None means unlimited."""
+    """Get saved views limit for a plan. None means unlimited.
+
+    Always returns None in SELF_HOSTED mode.
+    """
+    if _is_self_hosted():
+        return None
     plan = get_plan(plan_id)
     return plan.get("saved_views_limit")
 
 
 def get_webhook_limit(plan_id: str) -> Optional[int]:
-    """Get max webhook endpoint count for a plan. None means unlimited."""
+    """Get max webhook endpoint count for a plan. None means unlimited.
+
+    Always returns None in SELF_HOSTED mode.
+    """
+    if _is_self_hosted():
+        return None
     limits = {
         "free": 2,
         "pro": 5,
@@ -331,8 +372,16 @@ def get_webhook_limit(plan_id: str) -> Optional[int]:
     return limits.get(plan_id, 2)
 
 
+_SELF_HOSTED_WEBHOOK_HEADER_LIMIT = 50  # High constant for self-hosted
+
+
 def get_webhook_header_limit(plan_id: str) -> int:
-    """Get max custom headers per webhook for a plan."""
+    """Get max custom headers per webhook for a plan.
+
+    In SELF_HOSTED mode returns a high constant.
+    """
+    if _is_self_hosted():
+        return _SELF_HOSTED_WEBHOOK_HEADER_LIMIT
     if plan_id in ("pro", "business", "enterprise"):
         return 5
     return 2  # free
@@ -350,7 +399,10 @@ def get_automation_rule_limit(plan_id: str) -> Optional[int]:
     """Get maximum automation rules allowed for a plan. None means unlimited.
 
     free=0, pro=5, business=20, enterprise=None (unlimited)
+    In SELF_HOSTED mode always returns None.
     """
+    if _is_self_hosted():
+        return None
     limits: dict[str, Optional[int]] = {
         "free": 0,
         "pro": 5,

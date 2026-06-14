@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -21,9 +20,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { useAuth } from '@/contexts/AuthContext';
 import { aiSettingsAPI, type AIUsage, type AIUsageDaily } from '@/lib/api/ai-settings';
-import { useRouter } from 'next/navigation';
 import { Zap, DollarSign, Hash, GitBranch } from 'lucide-react';
 
 function formatCents(cents: number): string {
@@ -59,16 +56,11 @@ function StatCard({ title, value, icon }: StatCardProps) {
 }
 
 export function AISettingsUsage() {
-  const { user } = useAuth();
-  const router = useRouter();
   const [usage, setUsage] = useState<AIUsage | null>(null);
   const [daily, setDaily] = useState<AIUsageDaily | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const isPro = user?.plan !== 'free';
-
   useEffect(() => {
-    if (!isPro) return;
     setLoading(true);
     Promise.all([
       aiSettingsAPI.getUsage(),
@@ -80,29 +72,7 @@ export function AISettingsUsage() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [isPro]);
-
-  if (!isPro) {
-    return (
-      <Card>
-        <CardContent className="pt-12 pb-12 text-center space-y-4">
-          <div className="p-4 bg-secondary rounded-full w-fit mx-auto">
-            <Zap className="w-8 h-8 text-primary" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-foreground text-lg">Usage Dashboard</h3>
-            <p className="text-muted-foreground text-sm mt-1">
-              Track token usage, costs, and provider breakdown.
-            </p>
-            <p className="text-muted-foreground text-sm">Available on Pro and higher plans.</p>
-          </div>
-          <Button onClick={() => router.push('/settings/billing')}>
-            Upgrade to Pro
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
+  }, []);
 
   if (loading) {
     return (
@@ -177,6 +147,7 @@ export function AISettingsUsage() {
                   color: 'var(--foreground)',
                 }}
               />
+              <Legend />
               <Bar dataKey="tokens" fill="var(--chart-1)" radius={[3, 3, 0, 0]} name="Tokens" />
             </BarChart>
           </ResponsiveContainer>

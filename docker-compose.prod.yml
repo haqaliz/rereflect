@@ -1,7 +1,25 @@
-# Production Docker Compose for Raspberry Pi
-# Uses ARM64-compatible images
-# Nginx handles external traffic on ports 80/443
-# Internal services bind to localhost only
+# =============================================================================
+# Rereflect — Self-Host Entrypoint (production Docker Compose)
+# -----------------------------------------------------------------------------
+# This is the recommended way to self-host Rereflect. It brings up the full
+# stack: PostgreSQL, Redis, the FastAPI backend, the Celery worker, and the
+# Next.js frontend.
+#
+#   cp .env.prod.example .env   # fill in secrets
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Notes:
+#  - All features are unlocked (SELF_HOSTED=true on the backend, set below).
+#  - Runs $0 on the free local VADER pipeline by default (no LLM key needed).
+#  - The `frontend` image BAKES NEXT_PUBLIC_API_URL at BUILD time. Self-hosters
+#    on a real host/domain must set NEXT_PUBLIC_API_URL to their backend's
+#    public URL and REBUILD the frontend:
+#        docker compose -f docker-compose.prod.yml build frontend
+#  - No TLS/proxy is bundled: backend is plain HTTP on :8000, frontend on :3000.
+#    Put a reverse proxy (Caddy/nginx/Traefik) in front for internet exposure.
+#  - landing-web (marketing site) is intentionally NOT part of this stack; it
+#    is hosted separately.
+# =============================================================================
 
 services:
   # ===========================================
@@ -51,10 +69,19 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       JWT_SECRET: ${JWT_SECRET}
+      LLM_ENCRYPTION_KEY: ${LLM_ENCRYPTION_KEY}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ROOT_PATH: ${ROOT_PATH:-}
+      # Self-host: unlock all features, no paid tiers/limits.
+      SELF_HOSTED: ${SELF_HOSTED:-true}
+      # Default off -> runs on the free local VADER pipeline ($0, no key).
+      ai_analysis_enabled: ${ai_analysis_enabled:-false}
+      # OPTIONAL operator-owned BYOK keys (your own keys; never a Rereflect key).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
     ports:
       - "0.0.0.0:8000:8000"
     depends_on:
@@ -82,6 +109,13 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rereflect}:${POSTGRES_PASSWORD:-rereflect_secret}@postgres:5432/${POSTGRES_DB:-rereflect}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      LLM_ENCRYPTION_KEY: ${LLM_ENCRYPTION_KEY}
+      SELF_HOSTED: ${SELF_HOSTED:-true}
+      ai_analysis_enabled: ${ai_analysis_enabled:-false}
+      # OPTIONAL operator-owned BYOK keys (your own keys; never a Rereflect key).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

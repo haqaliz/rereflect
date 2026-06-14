@@ -1,14 +1,14 @@
 """
 Resolves per-org LLM configuration: provider, model, API key.
 
-Reads OrgAIConfig and OrgApiKey from the database to determine which
-LLM provider to use for a given task type.
+Strictly BYOK (bring-your-own-key): reads OrgApiKey from the database.
+If no valid BYOK key exists for an org, AI is disabled for that org and
+returns (None, False) — no system/env key fallback ever.
 
-Also handles budget checking and usage logging.
+Handles usage logging (org sees its own usage). Budget-cap machinery removed.
 """
 
 import logging
-import os
 from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -20,12 +20,8 @@ from src.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-# System API keys from environment variables
-_SYSTEM_OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
-_SYSTEM_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-_SYSTEM_GOOGLE_KEY = os.environ.get("GOOGLE_AI_API_KEY", "")
-
 # Encryption key for decrypting BYOK keys
+import os
 _ENCRYPTION_KEY = os.environ.get("LLM_ENCRYPTION_KEY", "")
 
 _DEFAULT_PROVIDER = "openai"
@@ -46,44 +42,6 @@ def _decrypt_api_key(encrypted_key: str) -> str:
         return ""
 
 
-def _get_system_key_for_provider(provider: str) -> str:
-    """Get the system API key for the given provider."""
-    if provider == "openai":
-        return _SYSTEM_OPENAI_KEY
-    elif provider == "anthropic":
-        return _SYSTEM_ANTHROPIC_KEY
-    elif provider == "google":
-        return _SYSTEM_GOOGLE_KEY
-    return ""
-
-
-def check_budget(org_id: int, estimated_cost_cents: float, db: Session) -> bool:
-    """
-    Check if org has remaining AI budget for system key usage.
-
-    Args:
-        org_id: Organization ID
-        estimated_cost_cents: Estimated cost of the upcoming LLM call
-        db: Database session
-
-    Returns:
-        True if call is allowed, False if budget exceeded.
-    """
-    from src.models import OrgAIConfig
-
-    config = db.query(OrgAIConfig).filter_by(organization_id=org_id).first()
-    if not config or not config.monthly_budget_cents:
-        return True  # No limit configured
-
-    if config.budget_used_cents >= config.monthly_budget_cents:
-        logger.warning(
-            f"Org {org_id} budget exceeded: "
-            f"{config.budget_used_cents}/{config.monthly_budget_cents} cents"
-        )
-        return False
-    return True
-
-
 def log_usage(
     org_id: int,
     response: LLMResponse,
@@ -93,9 +51,10 @@ def log_usage(
 ) -> None:
     """
     Write an LLMUsageLog entry for a completed LLM call.
-    Also updates budget_used_cents if using system key.
+    Org usage is always logged so operators can see their own spend.
+    Budget-update logic removed (no system key → no owner budget to track).
     """
-    from src.models import LLMUsageLog, OrgAIConfig
+    from src.models import LLMUsageLog
 
     try:
         log = LLMUsageLog(
@@ -113,13 +72,6 @@ def log_usage(
             is_byok=is_byok,
         )
         db.add(log)
-
-        # Update budget if using system key
-        if not is_byok:
-            config = db.query(OrgAIConfig).filter_by(organization_id=org_id).first()
-            if config:
-                config.budget_used_cents = (config.budget_used_cents or 0) + response.estimated_cost_cents
-
         db.flush()
     except Exception as e:
         logger.error(f"Failed to log LLM usage for org {org_id}: {e}")
@@ -130,13 +82,18 @@ def build_fallback_chain(
     provider: str,
     model: str,
     db: Session,
-) -> Tuple[FallbackChain, bool]:
+) -> Tuple[Optional[FallbackChain], bool]:
     """
     Build a FallbackChain for the given org/provider/model.
 
+    BYOK-only: if the org has no valid encrypted key for the requested provider,
+    returns (None, False) — AI is disabled for this org. No system/env key is
+    ever used as a fallback.
+
     Returns:
         Tuple of (FallbackChain, is_byok)
-        is_byok is True if the org's own API key is being used.
+        is_byok is True when the org's own API key is being used.
+        Returns (None, False) when no valid BYOK key is available.
     """
     from src.models import OrgApiKey
 
@@ -151,24 +108,16 @@ def build_fallback_chain(
     if org_api_key_record:
         byok_key = _decrypt_api_key(org_api_key_record.encrypted_key)
 
-    is_byok = bool(byok_key)
-    api_key = byok_key or _get_system_key_for_provider(provider)
-
-    if not api_key:
-        logger.warning(f"No API key available for provider '{provider}' (org {org_id})")
+    if not byok_key:
+        logger.warning(
+            f"No valid BYOK key for provider '{provider}' (org {org_id}) — AI disabled for this org"
+        )
         return None, False
 
-    primary = LLMProviderFactory.create(provider, api_key, model)
-
-    # System fallback: only if primary is not already using system OpenAI
-    system_provider = None
-    if is_byok or provider != "openai":
-        system_key = _SYSTEM_OPENAI_KEY
-        if system_key:
-            system_provider = LLMProviderFactory.create("openai", system_key, _DEFAULT_MODEL)
-
-    chain = FallbackChain(primary_provider=primary, system_provider=system_provider)
-    return chain, is_byok
+    primary = LLMProviderFactory.create(provider, byok_key, model)
+    # No system fallback: FallbackChain only does primary + one retry.
+    chain = FallbackChain(primary_provider=primary, system_provider=None)
+    return chain, True
 
 
 def call_llm_for_org(
@@ -180,7 +129,7 @@ def call_llm_for_org(
     db: Session,
 ) -> Optional[LLMResponse]:
     """
-    Full LLM call with org resolution, budget check, fallback, and usage logging.
+    Full LLM call with org resolution, fallback, and usage logging.
 
     Args:
         org_id: Organization ID
@@ -191,18 +140,11 @@ def call_llm_for_org(
         db: Database session
 
     Returns:
-        LLMResponse on success, None if budget exceeded or all providers fail.
+        LLMResponse on success, None if no BYOK key or all providers fail.
     """
     chain, is_byok = build_fallback_chain(org_id, provider, model, db)
     if chain is None:
         return None
-
-    # Budget check for system key usage
-    if not is_byok:
-        # Rough estimate: 1000 tokens at cheapest rate
-        rough_estimate = 0.05  # ~5 cents, very conservative
-        if not check_budget(org_id, rough_estimate, db):
-            return None
 
     response = chain.complete(request)
     if response is None:

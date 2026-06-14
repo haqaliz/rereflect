@@ -16,7 +16,6 @@ import {
   ChevronRight,
   FileText,
   Bell,
-  CreditCard,
   Users,
   Plug,
   Brain,
@@ -33,7 +32,6 @@ import {
   Zap,
   AlertOctagon,
   BarChart3,
-  Lock,
   ListChecks,
   Gauge,
 } from 'lucide-react';
@@ -84,7 +82,6 @@ const workspaceNavItems = [
     title: 'Customers',
     href: '/customers',
     icon: Users,
-    proBadge: true,
   },
   {
     title: 'Workflow',
@@ -133,7 +130,6 @@ const analysisNavItems = [
     title: 'Churn Cohorts',
     href: '/analytics/churn-cohorts',
     icon: BarChart3,
-    businessBadge: true,
   },
 ];
 
@@ -146,9 +142,8 @@ const settingsNavItems = [
   { title: 'Response Templates', href: '/settings/response-templates', icon: MessageSquarePlus, requiredRole: 'admin' as const },
   { title: 'Webhooks', href: '/settings/webhooks', icon: Webhook },
   { title: 'Automations', href: '/settings/automations', icon: Zap },
-  { title: 'Playbooks', href: '/settings/playbooks', icon: ListChecks, businessBadge: true as const },
+  { title: 'Playbooks', href: '/settings/playbooks', icon: ListChecks },
   { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },
-  { title: 'Billing', href: '/settings/billing', icon: CreditCard, requiredRole: 'owner' as const },
 ];
 
 const systemNavItems = [
@@ -249,11 +244,6 @@ export function AppSidebar() {
                         <Link href={item.href}>
                           <item.icon className="w-4 h-4" />
                           <span>{item.title}</span>
-                          {item.proBadge && user?.plan === 'free' && (
-                            <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary leading-none">
-                              Pro
-                            </span>
-                          )}
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -277,27 +267,20 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {analysisNavItems.map((item) => {
-                    const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
-                    const isLocked = 'businessBadge' in item && item.businessBadge && !isBusiness;
-                    return (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isActive(item.href)}
-                          tooltip={item.title}
-                        >
-                          <Link href={item.href}>
-                            <item.icon className="w-4 h-4" />
-                            <span>{item.title}</span>
-                            {isLocked && (
-                              <Lock className="ml-auto w-3 h-3 opacity-40" />
-                            )}
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
+                  {analysisNavItems.map((item) => (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.href)}
+                        tooltip={item.title}
+                      >
+                        <Link href={item.href}>
+                          <item.icon className="w-4 h-4" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
                 </SidebarMenu>
               </SidebarGroupContent>
             </CollapsibleContent>
@@ -319,27 +302,20 @@ export function AppSidebar() {
                 <SidebarMenu>
                   {settingsNavItems
                     .filter(item => hasRole(user?.role, item.requiredRole))
-                    .map((item) => {
-                      const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
-                      const isLocked = 'businessBadge' in item && item.businessBadge && !isBusiness;
-                      return (
-                        <SidebarMenuItem key={item.title}>
-                          <SidebarMenuButton
-                            asChild
-                            isActive={isActive(item.href)}
-                            tooltip={item.title}
-                          >
-                            <Link href={item.href}>
-                              <item.icon className="w-4 h-4" />
-                              <span>{item.title}</span>
-                              {isLocked && (
-                                <Lock className="ml-auto w-3 h-3 opacity-40" />
-                              )}
-                            </Link>
-                          </SidebarMenuButton>
-                        </SidebarMenuItem>
-                      );
-                    })}
+                    .map((item) => (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActive(item.href)}
+                          tooltip={item.title}
+                        >
+                          <Link href={item.href}>
+                            <item.icon className="w-4 h-4" />
+                            <span>{item.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
                 </SidebarMenu>
               </SidebarGroupContent>
             </CollapsibleContent>

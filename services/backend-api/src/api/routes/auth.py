@@ -97,12 +97,18 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information."""
+    from src.config.plans import _is_self_hosted
+    # In self-hosted mode every org is treated as enterprise — all features
+    # unlocked, no plan gating on the frontend.
+    effective_plan = "enterprise" if _is_self_hosted() else (
+        current_user.organization.plan or "free"
+    )
     return UserResponse(
         id=current_user.id,
         email=current_user.email,
         organization_id=current_user.organization_id,
         role=current_user.role,
-        plan=current_user.organization.plan or "free",
+        plan=effective_plan,
         created_at=current_user.created_at,
         weekly_digest_enabled=current_user.weekly_digest_enabled,
         is_system_admin=current_user.is_system_admin,

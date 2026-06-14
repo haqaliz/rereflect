@@ -38,7 +38,6 @@ celery_app = Celery(
         "src.tasks.alerts",
         "src.tasks.integrations",
         "src.tasks.source_events",
-        "src.tasks.billing",
         "src.tasks.anomaly",
         "src.tasks.insights",
         "src.tasks.workflow",
@@ -100,26 +99,6 @@ celery_app.conf.beat_schedule = {
     "sync-integrations-daily": {
         "task": "src.tasks.integrations.sync_all_integrations",
         "schedule": crontab(hour=2, minute=0),
-    },
-    # Billing: Check for expired trials daily at 3 AM
-    "check-trial-expirations": {
-        "task": "billing.check_trial_expirations",
-        "schedule": crontab(hour=3, minute=0),
-    },
-    # Billing: Send trial ending reminders daily at 9 AM
-    "send-trial-ending-reminders": {
-        "task": "billing.send_trial_ending_reminder",
-        "schedule": crontab(hour=9, minute=0),
-    },
-    # Billing: Report overages to Stripe hourly
-    "report-overages-to-stripe": {
-        "task": "billing.report_overages_to_stripe",
-        "schedule": crontab(minute=15),  # At 15 minutes past every hour
-    },
-    # Billing: Check usage warnings daily at 10 AM
-    "check-usage-warnings": {
-        "task": "billing.check_usage_warnings",
-        "schedule": crontab(hour=10, minute=0),
     },
     # Weekly digest: Every hour at :05, task filters by user's preferred day+hour
     "send-weekly-digests": {

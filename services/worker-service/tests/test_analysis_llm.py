@@ -41,9 +41,39 @@ class TestAnalyzeWithLLM:
         assert unanalyzed_feedback.pain_point_category == "system_crash"
         assert unanalyzed_feedback.is_urgent is True
 
-    def test_falls_back_to_keyword_when_llm_fails(self, db, ai_enabled_org, unanalyzed_feedback):
-        """Should use keyword analysis when OpenAI returns None."""
+    def test_falls_back_to_keyword_when_llm_fails_no_byok(self, db, ai_enabled_org, unanalyzed_feedback):
+        """Should use keyword analysis when LLM returns None and org has NO BYOK key.
+
+        BYOK-only pivot (A5): when no key is configured, pending stays False
+        to avoid perpetual retry loops that can never succeed.
+        """
         from src.tasks.analysis import _analyze_feedback_item
+
+        # ai_enabled_org has no OrgApiKey row → "no key" scenario → pending=False
+        with patch("src.tasks.analysis.categorize_feedback", return_value=None), \
+             patch("src.tasks.analysis._apply_keyword_analysis") as mock_keyword:
+            _analyze_feedback_item(unanalyzed_feedback, db)
+
+        mock_keyword.assert_called_once()
+        assert unanalyzed_feedback.llm_analysis_pending is False
+
+    def test_falls_back_to_keyword_sets_pending_when_byok_key_exists(self, db, ai_enabled_org, unanalyzed_feedback):
+        """Should set llm_analysis_pending=True when a BYOK key is configured but LLM fails.
+
+        BYOK-only pivot (A5): transient LLM failure with a configured key → retry later.
+        """
+        from src.tasks.analysis import _analyze_feedback_item
+        from src.models import OrgApiKey
+
+        # Add a BYOK key row for the org → "transient failure" scenario → pending=True
+        key = OrgApiKey(
+            organization_id=ai_enabled_org.id,
+            provider="openai",
+            encrypted_key="encrypted-stub",
+            is_valid=True,
+        )
+        db.add(key)
+        db.commit()
 
         with patch("src.tasks.analysis.categorize_feedback", return_value=None), \
              patch("src.tasks.analysis._apply_keyword_analysis") as mock_keyword:

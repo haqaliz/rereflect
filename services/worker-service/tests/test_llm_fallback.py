@@ -131,10 +131,10 @@ class TestFallbackChainRetry:
 
 
 class TestFallbackChainFallback:
-    """Tests for fallback to system OpenAI provider."""
+    """Tests for exhausted retry behavior — BYOK-only (no system fallback)."""
 
-    def test_retry_exhausted_falls_back_to_system(self):
-        """After both attempts fail, should fall back to system OpenAI."""
+    def test_retry_exhausted_returns_none(self):
+        """After both attempts fail, must return None — no system fallback in BYOK mode."""
         from src.llm.fallback import FallbackChain
         from openai import RateLimitError
 
@@ -147,48 +147,17 @@ class TestFallbackChainFallback:
         mock_primary = MagicMock()
         mock_primary.complete.side_effect = [rate_limit_error, rate_limit_error]
 
-        fallback_response = _make_llm_response("openai", was_fallback=True, fallback_reason="rate_limit")
-        mock_system = MagicMock()
-        mock_system.complete.return_value = fallback_response
-
-        chain = FallbackChain(primary_provider=mock_primary, system_provider=mock_system)
+        chain = FallbackChain(primary_provider=mock_primary, system_provider=None)
         request = LLMRequest(messages=[{"role": "user", "content": "test"}])
 
         with patch("time.sleep"):
             response = chain.complete(request)
 
-        assert response.was_fallback is True
-        mock_system.complete.assert_called_once()
+        assert response is None
+        assert mock_primary.complete.call_count == 2
 
-    def test_fallback_response_has_was_fallback_true(self):
-        """Fallback response should have was_fallback=True."""
-        from src.llm.fallback import FallbackChain
-        from openai import RateLimitError
-
-        rate_limit_error = RateLimitError(
-            message="Rate limit exceeded",
-            response=MagicMock(status_code=429, headers={}),
-            body={"error": {"message": "rate limit"}},
-        )
-
-        mock_primary = MagicMock()
-        mock_primary.complete.side_effect = [rate_limit_error, rate_limit_error]
-
-        system_response = _make_llm_response("openai", was_fallback=False)
-        mock_system = MagicMock()
-        mock_system.complete.return_value = system_response
-
-        chain = FallbackChain(primary_provider=mock_primary, system_provider=mock_system)
-        request = LLMRequest(messages=[{"role": "user", "content": "test"}])
-
-        with patch("time.sleep"):
-            response = chain.complete(request)
-
-        # FallbackChain should mark the response as a fallback
-        assert response.was_fallback is True
-
-    def test_fallback_reason_set_to_rate_limit(self):
-        """Fallback due to rate limit should have fallback_reason='rate_limit'."""
+    def test_system_provider_ignored_even_when_provided(self):
+        """system_provider is accepted for compat but never called — even on failure."""
         from src.llm.fallback import FallbackChain
         from openai import RateLimitError
 
@@ -204,13 +173,15 @@ class TestFallbackChainFallback:
         mock_system = MagicMock()
         mock_system.complete.return_value = _make_llm_response("openai")
 
+        # Pass a system provider — it must be silently ignored
         chain = FallbackChain(primary_provider=mock_primary, system_provider=mock_system)
         request = LLMRequest(messages=[{"role": "user", "content": "test"}])
 
         with patch("time.sleep"):
             response = chain.complete(request)
 
-        assert response.fallback_reason == "rate_limit"
+        mock_system.complete.assert_not_called()
+        assert response is None
 
     def test_system_key_org_no_further_fallback(self):
         """When primary IS system key and it fails, there's no further fallback."""
@@ -293,10 +264,10 @@ class TestFallbackChainAuthError:
 
 
 class TestFallbackChainTimeout:
-    """Tests for timeout handling."""
+    """Tests for timeout handling — BYOK-only (no system fallback)."""
 
-    def test_timeout_triggers_retry_then_fallback(self):
-        """Timeout should trigger retry, then fall back to system."""
+    def test_timeout_triggers_retry_then_returns_none(self):
+        """Timeout should trigger retry; after second timeout, return None (no system fallback)."""
         from src.llm.fallback import FallbackChain
         from openai import APITimeoutError
 
@@ -305,36 +276,31 @@ class TestFallbackChainTimeout:
         mock_primary = MagicMock()
         mock_primary.complete.side_effect = [timeout_error, timeout_error]
 
-        fallback_response = _make_llm_response("openai", was_fallback=True, fallback_reason="timeout")
-        mock_system = MagicMock()
-        mock_system.complete.return_value = fallback_response
-
-        chain = FallbackChain(primary_provider=mock_primary, system_provider=mock_system)
+        chain = FallbackChain(primary_provider=mock_primary, system_provider=None)
         request = LLMRequest(messages=[{"role": "user", "content": "test"}])
 
         with patch("time.sleep"):
             response = chain.complete(request)
 
-        assert response.was_fallback is True
-        mock_system.complete.assert_called_once()
+        assert response is None
+        assert mock_primary.complete.call_count == 2
 
-    def test_timeout_fallback_reason(self):
-        """Timeout fallback should have fallback_reason='timeout'."""
+    def test_timeout_retry_succeeds(self):
+        """Timeout on first attempt, success on retry — system fallback never needed."""
         from src.llm.fallback import FallbackChain
         from openai import APITimeoutError
 
         timeout_error = APITimeoutError(request=MagicMock())
+        success = _make_llm_response("openai")
 
         mock_primary = MagicMock()
-        mock_primary.complete.side_effect = [timeout_error, timeout_error]
+        mock_primary.complete.side_effect = [timeout_error, success]
 
-        mock_system = MagicMock()
-        mock_system.complete.return_value = _make_llm_response("openai")
-
-        chain = FallbackChain(primary_provider=mock_primary, system_provider=mock_system)
+        chain = FallbackChain(primary_provider=mock_primary, system_provider=None)
         request = LLMRequest(messages=[{"role": "user", "content": "test"}])
 
         with patch("time.sleep"):
             response = chain.complete(request)
 
-        assert response.fallback_reason == "timeout"
+        assert response is success
+        assert mock_primary.complete.call_count == 2

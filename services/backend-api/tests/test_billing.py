@@ -243,7 +243,8 @@ class TestGetSubscription:
     def test_get_subscription_pro_active(
         self, client: TestClient, pro_owner_headers: dict, pro_subscription: Subscription
     ):
-        """Org with active pro subscription returns correct data."""
+        """Org with active pro subscription returns correct data.
+        OSS pivot (B3): can_manage_billing is always False (no Stripe in self-hosted)."""
         response = client.get(
             "/api/v1/billing/subscription", headers=pro_owner_headers
         )
@@ -252,7 +253,7 @@ class TestGetSubscription:
         assert data["subscription"]["plan"] == "pro"
         assert data["subscription"]["status"] == "active"
         assert data["subscription"]["billing_cycle"] == "monthly"
-        assert data["can_manage_billing"] is True
+        assert data["can_manage_billing"] is False  # B3: no Stripe in self-hosted
 
 
 # ============================================================================
@@ -315,18 +316,15 @@ class TestStartTrial:
 # ============================================================================
 
 class TestCreateCheckout:
-    """Tests for POST /api/v1/billing/checkout."""
+    """Tests for POST /api/v1/billing/checkout.
 
-    @patch("src.api.routes.billing.get_stripe_service")
+    OSS pivot (B3): /checkout route removed. All tests verify 404.
+    """
+
     def test_create_checkout_session_pro(
-        self, mock_get_stripe, client: TestClient, owner_headers: dict
+        self, client: TestClient, owner_headers: dict
     ):
-        """Owner can create checkout for Pro plan."""
-        mock_service = MagicMock()
-        mock_service.create_customer.return_value = "cus_new_123"
-        mock_service.create_checkout_session.return_value = "https://checkout.stripe.com/session_pro"
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /checkout route is removed in self-hosted OSS — returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -337,22 +335,12 @@ class TestCreateCheckout:
                 "cancel_url": "https://app.example.com/cancel",
             },
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["checkout_url"] == "https://checkout.stripe.com/session_pro"
-        mock_service.create_checkout_session.assert_called_once()
-
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_create_checkout_session_business(
-        self, mock_get_stripe, client: TestClient, owner_headers: dict
+        self, client: TestClient, owner_headers: dict
     ):
-        """Owner can create checkout for Business plan."""
-        mock_service = MagicMock()
-        mock_service.create_customer.return_value = "cus_new_456"
-        mock_service.create_checkout_session.return_value = "https://checkout.stripe.com/session_biz"
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /checkout route is removed — returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -363,15 +351,12 @@ class TestCreateCheckout:
                 "cancel_url": "https://app.example.com/cancel",
             },
         )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["checkout_url"] == "https://checkout.stripe.com/session_biz"
+        assert response.status_code == 404
 
     def test_create_checkout_invalid_plan(
         self, client: TestClient, owner_headers: dict
     ):
-        """Invalid plan returns 400."""
+        """B3: /checkout route removed — even invalid plans return 404 (route gone)."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -382,13 +367,12 @@ class TestCreateCheckout:
                 "cancel_url": "https://app.example.com/cancel",
             },
         )
-        assert response.status_code == 400
-        assert "Invalid plan" in response.json()["detail"]
+        assert response.status_code == 404
 
     def test_create_checkout_invalid_billing_cycle(
         self, client: TestClient, owner_headers: dict
     ):
-        """Invalid billing cycle returns 400."""
+        """B3: /checkout route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -399,21 +383,12 @@ class TestCreateCheckout:
                 "cancel_url": "https://app.example.com/cancel",
             },
         )
-        assert response.status_code == 400
-        assert "Invalid billing cycle" in response.json()["detail"]
+        assert response.status_code == 404
 
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_create_checkout_stripe_error(
-        self, mock_get_stripe, client: TestClient, owner_headers: dict
+        self, client: TestClient, owner_headers: dict
     ):
-        """Stripe error during checkout returns 400."""
-        mock_service = MagicMock()
-        mock_service.create_customer.return_value = "cus_new_789"
-        mock_service.create_checkout_session.side_effect = ValueError(
-            "No Stripe price configured for plan 'pro' with cycle 'monthly'"
-        )
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /checkout route removed — returns 404 (no Stripe in self-hosted)."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -424,11 +399,10 @@ class TestCreateCheckout:
                 "cancel_url": "https://app.example.com/cancel",
             },
         )
-        assert response.status_code == 400
-        assert "No Stripe price configured" in response.json()["detail"]
+        assert response.status_code == 404
 
     def test_create_checkout_unauthenticated(self, client: TestClient):
-        """Unauthenticated request to checkout returns 401/403."""
+        """B3: /checkout route removed — unauthenticated request also returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             json={
@@ -438,7 +412,7 @@ class TestCreateCheckout:
                 "cancel_url": "https://app.example.com/cancel",
             },
         )
-        assert response.status_code in [401, 403]
+        assert response.status_code == 404
 
 
 # ============================================================================
@@ -446,37 +420,32 @@ class TestCreateCheckout:
 # ============================================================================
 
 class TestCreatePortal:
-    """Tests for POST /api/v1/billing/portal."""
+    """Tests for POST /api/v1/billing/portal.
 
-    @patch("src.api.routes.billing.get_stripe_service")
+    OSS pivot (B3): /portal route removed. All tests verify 404.
+    """
+
     def test_create_portal_session_owner(
-        self, mock_get_stripe, client: TestClient, pro_owner_headers: dict
+        self, client: TestClient, pro_owner_headers: dict
     ):
-        """Owner with Stripe customer can access billing portal."""
-        mock_service = MagicMock()
-        mock_service.create_portal_session.return_value = "https://billing.stripe.com/portal_123"
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /portal route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/portal",
             headers=pro_owner_headers,
             json={"return_url": "https://app.example.com/settings/billing"},
         )
-
-        assert response.status_code == 200
-        assert response.json()["portal_url"] == "https://billing.stripe.com/portal_123"
+        assert response.status_code == 404
 
     def test_create_portal_no_stripe_customer(
         self, client: TestClient, owner_headers: dict
     ):
-        """Org without Stripe customer ID cannot access portal."""
+        """B3: /portal route removed — returns 404 regardless of customer."""
         response = client.post(
             "/api/v1/billing/portal",
             headers=owner_headers,
             json={"return_url": "https://app.example.com/settings/billing"},
         )
-        assert response.status_code == 400
-        assert "no billing account" in response.json()["detail"].lower()
+        assert response.status_code == 404
 
 
 # ============================================================================
@@ -489,20 +458,19 @@ class TestGetUsage:
     def test_get_usage_free_tier(
         self, client: TestClient, owner_headers: dict, free_usage: UsageRecord
     ):
-        """Free tier usage shows correct limits."""
+        """Free plan returns 250 feedback limit (SELF_HOSTED=false default)."""
         response = client.get(
             "/api/v1/billing/usage", headers=owner_headers
         )
         assert response.status_code == 200
         data = response.json()
         assert data["feedback_limit"] == 250
-        assert data["overage_enabled"] is False
 
     def test_get_usage_pro_tier(
         self, client: TestClient, pro_owner_headers: dict, pro_subscription: Subscription,
         db: Session, pro_org: Organization
     ):
-        """Pro tier usage shows correct limits and overage enabled."""
+        """Pro plan returns 2500 feedback limit (SELF_HOSTED=false default)."""
         # Create a usage record for the pro org
         usage = UsageRecord(
             organization_id=pro_org.id,
@@ -520,7 +488,6 @@ class TestGetUsage:
         data = response.json()
         assert data["feedback_limit"] == 2500
         assert data["feedback_used"] == 100
-        assert data["overage_enabled"] is True
 
 
 # ============================================================================
@@ -528,272 +495,72 @@ class TestGetUsage:
 # ============================================================================
 
 class TestStripeWebhook:
-    """Tests for POST /api/v1/billing/webhooks/stripe."""
+    """Tests for POST /api/v1/billing/webhooks/stripe.
 
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_invalid_signature(
-        self, mock_get_stripe, client: TestClient
-    ):
-        """Invalid Stripe signature returns 400."""
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = None
-        mock_get_stripe.return_value = mock_service
+    OSS pivot (B3): /webhooks/stripe route removed. All tests verify 404.
+    """
 
+    def test_webhook_invalid_signature(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "fake"}',
             headers={"Stripe-Signature": "invalid_sig"},
         )
-        assert response.status_code == 400
-        assert "Invalid webhook signature" in response.json()["detail"]
+        assert response.status_code == 404
 
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_missing_signature(
-        self, mock_get_stripe, client: TestClient
-    ):
-        """Missing Stripe-Signature header returns 400."""
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = None
-        mock_get_stripe.return_value = mock_service
-
+    def test_webhook_missing_signature(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "test"}',
         )
-        assert response.status_code == 400
+        assert response.status_code == 404
 
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_checkout_completed(
-        self, mock_get_stripe, client: TestClient, db: Session
-    ):
-        """Successful checkout webhook creates subscription."""
-        # Set up org with Stripe customer
-        org = Organization(
-            name="Webhook Test Org",
-            plan="free",
-            stripe_customer_id="cus_webhook_test",
-        )
-        db.add(org)
-        db.commit()
-        db.refresh(org)
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "checkout.session.completed",
-            "data": {
-                "object": {
-                    "customer": "cus_webhook_test",
-                    "subscription": "sub_new_from_checkout",
-                }
-            },
-        }
-        mock_service.get_subscription.return_value = {
-            "id": "sub_new_from_checkout",
-            "status": "active",
-            "current_period_start": datetime.utcnow(),
-            "current_period_end": datetime.utcnow() + timedelta(days=30),
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-            "trial_start": None,
-            "trial_end": None,
-            "price_id": "price_pro_monthly_test",
-        }
-        mock_get_stripe.return_value = mock_service
-
+    def test_webhook_checkout_completed(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "checkout.session.completed"}',
             headers={"Stripe-Signature": "valid_sig_123"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-
-        # Verify subscription was created
-        sub = db.query(Subscription).filter(
-            Subscription.organization_id == org.id
-        ).first()
-        assert sub is not None
-        assert sub.stripe_subscription_id == "sub_new_from_checkout"
-        assert sub.status == "active"
-
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_subscription_updated(
-        self, mock_get_stripe, client: TestClient, db: Session
-    ):
-        """Subscription update webhook updates local record."""
-        org = Organization(
-            name="Sub Update Org",
-            plan="pro",
-            stripe_customer_id="cus_sub_update",
-        )
-        db.add(org)
-        db.flush()
-
-        now = datetime.utcnow()
-        sub = Subscription(
-            organization_id=org.id,
-            stripe_subscription_id="sub_existing_123",
-            stripe_price_id="price_pro_monthly_test",
-            plan="pro",
-            billing_cycle="monthly",
-            status="active",
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-        )
-        db.add(sub)
-        db.commit()
-        db.refresh(sub)
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "customer.subscription.updated",
-            "data": {
-                "object": {
-                    "id": "sub_existing_123",
-                    "customer": "cus_sub_update",
-                    "status": "active",
-                    "cancel_at_period_end": True,
-                    "canceled_at": int(now.timestamp()),
-                    "current_period_start": int(now.timestamp()),
-                    "current_period_end": int((now + timedelta(days=30)).timestamp()),
-                    "items": {"data": []},
-                }
-            },
-        }
-        mock_get_stripe.return_value = mock_service
-
+    def test_webhook_subscription_updated(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "customer.subscription.updated"}',
             headers={"Stripe-Signature": "valid_sig_456"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        db.refresh(sub)
-        assert sub.cancel_at_period_end is True
-
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_subscription_deleted(
-        self, mock_get_stripe, client: TestClient, db: Session
-    ):
-        """Cancellation webhook marks subscription as canceled and downgrades org."""
-        org = Organization(
-            name="Delete Sub Org",
-            plan="pro",
-            stripe_customer_id="cus_sub_delete",
-        )
-        db.add(org)
-        db.flush()
-
-        now = datetime.utcnow()
-        sub = Subscription(
-            organization_id=org.id,
-            stripe_subscription_id="sub_to_cancel",
-            plan="pro",
-            billing_cycle="monthly",
-            status="active",
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-        )
-        db.add(sub)
-        db.commit()
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "customer.subscription.deleted",
-            "data": {
-                "object": {
-                    "id": "sub_to_cancel",
-                    "customer": "cus_sub_delete",
-                }
-            },
-        }
-        mock_get_stripe.return_value = mock_service
-
+    def test_webhook_subscription_deleted(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "customer.subscription.deleted"}',
             headers={"Stripe-Signature": "valid_sig_789"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        db.refresh(sub)
-        assert sub.status == "canceled"
-        assert sub.plan == "free"
-
-        db.refresh(org)
-        assert org.plan == "free"
-
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_invoice_payment_failed(
-        self, mock_get_stripe, client: TestClient, db: Session
-    ):
-        """Failed payment webhook sets subscription to past_due."""
-        org = Organization(
-            name="Payment Fail Org",
-            plan="pro",
-            stripe_customer_id="cus_pay_fail",
-        )
-        db.add(org)
-        db.flush()
-
-        now = datetime.utcnow()
-        sub = Subscription(
-            organization_id=org.id,
-            stripe_subscription_id="sub_payment_fail",
-            plan="pro",
-            status="active",
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-        )
-        db.add(sub)
-        db.commit()
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "invoice.payment_failed",
-            "data": {
-                "object": {
-                    "customer": "cus_pay_fail",
-                    "subscription": "sub_payment_fail",
-                }
-            },
-        }
-        mock_get_stripe.return_value = mock_service
-
+    def test_webhook_invoice_payment_failed(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "invoice.payment_failed"}',
             headers={"Stripe-Signature": "valid_sig_fail"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        db.refresh(sub)
-        assert sub.status == "past_due"
-
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_unknown_event_ignored(
-        self, mock_get_stripe, client: TestClient
-    ):
-        """Unknown event type is accepted but ignored."""
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "some.unknown.event",
-            "data": {"object": {}},
-        }
-        mock_get_stripe.return_value = mock_service
-
+    def test_webhook_unknown_event_ignored(self, client: TestClient):
+        """B3: /webhooks/stripe removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "some.unknown.event"}',
             headers={"Stripe-Signature": "valid_sig"},
         )
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
+        assert response.status_code == 404
 
 
 # ============================================================================
@@ -801,38 +568,42 @@ class TestStripeWebhook:
 # ============================================================================
 
 class TestFeedbackLimitEnforcement:
-    """Tests for feedback limit checks via the check_feedback_limit dependency."""
+    """Tests for feedback limit checks.
 
-    def test_feedback_limit_free_tier_exceeded(
+    OSS pivot (B1): SELF_HOSTED=true returns None for all limits (unlimited).
+    """
+
+    def test_feedback_limit_is_unlimited_in_self_hosted(
         self, db: Session, owner_org: Organization
     ):
-        """Free tier blocks feedback when 250 limit is reached."""
-        from src.config.plans import get_feedback_limit, get_plan
+        """B1: In self-hosted mode, get_feedback_limit always returns None."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.get_feedback_limit("free") is None
+            assert plans_mod.get_feedback_limit("pro") is None
+            assert plans_mod.get_feedback_limit("enterprise") is None
 
-        plan = "free"
-        limit = get_feedback_limit(plan)
-        assert limit == 250
-
-        plan_config = get_plan(plan)
-        assert plan_config.get("overage_enabled") is False
-
-    def test_feedback_limit_pro_tier_allows_overage(self, db: Session):
-        """Pro tier allows overage (doesn't block at limit)."""
-        from src.config.plans import get_feedback_limit, get_plan
-
-        plan = "pro"
-        limit = get_feedback_limit(plan)
-        assert limit == 2500
-
-        plan_config = get_plan(plan)
-        assert plan_config.get("overage_enabled") is True
+    def test_feedback_limit_tiered_when_not_self_hosted(self, db: Session):
+        """Tiered limits are preserved when SELF_HOSTED=false."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.get_feedback_limit("free") == 250
+            assert plans_mod.get_feedback_limit("pro") == 2500
 
     def test_feedback_limit_enterprise_unlimited(self):
-        """Enterprise tier has no feedback limit."""
-        from src.config.plans import get_feedback_limit
-
-        limit = get_feedback_limit("enterprise")
-        assert limit is None
+        """Enterprise tier has no feedback limit regardless of SELF_HOSTED."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.get_feedback_limit("enterprise") is None
 
 
 # ============================================================================
@@ -840,40 +611,75 @@ class TestFeedbackLimitEnforcement:
 # ============================================================================
 
 class TestFeatureGating:
-    """Tests for the require_feature dependency."""
+    """Tests for the require_feature dependency.
 
-    def test_feature_available_for_correct_plan(self):
-        """Feature included in plan returns True."""
-        from src.config.plans import has_feature
+    OSS pivot (B1): In SELF_HOSTED mode, all features return True regardless of plan.
+    Tiered behavior is preserved when SELF_HOSTED=false.
+    """
 
-        assert has_feature("free", "basic_dashboard") is True
-        assert has_feature("free", "csv_import") is True
-        assert has_feature("pro", "slack_integration") is True
-        assert has_feature("business", "api_access") is True
-        assert has_feature("enterprise", "sso_saml") is True
+    def test_all_features_available_in_self_hosted_mode(self):
+        """B1: SELF_HOSTED=true makes has_feature always return True."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            # All plans and all features return True
+            assert plans_mod.has_feature("free", "slack_integration") is True
+            assert plans_mod.has_feature("free", "api_access") is True
+            assert plans_mod.has_feature("free", "sso_saml") is True
+            assert plans_mod.has_feature("pro", "sso_saml") is True
 
-    def test_feature_blocked_for_wrong_plan(self):
-        """Feature not included in lower plan returns False."""
-        from src.config.plans import has_feature
+    def test_feature_available_for_correct_plan_when_not_self_hosted(self):
+        """Tiered feature access when SELF_HOSTED=false."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "basic_dashboard") is True
+            assert plans_mod.has_feature("free", "csv_import") is True
+            assert plans_mod.has_feature("pro", "slack_integration") is True
+            assert plans_mod.has_feature("business", "api_access") is True
+            assert plans_mod.has_feature("enterprise", "sso_saml") is True
 
-        assert has_feature("free", "slack_integration") is False
-        assert has_feature("free", "api_access") is False
-        assert has_feature("pro", "api_access") is False
-        assert has_feature("pro", "sso_saml") is False
-        assert has_feature("business", "sso_saml") is False
+    def test_feature_blocked_for_wrong_plan_when_not_self_hosted(self):
+        """Feature not included in lower plan returns False when SELF_HOSTED=false."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "slack_integration") is False
+            assert plans_mod.has_feature("free", "api_access") is False
+            assert plans_mod.has_feature("pro", "api_access") is False
+            assert plans_mod.has_feature("pro", "sso_saml") is False
+            assert plans_mod.has_feature("business", "sso_saml") is False
 
-    def test_plan_hierarchy(self):
-        """Plan hierarchy comparison works correctly."""
-        from src.config.plans import plan_includes
+    def test_plan_hierarchy_when_not_self_hosted(self):
+        """Plan hierarchy comparison works correctly when SELF_HOSTED=false."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.plan_includes("free", "free") is True
+            assert plans_mod.plan_includes("pro", "free") is True
+            assert plans_mod.plan_includes("business", "pro") is True
+            assert plans_mod.plan_includes("enterprise", "business") is True
+            assert plans_mod.plan_includes("free", "pro") is False
+            assert plans_mod.plan_includes("pro", "business") is False
+            assert plans_mod.plan_includes("business", "enterprise") is False
 
-        assert plan_includes("free", "free") is True
-        assert plan_includes("pro", "free") is True
-        assert plan_includes("business", "pro") is True
-        assert plan_includes("enterprise", "business") is True
-
-        assert plan_includes("free", "pro") is False
-        assert plan_includes("pro", "business") is False
-        assert plan_includes("business", "enterprise") is False
+    def test_plan_hierarchy_all_true_in_self_hosted_mode(self):
+        """B1: SELF_HOSTED=true makes plan_includes always return True."""
+        import importlib
+        import os
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.plan_includes("free", "pro") is True
+            assert plans_mod.plan_includes("free", "enterprise") is True
 
 
 # ============================================================================
@@ -881,46 +687,25 @@ class TestFeatureGating:
 # ============================================================================
 
 class TestGetInvoices:
-    """Tests for GET /api/v1/billing/invoices."""
+    """Tests for GET /api/v1/billing/invoices.
+
+    OSS pivot (B3): /invoices route removed. All tests verify 404.
+    """
 
     def test_get_invoices_no_stripe_customer(
         self, client: TestClient, owner_headers: dict
     ):
-        """Org without Stripe customer returns empty invoices."""
+        """B3: /invoices route removed — returns 404."""
         response = client.get(
             "/api/v1/billing/invoices", headers=owner_headers
         )
-        assert response.status_code == 200
-        assert response.json()["invoices"] == []
+        assert response.status_code == 404
 
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_get_invoices_with_stripe_customer(
-        self, mock_get_stripe, client: TestClient, pro_owner_headers: dict
+        self, client: TestClient, pro_owner_headers: dict
     ):
-        """Org with Stripe customer returns invoices from Stripe."""
-        mock_service = MagicMock()
-        mock_service.get_invoices.return_value = [
-            {
-                "id": "inv_test_001",
-                "number": "INV-0001",
-                "amount_due": 2900,
-                "amount_paid": 2900,
-                "currency": "usd",
-                "status": "paid",
-                "created": datetime(2026, 1, 1),
-                "due_date": None,
-                "paid_at": datetime(2026, 1, 1),
-                "hosted_invoice_url": "https://invoice.stripe.com/inv_test_001",
-                "invoice_pdf": "https://invoice.stripe.com/inv_test_001.pdf",
-            },
-        ]
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /invoices route removed — returns 404 even with Stripe customer."""
         response = client.get(
             "/api/v1/billing/invoices", headers=pro_owner_headers
         )
-        assert response.status_code == 200
-        invoices = response.json()["invoices"]
-        assert len(invoices) == 1
-        assert invoices[0]["id"] == "inv_test_001"
-        assert invoices[0]["amount_paid"] == 2900
+        assert response.status_code == 404

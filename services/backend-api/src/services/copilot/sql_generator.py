@@ -185,12 +185,18 @@ class SQLGenerator:
         api_key: Optional[str],
         model: str,
     ) -> str:
-        """Call OpenAI to generate SQL. Returns the raw SQL string."""
+        """Call OpenAI to generate SQL. Returns the raw SQL string.
+
+        api_key must be the org's BYOK key (resolved upstream). No env fallback.
+        """
         import openai
 
-        key = api_key or os.environ.get("OPENAI_API_KEY", "")
+        key = api_key or ""
         if not key:
-            raise RuntimeError("No OpenAI API key available for SQL generation")
+            raise RuntimeError(
+                "No OpenAI API key configured for SQL generation. "
+                "Please add your key in Settings → AI → API Keys."
+            )
 
         client = openai.OpenAI(api_key=key)
         response = client.chat.completions.create(

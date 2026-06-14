@@ -27,7 +27,6 @@ import {
   Monitor,
   Sun,
   Moon,
-  ChevronRight,
   Bell,
   AlertTriangle,
   Download,
@@ -43,7 +42,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import Link from 'next/link';
 
 export default function PreferencesPage() {
   const router = useRouter();
@@ -426,13 +424,10 @@ export default function PreferencesPage() {
                 <label className="block text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   Subscription Plan
                 </label>
-                <Link
-                  href="/settings/billing"
-                  className="inline-flex items-center space-x-2 group"
-                >
+                <div className="inline-flex items-center space-x-2">
                   <Crown className="w-5 h-5 text-primary" />
                   <span
-                    className="px-3 py-1 rounded-lg text-sm font-bold capitalize group-hover:opacity-80 transition-opacity"
+                    className="px-3 py-1 rounded-lg text-sm font-bold capitalize"
                     style={{
                       backgroundColor: 'color-mix(in oklch, var(--primary) 15%, transparent)',
                       color: 'var(--primary)'
@@ -440,8 +435,7 @@ export default function PreferencesPage() {
                   >
                     {org?.plan}
                   </span>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                </Link>
+                </div>
               </div>
 
               {/* Created At */}

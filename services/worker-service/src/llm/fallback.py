@@ -1,19 +1,19 @@
 """
-FallbackChain — orchestrates retry + provider fallback for LLM calls.
+FallbackChain — orchestrates retry logic for LLM calls.
 
 Strategy:
-1. Try primary provider
+1. Try primary provider (org's BYOK key)
 2. On transient failure (429, 5xx, timeout): retry once with 2s backoff
-3. If retry fails: fall back to system OpenAI provider (if available)
-4. Auth errors (401, 403) are NOT retried or fallen back — config problem
+3. If retry also fails: return None — no system/env fallback ever
+4. Auth errors (401, 403) are NOT retried — config problem
 
-Returns None if all attempts fail and no fallback is available.
+BYOK-only pivot: the system-provider fallback (Attempt 3) has been removed.
+Orgs with no configured key simply don't get AI; they fall back to VADER.
 """
 
 import logging
 import time
-from dataclasses import replace
-from typing import Optional, Tuple
+from typing import Optional
 
 from src.llm.base import LLMProvider
 from src.llm.types import LLMRequest, LLMResponse
@@ -73,11 +73,12 @@ def _get_fallback_reason(exc: Exception) -> str:
 
 class FallbackChain:
     """
-    Orchestrates retry + provider fallback for LLM calls.
+    Orchestrates retry logic for LLM calls (BYOK-only).
 
     Args:
-        primary_provider: The org's chosen LLM provider.
-        system_provider: System OpenAI fallback (None if primary IS system key).
+        primary_provider: The org's chosen LLM provider (BYOK key).
+        system_provider: Accepted for compatibility but ignored. Must always
+                         be None in BYOK-only mode.
     """
 
     def __init__(
@@ -86,14 +87,15 @@ class FallbackChain:
         system_provider: Optional[LLMProvider],
     ):
         self._primary = primary_provider
-        self._system = system_provider
+        # system_provider is intentionally ignored — no system key in BYOK-only mode.
+        self._system = None
 
     def complete(self, request: LLMRequest) -> Optional[LLMResponse]:
         """
-        Attempt completion with retry and fallback logic.
+        Attempt completion with retry logic.
 
         Returns:
-            LLMResponse on success, None if all attempts fail.
+            LLMResponse on success, None if both attempts fail.
         """
         last_error = None
         fallback_reason = None
@@ -107,7 +109,9 @@ class FallbackChain:
                 return None
             last_error = exc
             fallback_reason = _get_fallback_reason(exc)
-            logger.warning(f"Primary LLM failed ({fallback_reason}), retrying in {_RETRY_BACKOFF_SECONDS}s: {exc}")
+            logger.warning(
+                f"Primary LLM failed ({fallback_reason}), retrying in {_RETRY_BACKOFF_SECONDS}s: {exc}"
+            )
 
         # Attempt 2: retry primary with backoff
         time.sleep(_RETRY_BACKOFF_SECONDS)
@@ -121,16 +125,9 @@ class FallbackChain:
             fallback_reason = _get_fallback_reason(exc)
             logger.warning(f"Primary LLM retry failed ({fallback_reason}): {exc}")
 
-        # Attempt 3: fallback to system provider
-        if self._system is None:
-            logger.error("No system fallback available, giving up")
-            return None
-
-        try:
-            logger.info(f"Falling back to system provider (reason: {fallback_reason})")
-            response = self._system.complete(request)
-            # Mark the response as a fallback
-            return replace(response, was_fallback=True, fallback_reason=fallback_reason)
-        except Exception as exc:
-            logger.error(f"System fallback also failed: {exc}")
-            return None
+        # Both attempts failed, no system fallback available
+        logger.error(
+            f"LLM call failed after 2 attempts ({fallback_reason}). "
+            "No system fallback — org must configure a valid BYOK key."
+        )
+        return None

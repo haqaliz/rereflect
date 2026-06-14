@@ -82,7 +82,6 @@ class UsageRecord(Base):
     feedback_count = Column(Integer, default=0, nullable=False)
     api_calls_count = Column(Integer, default=0, nullable=False)
     overage_feedback = Column(Integer, default=0, nullable=False)
-    overage_reported_to_stripe = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
@@ -586,7 +585,7 @@ class OrgApiKey(Base):
 
 
 class OrgAIConfig(Base):
-    """Per-org AI configuration: provider, model per task, budget."""
+    """Per-org AI configuration: provider, model per task."""
     __tablename__ = "org_ai_config"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -595,9 +594,6 @@ class OrgAIConfig(Base):
     model_categorization = Column(String(50), default='gpt-4o-mini', nullable=False)
     model_analysis = Column(String(50), default='gpt-4o-mini', nullable=False)
     model_insights = Column(String(50), default='gpt-4o-mini', nullable=False)
-    monthly_budget_cents = Column(Integer, nullable=True)
-    budget_used_cents = Column(Integer, default=0, nullable=False)
-    budget_reset_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

@@ -35,18 +35,6 @@ vi.mock('@/components/ui/breadcrumb', () => ({
   BreadcrumbSeparator: () => <span>/</span>,
 }));
 
-vi.mock('@/components/TrialBanner', () => ({
-  TrialBanner: () => <div data-testid="trial-banner">Trial</div>,
-}));
-
-vi.mock('@/components/UsageWarning', () => ({
-  UsageWarning: () => <div data-testid="usage-warning">Usage</div>,
-}));
-
-vi.mock('@/components/shared/BudgetBannerWrapper', () => ({
-  BudgetBannerWrapper: () => <div data-testid="budget-banner">Budget</div>,
-}));
-
 vi.mock('sonner', () => ({
   Toaster: () => <div data-testid="toaster">Toaster</div>,
 }));

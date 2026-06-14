@@ -20,25 +20,6 @@ vi.mock('sonner', () => ({
   },
 }));
 
-// ─── Mutable auth state (controlled per test) ─────────────────────────────────
-// Using a mutable object so individual tests can override plan without
-// re-importing the module (vi.mock is hoisted, so the factory runs once).
-
-const authState = {
-  user: {
-    id: 1,
-    email: 'test@example.com',
-    organization_id: 1,
-    role: 'owner' as const,
-    plan: 'business',
-    is_system_admin: false,
-  },
-};
-
-vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => authState,
-}));
-
 // ─── Mock reportsAPI ──────────────────────────────────────────────────────────
 
 const mockReports: Report[] = [
@@ -96,32 +77,14 @@ vi.mock('@/components/copilot/ReportPreview', () => ({
   ),
 }));
 
-// ─── Mock UpgradeCTA ──────────────────────────────────────────────────────────
-
-vi.mock('@/components/copilot/UpgradeCTA', () => ({
-  UpgradeCTA: ({ message }: { message: string }) => (
-    <div data-testid="upgrade-cta-mock">{message}</div>
-  ),
-}));
-
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('ReportsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset mocks to default resolved values
     mockList.mockResolvedValue(mockReports);
     mockDelete.mockResolvedValue(undefined);
     mockDownloadPDF.mockResolvedValue(undefined);
-    // Reset user to business plan
-    authState.user = {
-      id: 1,
-      email: 'test@example.com',
-      organization_id: 1,
-      role: 'owner',
-      plan: 'business',
-      is_system_admin: false,
-    };
   });
 
   it('test_renders_empty_state', async () => {
@@ -161,21 +124,17 @@ describe('ReportsPage', () => {
     expect(screen.getByText('Mar 10, 2026')).toBeInTheDocument();
   });
 
-  it('test_plan_gating_shows_upgrade', async () => {
-    // Override user to free plan via the mutable authState object
-    authState.user = { ...authState.user, plan: 'free' };
-
+  it('test_reports_always_shown_regardless_of_plan', async () => {
+    // All users now see reports with no plan gate
     render(<ReportsPage />);
 
-    // Upgrade CTA card visible immediately (no API call needed)
-    expect(screen.getByTestId('upgrade-cta-card')).toBeInTheDocument();
-    expect(screen.getByTestId('upgrade-cta-mock')).toBeInTheDocument();
+    // No upgrade gate card
+    expect(screen.queryByTestId('upgrade-cta-card')).not.toBeInTheDocument();
 
-    // Reports API should NOT have been called
-    expect(mockList).not.toHaveBeenCalled();
-
-    // Table should not be visible
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // Reports API IS called immediately
+    await waitFor(() => {
+      expect(mockList).toHaveBeenCalled();
+    });
   });
 
   it('test_delete_report', async () => {

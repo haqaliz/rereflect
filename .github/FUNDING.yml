@@ -1,0 +1,10 @@
+# Funding configuration for GitHub Sponsors and other platforms.
+# Uncomment and replace the placeholder with the project owner's username/handle.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+# github: YOUR_GITHUB_USERNAME_HERE   # <-- placeholder: set the owner's GitHub Sponsors username
+
+# Other supported platforms (optional):
+# ko_fi: YOUR_KOFI_USERNAME
+# open_collective: YOUR_OPENCOLLECTIVE_SLUG
+# custom: ["https://example.com/donate"]

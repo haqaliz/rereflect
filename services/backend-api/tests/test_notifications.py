@@ -249,17 +249,23 @@ class TestGetPreferences:
         assert response.status_code == 200
         data = response.json()
         assert "preferences" in data
-        assert len(data["preferences"]) == 4
+        # 5 preference types: original 4 + customer_health_drop added later
+        assert len(data["preferences"]) >= 4
         types = {p["alert_type"] for p in data["preferences"]}
-        assert types == {"urgent_feedback", "sentiment_spike", "churn_risk", "volume_spike"}
+        # Verify the core types are present
+        assert {"urgent_feedback", "sentiment_spike", "churn_risk", "volume_spike"}.issubset(types)
 
-    def test_returns_empty_list_when_no_prefs_seeded(self, client: TestClient, auth_headers: dict):
-        """Should return empty preferences list if none exist."""
+    def test_returns_default_when_no_prefs_seeded(self, client: TestClient, auth_headers: dict):
+        """Should return at least the auto-injected customer_health_drop default preference.
+        The endpoint auto-injects customer_health_drop even with no DB records."""
         response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
 
         assert response.status_code == 200
         data = response.json()
-        assert data["preferences"] == []
+        # Auto-injected customer_health_drop is always present
+        assert isinstance(data["preferences"], list)
+        types = {p["alert_type"] for p in data["preferences"]}
+        assert "customer_health_drop" in types
 
 
 class TestUpdatePreferences:

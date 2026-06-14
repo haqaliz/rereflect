@@ -1,0 +1,37 @@
+Rereflect
+Copyright (c) Rereflect contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+It bundles or depends on third-party software with separate licenses.
+The most notable non-MIT components are listed below. This list is not
+exhaustive; see each dependency's own license for full terms.
+
+--------------------------------------------------------------------------------
+GSAP (GreenSock Animation Platform)
+--------------------------------------------------------------------------------
+Used by: services/frontend-web, services/landing-web
+Components used: GSAP core, gsap/ScrollTrigger, gsap/MotionPathPlugin
+License: GreenSock Standard "No Charge" License (custom, non-OSI)
+         https://gsap.com/community/standard-license/
+
+Rereflect uses only the free GSAP toolset. As of GSAP 3.13, the entire
+GSAP library — including ScrollTrigger and MotionPathPlugin — is available
+free of charge under the GreenSock Standard "No Charge" License. No paid
+"Club GreenSock" / bonus plugins (e.g. SplitText, MorphSVG, DrawSVG,
+ScrambleText, Physics2D, InertiaPlugin, GSDevTools) are used.
+
+GSAP is a dependency only; its source is not modified. The GSAP license,
+not the MIT License, governs the GSAP code itself.
+
+--------------------------------------------------------------------------------
+psycopg2 / psycopg2-binary
+--------------------------------------------------------------------------------
+Used by: services/backend-api, services/worker-service (PostgreSQL driver)
+License: GNU Lesser General Public License v3.0 (LGPL-3.0) with the OpenSSL
+         linking exception
+         https://github.com/psycopg/psycopg2/blob/master/LICENSE
+
+psycopg2 is used as an unmodified, dynamically linked dependency. Under the
+LGPL, this usage does not impose LGPL terms on Rereflect's own MIT-licensed
+code. The LGPL-3.0 license governs the psycopg2 code itself.

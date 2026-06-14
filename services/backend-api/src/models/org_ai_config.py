@@ -12,9 +12,6 @@ class OrgAIConfig(Base):
     model_categorization = Column(String(50), default='gpt-4o-mini', nullable=False)
     model_analysis = Column(String(50), default='gpt-4o-mini', nullable=False)
     model_insights = Column(String(50), default='gpt-4o-mini', nullable=False)
-    monthly_budget_cents = Column(Integer, nullable=True)  # NULL = use plan default
-    budget_used_cents = Column(Integer, default=0, nullable=False)
-    budget_reset_at = Column(DateTime, nullable=True)  # Next reset date (1st of month)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

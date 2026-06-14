@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
 import {
   getChurnCohorts,
   cohortDimensionLabel,
@@ -22,8 +21,6 @@ import {
 import { CohortHeatmap } from '@/components/analytics/CohortHeatmap';
 import { ReasonCodeBreakdown } from '@/components/analytics/ReasonCodeBreakdown';
 import { ChurnCohortBarChart } from '@/components/analytics/ChurnCohortBarChart';
-import Link from 'next/link';
-import { Lock } from 'lucide-react';
 
 const DIMENSION_OPTIONS: { value: CohortDimension; label: string }[] = [
   { value: 'source', label: 'Source' },
@@ -38,10 +35,6 @@ const RANGE_OPTIONS: { value: CohortRange; label: string }[] = [
 ];
 
 export default function ChurnCohortsPage() {
-  const { user } = useAuth();
-  const plan = user?.plan ?? 'free';
-  const isBusiness = plan === 'business' || plan === 'enterprise';
-
   const [dimension, setDimension] = useState<CohortDimension>('source');
   const [range, setRange] = useState<CohortRange>('30d');
   const [data, setData] = useState<CohortAnalyticsResponse | null>(null);
@@ -65,10 +58,8 @@ export default function ChurnCohortsPage() {
   );
 
   useEffect(() => {
-    if (isBusiness) {
-      fetchData(dimension, range);
-    }
-  }, [dimension, range, fetchData, isBusiness]);
+    fetchData(dimension, range);
+  }, [dimension, range, fetchData]);
 
   const handleDimensionChange = (value: string) => {
     setDimension(value as CohortDimension);
@@ -89,30 +80,7 @@ export default function ChurnCohortsPage() {
         </p>
       </div>
 
-      {/* Upgrade banner for non-Business plans */}
-      {!isBusiness && (
-        <div
-          data-testid="upgrade-banner"
-          className="flex items-center gap-3 p-4 rounded-lg border border-primary/20 bg-primary/5"
-        >
-          <Lock className="w-5 h-5 text-primary shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-medium">Business plan required</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Churn cohort analytics are available on Business and Enterprise plans.
-            </p>
-          </div>
-          <Link
-            href="/settings/billing"
-            className="text-sm font-medium text-primary underline underline-offset-2"
-          >
-            Upgrade
-          </Link>
-        </div>
-      )}
-
-      {isBusiness && (
-        <>
+      <>
           {/* Filter row */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2">
@@ -275,8 +243,7 @@ export default function ChurnCohortsPage() {
               )}
             </>
           )}
-        </>
-      )}
+      </>
     </div>
   );
 }

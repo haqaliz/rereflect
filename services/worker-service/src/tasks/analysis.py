@@ -328,6 +328,21 @@ def process_unanalyzed_feedback() -> dict:
             pass
 
 
+def _org_has_byok_key(org_id: int, db) -> bool:
+    """
+    Return True if the org has at least one valid BYOK key in the database.
+
+    Used by _analyze_feedback_item to distinguish:
+    - "No BYOK key configured" → VADER fallback, llm_analysis_pending stays False
+    - "Key configured but LLM call failed transiently" → set llm_analysis_pending=True
+    """
+    from src.models import OrgApiKey
+    return db.query(OrgApiKey).filter_by(
+        organization_id=org_id,
+        is_valid=True,
+    ).first() is not None
+
+
 def _analyze_feedback_item(feedback, db=None) -> None:
     """
     Core analysis logic for a single feedback item.
@@ -375,8 +390,13 @@ def _analyze_feedback_item(feedback, db=None) -> None:
         feedback.churn_risk_factors = churn_factors
     else:
         _apply_keyword_analysis(feedback, db)
-        # Mark for LLM retry if org has AI enabled but LLM failed
-        if use_llm:
+        # Only mark for LLM retry when:
+        # 1. Org has AI enabled (use_llm=True), AND
+        # 2. A BYOK key IS configured (transient failure — not a missing key)
+        #
+        # If no BYOK key is configured, setting pending=True causes perpetual
+        # retries that can never succeed. VADER fallback is the correct end-state.
+        if use_llm and db is not None and _org_has_byok_key(feedback.organization_id, db):
             feedback.llm_analysis_pending = True
 
     # Extract and set customer_email from source_metadata

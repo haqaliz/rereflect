@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
 import {
   analyticsAPI,
   type AnalyticsTrendsData,
@@ -11,7 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Lock, TrendingUp, TrendingDown, Minus, ArrowRight, Download, ChevronDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, Minus, ArrowRight, Download, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -79,9 +78,6 @@ const metricTrendsChartConfig = {
 // ─── Component ─────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
-  const { user } = useAuth();
-  const plan = user?.plan || 'free';
-
   const [dateRange, setDateRange] = useState<DateRange>('7d');
   const [data, setData] = useState<AnalyticsTrendsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,29 +88,18 @@ export default function AnalyticsPage() {
   const [activeDonutIndex, setActiveDonutIndex] = useState<number | null>(null);
   const chartsRef = useRef<HTMLDivElement>(null);
 
-  const canAccessRange = useCallback((range: DateRange) => {
-    if (range === '7d') return true;
-    return plan !== 'free';
-  }, [plan]);
-
   const fetchData = useCallback(async (range: DateRange) => {
-    if (!canAccessRange(range)) return;
     setLoading(true);
     setError(null);
     try {
       const result = await analyticsAPI.getTrends(range);
       setData(result);
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { status: number; data?: { detail?: { message?: string } } } };
-      if (axiosErr.response?.status === 403) {
-        setError(axiosErr.response.data?.detail?.message || 'Upgrade required');
-      } else {
-        setError('Failed to load analytics data');
-      }
+    } catch {
+      setError('Failed to load analytics data');
     } finally {
       setLoading(false);
     }
-  }, [canAccessRange]);
+  }, []);
 
   useEffect(() => { fetchData(dateRange); }, [dateRange, fetchData]);
 
@@ -125,7 +110,7 @@ export default function AnalyticsPage() {
   };
 
   const handleExportPDF = async () => {
-    if (!chartsRef.current || plan === 'free') return;
+    if (!chartsRef.current) return;
     setExporting(true);
     try {
       const { exportAnalyticsPDF } = await import('@/lib/pdf-export');
@@ -207,26 +192,18 @@ export default function AnalyticsPage() {
             variant="outline"
             size="sm"
             onClick={handleExportPDF}
-            disabled={exporting || plan === 'free' || !data}
-            title={plan === 'free' ? 'Upgrade to Pro to export PDF' : 'Export as PDF'}
+            disabled={exporting || !data}
+            title="Export as PDF"
           >
             <Download className="w-4 h-4 mr-1.5" />
             {exporting ? 'Exporting...' : 'Export PDF'}
-            {plan === 'free' && <Lock className="w-3 h-3 ml-1 opacity-50" />}
           </Button>
-          <ShareAnalyticsDialog
-            disabled={plan === 'free'}
-            disabledReason={plan === 'free' ? 'Upgrade to Pro to share dashboards' : undefined}
-          />
+          <ShareAnalyticsDialog />
           <Tabs value={dateRange} onValueChange={handleRangeChange}>
             <TabsList className="h-8">
               <TabsTrigger value="7d" className="text-xs px-2 h-6">7d</TabsTrigger>
-              <TabsTrigger value="30d" disabled={!canAccessRange('30d')} className="text-xs px-2 h-6">
-                30d {!canAccessRange('30d') && <Lock className="w-3 h-3 ml-0.5 opacity-50" />}
-              </TabsTrigger>
-              <TabsTrigger value="90d" disabled={!canAccessRange('90d')} className="text-xs px-2 h-6">
-                90d {!canAccessRange('90d') && <Lock className="w-3 h-3 ml-0.5 opacity-50" />}
-              </TabsTrigger>
+              <TabsTrigger value="30d" className="text-xs px-2 h-6">30d</TabsTrigger>
+              <TabsTrigger value="90d" className="text-xs px-2 h-6">90d</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -246,11 +223,6 @@ export default function AnalyticsPage() {
       {error && (
         <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           {error}
-          {plan === 'free' && (
-            <Link href="/settings/billing" className="ml-2 underline font-medium">
-              Upgrade to Pro
-            </Link>
-          )}
         </div>
       )}
 

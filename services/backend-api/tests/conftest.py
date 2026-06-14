@@ -7,6 +7,11 @@ import os
 # Disable Redis caching during tests to prevent stale data interference
 os.environ["CACHE_ENABLED"] = "false"
 
+# B1 (OSS pivot): default SELF_HOSTED=false in tests so that plan-gating
+# logic is exercised normally.  Individual tests that need OSS/self-hosted
+# behaviour should use `patch.dict(os.environ, {"SELF_HOSTED": "true"})`.
+os.environ.setdefault("SELF_HOSTED", "false")
+
 import pytest
 from typing import Generator
 from unittest.mock import patch

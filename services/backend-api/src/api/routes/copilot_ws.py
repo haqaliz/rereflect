@@ -73,9 +73,10 @@ async def call_llm_stream(
     Can be patched in tests.
     """
     import openai
-    import os
 
-    key = api_key or os.environ.get("OPENAI_API_KEY", "")
+    # api_key must come from the org's BYOK — callers ensure it's non-None
+    # before reaching here (they return a WS error message if absent).
+    key = api_key or ""
     masked_key = f"***{key[-4:]}" if key and len(key) > 4 else "EMPTY"
     logger.info(f"call_llm_stream: provider={provider}, model={model}, key={masked_key}, messages={len(messages)}")
 
@@ -453,26 +454,22 @@ async def _handle_query(
                     _provider = _config.default_provider
                     _model = _config.model_analysis
 
-                _byok = db.query(OrgApiKey).filter_by(
-                    organization_id=org.id,
-                    provider=_provider,
-                    is_valid=True,
-                ).first()
-                if _byok:
-                    _api_key = decrypt_api_key(_byok.encrypted_key)
-                else:
-                    _key_env = {
-                        "openai": "OPENAI_API_KEY",
-                        "anthropic": "ANTHROPIC_API_KEY",
-                        "google": "GOOGLE_AI_API_KEY",
-                    }
-                    _api_key = _os.environ.get(_key_env.get(_provider, "OPENAI_API_KEY"), "")
+                from src.utils.byok import resolve_org_byok_key
+                _api_key = resolve_org_byok_key(_provider, org.id, db)
             except Exception as _cfg_err:
                 logger.warning(f"Could not load org LLM config for report: {_cfg_err}")
                 db.rollback()
+                _api_key = None
 
             if not _api_key:
-                _api_key = _os.environ.get("OPENAI_API_KEY", "")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": (
+                        "No API key configured. "
+                        "Please add your key in Settings → AI → API Keys."
+                    ),
+                })
+                return
 
             await _handle_report(
                 websocket=websocket,
@@ -526,27 +523,22 @@ async def _handle_query(
                 provider = config.default_provider
                 model = config.model_analysis
 
-            byok = db.query(OrgApiKey).filter_by(
-                organization_id=org.id,
-                provider=provider,
-                is_valid=True,
-            ).first()
-
-            if byok:
-                api_key = decrypt_api_key(byok.encrypted_key)
-            else:
-                key_env = {
-                    "openai": "OPENAI_API_KEY",
-                    "anthropic": "ANTHROPIC_API_KEY",
-                    "google": "GOOGLE_AI_API_KEY",
-                }
-                api_key = os.environ.get(key_env.get(provider, "OPENAI_API_KEY"), "")
+            from src.utils.byok import resolve_org_byok_key
+            api_key = resolve_org_byok_key(provider, org.id, db)
         except Exception as cfg_err:
             logger.warning(f"Could not load org LLM config: {cfg_err}")
             db.rollback()
+            api_key = None
 
         if not api_key:
-            api_key = os.environ.get("OPENAI_API_KEY", "")
+            await websocket.send_json({
+                "type": "error",
+                "message": (
+                    "No API key configured. "
+                    "Please add your key in Settings → AI → API Keys."
+                ),
+            })
+            return
 
         logger.info(f"_handle_query: provider={provider}, model={model}, key={'***'+api_key[-4:] if api_key and len(api_key)>4 else 'EMPTY'}")
 

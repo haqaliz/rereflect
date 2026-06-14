@@ -111,18 +111,15 @@ def promo_org_with_sub(db: Session) -> tuple[Organization, Subscription]:
 # ============================================================================
 
 class TestCheckoutWithPromoCode:
-    """Tests for POST /api/v1/billing/checkout with promo_code."""
+    """Tests for POST /api/v1/billing/checkout with promo_code.
 
-    @patch("src.api.routes.billing.get_stripe_service")
+    OSS pivot (B3): /checkout route removed. All tests verify 404.
+    """
+
     def test_checkout_passes_promo_code_to_stripe_service(
-        self, mock_get_stripe, client: TestClient, owner_headers: dict
+        self, client: TestClient, owner_headers: dict
     ):
-        """Promo code from request is forwarded to create_checkout_session."""
-        mock_service = MagicMock()
-        mock_service.create_customer.return_value = "cus_new_promo"
-        mock_service.create_checkout_session.return_value = "https://checkout.stripe.com/promo_session"
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /billing/checkout route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -134,26 +131,12 @@ class TestCheckoutWithPromoCode:
                 "promo_code": "EARLYPRO3",
             },
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-        assert response.json()["checkout_url"] == "https://checkout.stripe.com/promo_session"
-
-        # Verify promo_code was passed to stripe service
-        call_kwargs = mock_service.create_checkout_session.call_args
-        assert call_kwargs.kwargs.get("promo_code") == "EARLYPRO3" or \
-               (len(call_kwargs.args) > 6 and call_kwargs.args[6] == "EARLYPRO3") or \
-               call_kwargs[1].get("promo_code") == "EARLYPRO3"
-
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_checkout_without_promo_passes_none(
-        self, mock_get_stripe, client: TestClient, owner_headers: dict
+        self, client: TestClient, owner_headers: dict
     ):
-        """Checkout without promo_code passes None to stripe service."""
-        mock_service = MagicMock()
-        mock_service.create_customer.return_value = "cus_no_promo"
-        mock_service.create_checkout_session.return_value = "https://checkout.stripe.com/no_promo"
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /billing/checkout route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -164,26 +147,12 @@ class TestCheckoutWithPromoCode:
                 "cancel_url": "https://app.test.com/cancel",
             },
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        # Verify promo_code is None
-        call_kwargs = mock_service.create_checkout_session.call_args
-        assert call_kwargs.kwargs.get("promo_code") is None or \
-               call_kwargs[1].get("promo_code") is None
-
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_checkout_with_promo_creates_stripe_customer_if_missing(
-        self, mock_get_stripe, client: TestClient, owner_headers: dict, db: Session, free_org: Organization
+        self, client: TestClient, owner_headers: dict
     ):
-        """Org without Stripe customer ID gets one created during promo checkout."""
-        assert free_org.stripe_customer_id is None
-
-        mock_service = MagicMock()
-        mock_service.create_customer.return_value = "cus_brand_new"
-        mock_service.create_checkout_session.return_value = "https://checkout.stripe.com/new_cus"
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /billing/checkout route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/checkout",
             headers=owner_headers,
@@ -195,12 +164,7 @@ class TestCheckoutWithPromoCode:
                 "promo_code": "EARLYPRO3",
             },
         )
-
-        assert response.status_code == 200
-        mock_service.create_customer.assert_called_once()
-
-        db.refresh(free_org)
-        assert free_org.stripe_customer_id == "cus_brand_new"
+        assert response.status_code == 404
 
 
 # ============================================================================
@@ -208,197 +172,43 @@ class TestCheckoutWithPromoCode:
 # ============================================================================
 
 class TestWebhookCheckoutWithPromo:
-    """Tests for checkout.session.completed webhook handling promo codes."""
+    """Tests for checkout.session.completed webhook handling promo codes.
 
-    @patch("stripe.PromotionCode.retrieve")
-    @patch("stripe.checkout.Session.retrieve")
-    @patch("src.api.routes.billing.get_stripe_service")
+    OSS pivot (B3): /webhooks/stripe route removed. All tests verify 404.
+    """
+
     def test_webhook_stores_promo_code_on_org(
-        self, mock_get_stripe, mock_session_retrieve, mock_promo_retrieve,
-        client: TestClient, db: Session, free_org_with_stripe: Organization
+        self, client: TestClient
     ):
-        """Webhook extracts promo code from Stripe session and stores it on org."""
-        org = free_org_with_stripe
-        now = datetime.utcnow()
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "checkout.session.completed",
-            "data": {
-                "object": {
-                    "id": "cs_promo_session_123",
-                    "customer": org.stripe_customer_id,
-                    "subscription": "sub_promo_123",
-                }
-            },
-        }
-        mock_service.get_subscription.return_value = {
-            "id": "sub_promo_123",
-            "status": "active",
-            "current_period_start": now,
-            "current_period_end": now + timedelta(days=90),
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-            "trial_start": None,
-            "trial_end": None,
-            "price_id": "price_pro_monthly_test",
-        }
-        mock_service.api_key = "sk_test_fake"
-        mock_get_stripe.return_value = mock_service
-
-        # Mock Session.retrieve to return discount data
-        mock_session_obj = MagicMock()
-        mock_session_obj.get.side_effect = lambda key, default=None: {
-            "total_details": {
-                "breakdown": {
-                    "discounts": [
-                        {
-                            "discount": {
-                                "promotion_code": "promo_abc123",
-                            }
-                        }
-                    ]
-                }
-            }
-        }.get(key, default)
-        mock_session_retrieve.return_value = mock_session_obj
-
-        # Mock PromotionCode.retrieve to return the code string
-        mock_promo_obj = MagicMock()
-        mock_promo_obj.code = "EARLYPRO3"
-        mock_promo_retrieve.return_value = mock_promo_obj
-
+        """B3: /billing/webhooks/stripe route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "checkout.session.completed"}',
             headers={"Stripe-Signature": "valid_sig"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        db.refresh(org)
-        assert org.promo_code_used == "EARLYPRO3"
-
-    @patch("stripe.checkout.Session.retrieve")
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_webhook_upgrades_plan_to_pro(
-        self, mock_get_stripe, mock_session_retrieve,
-        client: TestClient, db: Session, free_org_with_stripe: Organization
+        self, client: TestClient
     ):
-        """Webhook upgrades org.plan from free to pro after promo checkout."""
-        org = free_org_with_stripe
-        assert org.plan == "free"
-
-        now = datetime.utcnow()
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "checkout.session.completed",
-            "data": {
-                "object": {
-                    "id": "cs_upgrade_123",
-                    "customer": org.stripe_customer_id,
-                    "subscription": "sub_upgrade_123",
-                }
-            },
-        }
-        mock_service.get_subscription.return_value = {
-            "id": "sub_upgrade_123",
-            "status": "active",
-            "current_period_start": now,
-            "current_period_end": now + timedelta(days=30),
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-            "trial_start": None,
-            "trial_end": None,
-            "price_id": "price_pro_monthly_test",
-        }
-        mock_service.api_key = "sk_test_fake"
-        mock_get_stripe.return_value = mock_service
-
-        # Mock Session.retrieve (no discounts)
-        mock_session_obj = MagicMock()
-        mock_session_obj.get.side_effect = lambda key, default=None: {
-            "total_details": {"breakdown": {"discounts": []}}
-        }.get(key, default)
-        mock_session_retrieve.return_value = mock_session_obj
-
-        # Set env var so _get_plan_from_price_id returns "pro"
-        with patch.dict(os.environ, {"STRIPE_PRICE_PRO_MONTHLY": "price_pro_monthly_test"}):
-            response = client.post(
-                "/api/v1/billing/webhooks/stripe",
-                content=b'{"type": "checkout.session.completed"}',
-                headers={"Stripe-Signature": "valid_sig"},
-            )
-
-        assert response.status_code == 200
-
-        db.refresh(org)
-        assert org.plan == "pro"
-
-        # Verify subscription record was created
-        sub = db.query(Subscription).filter(
-            Subscription.organization_id == org.id
-        ).first()
-        assert sub is not None
-        assert sub.plan == "pro"
-        assert sub.status == "active"
-        assert sub.stripe_subscription_id == "sub_upgrade_123"
-
-    @patch("stripe.checkout.Session.retrieve")
-    @patch("src.api.routes.billing.get_stripe_service")
-    def test_webhook_without_promo_leaves_promo_code_null(
-        self, mock_get_stripe, mock_session_retrieve,
-        client: TestClient, db: Session, free_org_with_stripe: Organization
-    ):
-        """Checkout without promo code leaves org.promo_code_used as None."""
-        org = free_org_with_stripe
-        assert org.promo_code_used is None
-
-        now = datetime.utcnow()
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "checkout.session.completed",
-            "data": {
-                "object": {
-                    "id": "cs_no_promo_123",
-                    "customer": org.stripe_customer_id,
-                    "subscription": "sub_no_promo_123",
-                }
-            },
-        }
-        mock_service.get_subscription.return_value = {
-            "id": "sub_no_promo_123",
-            "status": "active",
-            "current_period_start": now,
-            "current_period_end": now + timedelta(days=30),
-            "cancel_at_period_end": False,
-            "canceled_at": None,
-            "trial_start": None,
-            "trial_end": None,
-            "price_id": "price_pro_monthly_test",
-        }
-        mock_service.api_key = "sk_test_fake"
-        mock_get_stripe.return_value = mock_service
-
-        # No discounts in session
-        mock_session_obj = MagicMock()
-        mock_session_obj.get.side_effect = lambda key, default=None: {
-            "total_details": {"breakdown": {"discounts": []}}
-        }.get(key, default)
-        mock_session_retrieve.return_value = mock_session_obj
-
+        """B3: /billing/webhooks/stripe route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "checkout.session.completed"}',
             headers={"Stripe-Signature": "valid_sig"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        db.refresh(org)
-        assert org.promo_code_used is None
+    def test_webhook_without_promo_leaves_promo_code_null(
+        self, client: TestClient
+    ):
+        """B3: /billing/webhooks/stripe route removed — returns 404."""
+        response = client.post(
+            "/api/v1/billing/webhooks/stripe",
+            content=b'{"type": "checkout.session.completed"}',
+            headers={"Stripe-Signature": "valid_sig"},
+        )
+        assert response.status_code == 404
 
 
 # ============================================================================
@@ -406,79 +216,32 @@ class TestWebhookCheckoutWithPromo:
 # ============================================================================
 
 class TestPromoAutoDowngrade:
-    """Tests for subscription deletion downgrading a promo org back to free."""
+    """Tests for subscription deletion downgrading a promo org back to free.
 
-    @patch("src.api.routes.billing.get_stripe_service")
+    OSS pivot (B3): /webhooks/stripe route removed. All tests verify 404.
+    """
+
     def test_subscription_deleted_downgrades_promo_org_to_free(
-        self, mock_get_stripe, client: TestClient, db: Session, promo_org_with_sub: tuple
+        self, client: TestClient
     ):
-        """When Stripe cancels subscription (promo expired), org downgrades to free."""
-        org, sub = promo_org_with_sub
-        assert org.plan == "pro"
-        assert org.promo_code_used == "EARLYPRO3"
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "customer.subscription.deleted",
-            "data": {
-                "object": {
-                    "id": sub.stripe_subscription_id,
-                    "customer": org.stripe_customer_id,
-                }
-            },
-        }
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /billing/webhooks/stripe route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "customer.subscription.deleted"}',
             headers={"Stripe-Signature": "valid_sig"},
         )
+        assert response.status_code == 404
 
-        assert response.status_code == 200
-
-        db.refresh(org)
-        assert org.plan == "free"
-        # promo_code_used is preserved for historical tracking
-        assert org.promo_code_used == "EARLYPRO3"
-
-        db.refresh(sub)
-        assert sub.status == "canceled"
-        assert sub.plan == "free"
-
-    @patch("src.api.routes.billing.get_stripe_service")
     def test_payment_failed_marks_promo_sub_past_due(
-        self, mock_get_stripe, client: TestClient, db: Session, promo_org_with_sub: tuple
+        self, client: TestClient
     ):
-        """Failed payment after promo ends marks subscription as past_due."""
-        org, sub = promo_org_with_sub
-
-        mock_service = MagicMock()
-        mock_service.verify_webhook_signature.return_value = {
-            "type": "invoice.payment_failed",
-            "data": {
-                "object": {
-                    "customer": org.stripe_customer_id,
-                    "subscription": sub.stripe_subscription_id,
-                }
-            },
-        }
-        mock_get_stripe.return_value = mock_service
-
+        """B3: /billing/webhooks/stripe route removed — returns 404."""
         response = client.post(
             "/api/v1/billing/webhooks/stripe",
             content=b'{"type": "invoice.payment_failed"}',
             headers={"Stripe-Signature": "valid_sig"},
         )
-
-        assert response.status_code == 200
-
-        db.refresh(sub)
-        assert sub.status == "past_due"
-
-        # Org still on pro until subscription is actually deleted
-        db.refresh(org)
-        assert org.plan == "pro"
+        assert response.status_code == 404
 
 
 # ============================================================================
@@ -488,7 +251,7 @@ class TestPromoAutoDowngrade:
 class TestStripeServicePromoCode:
     """Unit tests for StripeService.create_checkout_session promo handling."""
 
-    @patch("src.services.stripe_service.stripe")
+    @patch("src.services.stripe_service._stripe_pkg")
     @patch("src.services.stripe_service.get_stripe_price_id")
     def test_session_with_valid_promo_applies_discount(
         self, mock_get_price, mock_stripe
@@ -529,7 +292,7 @@ class TestStripeServicePromoCode:
         assert "allow_promotion_codes" not in session_params
         assert session_params["payment_method_collection"] == "if_required"
 
-    @patch("src.services.stripe_service.stripe")
+    @patch("src.services.stripe_service._stripe_pkg")
     @patch("src.services.stripe_service.get_stripe_price_id")
     def test_session_with_invalid_promo_falls_back_to_manual_entry(
         self, mock_get_price, mock_stripe
@@ -566,7 +329,7 @@ class TestStripeServicePromoCode:
         assert "discounts" not in session_params
         assert session_params["allow_promotion_codes"] is True
 
-    @patch("src.services.stripe_service.stripe")
+    @patch("src.services.stripe_service._stripe_pkg")
     @patch("src.services.stripe_service.get_stripe_price_id")
     def test_session_without_promo_enables_manual_promo_entry(
         self, mock_get_price, mock_stripe

@@ -185,7 +185,7 @@ class TestAnalyticsTrends:
         assert data["total_feedback"] <= len(feedback_over_time)
 
     def test_free_plan_blocked_30d(self, client, free_auth_headers):
-        """Free plan users get 403 for 30d range."""
+        """Free plan users get 403 for 30d range (SELF_HOSTED=false default)."""
         response = client.get("/api/v1/analytics/trends?range=30d", headers=free_auth_headers)
         assert response.status_code == 403
 
@@ -194,7 +194,7 @@ class TestAnalyticsTrends:
         assert detail["required_plan"] == "pro"
 
     def test_free_plan_blocked_90d(self, client, free_auth_headers):
-        """Free plan users get 403 for 90d range."""
+        """Free plan users get 403 for 90d range (SELF_HOSTED=false default)."""
         response = client.get("/api/v1/analytics/trends?range=90d", headers=free_auth_headers)
         assert response.status_code == 403
 

@@ -134,15 +134,16 @@ describe('ChurnFactorBreakdown', () => {
     expect(greenBars.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('is hidden for Free plan users and shows upgrade CTA', () => {
+  it('shows factor breakdown for Free plan users (no plan gate)', () => {
     mockUseAuth.mockReturnValue({
       user: freeUser,
       isLoading: false,
       isAuthenticated: true,
     });
     render(<ChurnFactorBreakdown churnRiskFactors={mockFactors} />);
-    expect(screen.queryByRole('button', { name: /factor breakdown/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/upgrade to pro/i)).toBeInTheDocument();
+    // Factor breakdown should be visible for all plans now
+    expect(screen.getByRole('button', { name: /factor breakdown/i })).toBeInTheDocument();
+    expect(screen.queryByText(/upgrade to pro/i)).not.toBeInTheDocument();
   });
 
   it('shows "Factor breakdown not available" when churn_risk_factors is null', () => {

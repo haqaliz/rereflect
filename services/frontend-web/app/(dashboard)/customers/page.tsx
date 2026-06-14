@@ -105,8 +105,6 @@ function TrendCell({ trend, isBlurred }: TrendCellProps) {
 export default function CustomersPage() {
   const router = useRouter();
   const { user } = useAuth();
-  const isFree = user?.plan === 'free';
-
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [searchQuery, setSearchQuery] = useState('');
@@ -170,10 +168,9 @@ export default function CustomersPage() {
 
   const handleRowClick = useCallback(
     (item: CustomerListItem) => {
-      if (isFree) return;
       router.push(`/customers/${encodeURIComponent(item.customer_email)}`);
     },
-    [isFree, router]
+    [router]
   );
 
   const handleBatchAnalyze = useCallback(async () => {
@@ -230,9 +227,7 @@ export default function CustomersPage() {
       accessorKey: 'health_score',
       header: 'Health Score',
       cell: ({ row }) => {
-        const blurred = isFree
-          ? { filter: 'blur(4px)', userSelect: 'none' as const }
-          : {};
+        const blurred = {};
         return (
           <span style={blurred}>
             <HealthScoreCircle score={row.original.health_score} />
@@ -244,9 +239,7 @@ export default function CustomersPage() {
       accessorKey: 'risk_level',
       header: 'Churn Probability',
       cell: ({ row }) => {
-        const blurred = isFree
-          ? { filter: 'blur(4px)', userSelect: 'none' as const }
-          : {};
+        const blurred = {};
         const { churn_probability, churn_probability_low, churn_probability_high } = row.original;
         // Fall back to risk_level color hint when probability is null (Pro/Free)
         if (churn_probability === null || churn_probability === undefined) {
@@ -283,9 +276,7 @@ export default function CustomersPage() {
       cell: ({ row }) => {
         const level = row.original.confidence_level;
         if (level === 'high') return null;
-        const blurred = isFree
-          ? { filter: 'blur(4px)', userSelect: 'none' as const }
-          : {};
+        const blurred = {};
         const color = level === 'low' ? 'var(--chart-1)' : 'var(--chart-2)';
         return (
           <Badge
@@ -322,7 +313,7 @@ export default function CustomersPage() {
       accessorKey: 'sentiment_trend',
       header: 'Trend',
       cell: ({ row }) => (
-        <TrendCell trend={row.original.sentiment_trend} isBlurred={isFree} />
+        <TrendCell trend={row.original.sentiment_trend} isBlurred={false} />
       ),
     },
   ];
@@ -446,21 +437,6 @@ export default function CustomersPage() {
           </Card>
         )}
 
-        {/* Free plan upgrade CTA */}
-        {isFree && (
-          <div className="rounded-xl border-2 border-dashed border-primary/30 bg-primary/5 p-6 text-center animate-slide-up">
-            <h3 className="text-lg font-semibold text-foreground mb-2">
-              Upgrade to Pro to unlock Customer Health Intelligence
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Get full access to health scores, risk levels, trend analysis, and customer profiles.
-            </p>
-            <Link href="/settings/billing">
-              <Button>Upgrade to Pro</Button>
-            </Link>
-          </div>
-        )}
-
         {/* Filter Bar */}
         <div className="flex flex-wrap gap-4 items-center animate-slide-up stagger-2">
           <Select
@@ -503,7 +479,7 @@ export default function CustomersPage() {
               data={items}
               searchQuery={searchQuery}
               onSearchChange={handleSearchChange}
-              onRowClick={isFree ? undefined : handleRowClick}
+              onRowClick={handleRowClick}
               searchPlaceholder="Search customers by email or name..."
               emptyIcon={Users}
               emptyTitle="No customers found"

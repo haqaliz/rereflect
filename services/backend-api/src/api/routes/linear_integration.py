@@ -189,13 +189,13 @@ def _require_active_integration(org_id: int, db: Session) -> LinearIntegration:
     return integration
 
 
-async def generate_linear_issue_content(feedback_data: dict, org_id: int) -> dict:
+async def generate_linear_issue_content(feedback_data: dict, org_id: int, db=None) -> dict:
     """
     Generate AI-crafted issue title and description from feedback data.
     Falls back to basic content if AI is unavailable.
     """
     try:
-        result = await call_ai_for_linear_issue(feedback_data=feedback_data, org_id=org_id)
+        result = await call_ai_for_linear_issue(feedback_data=feedback_data, org_id=org_id, db=db)
         # Enforce max title length
         if len(result.get("title", "")) > 80:
             result["title"] = result["title"][:77] + "..."
@@ -208,20 +208,23 @@ async def generate_linear_issue_content(feedback_data: dict, org_id: int) -> dic
         return {"title": title, "description": description}
 
 
-async def call_ai_for_linear_issue(feedback_data: dict, org_id: int) -> dict:
+async def call_ai_for_linear_issue(feedback_data: dict, org_id: int, db=None) -> dict:
     """
     Call the configured LLM to generate a Linear issue title + description.
-    Uses OpenAI via the org's configured AI provider or the system default.
-    Raises on failure so generate_linear_issue_content can fall back.
+    Uses the org's BYOK OpenAI key; raises if absent so the caller falls back.
     """
     import json
-    import os
 
     import httpx
 
-    openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+    # A4: resolve BYOK key — no system/env key fallback
+    from src.utils.byok import resolve_org_byok_key
+    openai_api_key = resolve_org_byok_key("openai", org_id, db)
     if not openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY not configured")
+        raise RuntimeError(
+            "No OpenAI API key configured. "
+            "Please add your key in Settings → AI → API Keys."
+        )
 
     system_prompt = (
         "You are a product manager writing a Linear issue from customer feedback data.\n"
@@ -719,7 +722,7 @@ async def create_linear_issue(
             "is_urgent": feedback.is_urgent,
             "extracted_issue": feedback.extracted_issue,
         }
-        generated = await generate_linear_issue_content(feedback_data=feedback_data, org_id=current_org.id)
+        generated = await generate_linear_issue_content(feedback_data=feedback_data, org_id=current_org.id, db=db)
         title = title or generated["title"]
         description = description or generated["description"]
 

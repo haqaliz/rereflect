@@ -65,14 +65,16 @@ def member_headers(member_user: User) -> dict:
 
 class TestGetAISettings:
     def test_get_default_settings(self, client: TestClient, auth_headers: dict):
-        """Should return expanded AI settings with provider, models, budget."""
+        """Should return expanded AI settings with provider and models.
+        OSS pivot (A6): budget field removed from AISettingsResponse."""
         response = client.get("/api/v1/settings/ai", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["ai_analysis_enabled"] is True
         assert "default_provider" in data
         assert "models" in data
-        assert "budget" in data
+        # A6: budget field removed — verify it is absent
+        assert "budget" not in data
 
     def test_requires_auth(self, client: TestClient):
         """Should require authentication."""

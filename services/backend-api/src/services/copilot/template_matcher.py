@@ -109,19 +109,24 @@ class TemplateMatcher:
             )
         return embedding
 
-    def _call_embedding_api(self, text: str) -> list:
+    def _call_embedding_api(self, text: str, api_key: Optional[str] = None) -> list:
         """
         Call OpenAI embeddings API. Separated for testability.
-        In production, uses org's BYOK key or system key.
+
+        SELF-HOSTED NOTE (A4): api_key must be the org's BYOK key. No env
+        fallback. Orgs without an OpenAI BYOK key will not get template
+        matching — that is accepted behaviour (see PRD §A4 known limitation).
         """
-        import os
         import openai
 
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY not configured for embeddings")
+        key = api_key or ""
+        if not key:
+            raise RuntimeError(
+                "No OpenAI API key configured for embeddings. "
+                "Please add your OpenAI key in Settings → AI → API Keys."
+            )
 
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=key)
         response = client.embeddings.create(
             model="text-embedding-3-small",
             input=text,

@@ -188,9 +188,6 @@ def org_ai_config(db: Session, test_organization: Organization):
         model_categorization="gpt-4o-mini",
         model_analysis="gpt-4o-mini",
         model_insights="gpt-4o-mini",
-        monthly_budget_cents=1000,
-        budget_used_cents=0,
-        budget_reset_at=datetime(2026, 3, 1, 0, 0, 0),
     )
     db.add(config)
     db.commit()
@@ -377,19 +374,23 @@ class TestGetAISettingsExpanded:
     def test_returns_expanded_schema_without_config(
         self, client: TestClient, auth_headers: dict
     ):
-        """Should return expanded schema even if no OrgAIConfig exists yet."""
+        """Should return expanded schema even if no OrgAIConfig exists yet.
+
+        A6 update: budget field has been removed from AISettingsResponse.
+        """
         response = client.get("/api/v1/settings/ai", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert "ai_analysis_enabled" in data
         assert "default_provider" in data
         assert "models" in data
-        assert "budget" in data
+        # A6: budget is no longer returned
+        assert "budget" not in data
 
     def test_returns_defaults_when_no_config(
         self, client: TestClient, auth_headers: dict
     ):
-        """Defaults: provider=openai, all models=gpt-4o-mini, no budget set."""
+        """Defaults: provider=openai, all models=gpt-4o-mini."""
         response = client.get("/api/v1/settings/ai", headers=auth_headers)
         data = response.json()
         assert data["default_provider"] == "openai"
@@ -403,14 +404,16 @@ class TestGetAISettingsExpanded:
         auth_headers: dict,
         org_ai_config,
     ):
-        """Should return org's configured values."""
+        """Should return org's configured values.
+
+        A6 update: no budget fields in response.
+        """
         response = client.get("/api/v1/settings/ai", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["default_provider"] == "openai"
-        assert data["budget"]["monthly_limit_cents"] == 1000
-        assert data["budget"]["used_cents"] == 0
-        assert data["budget"]["is_exceeded"] is False
+        # A6: budget is no longer in the response
+        assert "budget" not in data
 
     def test_requires_auth(self, client: TestClient):
         response = client.get("/api/v1/settings/ai")
@@ -619,14 +622,15 @@ class TestAddAPIKey:
             )
             assert response.status_code == 422
 
-    def test_requires_pro_plan(
+    def test_byok_key_available_on_free_plan(
         self,
         client: TestClient,
         owner_headers: dict,
         db: Session,
         test_organization: Organization,
     ):
-        """BYOK keys require Pro+ plan."""
+        """A7 update: BYOK keys no longer require Pro+ plan. Free plan owners
+        can add API keys — the byok_keys feature gate has been removed."""
         test_organization.plan = "free"
         db.commit()
         with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_ENCRYPTION_KEY}):
@@ -635,7 +639,8 @@ class TestAddAPIKey:
                 headers=owner_headers,
                 json={"provider": "openai", "api_key": "sk-test"},
             )
-            assert response.status_code == 403
+            # A7: no feature gate — should succeed
+            assert response.status_code == 201
 
 
 # ─── DELETE /api/v1/settings/ai/keys/{provider} ──────────────────────────────
@@ -812,7 +817,7 @@ class TestModelTesting:
         )
         assert response.status_code == 403
 
-    def test_free_plan_cannot_test_premium_model(
+    def test_all_models_accessible_in_self_hosted_mode(
         self,
         client: TestClient,
         auth_headers: dict,
@@ -820,15 +825,32 @@ class TestModelTesting:
         test_organization: Organization,
         llm_model_prices,
     ):
-        """Free plan cannot test premium (business-tier) models."""
+        """B1 update: In SELF_HOSTED mode, plan_includes always returns True,
+        so any plan can test any model tier."""
         test_organization.plan = "free"
         db.commit()
-        response = client.post(
-            "/api/v1/settings/ai/test-model",
-            headers=auth_headers,
-            json={"provider": "openai", "model": "gpt-4-turbo"},
-        )
-        assert response.status_code == 403
+        mock_result = {"sentiment": "negative"}
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}), patch(
+            "src.api.routes.ai_settings.run_model_test",
+            return_value={
+                "result": mock_result,
+                "tokens": 100,
+                "cost_cents": 0.1,
+                "latency_ms": 200,
+                "provider": "openai",
+                "model": "gpt-4-turbo",
+            },
+        ), patch(
+            "src.api.routes.ai_settings._get_api_key_for_provider",
+            return_value="sk-byok-key",
+        ):
+            response = client.post(
+                "/api/v1/settings/ai/test-model",
+                headers=auth_headers,
+                json={"provider": "openai", "model": "gpt-4-turbo"},
+            )
+            # B1: SELF_HOSTED unlocks all plan gates
+            assert response.status_code == 200
 
     def test_free_plan_can_test_cheap_model(
         self,
@@ -875,21 +897,22 @@ class TestAvailableModels:
         db: Session,
         test_organization: Organization,
     ):
-        """Should return models available for the org's plan."""
+        """B1 update: In SELF_HOSTED mode, plan_includes always returns True,
+        so all models are accessible regardless of plan."""
         test_organization.plan = "pro"
         db.commit()
-        response = client.get("/api/v1/settings/ai/models", headers=auth_headers)
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            response = client.get("/api/v1/settings/ai/models", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        # Should include cheap and mid tier (pro plan)
+        # B1: all models accessible in self-hosted mode
         model_ids = [m["model_id"] for m in data]
         assert "gpt-4o-mini" in model_ids
         assert "gpt-4o" in model_ids
-        # Should not include premium (business only)
-        assert "gpt-4-turbo" not in model_ids
+        assert "gpt-4-turbo" in model_ids  # previously business-only, now unlocked
 
-    def test_free_plan_gets_only_cheap_models(
+    def test_free_plan_gets_all_models_in_self_hosted_mode(
         self,
         client: TestClient,
         auth_headers: dict,
@@ -897,16 +920,18 @@ class TestAvailableModels:
         db: Session,
         test_organization: Organization,
     ):
-        """Free plan should only see cheap-tier models."""
+        """B1 update: Free plan gets all available (non-deprecated) models
+        in SELF_HOSTED mode — plan gating is neutralised."""
         test_organization.plan = "free"
         db.commit()
-        response = client.get("/api/v1/settings/ai/models", headers=auth_headers)
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            response = client.get("/api/v1/settings/ai/models", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         model_ids = [m["model_id"] for m in data]
         assert "gpt-4o-mini" in model_ids
-        assert "gpt-4o" not in model_ids  # mid tier, pro required
-        assert "gpt-4-turbo" not in model_ids  # premium, business required
+        assert "gpt-4o" in model_ids      # unlocked by SELF_HOSTED
+        assert "gpt-4-turbo" in model_ids  # unlocked by SELF_HOSTED
 
     def test_business_plan_gets_all_tiers(
         self,
@@ -1002,18 +1027,20 @@ class TestUsageSummary:
         assert providers["openai"]["requests"] == 2
         assert providers["anthropic"]["requests"] == 1
 
-    def test_requires_pro_plan(
+    def test_usage_accessible_on_free_plan_in_self_hosted_mode(
         self,
         client: TestClient,
         auth_headers: dict,
         db: Session,
         test_organization: Organization,
     ):
-        """Usage dashboard requires Pro+ plan."""
+        """B1 update: Usage dashboard accessible on any plan in SELF_HOSTED mode.
+        The ai_usage_dashboard feature gate always returns True."""
         test_organization.plan = "free"
         db.commit()
-        response = client.get("/api/v1/settings/ai/usage", headers=auth_headers)
-        assert response.status_code == 403
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            response = client.get("/api/v1/settings/ai/usage", headers=auth_headers)
+        assert response.status_code == 200
 
     def test_requires_auth(self, client: TestClient):
         response = client.get("/api/v1/settings/ai/usage")
@@ -1052,17 +1079,19 @@ class TestUsageDaily:
             assert "requests" in day
             assert "cost_cents" in day
 
-    def test_requires_pro_plan(
+    def test_usage_daily_accessible_on_free_plan_in_self_hosted_mode(
         self,
         client: TestClient,
         auth_headers: dict,
         db: Session,
         test_organization: Organization,
     ):
+        """B1 update: daily usage accessible on free plan in SELF_HOSTED mode."""
         test_organization.plan = "free"
         db.commit()
-        response = client.get("/api/v1/settings/ai/usage/daily", headers=auth_headers)
-        assert response.status_code == 403
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            response = client.get("/api/v1/settings/ai/usage/daily", headers=auth_headers)
+        assert response.status_code == 200
 
     def test_requires_auth(self, client: TestClient):
         response = client.get("/api/v1/settings/ai/usage/daily")
@@ -1072,13 +1101,17 @@ class TestUsageDaily:
 # ─── GET /api/v1/settings/ai/budget ──────────────────────────────────────────
 
 class TestBudgetEndpoint:
-    def test_returns_budget_status(
+    """A6 update: Budget capping is removed. The endpoint remains for API
+    compatibility but always returns a no-budget state."""
+
+    def test_returns_no_budget_cap_in_self_hosted_mode(
         self,
         client: TestClient,
         auth_headers: dict,
         org_ai_config,
     ):
-        """Should return budget status."""
+        """A6: endpoint still responds 200 but monthly_limit_cents is None
+        and is_exceeded is always False — no budget cap in self-hosted mode."""
         response = client.get("/api/v1/settings/ai/budget", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
@@ -1086,30 +1119,23 @@ class TestBudgetEndpoint:
         assert "used_cents" in data
         assert "is_exceeded" in data
         assert "resets_at" in data
-
-    def test_is_exceeded_false_when_under_budget(
-        self,
-        client: TestClient,
-        auth_headers: dict,
-        org_ai_config,
-    ):
-        response = client.get("/api/v1/settings/ai/budget", headers=auth_headers)
-        data = response.json()
+        # A6: no cap applied
+        assert data["monthly_limit_cents"] is None
         assert data["is_exceeded"] is False
 
-    def test_is_exceeded_true_when_over_budget(
+    def test_is_never_exceeded_in_self_hosted_mode(
         self,
         client: TestClient,
         auth_headers: dict,
         org_ai_config,
         db: Session,
     ):
-        """Should flag is_exceeded when budget_used >= monthly_budget."""
-        org_ai_config.budget_used_cents = 1000  # equals the limit
-        db.commit()
+        """A6: Even if DB columns have values, is_exceeded is always False
+        since we no longer read the budget columns."""
+        # budget_used_cents column removed (B4 OSS pivot) — no write needed
         response = client.get("/api/v1/settings/ai/budget", headers=auth_headers)
         data = response.json()
-        assert data["is_exceeded"] is True
+        assert data["is_exceeded"] is False
 
     def test_no_budget_configured(
         self, client: TestClient, auth_headers: dict
@@ -1119,6 +1145,7 @@ class TestBudgetEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["is_exceeded"] is False
+        assert data["monthly_limit_cents"] is None
 
     def test_requires_auth(self, client: TestClient):
         response = client.get("/api/v1/settings/ai/budget")
@@ -1274,37 +1301,66 @@ class TestAdminSyncPrices:
 # ─── Plan Gating ─────────────────────────────────────────────────────────────
 
 class TestPlanGating:
-    def test_multi_model_support_available_on_pro(self):
-        """multi_model_support feature should be in Pro plan."""
-        from src.config.plans import has_feature
-        assert has_feature("pro", "multi_model_support") is True
+    """B1 update: With SELF_HOSTED=true (default), has_feature always returns
+    True regardless of plan. Tests below verify both self-hosted (default) and
+    non-self-hosted (SELF_HOSTED=false) modes for regression coverage."""
 
-    def test_multi_model_support_not_on_free(self):
-        from src.config.plans import has_feature
-        assert has_feature("free", "multi_model_support") is False
+    def test_multi_model_support_available_on_any_plan_in_self_hosted_mode(self):
+        """B1: multi_model_support available on all plans in self-hosted mode."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "multi_model_support") is True
+            assert plans_mod.has_feature("pro", "multi_model_support") is True
 
-    def test_byok_keys_available_on_pro(self):
-        from src.config.plans import has_feature
-        assert has_feature("pro", "byok_keys") is True
+    def test_multi_model_support_not_on_free_when_not_self_hosted(self):
+        """When SELF_HOSTED=false, tiered gating still applies."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "multi_model_support") is False
 
-    def test_byok_keys_not_on_free(self):
-        from src.config.plans import has_feature
-        assert has_feature("free", "byok_keys") is False
+    def test_byok_keys_available_on_any_plan_in_self_hosted_mode(self):
+        """B1: byok_keys available on all plans in self-hosted mode."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "byok_keys") is True
+            assert plans_mod.has_feature("pro", "byok_keys") is True
 
-    def test_ai_usage_dashboard_available_on_pro(self):
-        from src.config.plans import has_feature
-        assert has_feature("pro", "ai_usage_dashboard") is True
+    def test_byok_keys_not_on_free_when_not_self_hosted(self):
+        """When SELF_HOSTED=false, byok_keys requires pro+."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "byok_keys") is False
 
-    def test_ai_usage_dashboard_not_on_free(self):
-        from src.config.plans import has_feature
-        assert has_feature("free", "ai_usage_dashboard") is False
+    def test_ai_usage_dashboard_available_on_any_plan_in_self_hosted_mode(self):
+        """B1: ai_usage_dashboard available on all plans in self-hosted mode."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "ai_usage_dashboard") is True
 
-    def test_all_features_available_on_business(self):
-        from src.config.plans import has_feature
-        for feature in ["multi_model_support", "byok_keys", "ai_usage_dashboard"]:
-            assert has_feature("business", feature) is True
+    def test_ai_usage_dashboard_not_on_free_when_not_self_hosted(self):
+        """When SELF_HOSTED=false, ai_usage_dashboard requires pro+."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "false"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            assert plans_mod.has_feature("free", "ai_usage_dashboard") is False
 
-    def test_all_features_available_on_enterprise(self):
-        from src.config.plans import has_feature
-        for feature in ["multi_model_support", "byok_keys", "ai_usage_dashboard"]:
-            assert has_feature("enterprise", feature) is True
+    def test_all_features_available_on_business_and_enterprise_in_self_hosted(self):
+        """All features still available on higher plans in self-hosted mode."""
+        with patch.dict(os.environ, {"SELF_HOSTED": "true"}):
+            import importlib
+            import src.config.plans as plans_mod
+            importlib.reload(plans_mod)
+            for plan in ("business", "enterprise"):
+                for feature in ["multi_model_support", "byok_keys", "ai_usage_dashboard"]:
+                    assert plans_mod.has_feature(plan, feature) is True

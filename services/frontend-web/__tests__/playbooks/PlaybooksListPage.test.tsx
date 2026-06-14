@@ -93,23 +93,25 @@ const templatePlaybook: Playbook = {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe('PlaybooksListPage - plan gating', () => {
-  it('shows upgrade banner for Free plan', async () => {
+describe('PlaybooksListPage - plan gating removed', () => {
+  it('shows playbook content for Free plan (no upgrade banner)', async () => {
     mockUseAuth.mockReturnValue({ user: freeUser });
     mockListPlaybooks.mockResolvedValue([]);
     render(<PlaybooksPage />);
     await waitFor(() => {
-      expect(screen.getByTestId('upgrade-banner')).toBeInTheDocument();
+      expect(screen.getByTestId('section-org-playbooks')).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('upgrade-banner')).not.toBeInTheDocument();
   });
 
-  it('shows upgrade banner for Pro plan', async () => {
+  it('shows playbook content for Pro plan (no upgrade banner)', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
     mockListPlaybooks.mockResolvedValue([]);
     render(<PlaybooksPage />);
     await waitFor(() => {
-      expect(screen.getByTestId('upgrade-banner')).toBeInTheDocument();
+      expect(screen.getByTestId('section-org-playbooks')).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('upgrade-banner')).not.toBeInTheDocument();
   });
 });
 

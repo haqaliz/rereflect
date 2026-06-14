@@ -487,16 +487,22 @@ class TemplateSaver:
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _generate_embedding(self, text: str) -> list:
-        """Generate embedding vector for text. Separated for testability."""
-        import os
+    def _generate_embedding(self, text: str, api_key: Optional[str] = None) -> list:
+        """Generate embedding vector for text. Separated for testability.
 
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY not configured")
+        SELF-HOSTED NOTE (A4): api_key must be the org's BYOK key. No env
+        fallback. Template saving is silently skipped for orgs without an
+        OpenAI key — accepted behaviour (PRD §A4 known limitation).
+        """
+        key = api_key or ""
+        if not key:
+            raise RuntimeError(
+                "No OpenAI API key configured for embedding. "
+                "Please add your OpenAI key in Settings → AI → API Keys."
+            )
 
         import openai
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=key)
         response = client.embeddings.create(
             model="text-embedding-3-small",
             input=text,

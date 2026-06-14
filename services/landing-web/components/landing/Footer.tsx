@@ -71,11 +71,6 @@ export function Footer({ onScrollToSection }: FooterProps) {
                   Blog
                 </Link>
               </li>
-              <li>
-                <Link href="/changelog" className="hover:text-foreground transition-colors">
-                  Changelog
-                </Link>
-              </li>
             </ul>
           </div>
 

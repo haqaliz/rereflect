@@ -12,9 +12,6 @@ import {
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb';
 import { usePathname } from 'next/navigation';
-import { TrialBanner } from '@/components/TrialBanner';
-import { UsageWarning } from '@/components/UsageWarning';
-import { BudgetBannerWrapper } from '@/components/shared/BudgetBannerWrapper';
 import { Toaster } from 'sonner';
 import { NotificationBell } from '@/components/NotificationBell';
 import { CommandBarProvider } from '@/components/copilot/CommandBarProvider';
@@ -34,7 +31,6 @@ const pageTitles: Record<string, string> = {
   '/churn-risks': 'Churn Risks',
   '/settings': 'Settings',
   '/settings/preferences': 'Preferences',
-  '/settings/billing': 'Billing',
   '/settings/integrations': 'Integrations',
   '/settings/team': 'Team',
   '/notifications': 'Notifications',
@@ -115,12 +111,6 @@ export default function DashboardLayout({
             </div>
           </header>
           <div className="flex-1 overflow-y-auto overflow-x-hidden">
-            {/* Billing banners */}
-            <div className="px-4 pt-4 space-y-2">
-              <TrialBanner />
-              <UsageWarning />
-              <BudgetBannerWrapper />
-            </div>
             {children}
           </div>
         </CommandBarProvider>

@@ -6,7 +6,7 @@ from starlette.responses import Response
 from src.api.routes import auth, organizations, feedback, dashboard, analyze, integrations
 from src.api.routes import source_webhooks, feedback_sources, pending_feedback, billing, team, invites, audit_logs
 from src.api.routes import categories, ai_settings, anomalies, insights, changelog, notifications, analytics, saved_views, shared_links, workflow, email_webhooks
-from src.api.routes import customer_health, activity_feed, dashboard_layout, admin_promo, admin_users, admin_orgs
+from src.api.routes import customer_health, activity_feed, dashboard_layout, admin_users, admin_orgs
 from src.api.routes import customers, admin_backtest, admin_ai_models
 from src.api.routes import conversation_folders, conversations, copilot_ws, copilot
 from src.api.routes import events_ws
@@ -93,6 +93,18 @@ async def lifespan(app: FastAPI):
         run_changelog_sync()
     except Exception as e:
         logger.warning(f"Changelog sync skipped: {e}")
+    # Q1 (OSS pivot): seed operator's env keys into the primary org's OrgApiKey
+    # store so the BYOK resolver can find them via the DB (not via env at runtime).
+    try:
+        from src.seed_byok import seed_byok_keys_from_env
+        from src.database.session import SessionLocal
+        _byok_db = SessionLocal()
+        try:
+            seed_byok_keys_from_env(_byok_db)
+        finally:
+            _byok_db.close()
+    except Exception as e:
+        logger.warning(f"Could not seed env BYOK keys: {e}")
     yield
     # Shutdown: cleanup if needed
 
@@ -174,7 +186,6 @@ app.include_router(email_webhooks.router)
 app.include_router(customer_health.router)
 app.include_router(activity_feed.router)
 app.include_router(dashboard_layout.router)
-app.include_router(admin_promo.router)
 app.include_router(admin_users.router)
 app.include_router(admin_orgs.router)
 app.include_router(admin_backtest.router)

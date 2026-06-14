@@ -489,7 +489,6 @@ export default function IntercomIntegrationPage() {
             <p>2025 Rereflect. All rights reserved.</p>
             <div className="flex gap-6">
               <Link href="/integrations" className="hover:text-foreground transition-colors">Integrations</Link>
-              <Link href="/changelog" className="hover:text-foreground transition-colors">Changelog</Link>
               <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
             </div>

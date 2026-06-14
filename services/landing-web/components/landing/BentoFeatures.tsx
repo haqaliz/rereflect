@@ -1,6 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? (process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : 'https://app.rereflect.ca');
+
 import {
   AlertTriangle,
   Workflow,
@@ -290,12 +293,12 @@ export default function BentoFeatures() {
                 </li>
               ))}
             </ul>
-            <Link
-              href="/signup"
+            <a
+              href={`${APP_URL}/signup`}
               className="text-primary hover:underline text-sm font-medium w-fit"
             >
               Try it free &rarr;
-            </Link>
+            </a>
           </div>
 
           {/* Right: Chat mockup */}

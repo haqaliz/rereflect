@@ -30,10 +30,8 @@ import {
   Send,
   ChevronDown,
   ClipboardList,
-  Zap,
   ArrowRight,
 } from 'lucide-react';
-import Link from 'next/link';
 import {
   responsesAPI,
   TONE_OPTIONS,
@@ -55,7 +53,6 @@ const MODAL_RESPONSE_VARIABLES = [
   { name: 'agent_name', description: "Current user's name" },
   { name: 'support_email', description: 'Support email from org settings' },
 ];
-import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { TemplateBrowser } from './TemplateBrowser';
 
@@ -99,10 +96,6 @@ export function ResponseModal({
   connectedChannels,
   defaultTone = 'professional',
 }: ResponseModalProps) {
-  const { user } = useAuth();
-
-  const isFree = user?.plan === 'free';
-
   // ── State ──────────────────────────────────────────────────────────────────
   const [view, setView] = useState<ModalView>('main');
   const [suggestedTemplate, setSuggestedTemplate] = useState<ResponseTemplate | null>(null);
@@ -127,22 +120,20 @@ export function ResponseModal({
       setCurrentUsed(null);
       setTone(defaultTone);
 
-      if (!isFree) {
-        // Load template suggestion and usage in parallel
-        responsesAPI.suggestTemplate(feedback.id)
-          .then(result => {
-            if (result.template && result.score >= 10) {
-              setSuggestedTemplate(result.template);
-            }
-          })
-          .catch(() => {});
+      // Load template suggestion and usage in parallel
+      responsesAPI.suggestTemplate(feedback.id)
+        .then(result => {
+          if (result.template && result.score >= 10) {
+            setSuggestedTemplate(result.template);
+          }
+        })
+        .catch(() => {});
 
-        responsesAPI.getResponseUsage()
-          .then(setUsage)
-          .catch(() => {});
-      }
+      responsesAPI.getResponseUsage()
+        .then(setUsage)
+        .catch(() => {});
     }
-  }, [open, feedback.id, isFree, defaultTone]);
+  }, [open, feedback.id, defaultTone]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -253,25 +244,8 @@ export function ResponseModal({
           <DialogTitle>Respond to Feedback</DialogTitle>
         </DialogHeader>
 
-        {/* ── Free plan upgrade CTA ── */}
-        {isFree ? (
-          <div data-testid="upgrade-cta" className="space-y-4 py-4">
-            <div className="p-6 rounded-xl border border-border bg-secondary/30 text-center space-y-3">
-              <div className="p-3 bg-primary/10 rounded-full w-fit mx-auto">
-                <Zap className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="text-lg font-semibold">
-                Response Suggestions is available on Pro and above
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Use AI-powered templates to respond to customer feedback faster and more consistently.
-              </p>
-              <Button asChild>
-                <Link href="/settings/billing">Upgrade to Pro</Link>
-              </Button>
-            </div>
-          </div>
-        ) : view === 'browse' ? (
+        {/* ── Content ── */}
+        {view === 'browse' ? (
           /* ── Template Browser sub-view ── */
           <TemplateBrowser
             onSelect={handleUseTemplate}

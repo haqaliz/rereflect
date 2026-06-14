@@ -89,16 +89,22 @@ describe('ChurnCohortsPage', () => {
     expect(screen.getByTestId('page-description')).toBeInTheDocument();
   });
 
-  it('shows upgrade banner for Free plan', async () => {
+  it('fetches cohort data for Free plan users (no plan gate)', async () => {
     mockUseAuth.mockReturnValue(makeAuth('free'));
     render(<ChurnCohortsPage />);
-    expect(screen.getByTestId('upgrade-banner')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getChurnCohorts).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId('upgrade-banner')).not.toBeInTheDocument();
   });
 
-  it('shows upgrade banner for Pro plan', async () => {
+  it('fetches cohort data for Pro plan users (no plan gate)', async () => {
     mockUseAuth.mockReturnValue(makeAuth('pro'));
     render(<ChurnCohortsPage />);
-    expect(screen.getByTestId('upgrade-banner')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getChurnCohorts).toHaveBeenCalled();
+    });
+    expect(screen.queryByTestId('upgrade-banner')).not.toBeInTheDocument();
   });
 
   it('fetches cohorts on mount with default filters (dimension=source, range=30d)', async () => {

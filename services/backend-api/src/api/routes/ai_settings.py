@@ -31,14 +31,6 @@ router = APIRouter(prefix="/api/v1/settings/ai", tags=["ai-settings"])
 
 VALID_PROVIDERS = {"openai", "anthropic", "google"}
 
-# Budget defaults by plan (cents)
-PLAN_BUDGET_DEFAULTS = {
-    "free": 100,        # $1
-    "pro": 1000,        # $10
-    "business": 5000,   # $50
-    "enterprise": None, # Custom
-}
-
 
 # ── Pydantic Schemas ──────────────────────────────────────────────────────────
 
@@ -48,18 +40,10 @@ class ModelConfig(BaseModel):
     insights: str
 
 
-class BudgetStatus(BaseModel):
-    monthly_limit_cents: Optional[int]
-    used_cents: int
-    resets_at: Optional[datetime]
-    is_exceeded: bool
-
-
 class AISettingsResponse(BaseModel):
     ai_analysis_enabled: bool
     default_provider: str
     models: ModelConfig
-    budget: BudgetStatus
 
 
 class AISettingsUpdate(BaseModel):
@@ -171,33 +155,13 @@ def _get_or_create_config(org_id: int, db: Session) -> OrgAIConfig:
     return config
 
 
-def _get_plan_budget(plan: str) -> Optional[int]:
-    """Get default monthly budget in cents for a plan."""
-    return PLAN_BUDGET_DEFAULTS.get(plan)
-
-
-def _build_budget_status(config: Optional[OrgAIConfig], plan: str) -> BudgetStatus:
-    """Build budget status from config."""
-    if config is None:
-        return BudgetStatus(
-            monthly_limit_cents=_get_plan_budget(plan),
-            used_cents=0,
-            resets_at=None,
-            is_exceeded=False,
-        )
-    limit = config.monthly_budget_cents or _get_plan_budget(plan)
-    used = config.budget_used_cents or 0
-    is_exceeded = bool(limit and used >= limit)
-    return BudgetStatus(
-        monthly_limit_cents=limit,
-        used_cents=used,
-        resets_at=config.budget_reset_at,
-        is_exceeded=is_exceeded,
-    )
-
-
 def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -> AISettingsResponse:
-    """Build the AI settings response object."""
+    """Build the AI settings response object.
+
+    Budget machinery has been removed (A6): there is no owner-level spend cap
+    in the self-hosted product. The DB columns remain as dead columns; we
+    simply stop reading them here.
+    """
     if config:
         default_provider = config.default_provider
         model_config = ModelConfig(
@@ -217,7 +181,6 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         ai_analysis_enabled=org.ai_analysis_enabled,
         default_provider=default_provider,
         models=model_config,
-        budget=_build_budget_status(config, org.plan or "free"),
     )
 
 
@@ -433,14 +396,18 @@ def list_api_keys(
     "/keys",
     response_model=APIKeyResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_owner), Depends(require_feature("byok_keys"))],
+    dependencies=[Depends(require_owner)],
 )
 def add_api_key(
     data: AddAPIKeyRequest,
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
-    """Add or replace a BYOK API key. Owner only, Pro+ plan required."""
+    """Add or replace a BYOK API key. Owner only.
+
+    No plan gate — in the self-hosted product BYOK is the only way AI works,
+    so it must be available on every plan (A7).
+    """
     from src.utils.encryption import encrypt_api_key, get_key_hint
 
     try:
@@ -587,29 +554,22 @@ def test_model(
 
 
 def _get_api_key_for_provider(provider: str, org_id: int, db: Session) -> str:
-    """Get API key for a provider: org's BYOK key or system key from env."""
-    from src.utils.encryption import decrypt_api_key
+    """Return the org's BYOK API key for the given provider.
 
-    byok_key = db.query(OrgApiKey).filter_by(
-        organization_id=org_id,
-        provider=provider,
-        is_valid=True,
-    ).first()
+    There is NO system/env key fallback. If the org has no valid BYOK key for
+    this provider, raises HTTP 503 so the caller can surface a "configure your
+    API key" message to the user.
+    """
+    from src.utils.byok import resolve_org_byok_key
 
-    if byok_key:
-        return decrypt_api_key(byok_key.encrypted_key)
-
-    # Fall back to system key
-    system_keys = {
-        "openai": os.environ.get("OPENAI_API_KEY", ""),
-        "anthropic": os.environ.get("ANTHROPIC_API_KEY", ""),
-        "google": os.environ.get("GOOGLE_AI_API_KEY", ""),
-    }
-    key = system_keys.get(provider, "")
+    key = resolve_org_byok_key(provider, org_id, db)
     if not key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"No API key available for provider '{provider}'",
+            detail=(
+                f"No API key configured for provider '{provider}'. "
+                "Please add your API key in Settings → AI → API Keys."
+            ),
         )
     return key
 
@@ -756,26 +716,17 @@ def get_budget(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
-    """Get current AI budget status for the organization."""
-    config = db.query(OrgAIConfig).filter_by(organization_id=current_org.id).first()
-    plan = current_org.plan or "free"
+    """Get current AI budget status for the organization.
 
-    if not config:
-        plan_budget = _get_plan_budget(plan)
-        return BudgetResponse(
-            monthly_limit_cents=plan_budget,
-            used_cents=0,
-            resets_at=None,
-            is_exceeded=False,
-        )
-
-    limit = config.monthly_budget_cents or _get_plan_budget(plan)
-    used = config.budget_used_cents or 0
-    is_exceeded = bool(limit and used >= limit)
-
+    A6 note: Budget capping has been removed from the self-hosted product.
+    This endpoint is kept for API compatibility but always returns a
+    no-budget-cap state (monthly_limit_cents=None, is_exceeded=False).
+    The underlying DB columns (monthly_budget_cents etc.) are dead columns
+    pending a future migration; we stop reading them here.
+    """
     return BudgetResponse(
-        monthly_limit_cents=limit,
-        used_cents=used,
-        resets_at=config.budget_reset_at,
-        is_exceeded=is_exceeded,
+        monthly_limit_cents=None,
+        used_cents=0,
+        resets_at=None,
+        is_exceeded=False,
     )

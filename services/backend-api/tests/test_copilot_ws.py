@@ -92,11 +92,11 @@ def free_token(free_user: User) -> str:
 
 @pytest.fixture
 def conversation_id(client: TestClient, valid_token: str) -> str:
-    """Create a conversation and return its ID."""
+    """Create a conversation and return its public UUID (used by WS handler)."""
     headers = {"Authorization": f"Bearer {valid_token}"}
     r = client.post("/api/v1/conversations", json={"title": "Test"}, headers=headers)
     assert r.status_code == 201
-    return r.json()["id"]
+    return r.json()["public_id"]
 
 
 # =============================================================================
@@ -162,12 +162,16 @@ class TestQueryMessages:
     def test_send_query_receives_status_message(
         self, client: TestClient, valid_token: str, conversation_id: str
     ):
-        """Sending a query results in a status message being received first."""
+        """Sending a query results in a status message being received first.
+        A4: Must also patch resolve_org_byok_key so test org has a BYOK key."""
         mock_chunks = [
             MagicMock(choices=[MagicMock(delta=MagicMock(content="Hello"))])
         ]
 
         with patch(
+            "src.utils.byok.resolve_org_byok_key",
+            return_value="sk-test-byok-key-for-tests",
+        ), patch(
             "src.api.routes.copilot_ws.call_llm_stream",
             side_effect=lambda **kwargs: _async_generator(mock_chunks),
         ):
@@ -188,7 +192,8 @@ class TestQueryMessages:
     def test_send_query_receives_stream_messages(
         self, client: TestClient, valid_token: str, conversation_id: str
     ):
-        """Sending a query results in stream messages with delta tokens."""
+        """Sending a query results in stream messages with delta tokens.
+        A4: Must also patch resolve_org_byok_key so test org has a BYOK key."""
         mock_chunks = [
             MagicMock(choices=[MagicMock(delta=MagicMock(content="Based "))]),
             MagicMock(choices=[MagicMock(delta=MagicMock(content="on "))]),
@@ -196,6 +201,9 @@ class TestQueryMessages:
         ]
 
         with patch(
+            "src.utils.byok.resolve_org_byok_key",
+            return_value="sk-test-byok-key-for-tests",
+        ), patch(
             "src.api.routes.copilot_ws.call_llm_stream",
             side_effect=lambda **kwargs: _async_generator(mock_chunks),
         ) as mock_llm:
@@ -293,26 +301,28 @@ class TestRateLimiting:
     def test_pro_user_no_daily_cap(
         self, client: TestClient, valid_token: str, conversation_id: str
     ):
-        """Pro users have no daily cap (only monthly token budget)."""
+        """Pro users have no daily cap (only monthly token budget).
+        A4: Also patch resolve_org_byok_key so test org has a BYOK key."""
         mock_chunks = [MagicMock(choices=[MagicMock(delta=MagicMock(content="OK"))])]
         # Simulate 100 queries (way beyond free limit) - Pro should still proceed
-        with patch("src.services.copilot_rate_limiter.get_daily_query_count", return_value=100):
-            with patch(
-                "src.api.routes.copilot_ws.call_llm_stream",
-                side_effect=lambda **kwargs: _async_generator(mock_chunks),
-            ):
-                with client.websocket_connect(f"/ws/copilot?token={valid_token}") as ws:
-                    ws.send_json({
-                        "type": "query",
-                        "conversation_id": conversation_id,
-                        "content": "test",
-                        "context_scope": "all_data",
-                        "message_id": "test-msg-1",
-                    })
+        with patch("src.utils.byok.resolve_org_byok_key", return_value="sk-test-byok-key"):
+            with patch("src.services.copilot_rate_limiter.get_daily_query_count", return_value=100):
+                with patch(
+                    "src.api.routes.copilot_ws.call_llm_stream",
+                    side_effect=lambda **kwargs: _async_generator(mock_chunks),
+                ):
+                    with client.websocket_connect(f"/ws/copilot?token={valid_token}") as ws:
+                        ws.send_json({
+                            "type": "query",
+                            "conversation_id": conversation_id,
+                            "content": "test",
+                            "context_scope": "all_data",
+                            "message_id": "test-msg-1",
+                        })
 
-                    msg = ws.receive_json()
-                    # Should NOT be an error about rate limits
-                    assert msg["type"] != "error" or "rate_limit" not in msg.get("error", "")
+                        msg = ws.receive_json()
+                        # Should NOT be an error about rate limits
+                        assert msg["type"] != "error" or "rate_limit" not in msg.get("error", "")
 
 
 # =============================================================================
@@ -324,9 +334,13 @@ class TestMessagePersistence:
     def test_messages_persisted_after_response(
         self, client: TestClient, valid_token: str, conversation_id: str
     ):
-        """User message and AI response are persisted to the DB after streaming."""
+        """User message and AI response are persisted to the DB after streaming.
+        A4: Also patch resolve_org_byok_key so test org has a BYOK key."""
         mock_chunks = [MagicMock(choices=[MagicMock(delta=MagicMock(content="Test response"))])]
         with patch(
+            "src.utils.byok.resolve_org_byok_key",
+            return_value="sk-test-byok-key",
+        ), patch(
             "src.api.routes.copilot_ws.call_llm_stream",
             side_effect=lambda **kwargs: _async_generator(mock_chunks),
         ):
@@ -368,8 +382,12 @@ class TestErrorHandling:
     def test_llm_failure_sends_error_message(
         self, client: TestClient, valid_token: str, conversation_id: str
     ):
-        """When the LLM call fails, an error message is sent to the client."""
-        with patch("src.api.routes.copilot_ws.call_llm_stream", side_effect=Exception("LLM down")):
+        """When the LLM call fails, an error message is sent to the client.
+        A4: Also patch resolve_org_byok_key so test org has a BYOK key."""
+        with patch(
+            "src.utils.byok.resolve_org_byok_key",
+            return_value="sk-test-byok-key",
+        ), patch("src.api.routes.copilot_ws.call_llm_stream", side_effect=Exception("LLM down")):
             with client.websocket_connect(f"/ws/copilot?token={valid_token}") as ws:
                 ws.send_json({
                     "type": "query",

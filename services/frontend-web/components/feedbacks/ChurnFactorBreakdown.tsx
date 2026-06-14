@@ -2,8 +2,6 @@
 
 import { ChevronsUpDown } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { useAuth } from '@/contexts/AuthContext';
-import Link from 'next/link';
 
 export interface ChurnFactor {
   score: number;
@@ -46,26 +44,6 @@ interface ChurnFactorBreakdownProps {
 }
 
 export function ChurnFactorBreakdown({ churnRiskFactors }: ChurnFactorBreakdownProps) {
-  const { user } = useAuth();
-
-  const isPro =
-    user?.plan === 'pro' ||
-    user?.plan === 'business' ||
-    user?.plan === 'enterprise';
-
-  if (!isPro) {
-    return (
-      <div className="mt-3 pt-3 border-t border-border">
-        <p className="text-sm text-muted-foreground">
-          <Link href="/settings/billing" className="text-primary underline underline-offset-2">
-            Upgrade to Pro
-          </Link>{' '}
-          to see factor breakdown
-        </p>
-      </div>
-    );
-  }
-
   if (churnRiskFactors === null) {
     return (
       <div className="mt-3 pt-3 border-t border-border">

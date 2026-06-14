@@ -490,11 +490,6 @@ export default function SlackIntegrationPage() {
               <h4 className="font-semibold text-foreground mb-4">Company</h4>
               <ul className="space-y-3 text-muted-foreground">
                 <li>
-                  <Link href="/changelog" className="hover:text-foreground transition-colors">
-                    Changelog
-                  </Link>
-                </li>
-                <li>
                   <Link href="/privacy" className="hover:text-foreground transition-colors">
                     Privacy Policy
                   </Link>

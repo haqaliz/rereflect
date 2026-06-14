@@ -20,7 +20,8 @@ from src.models.user import User
 
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+# NOTE (A4): No module-level OPENAI_API_KEY constant. Keys are resolved at
+# call-time via resolve_org_byok_key() and passed in by callers.
 DEFAULT_MODEL = "gpt-4o-mini"
 MAX_TOKENS = 500
 TEMPERATURE = 0.7
@@ -121,6 +122,7 @@ async def generate_response(
     org: Organization,
     user: Optional[User],
     tone: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> dict:
     """
     Build an LLM prompt from the feedback context and call OpenAI to generate
@@ -183,13 +185,16 @@ async def generate_response(
         f"Product name: {product_name}"
     )
 
-    if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY not configured")
+    if not api_key:
+        raise RuntimeError(
+            "No OpenAI API key configured. "
+            "Please add your key in Settings → AI → API Keys."
+        )
 
     async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as http_client:
         resp = await http_client.post(
             "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": DEFAULT_MODEL,
                 "messages": [
