@@ -39,11 +39,10 @@ def free_org(db: Session) -> Organization:
 
 @pytest.fixture
 def free_org_with_stripe(db: Session) -> Organization:
-    """Create a free-plan org that already has a Stripe customer ID."""
+    """Create a free-plan org (Stripe customer ID dropped in B4 OSS pivot)."""
     org = Organization(
         name="Promo Stripe Org",
         plan="free",
-        stripe_customer_id="cus_promo_test_123",
     )
     db.add(org)
     db.commit()
@@ -82,22 +81,15 @@ def promo_org_with_sub(db: Session) -> tuple[Organization, Subscription]:
     org = Organization(
         name="Promo Activated Org",
         plan="pro",
-        stripe_customer_id="cus_promo_activated",
         promo_code_used="EARLYPRO3",
     )
     db.add(org)
     db.flush()
 
-    now = datetime.utcnow()
     sub = Subscription(
         organization_id=org.id,
-        stripe_subscription_id="sub_promo_activated",
-        stripe_price_id="price_pro_monthly_test",
         plan="pro",
-        billing_cycle="monthly",
         status="active",
-        current_period_start=now,
-        current_period_end=now + timedelta(days=30),
     )
     db.add(sub)
     db.commit()

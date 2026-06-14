@@ -215,8 +215,8 @@ class TestCheckBudgetRemoved:
             fallback_reason=None,
         )
 
-        # Call with is_byok=True (BYOK org)
-        log_usage(org_id=1, response=response, task_type="categorization", is_byok=True, db=mock_db)
+        # BYOK is the only mode now; log_usage no longer takes is_byok
+        log_usage(org_id=1, response=response, task_type="categorization", db=mock_db)
 
         # budget_used_cents must NOT have been mutated
         assert mock_org_ai_config.budget_used_cents == 0

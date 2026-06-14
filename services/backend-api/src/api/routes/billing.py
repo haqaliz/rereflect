@@ -8,29 +8,29 @@ Stripe-only routes have been removed:
   - GET  /invoices
   - POST /sync-subscription
   - POST /webhooks/stripe
+  - GET  /subscription   (exposed Stripe columns — dropped in B4 cleanup)
+  - POST /start-trial    (trials meaningless when everything is unlimited)
 
 Kept (Stripe-free, useful for self-hosted):
-  - GET  /plans         — plan comparison / info
-  - GET  /subscription  — shows "self-hosted / active" subscription
-  - POST /start-trial   — internal trial state (non-Stripe)
-  - GET  /usage         — feedback and seat usage counters
+  - GET  /plans   — plan comparison / info
+  - GET  /usage   — feedback and seat usage counters (calendar-month window,
+                    no Stripe billing period, no Stripe-era counters)
 
 The `stripe_service` import is retained so the module compiles whether or not
 the `stripe` package is installed (stripe_service itself is now import-guarded).
 """
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from src.database.session import get_db
 from src.models.organization import Organization
-from src.models.subscription import Subscription
 from src.models.usage import UsageRecord
 from src.models.user import User
-from src.api.dependencies import get_current_user, get_current_org
+from src.api.dependencies import get_current_org
 from src.config.plans import PLANS, get_plan, get_feedback_limit, get_seat_limit
 from src.services.stripe_service import get_stripe_service  # import-guarded stub
 
@@ -66,31 +66,6 @@ class PlansListResponse(BaseModel):
     plans: list[PlanResponse]
 
 
-class SubscriptionData(BaseModel):
-    id: Optional[int] = None
-    plan: str
-    status: str
-    billing_cycle: Optional[str]
-    is_trial: bool
-    trial_days_remaining: Optional[int]
-    trial_end: Optional[datetime] = None
-    current_period_start: Optional[datetime]
-    current_period_end: Optional[datetime]
-    cancel_at_period_end: bool
-    canceled_at: Optional[datetime] = None
-    stripe_subscription_id: Optional[str] = None
-
-
-class SubscriptionResponse(BaseModel):
-    subscription: SubscriptionData
-    can_manage_billing: bool
-
-
-class TrialResponse(BaseModel):
-    message: str
-    subscription: SubscriptionData
-
-
 class UsageResponse(BaseModel):
     feedback_used: int
     feedback_limit: Optional[int]
@@ -100,8 +75,6 @@ class UsageResponse(BaseModel):
     seats_percentage: float
     period_start: Optional[datetime]
     period_end: Optional[datetime]
-    overage_enabled: bool
-    overage_count: int
 
 
 # ============================================================================
@@ -172,168 +145,43 @@ def get_plans():
 
 
 # ============================================================================
-# Subscription Endpoints
-# ============================================================================
-
-@router.get("/subscription", response_model=SubscriptionResponse)
-def get_subscription(
-    current_org: Organization = Depends(get_current_org),
-    db: Session = Depends(get_db)
-):
-    """Get current organization's subscription status."""
-    subscription = db.query(Subscription).filter(
-        Subscription.organization_id == current_org.id
-    ).first()
-
-    if not subscription:
-        # Return free plan info if no subscription exists
-        return SubscriptionResponse(
-            subscription=SubscriptionData(
-                id=None,
-                plan="free",
-                status="active",
-                billing_cycle=None,
-                is_trial=False,
-                trial_days_remaining=None,
-                trial_end=None,
-                current_period_start=None,
-                current_period_end=None,
-                cancel_at_period_end=False,
-                canceled_at=None,
-                stripe_subscription_id=None,
-            ),
-            can_manage_billing=False,
-        )
-
-    return SubscriptionResponse(
-        subscription=SubscriptionData(
-            id=subscription.id,
-            plan=subscription.plan,
-            status=subscription.status,
-            billing_cycle=subscription.billing_cycle,
-            is_trial=subscription.is_trial,
-            trial_days_remaining=subscription.trial_days_remaining,
-            trial_end=subscription.trial_end,
-            current_period_start=subscription.current_period_start,
-            current_period_end=subscription.current_period_end,
-            cancel_at_period_end=subscription.cancel_at_period_end,
-            canceled_at=subscription.canceled_at,
-            stripe_subscription_id=subscription.stripe_subscription_id,
-        ),
-        can_manage_billing=False,  # Stripe billing not available in self-hosted mode
-    )
-
-
-@router.post("/start-trial", response_model=TrialResponse)
-def start_trial(
-    current_org: Organization = Depends(get_current_org),
-    db: Session = Depends(get_db)
-):
-    """Start a 14-day Pro trial for the organization."""
-    # Check if already has an active subscription or trial
-    existing = db.query(Subscription).filter(
-        Subscription.organization_id == current_org.id
-    ).first()
-
-    if existing:
-        if existing.status == "trialing":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Organization is already on a trial"
-            )
-        if existing.plan != "free":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Organization already has an active subscription"
-            )
-
-    # Create or update subscription with trial
-    now = datetime.utcnow()
-    trial_end = now + timedelta(days=14)
-
-    if existing:
-        existing.plan = "pro"
-        existing.status = "trialing"
-        existing.trial_start = now
-        existing.trial_end = trial_end
-        existing.current_period_start = now
-        existing.current_period_end = trial_end
-        subscription = existing
-    else:
-        subscription = Subscription(
-            organization_id=current_org.id,
-            plan="pro",
-            status="trialing",
-            trial_start=now,
-            trial_end=trial_end,
-            current_period_start=now,
-            current_period_end=trial_end,
-        )
-        db.add(subscription)
-
-    # Update organization plan
-    current_org.plan = "pro"
-
-    db.commit()
-    db.refresh(subscription)
-
-    return TrialResponse(
-        message="Trial started successfully",
-        subscription=SubscriptionData(
-            id=subscription.id,
-            plan=subscription.plan,
-            status=subscription.status,
-            billing_cycle=subscription.billing_cycle,
-            is_trial=subscription.is_trial,
-            trial_days_remaining=subscription.trial_days_remaining,
-            trial_end=subscription.trial_end,
-            current_period_start=subscription.current_period_start,
-            current_period_end=subscription.current_period_end,
-            cancel_at_period_end=subscription.cancel_at_period_end,
-            canceled_at=subscription.canceled_at,
-            stripe_subscription_id=subscription.stripe_subscription_id,
-        ),
-    )
-
-
-# ============================================================================
 # Usage Endpoints
 # ============================================================================
+
+def _current_calendar_month() -> tuple[datetime, datetime]:
+    """Return (period_start, period_end) for the current calendar month (UTC)."""
+    now = datetime.utcnow()
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if now.month == 12:
+        period_end = period_start.replace(year=now.year + 1, month=1)
+    else:
+        period_end = period_start.replace(month=now.month + 1)
+    return period_start, period_end
+
 
 @router.get("/usage", response_model=UsageResponse)
 def get_usage(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
-    """Get current usage for the billing period."""
+    """Get current usage for the current calendar month.
+
+    Stripe-free: period is always the UTC calendar month.
+    No Stripe billing period or overage columns are read.
+    """
     from src.models.feedback import FeedbackItem
 
-    # Get subscription
-    subscription = db.query(Subscription).filter(
-        Subscription.organization_id == current_org.id
-    ).first()
+    # Always use calendar-month window — no Stripe billing period
+    period_start, period_end = _current_calendar_month()
 
-    # Determine billing period
-    if subscription and subscription.current_period_start:
-        period_start = subscription.current_period_start
-        period_end = subscription.current_period_end
-    else:
-        # Default to current month for free plans
-        now = datetime.utcnow()
-        period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if now.month == 12:
-            period_end = period_start.replace(year=now.year + 1, month=1)
-        else:
-            period_end = period_start.replace(month=now.month + 1)
-
-    # Get or create usage record
+    # Get or create usage record for this calendar month
     usage = db.query(UsageRecord).filter(
         UsageRecord.organization_id == current_org.id,
         UsageRecord.period_start == period_start,
     ).first()
 
     if not usage:
-        # Count feedback for this period
+        # Count feedback for this calendar period
         feedback_count = db.query(FeedbackItem).filter(
             FeedbackItem.organization_id == current_org.id,
             FeedbackItem.created_at >= period_start,
@@ -354,7 +202,6 @@ def get_usage(
     plan = current_org.plan or "free"
     feedback_limit = get_feedback_limit(plan)
     seat_limit = get_seat_limit(plan)
-    plan_config = get_plan(plan)
 
     # Count current seats
     seats_used = db.query(User).filter(
@@ -379,6 +226,4 @@ def get_usage(
         seats_percentage=round(seats_percentage, 1),
         period_start=period_start,
         period_end=period_end,
-        overage_enabled=plan_config.get("overage_enabled", False),
-        overage_count=usage.overage_feedback,
     )

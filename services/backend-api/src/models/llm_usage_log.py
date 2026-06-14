@@ -18,7 +18,6 @@ class LLMUsageLog(Base):
     latency_ms = Column(Integer, nullable=True)
     was_fallback = Column(Boolean, default=False, nullable=False)
     fallback_reason = Column(String(30), nullable=True)  # rate_limit, server_error, timeout
-    is_byok = Column(Boolean, default=False, nullable=False)  # True if org's own key was used
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (

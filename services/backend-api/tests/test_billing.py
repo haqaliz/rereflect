@@ -115,7 +115,6 @@ def pro_org(db: Session) -> Organization:
     org = Organization(
         name="Pro Billing Org",
         plan="pro",
-        stripe_customer_id="cus_test_pro_123",
     )
     db.add(org)
     db.commit()
@@ -152,16 +151,10 @@ def pro_owner_headers(pro_owner: User) -> dict:
 @pytest.fixture
 def pro_subscription(db: Session, pro_org: Organization) -> Subscription:
     """Create an active pro subscription."""
-    now = datetime.utcnow()
     sub = Subscription(
         organization_id=pro_org.id,
-        stripe_subscription_id="sub_test_pro_123",
-        stripe_price_id="price_pro_monthly_test",
         plan="pro",
-        billing_cycle="monthly",
         status="active",
-        current_period_start=now.replace(day=1),
-        current_period_end=(now.replace(day=1) + timedelta(days=30)),
     )
     db.add(sub)
     db.commit()
@@ -225,35 +218,32 @@ class TestGetPlans:
 # ============================================================================
 
 class TestGetSubscription:
-    """Tests for GET /api/v1/billing/subscription."""
+    """Tests for GET /api/v1/billing/subscription.
 
-    def test_get_subscription_free_default(
+    OSS pivot (B3 + B4 cleanup): /subscription route deleted — returns 404.
+    """
+
+    def test_get_subscription_returns_404(
         self, client: TestClient, owner_headers: dict
     ):
-        """Org with no subscription returns free plan."""
+        """B4 cleanup: /subscription route is removed — returns 404."""
         response = client.get(
             "/api/v1/billing/subscription", headers=owner_headers
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["subscription"]["plan"] == "free"
-        assert data["subscription"]["status"] == "active"
-        assert data["can_manage_billing"] is False
+        assert response.status_code == 404, (
+            f"Expected 404 for removed /subscription route, got {response.status_code}"
+        )
 
-    def test_get_subscription_pro_active(
+    def test_get_subscription_pro_returns_404(
         self, client: TestClient, pro_owner_headers: dict, pro_subscription: Subscription
     ):
-        """Org with active pro subscription returns correct data.
-        OSS pivot (B3): can_manage_billing is always False (no Stripe in self-hosted)."""
+        """B4 cleanup: /subscription route removed even for pro orgs — returns 404."""
         response = client.get(
             "/api/v1/billing/subscription", headers=pro_owner_headers
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["subscription"]["plan"] == "pro"
-        assert data["subscription"]["status"] == "active"
-        assert data["subscription"]["billing_cycle"] == "monthly"
-        assert data["can_manage_billing"] is False  # B3: no Stripe in self-hosted
+        assert response.status_code == 404, (
+            f"Expected 404 for removed /subscription route, got {response.status_code}"
+        )
 
 
 # ============================================================================
@@ -261,54 +251,33 @@ class TestGetSubscription:
 # ============================================================================
 
 class TestStartTrial:
-    """Tests for POST /api/v1/billing/start-trial."""
+    """Tests for POST /api/v1/billing/start-trial.
 
-    def test_start_trial_success(
-        self, client: TestClient, owner_headers: dict, owner_org: Organization
+    OSS pivot (B4 cleanup): /start-trial route deleted — returns 404.
+    Trials are meaningless when everything is unlimited in self-hosted mode.
+    """
+
+    def test_start_trial_returns_404(
+        self, client: TestClient, owner_headers: dict
     ):
-        """Free org can start a 14-day Pro trial."""
+        """B4 cleanup: /start-trial route is removed — returns 404."""
         response = client.post(
             "/api/v1/billing/start-trial", headers=owner_headers
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["message"] == "Trial started successfully"
-        assert data["subscription"]["plan"] == "pro"
-        assert data["subscription"]["status"] == "trialing"
-        assert data["subscription"]["is_trial"] is True
-
-    def test_start_trial_already_trialing(
-        self, client: TestClient, owner_headers: dict, db: Session, owner_org: Organization
-    ):
-        """Org already on trial cannot start another."""
-        # Create existing trial
-        sub = Subscription(
-            organization_id=owner_org.id,
-            plan="pro",
-            status="trialing",
-            trial_start=datetime.utcnow(),
-            trial_end=datetime.utcnow() + timedelta(days=14),
-            current_period_start=datetime.utcnow(),
-            current_period_end=datetime.utcnow() + timedelta(days=14),
+        assert response.status_code == 404, (
+            f"Expected 404 for removed /start-trial route, got {response.status_code}"
         )
-        db.add(sub)
-        db.commit()
 
-        response = client.post(
-            "/api/v1/billing/start-trial", headers=owner_headers
-        )
-        assert response.status_code == 400
-        assert "already on a trial" in response.json()["detail"]
-
-    def test_start_trial_already_subscribed(
+    def test_start_trial_pro_returns_404(
         self, client: TestClient, pro_owner_headers: dict, pro_subscription: Subscription
     ):
-        """Org with active subscription cannot start trial."""
+        """B4 cleanup: /start-trial removed even for pro orgs."""
         response = client.post(
             "/api/v1/billing/start-trial", headers=pro_owner_headers
         )
-        assert response.status_code == 400
-        assert "already has an active subscription" in response.json()["detail"]
+        assert response.status_code == 404, (
+            f"Expected 404 for removed /start-trial route, got {response.status_code}"
+        )
 
 
 # ============================================================================
@@ -470,12 +439,23 @@ class TestGetUsage:
         self, client: TestClient, pro_owner_headers: dict, pro_subscription: Subscription,
         db: Session, pro_org: Organization
     ):
-        """Pro plan returns 2500 feedback limit (SELF_HOSTED=false default)."""
-        # Create a usage record for the pro org
+        """Pro plan returns 2500 feedback limit (SELF_HOSTED=false default).
+
+        B4 cleanup: usage period is now the current calendar month, not the
+        Stripe subscription period.
+        """
+        # Create a usage record for the current calendar month (new Stripe-free window)
+        now = datetime.utcnow()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if now.month == 12:
+            month_end = month_start.replace(year=now.year + 1, month=1)
+        else:
+            month_end = month_start.replace(month=now.month + 1)
+
         usage = UsageRecord(
             organization_id=pro_org.id,
-            period_start=pro_subscription.current_period_start,
-            period_end=pro_subscription.current_period_end,
+            period_start=month_start,
+            period_end=month_end,
             feedback_count=100,
         )
         db.add(usage)

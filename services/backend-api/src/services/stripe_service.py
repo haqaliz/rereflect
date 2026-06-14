@@ -79,23 +79,8 @@ class StripeService:
         return session.url
 
     def get_subscription(self, subscription_id: str) -> Optional[dict]:
-        if not _STRIPE_AVAILABLE or _stripe_pkg is None:
-            return None
-        try:
-            subscription = _stripe_pkg.Subscription.retrieve(subscription_id)
-            return {
-                "id": subscription.id,
-                "status": subscription.status,
-                "current_period_start": datetime.fromtimestamp(subscription.current_period_start),
-                "current_period_end": datetime.fromtimestamp(subscription.current_period_end),
-                "cancel_at_period_end": subscription.cancel_at_period_end,
-                "canceled_at": datetime.fromtimestamp(subscription.canceled_at) if subscription.canceled_at else None,
-                "trial_start": datetime.fromtimestamp(subscription.trial_start) if subscription.trial_start else None,
-                "trial_end": datetime.fromtimestamp(subscription.trial_end) if subscription.trial_end else None,
-                "price_id": subscription["items"]["data"][0]["price"]["id"] if subscription["items"]["data"] else None,
-            }
-        except Exception:
-            return None
+        """No-op in self-hosted mode (B3/B4 — Stripe stripped)."""
+        return None
 
     def cancel_subscription(self, subscription_id: str, at_period_end: bool = True) -> bool:
         if not _STRIPE_AVAILABLE or _stripe_pkg is None:

@@ -91,7 +91,7 @@ def test_usage_record_keeps_core_columns():
     """Sanity: UsageRecord must still have its non-dead columns."""
     from src.models.usage import UsageRecord
     for col in ("id", "organization_id", "period_start", "period_end",
-                "feedback_count", "api_calls_count", "overage_feedback", "created_at"):
+                "feedback_count", "api_calls_count", "created_at"):
         assert hasattr(UsageRecord, col), f"UsageRecord.{col} unexpectedly missing"
 
 

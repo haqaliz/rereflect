@@ -424,12 +424,15 @@ class TestStripeRoutesRemoved:
         response = client.get("/api/v1/billing/usage", headers=auth_headers)
         assert response.status_code == 200
 
-    def test_kept_billing_subscription_still_works(
+    def test_billing_subscription_removed_in_b4_cleanup(
         self, client: TestClient, auth_headers: dict
     ):
-        """GET /billing/subscription must still work."""
+        """GET /billing/subscription was removed in B4 cleanup (exposed Stripe columns).
+        It now returns 404."""
         response = client.get("/api/v1/billing/subscription", headers=auth_headers)
-        assert response.status_code == 200
+        assert response.status_code == 404, (
+            f"Expected 404 for removed /subscription route, got {response.status_code}"
+        )
 
 
 class TestStripeServiceImportGuard:

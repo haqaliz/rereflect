@@ -52,7 +52,6 @@ class AdminOrgResponse(BaseModel):
     name: str
     plan: str
     user_count: int
-    stripe_customer_id: Optional[str] = None
     promo_code_used: Optional[str] = None
     created_at: datetime
 
@@ -70,7 +69,6 @@ class AdminOrgListResponse(BaseModel):
 class AdminOrgDetailResponse(AdminOrgResponse):
     users: List[AdminOrgUser] = []
     seat_count: int
-    max_seats: Optional[int] = None
     ai_analysis_enabled: bool
     auto_assignment_enabled: bool
 
@@ -119,7 +117,6 @@ def list_organizations(
                 name=org.name,
                 plan=org.plan,
                 user_count=user_count,
-                stripe_customer_id=org.stripe_customer_id,
                 promo_code_used=org.promo_code_used,
                 created_at=org.created_at,
             )
@@ -145,11 +142,9 @@ def get_organization(org_id: int, db: Session = Depends(get_db)):
         name=org.name,
         plan=org.plan,
         user_count=len(users),
-        stripe_customer_id=org.stripe_customer_id,
         promo_code_used=org.promo_code_used,
         created_at=org.created_at,
         seat_count=org.seat_count,
-        max_seats=org.max_seats,
         ai_analysis_enabled=org.ai_analysis_enabled,
         auto_assignment_enabled=org.auto_assignment_enabled,
         users=[

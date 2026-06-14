@@ -34,7 +34,6 @@ def _make_usage(db: Session, org_id: int) -> UsageRecord:
             period_start=period_start,
             period_end=period_start + timedelta(days=30),
             feedback_count=0,
-            overage_feedback=0,
         )
         db.add(usage)
         db.commit()

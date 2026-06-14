@@ -56,17 +56,8 @@ class Subscription(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     organization_id = Column(Integer, nullable=False)
-    stripe_subscription_id = Column(String(255), nullable=True, index=True)
-    stripe_price_id = Column(String(255), nullable=True)
     plan = Column(String(50), nullable=False, default="free")
-    billing_cycle = Column(String(20), nullable=True)
     status = Column(String(50), nullable=False, default="active")
-    trial_start = Column(DateTime, nullable=True)
-    trial_end = Column(DateTime, nullable=True)
-    current_period_start = Column(DateTime, nullable=True)
-    current_period_end = Column(DateTime, nullable=True)
-    cancel_at_period_end = Column(Boolean, default=False)
-    canceled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -81,7 +72,6 @@ class UsageRecord(Base):
     period_end = Column(DateTime, nullable=False)
     feedback_count = Column(Integer, default=0, nullable=False)
     api_calls_count = Column(Integer, default=0, nullable=False)
-    overage_feedback = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
@@ -614,7 +604,6 @@ class LLMUsageLog(Base):
     latency_ms = Column(Integer, nullable=True)
     was_fallback = Column(Boolean, default=False, nullable=False)
     fallback_reason = Column(String(30), nullable=True)
-    is_byok = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (

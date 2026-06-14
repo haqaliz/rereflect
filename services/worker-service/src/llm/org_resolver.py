@@ -6,6 +6,8 @@ If no valid BYOK key exists for an org, AI is disabled for that org and
 returns (None, False) — no system/env key fallback ever.
 
 Handles usage logging (org sees its own usage). Budget-cap machinery removed.
+is_byok column dropped (OSS pivot B4): all AI calls are BYOK-only by definition;
+the column carried no information and is no longer written.
 """
 
 import logging
@@ -46,13 +48,13 @@ def log_usage(
     org_id: int,
     response: LLMResponse,
     task_type: str,
-    is_byok: bool,
     db: Session,
 ) -> None:
     """
     Write an LLMUsageLog entry for a completed LLM call.
     Org usage is always logged so operators can see their own spend.
     Budget-update logic removed (no system key → no owner budget to track).
+    is_byok column dropped (OSS pivot B4): all calls are BYOK by definition.
     """
     from src.models import LLMUsageLog
 
@@ -69,7 +71,6 @@ def log_usage(
             latency_ms=response.latency_ms,
             was_fallback=response.was_fallback,
             fallback_reason=response.fallback_reason,
-            is_byok=is_byok,
         )
         db.add(log)
         db.flush()
@@ -142,7 +143,7 @@ def call_llm_for_org(
     Returns:
         LLMResponse on success, None if no BYOK key or all providers fail.
     """
-    chain, is_byok = build_fallback_chain(org_id, provider, model, db)
+    chain, _is_byok = build_fallback_chain(org_id, provider, model, db)
     if chain is None:
         return None
 
@@ -150,5 +151,5 @@ def call_llm_for_org(
     if response is None:
         return None
 
-    log_usage(org_id, response, task_type, is_byok, db)
+    log_usage(org_id, response, task_type, db)
     return response

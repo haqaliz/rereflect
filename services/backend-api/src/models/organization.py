@@ -10,12 +10,10 @@ class Organization(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     plan = Column(String, nullable=False, default="free")  # free, pro, business, enterprise
-    stripe_customer_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Seat tracking
     seat_count = Column(Integer, default=1, nullable=False)
-    max_seats = Column(Integer, nullable=True)  # NULL = unlimited (enterprise)
 
     # AI Analysis settings
     ai_analysis_enabled = Column(Boolean, default=True, nullable=False)

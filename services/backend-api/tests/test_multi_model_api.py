@@ -329,7 +329,6 @@ def llm_usage_logs(db: Session, test_organization: Organization):
             estimated_cost_cents=0.5,
             latency_ms=300,
             was_fallback=False,
-            is_byok=False,
             created_at=now - timedelta(days=2),
         ),
         LLMUsageLog(
@@ -344,7 +343,6 @@ def llm_usage_logs(db: Session, test_organization: Organization):
             latency_ms=450,
             was_fallback=True,
             fallback_reason="rate_limit",
-            is_byok=False,
             created_at=now - timedelta(days=1),
         ),
         LLMUsageLog(
@@ -358,7 +356,6 @@ def llm_usage_logs(db: Session, test_organization: Organization):
             estimated_cost_cents=2.0,
             latency_ms=600,
             was_fallback=False,
-            is_byok=True,
             created_at=now,
         ),
     ]

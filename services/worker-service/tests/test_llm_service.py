@@ -128,7 +128,9 @@ class TestCallLlmForOrg:
         call_args = mock_log.call_args[0]
         assert call_args[0] == 42  # org_id
         assert call_args[2] == "insights"  # task_type
-        assert call_args[3] is True  # is_byok
+        # is_byok param removed (OSS pivot B4): all AI calls are BYOK by definition.
+        # log_usage signature is now (org_id, response, task_type, db) — 4 args.
+        assert len(call_args) == 4
 
 
 class TestBuildFallbackChainOrgResolver:

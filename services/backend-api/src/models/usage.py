@@ -18,9 +18,6 @@ class UsageRecord(Base):
     feedback_count = Column(Integer, default=0, nullable=False)
     api_calls_count = Column(Integer, default=0, nullable=False)
 
-    # Overage tracking
-    overage_feedback = Column(Integer, default=0, nullable=False)
-
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -34,7 +31,3 @@ class UsageRecord(Base):
 
     def __repr__(self):
         return f"<UsageRecord(id={self.id}, org={self.organization_id}, feedback={self.feedback_count})>"
-
-    @property
-    def total_feedback(self) -> int:
-        return self.feedback_count + self.overage_feedback

@@ -22,7 +22,6 @@ class OrganizationResponse(BaseModel):
     id: int
     name: str
     plan: str
-    stripe_customer_id: Optional[str]
     created_at: datetime
 
     class Config:

@@ -188,15 +188,8 @@ async def create_feedback(
     db.commit()
     db.refresh(feedback)
 
-    # Track usage
-    plan = current_org.plan or "free"
-    limit = get_feedback_limit(plan)
-    if limit is None:
-        usage.feedback_count += 1
-    elif usage.feedback_count < limit:
-        usage.feedback_count += 1
-    else:
-        usage.overage_feedback += 1
+    # Track usage — Stripe-free: feedback_count is the sole counter
+    usage.feedback_count += 1
     db.commit()
 
     # Auto-assign if enabled
@@ -671,7 +664,7 @@ async def import_csv(
     Common column names detected: feedback_text, text, feedback, comment, message, description
     Optional columns: source, customer_email, date, rating
     """
-    from src.config.plans import get_plan, get_feedback_limit
+    from src.config.plans import get_feedback_limit
 
     # Validate file type
     if not file.filename.endswith('.csv'):
@@ -682,12 +675,11 @@ async def import_csv(
 
     # Check plan limits before importing
     plan = current_org.plan or "free"
-    plan_config = get_plan(plan)
     limit = get_feedback_limit(plan)
-    total_used = usage.feedback_count + usage.overage_feedback
+    total_used = usage.feedback_count
 
-    # For free plan, check if there's remaining capacity
-    if limit is not None and not plan_config.get("overage_enabled") and total_used >= limit:
+    # For limited plans, check if there's remaining capacity
+    if limit is not None and total_used >= limit:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
@@ -763,8 +755,8 @@ async def import_csv(
             if source_column and row.get(source_column):
                 source = row.get(source_column).strip()
 
-            # Check if we can still import (for free plan)
-            if limit is not None and not plan_config.get("overage_enabled"):
+            # Check if we can still import (for limited plans)
+            if limit is not None:
                 if total_used + imported_count >= limit:
                     errors.append(f"Row {row_num}: Feedback limit reached ({limit})")
                     failed_count += 1
@@ -789,13 +781,8 @@ async def import_csv(
             db.commit()
             db.refresh(feedback)
 
-            # Track usage
-            if limit is None:
-                usage.feedback_count += 1
-            elif usage.feedback_count < limit:
-                usage.feedback_count += 1
-            else:
-                usage.overage_feedback += 1
+            # Track usage — Stripe-free: feedback_count is the sole counter
+            usage.feedback_count += 1
 
             # Note: Analysis will be done by background scheduler
             imported_count += 1

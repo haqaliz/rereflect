@@ -105,26 +105,18 @@ def get_current_usage(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ) -> UsageRecord:
-    """Get or create current usage record for the billing period."""
-    from src.models.subscription import Subscription
+    """Get or create current usage record for the current calendar month.
 
-    # Get subscription to determine billing period
-    subscription = db.query(Subscription).filter(
-        Subscription.organization_id == current_org.id
-    ).first()
-
-    # Determine billing period
-    if subscription and subscription.current_period_start:
-        period_start = subscription.current_period_start
-        period_end = subscription.current_period_end
+    Stripe-free: uses a UTC calendar-month window rather than Subscription
+    billing periods.  No Stripe column reads.
+    """
+    # Use calendar-month window — no Stripe billing period lookup
+    now = datetime.utcnow()
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if now.month == 12:
+        period_end = period_start.replace(year=now.year + 1, month=1)
     else:
-        # Default to current month for free plans
-        now = datetime.utcnow()
-        period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if now.month == 12:
-            period_end = period_start.replace(year=now.year + 1, month=1)
-        else:
-            period_end = period_start.replace(month=now.month + 1)
+        period_end = period_start.replace(month=now.month + 1)
 
     # Get or create usage record
     usage = db.query(UsageRecord).filter(
@@ -153,34 +145,29 @@ def check_feedback_limit(
 ) -> bool:
     """
     Check if organization can create more feedback.
-    Raises HTTPException if limit exceeded and overage not enabled.
+    Raises HTTPException if limit exceeded.
+
+    Stripe-free: uses only feedback_count.
+    SELF_HOSTED mode returns None from get_feedback_limit, meaning unlimited.
     """
     plan = current_org.plan or "free"
-    plan_config = get_plan(plan)
     limit = get_feedback_limit(plan)
 
-    # Unlimited
+    # Unlimited (SELF_HOSTED or enterprise plan)
     if limit is None:
         return True
 
-    total_used = usage.feedback_count + usage.overage_feedback
-
-    if total_used >= limit:
-        if plan_config.get("overage_enabled"):
-            # Allow overage - will be tracked and charged
-            return True
-        else:
-            # Hard limit for free plan
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "error": "feedback_limit_exceeded",
-                    "limit": limit,
-                    "used": total_used,
-                    "message": f"You've reached your monthly limit of {limit} feedback items. Upgrade to continue.",
-                    "upgrade_url": "/settings/billing"
-                }
-            )
+    if usage.feedback_count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "error": "feedback_limit_exceeded",
+                "limit": limit,
+                "used": usage.feedback_count,
+                "message": f"You've reached your monthly limit of {limit} feedback items. Upgrade to continue.",
+                "upgrade_url": "/settings/billing"
+            }
+        )
 
     return True
 
@@ -191,22 +178,11 @@ def track_feedback_usage(
     db: Session = Depends(get_db)
 ) -> UsageRecord:
     """
-    Track feedback usage - call this after successfully creating feedback.
-    Increments counter and tracks overage if applicable.
+    Track feedback usage — increment feedback_count only.
+
+    Stripe-free: feedback_count is the sole counter regardless of plan limit.
     """
-    plan = current_org.plan or "free"
-    limit = get_feedback_limit(plan)
-
-    if limit is None:
-        # Unlimited - just increment counter
-        usage.feedback_count += 1
-    elif usage.feedback_count < limit:
-        # Within limit
-        usage.feedback_count += 1
-    else:
-        # Overage
-        usage.overage_feedback += 1
-
+    usage.feedback_count += 1
     db.commit()
     db.refresh(usage)
     return usage
