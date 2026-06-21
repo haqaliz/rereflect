@@ -34,6 +34,7 @@ import {
   BarChart3,
   ListChecks,
   Gauge,
+  Key,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -141,6 +142,7 @@ const settingsNavItems = [
   { title: 'AI', href: '/settings/ai', icon: Brain, requiredRole: 'admin' as const },
   { title: 'Response Templates', href: '/settings/response-templates', icon: MessageSquarePlus, requiredRole: 'admin' as const },
   { title: 'Webhooks', href: '/settings/webhooks', icon: Webhook },
+  { title: 'API Keys', href: '/settings/api-keys', icon: Key, requiredRole: 'admin' as const },
   { title: 'Automations', href: '/settings/automations', icon: Zap },
   { title: 'Playbooks', href: '/settings/playbooks', icon: ListChecks },
   { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },

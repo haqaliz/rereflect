@@ -19,6 +19,7 @@ export interface AISettings {
   ai_analysis_enabled: boolean;
   has_custom_key: boolean; // kept for backward compat
   default_provider: string;
+  base_url: string | null;
   models: AIModels;
   budget: AIBudget;
 }
@@ -27,6 +28,7 @@ export interface AISettingsUpdate {
   ai_analysis_enabled?: boolean;
   openai_api_key?: string; // legacy field
   default_provider?: string;
+  base_url?: string | null;
   model_categorization?: string;
   model_analysis?: string;
   model_insights?: string;

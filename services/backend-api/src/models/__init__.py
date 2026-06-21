@@ -47,6 +47,7 @@ from .automation_execution import AutomationExecution
 from .churn_event import CustomerChurnEvent
 from .churn_calibration import ChurnCalibrationModel, ChurnBacktestRun
 from .churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
+from .api_key import ApiKey
 
 __all__ = [
     "Base",
@@ -104,4 +105,5 @@ __all__ = [
     "ChurnBacktestRun",
     "ChurnPlaybook",
     "ChurnPlaybookExecution",
+    "ApiKey",
 ]

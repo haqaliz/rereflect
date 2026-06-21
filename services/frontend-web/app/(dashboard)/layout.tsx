@@ -41,6 +41,7 @@ const pageTitles: Record<string, string> = {
   '/workflow': 'Workflow',
   '/settings/workflow': 'Workflow Settings',
   '/settings/response-templates': 'Response Templates',
+  '/settings/api-keys': 'API Keys',
   '/system/ai-models': 'AI Models',
   '/conversations': 'AI Copilot',
 };

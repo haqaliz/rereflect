@@ -584,6 +584,13 @@ class OrgAIConfig(Base):
     model_categorization = Column(String(50), default='gpt-4o-mini', nullable=False)
     model_analysis = Column(String(50), default='gpt-4o-mini', nullable=False)
     model_insights = Column(String(50), default='gpt-4o-mini', nullable=False)
+    # Local / custom OpenAI-compatible endpoint (null for cloud providers)
+    base_url = Column(String(500), nullable=True)
+    # Per-org customer-health-score component weights (must sum to 100)
+    health_weight_churn = Column(Integer, default=35, nullable=False)
+    health_weight_sentiment = Column(Integer, default=25, nullable=False)
+    health_weight_resolution = Column(Integer, default=25, nullable=False)
+    health_weight_frequency = Column(Integer, default=15, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

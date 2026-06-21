@@ -27,12 +27,14 @@ import { toast } from 'sonner';
 import { AISettingsGeneral } from '@/components/settings/AISettingsGeneral';
 import { AISettingsProviders } from '@/components/settings/AISettingsProviders';
 import { AISettingsUsage } from '@/components/settings/AISettingsUsage';
+import { HealthWeightsEditor } from '@/components/settings/HealthWeightsEditor';
 
-type CategoryType = 'pain_point' | 'feature_request' | 'general';
+type CategoryType = 'pain_point' | 'feature_request' | 'urgency' | 'general';
 
 const CATEGORY_TYPE_LABELS: Record<CategoryType, string> = {
   pain_point: 'Pain Point',
   feature_request: 'Feature Request',
+  urgency: 'Urgency',
   general: 'General',
 };
 
@@ -215,7 +217,7 @@ function AISettingsContent() {
           </TabsContent>
 
           {/* Categories Tab */}
-          <TabsContent value="categories" className="mt-6">
+          <TabsContent value="categories" className="mt-6 space-y-6">
             <Card>
               <CardHeader className="border-b border-border">
                 <div className="flex items-center justify-between">
@@ -266,6 +268,7 @@ function AISettingsContent() {
                           <SelectContent>
                             <SelectItem value="pain_point">Pain Point</SelectItem>
                             <SelectItem value="feature_request">Feature Request</SelectItem>
+                            <SelectItem value="urgency">Urgency</SelectItem>
                             <SelectItem value="general">General</SelectItem>
                           </SelectContent>
                         </Select>
@@ -353,6 +356,21 @@ function AISettingsContent() {
                     ))}
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Health Weights Editor */}
+            <Card>
+              <CardHeader className="border-b border-border">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-secondary rounded-lg">
+                    <ShieldCheck className="w-5 h-5 text-primary" />
+                  </div>
+                  <CardTitle>Health Score Weights</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <HealthWeightsEditor isAdminOrOwner={isAdminOrOwner} />
               </CardContent>
             </Card>
           </TabsContent>

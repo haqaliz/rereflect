@@ -16,7 +16,9 @@ class CategorizationResult:
 class PainPointCategorizer:
     """Categorize extracted pain points into 12 categories with severity levels."""
 
-    CATEGORIES = {
+    _CUSTOM_DEFAULT_SEVERITY = "moderate"
+
+    _BASE_CATEGORIES = {
         'security_breach': {
             'keywords': [
                 'hacked', 'breach', 'exposed', 'unauthorized', 'compromised',
@@ -118,6 +120,25 @@ class PainPointCategorizer:
         }
     }
 
+    def __init__(self) -> None:
+        # Per-instance copy so add_custom_categories does not affect other instances
+        self.CATEGORIES = dict(self._BASE_CATEGORIES)
+
+    def add_custom_categories(self, custom_categories: list) -> None:
+        """Extend the categorizer with custom pain_point category entries."""
+        for entry in custom_categories:
+            if entry.get("category_type") != "pain_point":
+                continue
+            name = entry.get("name")
+            if not name:
+                continue
+            description = entry.get("description") or ""
+            keywords = [w.strip(".,;:!?") for w in description.lower().split() if len(w) > 2]
+            self.CATEGORIES[name] = {
+                "keywords": keywords or [name.replace("_", " ")],
+                "severity": self._CUSTOM_DEFAULT_SEVERITY,
+            }
+
     def categorize(self, text: str) -> CategorizationResult:
         """
         Categorize a pain point text.
@@ -185,7 +206,9 @@ class PainPointCategorizer:
 class FeatureRequestCategorizer:
     """Categorize feature requests into 10 categories with priority levels."""
 
-    CATEGORIES = {
+    _CUSTOM_DEFAULT_PRIORITY = "medium"
+
+    _BASE_CATEGORIES = {
         'core_functionality': {
             'keywords': [
                 'need', 'must have', 'essential', 'basic', 'critical feature',
@@ -267,6 +290,24 @@ class FeatureRequestCategorizer:
             'priority': 'low'
         }
     }
+
+    def __init__(self) -> None:
+        self.CATEGORIES = dict(self._BASE_CATEGORIES)
+
+    def add_custom_categories(self, custom_categories: list) -> None:
+        """Extend the categorizer with custom feature_request category entries."""
+        for entry in custom_categories:
+            if entry.get("category_type") != "feature_request":
+                continue
+            name = entry.get("name")
+            if not name:
+                continue
+            description = entry.get("description") or ""
+            keywords = [w.strip(".,;:!?") for w in description.lower().split() if len(w) > 2]
+            self.CATEGORIES[name] = {
+                "keywords": keywords or [name.replace("_", " ")],
+                "priority": self._CUSTOM_DEFAULT_PRIORITY,
+            }
 
     def categorize(self, text: str, occurrence_count: int = 1) -> CategorizationResult:
         """
@@ -350,7 +391,9 @@ class FeatureRequestCategorizer:
 class UrgentCategorizer:
     """Categorize urgent feedback into 10 categories with response time targets."""
 
-    CATEGORIES = {
+    _CUSTOM_DEFAULT_RESPONSE_TIME = "4_hours"
+
+    _BASE_CATEGORIES = {
         'service_outage': {
             'keywords': [
                 'down', 'not loading', '503', '502', 'unavailable', 'offline',
@@ -432,6 +475,24 @@ class UrgentCategorizer:
             'response_time': '24_hours'
         }
     }
+
+    def __init__(self) -> None:
+        self.CATEGORIES = dict(self._BASE_CATEGORIES)
+
+    def add_custom_categories(self, custom_categories: list) -> None:
+        """Extend the categorizer with custom urgency category entries."""
+        for entry in custom_categories:
+            if entry.get("category_type") != "urgency":
+                continue
+            name = entry.get("name")
+            if not name:
+                continue
+            description = entry.get("description") or ""
+            keywords = [w.strip(".,;:!?") for w in description.lower().split() if len(w) > 2]
+            self.CATEGORIES[name] = {
+                "keywords": keywords or [name.replace("_", " ")],
+                "response_time": self._CUSTOM_DEFAULT_RESPONSE_TIME,
+            }
 
     def categorize(self, text: str, sentiment_score: float = 0.0) -> CategorizationResult:
         """

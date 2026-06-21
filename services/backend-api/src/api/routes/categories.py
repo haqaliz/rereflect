@@ -6,12 +6,13 @@ Allows organizations to define custom categories for AI-powered categorization.
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import datetime
 
 from src.database.session import get_db
 from src.models.custom_category import CustomCategory
 from src.models.organization import Organization
+from src.models.org_ai_config import OrgAIConfig
 from src.api.dependencies import get_current_user, get_current_org, require_admin_or_owner
 
 router = APIRouter(prefix="/api/v1/categories", tags=["categories"])
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api/v1/categories", tags=["categories"])
 class CustomCategoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: Optional[str] = None
-    category_type: str = Field(pattern="^(pain_point|feature_request|general)$")
+    category_type: str = Field(pattern="^(pain_point|feature_request|urgency|general)$")
 
 
 class CustomCategoryUpdate(BaseModel):
@@ -161,3 +162,77 @@ def delete_custom_category(
 
     db.delete(category)
     db.commit()
+
+
+# ── Health weights ──────────────────────────────────────────────────────────
+
+_DEFAULT_WEIGHTS = {"churn": 35, "sentiment": 25, "resolution": 25, "frequency": 15}
+
+
+class HealthWeightsResponse(BaseModel):
+    churn: int
+    sentiment: int
+    resolution: int
+    frequency: int
+
+
+class HealthWeightsUpdate(BaseModel):
+    churn: int = Field(..., ge=0, le=100)
+    sentiment: int = Field(..., ge=0, le=100)
+    resolution: int = Field(..., ge=0, le=100)
+    frequency: int = Field(..., ge=0, le=100)
+
+    @model_validator(mode="after")
+    def validate_sum_is_100(self) -> "HealthWeightsUpdate":
+        total = self.churn + self.sentiment + self.resolution + self.frequency
+        if total != 100:
+            raise ValueError(f"Health weights must sum to exactly 100, got {total}")
+        return self
+
+
+@router.get("/health-weights", response_model=HealthWeightsResponse)
+def get_health_weights(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Return the organization's health-score weights, or defaults if none configured."""
+    config = db.query(OrgAIConfig).filter_by(organization_id=current_org.id).first()
+    if config is not None:
+        return HealthWeightsResponse(
+            churn=config.health_weight_churn,
+            sentiment=config.health_weight_sentiment,
+            resolution=config.health_weight_resolution,
+            frequency=config.health_weight_frequency,
+        )
+    return HealthWeightsResponse(**_DEFAULT_WEIGHTS)
+
+
+@router.put(
+    "/health-weights",
+    response_model=HealthWeightsResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def update_health_weights(
+    data: HealthWeightsUpdate,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Persist per-org health-score weights. Admin or Owner only. Must sum to 100."""
+    config = db.query(OrgAIConfig).filter_by(organization_id=current_org.id).first()
+    if config is None:
+        config = OrgAIConfig(organization_id=current_org.id)
+        db.add(config)
+
+    config.health_weight_churn = data.churn
+    config.health_weight_sentiment = data.sentiment
+    config.health_weight_resolution = data.resolution
+    config.health_weight_frequency = data.frequency
+
+    db.commit()
+    db.refresh(config)
+    return HealthWeightsResponse(
+        churn=config.health_weight_churn,
+        sentiment=config.health_weight_sentiment,
+        resolution=config.health_weight_resolution,
+        frequency=config.health_weight_frequency,
+    )

@@ -29,6 +29,9 @@ _ENCRYPTION_KEY = os.environ.get("LLM_ENCRYPTION_KEY", "")
 _DEFAULT_PROVIDER = "openai"
 _DEFAULT_MODEL = "gpt-4o-mini"
 
+# Providers that run locally/offline and do not need an OrgApiKey row
+_LOCAL_PROVIDERS = frozenset({"ollama", "openai_compatible"})
+
 
 def _decrypt_api_key(encrypted_key: str) -> str:
     """Decrypt a Fernet-encrypted API key."""
@@ -83,19 +86,47 @@ def build_fallback_chain(
     provider: str,
     model: str,
     db: Session,
+    base_url: Optional[str] = None,
 ) -> Tuple[Optional[FallbackChain], bool]:
     """
     Build a FallbackChain for the given org/provider/model.
 
-    BYOK-only: if the org has no valid encrypted key for the requested provider,
-    returns (None, False) — AI is disabled for this org. No system/env key is
-    ever used as a fallback.
+    Local/keyless path (ollama, openai_compatible): no OrgApiKey lookup.
+    If base_url is missing for a local provider, returns (None, False) and
+    falls back to VADER.
+
+    BYOK-only (cloud providers): if the org has no valid encrypted key for the
+    requested provider, returns (None, False) — AI is disabled for this org.
+    No system/env key is ever used as a fallback.
+
+    Args:
+        org_id: Organization ID (used for BYOK lookup; ignored for local)
+        provider: Provider name
+        model: Model ID
+        db: Database session
+        base_url: Base URL for local/compatible endpoints (local providers only)
 
     Returns:
         Tuple of (FallbackChain, is_byok)
-        is_byok is True when the org's own API key is being used.
-        Returns (None, False) when no valid BYOK key is available.
+        is_byok is True when the org's own API key is being used (cloud BYOK).
+        Returns (None, False) when no valid key/URL is available.
     """
+    # ── Local / keyless path ─────────────────────────────────────────────────
+    if provider in _LOCAL_PROVIDERS:
+        if not base_url:
+            logger.warning(
+                f"Provider '{provider}' has no base_url — local LLM disabled, "
+                f"falling back to VADER (org {org_id})"
+            )
+            return None, False
+        primary = LLMProviderFactory.create(
+            provider, api_key="", model=model, base_url=base_url
+        )
+        # Local providers are not BYOK (no OrgApiKey row used)
+        chain = FallbackChain(primary_provider=primary, system_provider=None)
+        return chain, False
+
+    # ── Cloud BYOK path ──────────────────────────────────────────────────────
     from src.models import OrgApiKey
 
     # Look up org's BYOK key for this provider

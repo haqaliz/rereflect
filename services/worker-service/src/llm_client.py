@@ -71,12 +71,15 @@ def categorize_feedback(
     if custom_categories:
         custom_pain = [c["name"] for c in custom_categories if c["category_type"] == "pain_point"]
         custom_feature = [c["name"] for c in custom_categories if c["category_type"] == "feature_request"]
+        custom_urgency = [c["name"] for c in custom_categories if c["category_type"] == "urgency"]
         custom_general = [c["name"] for c in custom_categories if c["category_type"] == "general"]
         parts = []
         if custom_pain:
             parts.append(f"Additional custom pain point categories: {', '.join(custom_pain)}")
         if custom_feature:
             parts.append(f"Additional custom feature request categories: {', '.join(custom_feature)}")
+        if custom_urgency:
+            parts.append(f"Additional custom urgency categories: {', '.join(custom_urgency)}")
         if custom_general:
             parts.append(f"Additional general categories (can be used for any field): {', '.join(custom_general)}")
         if parts:

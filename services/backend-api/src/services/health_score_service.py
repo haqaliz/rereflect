@@ -29,30 +29,48 @@ WEIGHTS = {
 }
 
 
+def _get_org_weights(org_id: int, db: Session) -> dict:
+    """Return per-org health-score weights, falling back to module-level defaults."""
+    try:
+        from src.models.org_ai_config import OrgAIConfig
+        config = db.query(OrgAIConfig).filter_by(organization_id=org_id).first()
+        if config is not None:
+            return {
+                "churn_risk": config.health_weight_churn / 100.0,
+                "sentiment": config.health_weight_sentiment / 100.0,
+                "resolution": config.health_weight_resolution / 100.0,
+                "frequency": config.health_weight_frequency / 100.0,
+            }
+    except Exception:
+        pass
+    return WEIGHTS
+
+
 def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
     """Compute 0-100 health score (higher = healthier) for a customer."""
     from src.models.feedback import FeedbackItem
 
     now = datetime.utcnow()
 
-    # Churn risk component (35%): inverted avg churn_risk_score
+    # Churn risk component (35% default): inverted avg churn_risk_score
     churn_component = _compute_churn_component(db, org_id, customer_email, now)
 
-    # Sentiment component (25%): avg sentiment mapped to 0-100
+    # Sentiment component (25% default): avg sentiment mapped to 0-100
     sentiment_component = _compute_sentiment_component(db, org_id, customer_email, now)
 
-    # Resolution component (25%): faster resolution = higher score
+    # Resolution component (25% default): faster resolution = higher score
     resolution_component = _compute_resolution_component(db, org_id, customer_email, now)
 
-    # Frequency component (15%): stable/declining frequency = healthy
+    # Frequency component (15% default): stable/declining frequency = healthy
     frequency_component = _compute_frequency_component(db, org_id, customer_email, now)
 
-    # Weighted sum
+    # Weighted sum using per-org configured weights (or defaults)
+    weights = _get_org_weights(org_id, db)
     health_score = int(
-        churn_component * WEIGHTS["churn_risk"] +
-        sentiment_component * WEIGHTS["sentiment"] +
-        resolution_component * WEIGHTS["resolution"] +
-        frequency_component * WEIGHTS["frequency"]
+        churn_component * weights["churn_risk"] +
+        sentiment_component * weights["sentiment"] +
+        resolution_component * weights["resolution"] +
+        frequency_component * weights["frequency"]
     )
     health_score = max(0, min(100, health_score))
 

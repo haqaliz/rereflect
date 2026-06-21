@@ -29,7 +29,17 @@ from src.config.plans import plan_includes, PLAN_HIERARCHY
 
 router = APIRouter(prefix="/api/v1/settings/ai", tags=["ai-settings"])
 
-VALID_PROVIDERS = {"openai", "anthropic", "google"}
+VALID_PROVIDERS = {"openai", "anthropic", "google", "ollama", "openai_compatible"}
+
+# Local/offline providers: keyless, require a base_url instead of an API key
+LOCAL_PROVIDERS = {"ollama", "openai_compatible"}
+
+
+def _is_valid_url(value: str) -> bool:
+    """Return True if value is a well-formed http/https URL with a netloc."""
+    from urllib.parse import urlparse
+    parsed = urlparse(value)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
 
 # ── Pydantic Schemas ──────────────────────────────────────────────────────────
@@ -43,12 +53,14 @@ class ModelConfig(BaseModel):
 class AISettingsResponse(BaseModel):
     ai_analysis_enabled: bool
     default_provider: str
+    base_url: Optional[str] = None
     models: ModelConfig
 
 
 class AISettingsUpdate(BaseModel):
     ai_analysis_enabled: Optional[bool] = None
     default_provider: Optional[str] = None
+    base_url: Optional[str] = None
     model_categorization: Optional[str] = None
     model_analysis: Optional[str] = None
     model_insights: Optional[str] = None
@@ -177,9 +189,12 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
             insights="gpt-4o-mini",
         )
 
+    base_url = config.base_url if config and hasattr(config, "base_url") else None
+
     return AISettingsResponse(
         ai_analysis_enabled=org.ai_analysis_enabled,
         default_provider=default_provider,
+        base_url=base_url,
         models=model_config,
     )
 
@@ -352,9 +367,41 @@ def update_ai_settings(
         if data.default_provider not in VALID_PROVIDERS:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid provider. Must be one of: {', '.join(VALID_PROVIDERS)}",
+                detail=f"Invalid provider. Must be one of: {', '.join(sorted(VALID_PROVIDERS))}",
             )
         config.default_provider = data.default_provider
+
+    # ── Local provider validation ─────────────────────────────────────────────
+    # Determine the effective provider (newly set or existing config).
+    effective_provider = (
+        data.default_provider
+        if data.default_provider is not None
+        else config.default_provider
+    )
+    if effective_provider in LOCAL_PROVIDERS:
+        # Determine the effective base_url (explicit field set vs. existing config).
+        if "base_url" in data.model_fields_set:
+            effective_base_url = data.base_url
+        else:
+            effective_base_url = config.base_url if hasattr(config, "base_url") else None
+
+        if not effective_base_url:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"base_url is required when provider is '{effective_provider}'. "
+                    "Provide the full inference server URL (e.g. http://localhost:11434/v1)."
+                ),
+            )
+        if not _is_valid_url(effective_base_url):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="base_url must be a valid http or https URL.",
+            )
+
+    # Persist base_url if explicitly included in the request (even as null).
+    if "base_url" in data.model_fields_set and hasattr(config, "base_url"):
+        config.base_url = data.base_url
 
     if data.model_categorization is not None:
         config.model_categorization = data.model_categorization

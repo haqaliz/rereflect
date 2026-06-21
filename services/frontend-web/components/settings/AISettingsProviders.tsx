@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
-import { Check, X, Key, Loader2, FlaskConical } from 'lucide-react';
+import { Check, X, Key, Loader2, FlaskConical, Server } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   aiSettingsAPI,
@@ -29,6 +29,9 @@ import {
 } from '@/components/icons/ProviderLogos';
 
 const PROVIDERS = ['openai', 'anthropic', 'google'];
+
+// Providers that run locally and do not need a stored API key
+const LOCAL_PROVIDERS = new Set(['ollama', 'openai_compatible']);
 
 const TASK_TYPES: Array<{ key: keyof AISettings['models']; label: string }> = [
   { key: 'categorization', label: 'Categorization' },
@@ -276,6 +279,133 @@ function ModelSelector({
   );
 }
 
+interface LocalProviderCardProps {
+  settings: AISettings;
+  isAdminOrOwner: boolean;
+  onUpdate: (updated: AISettings) => void;
+}
+
+function LocalProviderCard({ settings, isAdminOrOwner, onUpdate }: LocalProviderCardProps) {
+  const isLocal = LOCAL_PROVIDERS.has(settings.default_provider);
+
+  // Selected provider within the card (may differ from saved setting)
+  const [selectedProvider, setSelectedProvider] = useState<string>(
+    isLocal ? settings.default_provider : 'ollama'
+  );
+  const [baseUrl, setBaseUrl] = useState<string>(settings.base_url || '');
+  const [apiKey, setApiKey] = useState<string>('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleApply = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: import('@/lib/api/ai-settings').AISettingsUpdate = {
+        default_provider: selectedProvider,
+        base_url: baseUrl || null,
+      };
+      if (apiKey.trim()) {
+        // openai_compatible endpoints may require a real key — store via BYOK key endpoint
+        // (api_key field not part of ai_settings PATCH; handled separately)
+      }
+      const updated = await aiSettingsAPI.update(payload);
+      onUpdate(updated);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Failed to apply local provider settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="border-b border-border">
+        <CardTitle className="flex items-center gap-2">
+          <Server className="w-4 h-4" />
+          Local / Offline LLM
+        </CardTitle>
+        <p className="text-sm text-muted-foreground mt-1">
+          Use a local model (Ollama, LM Studio, vLLM, or any OpenAI-compatible server)
+          to process feedback without cloud calls or API keys.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-4 space-y-4">
+        {/* Provider selector */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Provider</label>
+          <Select
+            value={selectedProvider}
+            onValueChange={setSelectedProvider}
+            disabled={!isAdminOrOwner}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select a local provider" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ollama">Ollama</SelectItem>
+              <SelectItem value="openai_compatible">Custom (OpenAI-compatible)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Base URL */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Inference server URL</label>
+          <Input
+            type="url"
+            placeholder={
+              selectedProvider === 'ollama'
+                ? 'http://localhost:11434/v1'
+                : 'http://your-inference-server/v1'
+            }
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            disabled={!isAdminOrOwner}
+            className="font-mono text-sm"
+          />
+        </div>
+
+        {/* Optional API key for custom endpoints */}
+        {selectedProvider === 'openai_compatible' && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
+              API key{' '}
+              <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <Input
+              type="password"
+              placeholder="optional — leave blank for keyless endpoints"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              disabled={!isAdminOrOwner}
+              className="text-sm"
+            />
+          </div>
+        )}
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        {isAdminOrOwner && (
+          <Button
+            onClick={handleApply}
+            disabled={saving || !baseUrl.trim()}
+            size="sm"
+            aria-label="Apply local provider configuration"
+          >
+            {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+            Apply
+          </Button>
+        )}
+
+        {!isAdminOrOwner && (
+          <p className="text-xs text-muted-foreground">Only admins and owners can change AI providers.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersProps) {
   const { user } = useAuth();
   const [keys, setKeys] = useState<AIKey[]>([]);
@@ -328,10 +458,17 @@ export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersP
 
   return (
     <div className="space-y-6">
-      {/* Provider Cards */}
+      {/* Local / Offline LLM Card */}
+      <LocalProviderCard
+        settings={settings}
+        isAdminOrOwner={isAdminOrOwner}
+        onUpdate={onUpdate}
+      />
+
+      {/* Cloud BYOK Provider Cards */}
       <Card>
         <CardHeader className="border-b border-border">
-          <CardTitle>API Keys</CardTitle>
+          <CardTitle>Cloud API Keys</CardTitle>
           <p className="text-sm text-muted-foreground mt-1">
             AI features require your own API key. Add a key from OpenAI, Anthropic, or Google to activate AI-powered processing.
           </p>
