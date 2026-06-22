@@ -82,7 +82,7 @@ export function Footer({ onScrollToSection }: FooterProps) {
               </li>
               <li>
                 <a
-                  href={GITHUB_URL}
+                  href={`${GITHUB_URL}#readme`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-foreground transition-colors"

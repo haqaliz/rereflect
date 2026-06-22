@@ -16,6 +16,17 @@
 
 ---
 
+## ⚠️ Open-Source Self-Hosted Pivot (2026-06)
+
+Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MRR framing and plan-gating below are **stale** — every feature is unlocked. See `PRD-OSS-SELF-HOSTED-PIVOT.md`.
+
+**Open-Source Feature Batch — shipped 2026-06-22** (`PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md`):
+- ✅ **Local / Offline LLM** — Ollama / any OpenAI-compatible endpoint, keyless; VADER fallback with no model.
+- ✅ **Custom AI** — custom pain-point/feature-request/urgency taxonomies + configurable health-score weights.
+- ✅ **Public REST API** — API keys (read/ingest), reads + feedback ingestion + webhooks + OpenAPI docs.
+
+---
+
 ## Phase 1: MVP SaaS (Months 1-3)
 
 ### Authentication & Multi-tenancy - COMPLETE

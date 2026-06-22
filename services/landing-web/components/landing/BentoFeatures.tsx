@@ -18,6 +18,8 @@ import {
   Sparkles,
   Server,
   Zap,
+  Code2,
+  SlidersHorizontal,
   Github,
   type LucideIcon,
 } from 'lucide-react';
@@ -92,9 +94,9 @@ const customer360Bullets = [
 ];
 
 const multiModelBullets = [
-  'OpenAI, Anthropic, Google support',
-  'Automatic fallback chains',
-  'Per-org budget tracking',
+  'OpenAI, Anthropic, Google — bring your own key',
+  'Run fully offline with Ollama or any OpenAI-compatible endpoint',
+  'No key? Falls back to free local VADER analysis',
 ];
 
 const smallCards: {
@@ -125,7 +127,7 @@ const smallCards: {
     icon: Tags,
     title: 'Smart Categorization',
     description:
-      'AI auto-tags feedback by topic and type — no manual sorting needed',
+      'AI auto-tags feedback by topic and type — or define your own custom pain-point, feature, and urgency categories',
     animation: 'spin',
   },
   {
@@ -191,6 +193,22 @@ const smallCards: {
     description:
       'Predict 30-60 days out which customers will churn — with calibrated probabilities, factor breakdowns, and prevention playbooks. Honest accuracy tracking included.',
     animation: 'pulse',
+  },
+  {
+    id: 'card-custom-ai',
+    icon: SlidersHorizontal,
+    title: 'Tune the AI to You',
+    description:
+      'Custom categories for every taxonomy plus configurable customer-health-score weights — make the analysis fit your product, not the other way around.',
+    animation: 'spin',
+  },
+  {
+    id: 'card-public-api',
+    icon: Code2,
+    title: 'Public REST API',
+    description:
+      'API keys, read endpoints, feedback ingestion, webhooks, and OpenAPI docs. Build on top of your own feedback data.',
+    animation: 'spin',
   },
 ];
 
@@ -347,8 +365,8 @@ export default function BentoFeatures() {
               <h3 className="text-xl font-bold">Choose Your AI</h3>
             </div>
             <p className="text-muted-foreground text-sm mb-5">
-              Bring your own keys (BYOK). Pick the model that fits your needs
-              and budget.
+              Bring your own key — or run it fully offline against a local model.
+              Pick what fits your privacy and budget.
             </p>
             <ul className="space-y-2.5">
               {multiModelBullets.map((point) => (

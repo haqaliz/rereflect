@@ -224,13 +224,13 @@
 - [x] Accuracy tracking: precision/recall/F1/AUC metrics on organization + system admin accuracy dashboards, weekly refit Mondays 07:45 UTC
 - [x] Plan gate: Business+ (Pro gets enhanced risk_level + factor breakdown)
 
-#### M4.2 — Custom AI Models (3 weeks)
-- [ ] Custom category configuration (Enterprise): org-specific pain point categories, feature request categories, urgency definitions
-- [ ] Custom health score weights: CS teams can adjust component weights (e.g., "sentiment matters more for us")
+#### M4.2 — Custom AI Models (3 weeks) — PARTIAL (categories + weights shipped 2026-06-22)
+- [x] Custom category configuration: org-specific pain point, feature request, and **urgency** categories — injected into the LLM prompt + merged into the keyword categorizers
+- [x] Custom health score weights: adjust the 4 component weights per org (validated to sum to 100); `health_score_service` reads them
 - [ ] Fine-tuned classification: train per-org classification model on their feedback + corrections (from M3.3)
 - [ ] A/B comparison: show fine-tuned vs default model accuracy side-by-side
 - [ ] Model versioning: track model performance over time, rollback if accuracy drops
-- [ ] Plan gate: Enterprise only
+- [x] Plan gate: removed — all features unlocked in the open-source self-hosted edition
 
 #### M4.3 — Industry Benchmarks (2 weeks)
 - [ ] Opt-in benchmark program: customers choose to contribute anonymized aggregate metrics
@@ -258,6 +258,17 @@
 
 **Q4 Deliverables**: Advanced churn prediction, custom models, benchmarks, workflow automation (M4.4 COMPLETE)
 **Plan Gating**: Custom models = Enterprise, benchmarks = Pro+, automation = Pro+ (5 rules) / Business (20) / Enterprise (unlimited)
+
+---
+
+### Open-Source Feature Batch — COMPLETE (shipped 2026-06-22)
+> First batch after the open-source self-hosted pivot. All unlocked (no plan gating). See `PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md`.
+
+- [x] **Local / Offline LLM** — run the analysis pipeline against Ollama or any OpenAI-compatible endpoint, keyless (no API key, no system key); falls back to free local VADER when no model is configured. Cloud BYOK unchanged. (extends M2.1 Multi-Model)
+- [x] **Custom AI** — custom pain-point/feature-request/urgency taxonomies into the analyzer + per-org configurable customer-health-score weights (M4.2 partial)
+- [x] **Public REST API** — API-key auth (read/ingest scopes), read endpoints (feedback/customers/health/churn/analytics), feedback ingestion, webhook management, OpenAPI docs
+
+> **Note:** the Plan Gating tables below are pre-pivot and now stale — every feature is unlocked in the open-source self-hosted edition.
 
 ---
 

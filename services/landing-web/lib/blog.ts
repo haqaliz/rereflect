@@ -1,3 +1,10 @@
+import { batch1 } from './blog-posts/batch1';
+import { batch2 } from './blog-posts/batch2';
+import { batch3 } from './blog-posts/batch3';
+import { batch4 } from './blog-posts/batch4';
+import { batch5 } from './blog-posts/batch5';
+import { batch6 } from './blog-posts/batch6';
+
 export interface BlogSection {
   heading: string;
   content: string[];
@@ -21,6 +28,311 @@ export interface BlogPost {
 }
 
 const posts: BlogPost[] = [
+  {
+    slug: 'run-rereflect-offline-local-llm-ollama',
+    title: 'Running Rereflect Fully Offline With a Local LLM',
+    excerpt: 'Rereflect is BYOK — bring your own key — but you do not even need a key. Point it at a local model running on your own hardware (Ollama or any OpenAI-compatible endpoint), and your customer feedback never leaves your infrastructure. This guide walks through how it works, what it costs ($0), and the free VADER fallback when no model is configured.',
+    date: '2026-06-25',
+    status: 'scheduled',
+    readTime: '8 min read',
+    author: 'Rereflect Team',
+    tags: ['Self-Hosting', 'AI', 'Privacy'],
+    seoTitle: 'Run Rereflect Fully Offline With a Local LLM (Ollama) | Rereflect',
+    seoDescription: 'Run Rereflect feedback analysis entirely offline with a local LLM via Ollama or any OpenAI-compatible endpoint. No API key, no data leaving your infra, $0 cost, plus a free VADER fallback.',
+    sections: [
+      {
+        heading: 'Why offline analysis matters',
+        content: [
+          'Customer feedback is some of the most sensitive text a company holds. It contains names, account details, candid frustrations, and sometimes data customers assumed was private. The default mode for most AI feedback tools is to ship that text to a third-party API for processing — which means your customers\' words leave your control the moment they are analyzed.',
+          'For a lot of teams, that is a non-starter. Maybe you operate under a data residency requirement. Maybe your security team will not approve sending customer data to an external model provider. Maybe you simply do not want a copy of every support complaint sitting in someone else\'s logs.',
+          'Rereflect is self-hosted and open source, and it is built so that you never have to make that trade-off. You can run the entire analysis pipeline against a model on your own hardware. Nothing about a piece of feedback — the raw text, the inferred sentiment, the extracted pain points — ever crosses your network boundary.',
+        ],
+      },
+      {
+        heading: 'BYOK, including bringing your own model',
+        content: [
+          'Rereflect follows a bring-your-own-key (BYOK) philosophy. There is no Rereflect-managed AI service in the middle, no per-seat AI markup, and no usage metering on our side. You connect Rereflect to whatever model you want to use, and you pay that provider directly (or, in the local case, pay nobody).',
+          'BYOK usually means pasting in an OpenAI or Anthropic key. But the same mechanism that lets you point Rereflect at a hosted provider also lets you point it at a model running on localhost. From Rereflect\'s perspective, a local model exposed over an OpenAI-compatible HTTP endpoint looks exactly like a remote one — it just happens to live on your own machine.',
+          'That gives you three deployment shapes, all using the same configuration surface:',
+        ],
+        listItems: [
+          'Hosted API with your own key — point Rereflect at OpenAI, Anthropic, or Google using a key you own. Best accuracy, you pay the provider per token.',
+          'Local LLM, no key — run a model with Ollama or any OpenAI-compatible server on your infra. Keyless, private, $0 in API costs.',
+          'No model at all — skip LLM configuration entirely and fall back to the built-in VADER analyzer, which runs locally with zero dependencies.',
+        ],
+      },
+      {
+        heading: 'Pointing Rereflect at a local model',
+        content: [
+          'The most common offline setup uses Ollama, which runs open-weight models locally and exposes an OpenAI-compatible API. Once Ollama is running and you have pulled a model, you configure Rereflect to talk to it through the same base-URL and model-name settings you would use for any OpenAI-compatible provider.',
+          'The shape of the configuration is simple: tell Rereflect the base URL of your local endpoint and the model name to request. Because the endpoint is OpenAI-compatible, no API key is required — you can leave the key blank or set a throwaway placeholder, since the local server does not authenticate.',
+        ],
+        listItems: [
+          'Run a local server — start Ollama (or another OpenAI-compatible runtime such as llama.cpp\'s server, LM Studio, or vLLM) and load a model that suits your hardware.',
+          'Set the base URL — point Rereflect\'s LLM base URL at your local endpoint (for Ollama, that is its local OpenAI-compatible address).',
+          'Set the model name — specify the model you pulled, so requests ask for the right weights.',
+          'Leave the key empty — local endpoints do not require authentication, so no API key is needed.',
+        ],
+        content2: [
+          'After that, the analysis pipeline behaves identically to a hosted setup. Feedback gets sentiment scores, pain point categories, feature request extraction, and urgency flags — all computed by the model on your own machine. The only difference is that no request ever leaves your network.',
+          'Smaller local models will not match a frontier hosted model on the hardest, most ambiguous feedback. But for the bulk of routine categorization and sentiment work, a capable local model is more than good enough — and the privacy and cost properties are unbeatable.',
+        ],
+      },
+      {
+        heading: 'The free VADER fallback',
+        content: [
+          'Not every team wants to run a model at all. Maybe you do not have a GPU handy, or you just want to see Rereflect working on your data before you commit to any AI setup. For that, Rereflect ships with a built-in fallback: VADER.',
+          'VADER (Valence Aware Dictionary and sEntiment Reasoner) is a lexicon and rule-based sentiment analyzer. It runs entirely in-process with no model weights, no GPU, and no network calls. When no LLM is configured, Rereflect automatically uses VADER for sentiment analysis so the product still works out of the box.',
+          'It is important to be honest about what the fallback does and does not give you. VADER is a sentiment engine, not a general-purpose language model:',
+        ],
+        listItems: [
+          'What you get — fast, fully local sentiment scoring (positive / neutral / negative) on every piece of feedback, with zero configuration.',
+          'What is reduced — the richer LLM-driven steps (nuanced pain point detection, feature request extraction, urgency reasoning) are stronger with an actual language model behind them.',
+          'When it is enough — early-stage teams, smaller volumes, or anyone who wants an immediate, dependency-free sense of sentiment trends before wiring up a model.',
+        ],
+        content2: [
+          'The practical path most self-hosters take: start with the VADER fallback to confirm Rereflect is ingesting and scoring your feedback, then point it at a local LLM once you want the deeper categorization. Both modes keep your data on your own infrastructure.',
+        ],
+      },
+      {
+        heading: 'What this costs: nothing',
+        content: [
+          'The offline setup has a genuinely simple cost story. There is no Rereflect subscription — the software is open source and self-hosted. There is no AI bill — a local model runs on hardware you already own, and the VADER fallback has no marginal cost at all. There is no per-seat pricing and no usage metering.',
+          'Your only real cost is the compute you choose to provision. If you run a local model on an existing server or a developer workstation, the incremental cost of analyzing feedback is effectively electricity. If you decide later that you want higher accuracy on hard cases, you can switch a single configuration value to a hosted provider with your own key — and you pay that provider directly, with no markup in between.',
+          'This is the core promise of the self-hosted, BYOK model: you own the data, you own the infrastructure, and you decide exactly how much (if anything) to spend on intelligence.',
+        ],
+      },
+      {
+        heading: 'Getting started',
+        content: [
+          'If privacy or cost has kept you away from AI-powered feedback analysis, the offline path removes both objections. You can stand up Rereflect, point it at a local model — or just let the VADER fallback handle sentiment — and start seeing categorized, scored feedback without a single byte leaving your network.',
+          'Rereflect is open source under the MIT license. Clone it, run it on your own infrastructure, and configure the analyzer to match your privacy and budget requirements. Whether that means a local Ollama model, your own OpenAI key, or no model at all, the choice stays entirely yours.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'tailor-ai-custom-categories-health-weights',
+    title: 'Tailoring the AI to Your Product: Custom Categories and Health Weights',
+    excerpt: 'Generic feedback categories rarely match how your team actually thinks about your product. Rereflect lets you define your own pain-point, feature-request, and urgency taxonomies and feed them directly into the analyzer — and tune the weights behind your customer health score so it reflects what churn actually looks like for you.',
+    date: '2026-07-08',
+    status: 'scheduled',
+    readTime: '8 min read',
+    author: 'Rereflect Team',
+    tags: ['AI', 'Customer Health', 'Product Management'],
+    seoTitle: 'Custom AI Categories and Configurable Health Weights | Rereflect',
+    seoDescription: 'Define custom pain-point, feature-request, and urgency taxonomies that feed directly into Rereflect\'s analyzer, and configure per-organization customer-health-score weights to match how churn really looks for your product.',
+    sections: [
+      {
+        heading: 'Why generic categories fall short',
+        content: [
+          'Most feedback tools ship with a fixed set of categories — "bug," "feature request," "billing," "UX" — and quietly force your product into that mold. For a while it is fine. Then you notice that half your feedback lands in a vague catch-all, that two categories you actually care about are merged into one, and that the labels do not match the language your own team uses in standup.',
+          'The problem is that categories are not universal. A developer-tools company cares about "API reliability" and "SDK ergonomics." A consumer app cares about "onboarding friction" and "notification fatigue." A vertical SaaS product has domain-specific concerns no off-the-shelf taxonomy will ever anticipate. When the categories are wrong, every downstream chart, filter, and priority list inherits that distortion.',
+          'Rereflect takes a different stance: the taxonomy is yours to define, and your definitions are fed directly into the analyzer so the AI categorizes against the buckets you actually use.',
+        ],
+      },
+      {
+        heading: 'Custom taxonomies that feed the analyzer',
+        content: [
+          'Rereflect lets you define custom categories across the three dimensions it analyzes — pain points, feature requests, and urgency. Crucially, these are not just display labels applied after the fact. Your taxonomy is passed into the analysis step itself, so the AI is reasoning about your categories when it reads each piece of feedback.',
+          'That distinction matters. A tool that lets you "rename" categories after analysis is just relabeling generic output. A tool that feeds your taxonomy into the analyzer is genuinely classifying feedback into the buckets you defined, which produces far more accurate and useful results.',
+        ],
+        listItems: [
+          'Custom pain-point categories — define the specific problem areas your team tracks, so complaints get sorted into buckets that map to real owners and roadmap themes.',
+          'Custom feature-request categories — group incoming requests under the product areas you plan around, instead of one undifferentiated "feature request" pile.',
+          'Custom urgency definitions — describe what "urgent" actually means for your business, so churn-risk and critical-issue flagging reflects your thresholds rather than a generic default.',
+        ],
+        content2: [
+          'Because the analyzer works from your definitions, the categorization improves the more precisely you describe each category. Clear, distinct category descriptions give the model strong signal; vague or overlapping ones invite ambiguity. Treat your taxonomy like documentation for the AI — the better you describe each bucket, the better the sorting.',
+        ],
+      },
+      {
+        heading: 'Designing a taxonomy that works',
+        content: [
+          'A good taxonomy is a balance between granularity and usability. Too few categories and everything collapses into a useless catch-all. Too many and the signal scatters so thinly that no category ever accumulates enough volume to act on. A few principles help:',
+        ],
+        listItems: [
+          'Map categories to owners — if no one on your team owns a category, you will never act on what lands in it. Categories should correspond to teams, roadmap themes, or decision-makers.',
+          'Keep categories mutually distinct — overlapping categories force both the AI and your team to guess. Each bucket should have a clear boundary that a human could apply consistently.',
+          'Describe, do not just name — a category called "performance" is ambiguous; a category described as "slowness, timeouts, and latency in the core editor" gives the analyzer something concrete to match against.',
+          'Start small and split later — begin with the handful of categories you genuinely track today. When one accumulates enough volume that it needs subdivision, split it then.',
+        ],
+        content2: [
+          'Because the taxonomy is configurable per organization, different teams running their own Rereflect instance can each shape it to their product without affecting anyone else.',
+        ],
+      },
+      {
+        heading: 'Configurable customer-health-score weights',
+        content: [
+          'Categorization tells you what customers are saying. The customer health score tells you which customers are in trouble. But "health" is not a one-size-fits-all formula — the signals that predict churn in your product are not the same as the ones that predict it in someone else\'s.',
+          'Rereflect makes the health score configurable per organization. Rather than locking you into a fixed formula, it lets you set the weights that determine how much each signal contributes to a customer\'s overall health. If declining sentiment is the strongest leading indicator of churn in your business, weight it heavily. If a drop in engagement matters more for your product, shift the weight there.',
+          'This turns the health score from a generic gauge into a model of churn that actually reflects your reality. Two organizations looking at the same raw signals can produce different, equally valid health scores — because they have tuned the weights to their own retention dynamics.',
+        ],
+      },
+      {
+        heading: 'Tuning weights honestly',
+        content: [
+          'Configurable weights are powerful, but they invite a temptation: tuning the score until it tells you what you want to hear. The discipline is to tune it until it tells you what is true. A few practical guidelines:',
+        ],
+        listItems: [
+          'Anchor on real outcomes — when you have customers who actually churned, look back at what their health score and underlying signals looked like beforehand. Adjust weights so the score would have flagged them in time.',
+          'Change one weight at a time — sweeping multiple weights at once makes it impossible to tell what improved the score and what just moved it.',
+          'Beware over-fitting to a few cases — a handful of churned accounts is anecdote, not pattern. Wait for enough history before trusting any single signal\'s weight.',
+          'Revisit periodically — your product, pricing, and customer base change. Weights that were predictive last year may not be this year. Treat the configuration as something you maintain, not something you set once.',
+        ],
+        content2: [
+          'The goal is a health score your team trusts enough to act on — proactively reaching out to accounts the score flags, and confidently leaving healthy ones alone.',
+        ],
+      },
+      {
+        heading: 'Bringing it together',
+        content: [
+          'Custom taxonomies and configurable health weights work best as a pair. The taxonomy shapes how feedback is understood; the health weights shape how that understanding rolls up into a per-customer risk signal. Together they let you bend a general-purpose feedback analyzer until it fits your specific product, your specific language, and your specific definition of a customer in trouble.',
+          'Rereflect is open source and self-hosted, so this configuration lives in your own instance, tuned by your own team. Define the categories that match how you actually think about your product, set the health weights that reflect how churn really happens for you, and let the analyzer do the rest. Clone Rereflect and start shaping it to your product on your own infrastructure.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'rereflect-public-api-build-on-your-feedback-data',
+    title: 'The Rereflect Public API: Build on Your Feedback Data',
+    excerpt: 'Rereflect ships with a Public REST API so your feedback data is never locked inside the dashboard. Authenticate with API keys, read feedback, customers, health scores, churn signals, and analytics, ingest feedback programmatically, subscribe to webhooks, and explore everything through OpenAPI docs.',
+    date: '2026-07-22',
+    status: 'scheduled',
+    readTime: '7 min read',
+    author: 'Rereflect Team',
+    tags: ['API', 'Developers', 'Integrations'],
+    seoTitle: 'The Rereflect Public API: Build on Your Feedback Data | Rereflect',
+    seoDescription: 'A developer guide to the Rereflect Public REST API: API-key auth with read and ingest scopes, reading feedback and analytics, ingesting feedback programmatically, webhooks, and OpenAPI docs.',
+    sections: [
+      {
+        heading: 'Your feedback data, programmatically accessible',
+        content: [
+          'A dashboard is great until you need to do something the dashboard does not do. You want to pipe feedback into your data warehouse. You want to ingest messages from a channel Rereflect does not natively connect to. You want to surface a customer\'s health score inside your own internal admin tool. You want to trigger a workflow the moment a piece of feedback is flagged urgent.',
+          'For all of that, Rereflect exposes a Public REST API. Because Rereflect is self-hosted and open source, this is not a gated upsell — the API runs on your own instance, against your own data, and you can build whatever you need on top of it.',
+          'The API is organized around the same concepts you see in the product: feedback, customers, health, churn signals, and analytics for reading, plus an ingestion path for writing feedback in, and webhooks for getting events pushed out.',
+        ],
+      },
+      {
+        heading: 'Authentication with API keys',
+        content: [
+          'The Public API authenticates with API keys rather than the user-session tokens the dashboard uses. An API key represents a programmatic client — a script, a service, an integration — rather than a logged-in person, which makes keys easy to rotate and revoke without touching anyone\'s account.',
+          'Keys are scoped, so a client only gets the access it needs. The two core scopes map to the two things you do with the API:',
+        ],
+        listItems: [
+          'Read scope — query feedback, customers, health scores, churn signals, and analytics. Ideal for dashboards, reporting jobs, and read-only integrations.',
+          'Ingest scope — push new feedback into Rereflect. Ideal for connectors that pull from a source Rereflect does not natively support and forward it in.',
+        ],
+        content2: [
+          'Following least privilege, give each integration only the scope it actually requires: a reporting pipeline should hold a read-only key, while an inbound connector needs ingest. If a key leaks, revoke it and issue a new one — no user passwords or sessions are involved.',
+        ],
+      },
+      {
+        heading: 'Reading your data',
+        content: [
+          'The read endpoints expose the analyzed data Rereflect produces, so you can take insights out of the dashboard and put them wherever your team works. Everything that drives the UI is reachable programmatically:',
+        ],
+        listItems: [
+          'Feedback — list and retrieve feedback items along with their analysis: sentiment, categories, and urgency flags.',
+          'Customers — pull customer records to join Rereflect\'s view of a customer with your own systems.',
+          'Health — read customer health scores to surface risk where your team already looks.',
+          'Churn — access churn signals and risk indicators for proactive retention work.',
+          'Analytics — retrieve aggregate metrics and trends for reporting and warehousing.',
+        ],
+        content2: [
+          'Because these endpoints return structured JSON, they slot cleanly into the tools you already use — a scheduled job that loads feedback into your warehouse, an internal admin panel that shows a customer\'s health inline, or a weekly report that pulls analytics on a cron.',
+        ],
+      },
+      {
+        heading: 'Ingesting feedback programmatically',
+        content: [
+          'Reading is only half the story. The ingestion endpoint lets you push feedback into Rereflect from anywhere, which means you are never limited to the sources Rereflect connects to out of the box.',
+          'The pattern is straightforward: a client holding an ingest-scoped key sends feedback to the API, and Rereflect runs it through the same analysis pipeline as feedback from any other source — sentiment, categorization, urgency, the works. The feedback then appears in the dashboard and in the read API exactly like everything else.',
+        ],
+        listItems: [
+          'Custom connectors — pull from a channel Rereflect does not natively integrate (a niche support tool, an internal forum, a community platform) and forward each message in.',
+          'Bulk backfill — load historical feedback from a prior system so your trends and analytics reflect your full history, not just data since you adopted Rereflect.',
+          'Embedded capture — wire a feedback widget in your own product directly to the ingestion endpoint, so in-app feedback flows straight into analysis.',
+        ],
+        content2: [
+          'Whatever the source, once feedback is ingested it is a first-class citizen: analyzed, categorized, scored, and queryable through the same read API.',
+        ],
+      },
+      {
+        heading: 'Webhooks for real-time events',
+        content: [
+          'Polling the read API on a schedule works, but for time-sensitive reactions you want to be notified the moment something happens rather than discovering it on your next poll. That is what webhooks are for.',
+          'With webhooks, Rereflect pushes events to a URL you control as they occur. Instead of asking "has anything urgent come in?" every few minutes, your endpoint is called the instant it does — letting you react in real time.',
+          'Typical uses include alerting and automation: post urgent feedback to a Slack channel as it arrives, open a ticket in your issue tracker when a churn-risk signal fires, or kick off an internal workflow when a customer\'s health crosses a threshold. Because the event comes to you, the latency between something happening in Rereflect and your team acting on it shrinks to near zero.',
+        ],
+      },
+      {
+        heading: 'OpenAPI docs and getting started',
+        content: [
+          'The whole API is described with OpenAPI, so you do not have to guess at endpoints, parameters, or response shapes. The interactive docs let you browse every endpoint, see request and response schemas, and try calls directly. The same OpenAPI definition also feeds client-generation tooling, so you can generate a typed client in your language of choice instead of writing HTTP plumbing by hand.',
+          'Because Rereflect is open source and self-hosted, the API and its docs run on your own instance against your own data — no external dependency, no rate-limit negotiations with a vendor, no data leaving your control. Clone Rereflect, create an API key with the scope you need, open the OpenAPI docs, and start building on top of your feedback data.',
+        ],
+      },
+    ],
+  },
+  {
+    slug: 'why-we-open-sourced-rereflect',
+    title: 'Why We Open-Sourced Rereflect',
+    excerpt: 'Rereflect is now open source and self-hosted under the MIT license — bring your own key, own your data, run it on your own infrastructure. As the year closes, here is an honest reflection on why we made that change and what it means for the people who use it.',
+    date: '2026-12-15',
+    status: 'scheduled',
+    readTime: '6 min read',
+    author: 'Rereflect Team',
+    tags: ['Open Source', 'Company'],
+    seoTitle: 'Why We Open-Sourced Rereflect (MIT, BYOK, Self-Hosted) | Rereflect',
+    seoDescription: 'A reflective end-of-year piece on why Rereflect went open source and self-hosted under the MIT license: bring your own key, own your data, run it yourself, and what it means for users.',
+    sections: [
+      {
+        heading: 'A different kind of year-end note',
+        content: [
+          'It is easy to end a year with a list of features and a victory lap. This is not that. The biggest change to Rereflect this year was not a feature at all — it was a decision about what kind of product Rereflect should be. We made it open source and self-hosted under the MIT license, and we want to be honest about why.',
+          'Feedback data is intimate. It is your customers telling you, often candidly, what is wrong and what they wish were different. The more we sat with that, the less comfortable we were being a mandatory middleman between you and that data. Open-sourcing Rereflect was our way of removing ourselves from that position entirely.',
+        ],
+      },
+      {
+        heading: 'Own your data, literally',
+        content: [
+          'The phrase "you own your data" gets used loosely. Plenty of products say it while still storing your data on their servers, processing it through their pipelines, and holding the keys to export it. Ownership in that arrangement is conditional — it lasts exactly as long as the relationship does.',
+          'Self-hosting makes ownership literal. When you run Rereflect on your own infrastructure, your feedback lives in your database, on your machines, behind your firewall. There is no copy on our side because there is no "our side" in the data path. If you walk away from the project tomorrow, nothing of yours leaves with us, because nothing of yours was ever with us.',
+          'That is a meaningfully different promise than "we will not misuse your data." It is "we cannot, because we never have it."',
+        ],
+      },
+      {
+        heading: 'BYOK: no lock-in on intelligence',
+        content: [
+          'Rereflect is bring-your-own-key. The AI that powers analysis is yours to choose — a hosted provider with your own key, a local model on your own hardware, or the built-in local fallback when you want no external dependency at all. We do not sit in the middle of those calls, and we do not mark up anyone\'s tokens.',
+          'This matters beyond cost. BYOK means the intelligence layer is not a lever we can pull against you. We cannot quietly degrade the model, ration your usage, or hold better analysis behind a higher tier, because we are not the ones providing the model. You are. The most important and most expensive part of the system is under your control, not ours.',
+        ],
+      },
+      {
+        heading: 'Why MIT, specifically',
+        content: [
+          'There are many open-source licenses, and the choice signals intent. We chose MIT deliberately, because it is about as permissive as a license gets. It says: take this, run it, change it, build on it, and do not worry about us coming back with restrictions later.',
+          'We could have picked a more restrictive license that hedged against certain uses. We did not, because the whole point was to remove conditions, not add cleverer ones. If the goal is to let people genuinely own and control their feedback analysis, the license should get out of the way as much as the architecture does.',
+        ],
+      },
+      {
+        heading: 'What this asks of you, honestly',
+        content: [
+          'We want to be straight about the trade-off, because pretending self-hosting is free would be dishonest. Running Rereflect yourself means you operate it: you provision the infrastructure, you apply updates, you handle backups, you decide how to configure the analyzer. A fully managed product hands all of that to a vendor. Self-hosting hands it to you.',
+          'For some teams that is more responsibility than they want, and that is a fair reason to choose a managed alternative. But for teams who care about data control, who already run their own infrastructure, or who simply do not want a third party in the path of their customers\' words, the operational cost buys something real: complete control and zero lock-in.',
+          'We think that trade is worth it for the people Rereflect is for. We would rather be honest about the cost than oversell the benefit.',
+        ],
+      },
+      {
+        heading: 'Where we go from here',
+        content: [
+          'Open-sourcing Rereflect is not the end of the work — it is the foundation for the kind of work we want to do. The roadmap is built in the open now: improving the self-hosted experience, broadening the models and sources you can connect, and sharpening the analysis itself. And because the code is yours too, the project improves from contributions, not just from us.',
+          'If you have been waiting for a feedback analysis tool that you can actually own — code, data, and intelligence — Rereflect is that tool now, under the MIT license, on your infrastructure, with your keys. Clone it, run it, make it yours. Thank you to everyone who pushed us toward this. Here is to a year of owning your own data.',
+        ],
+      },
+    ],
+  },
   {
     slug: 'how-to-organize-customer-feedback',
     title: 'How to Organize Customer Feedback (2026 Guide)',
@@ -2897,6 +3209,12 @@ const posts: BlogPost[] = [
       },
     ],
   },
+  ...batch1,
+  ...batch2,
+  ...batch3,
+  ...batch4,
+  ...batch5,
+  ...batch6,
 ];
 
 function isVisible(post: BlogPost): boolean {
