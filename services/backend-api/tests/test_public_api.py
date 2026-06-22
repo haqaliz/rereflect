@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from src.api.main import app
 from src.database.session import get_db
 from src.models.api_key import ApiKey
+from src.models.customer_health import CustomerHealth
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.models.user import User
@@ -520,3 +521,66 @@ class TestIngestEnqueuesAnalysis:
         assert resp.status_code == 201, resp.text
         fid = resp.json()["id"]
         assert fid in queued_ids, "queue_analyze_feedback must be called with the new feedback id"
+
+
+def _health_in_org(db, org_id, email, risk_level="moderate", churn_probability=None, health_score=50.0):
+    row = CustomerHealth(
+        organization_id=org_id,
+        customer_email=email,
+        health_score=health_score,
+        risk_level=risk_level,
+        churn_probability=churn_probability,
+        feedback_count=1,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+class TestPublicCustomersAndChurn:
+    def test_list_customers_scoped_to_org(self, client, db, org, org_b):
+        _health_in_org(db, org.id, "a@x.com", health_score=40)
+        _health_in_org(db, org_b.id, "b@y.com", health_score=30)  # other org
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        resp = client.get("/api/public/v1/customers", headers={"Authorization": f"Bearer {raw}"})
+        assert resp.status_code == 200, resp.text
+        emails = [c["customer_email"] for c in resp.json()["items"]]
+        assert "a@x.com" in emails and "b@y.com" not in emails
+
+    def test_customer_health_returns_detail(self, client, db, org):
+        _health_in_org(db, org.id, "h@x.com", risk_level="critical", churn_probability=0.8, health_score=20)
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        resp = client.get("/api/public/v1/customers/h@x.com/health", headers={"Authorization": f"Bearer {raw}"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["risk_level"] == "critical"
+
+    def test_customer_health_404_when_missing(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        resp = client.get("/api/public/v1/customers/nope@x.com/health", headers={"Authorization": f"Bearer {raw}"})
+        assert resp.status_code == 404
+
+    def test_churn_customers_only_at_risk(self, client, db, org):
+        _health_in_org(db, org.id, "ok@x.com", risk_level="healthy")
+        _health_in_org(db, org.id, "risk@x.com", risk_level="critical", churn_probability=0.9)
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        resp = client.get("/api/public/v1/churn/customers", headers={"Authorization": f"Bearer {raw}"})
+        assert resp.status_code == 200, resp.text
+        emails = [c["customer_email"] for c in resp.json()["items"]]
+        assert "risk@x.com" in emails and "ok@x.com" not in emails
+
+
+class TestPublicDocs:
+    def test_docs_page_returns_200(self, client):
+        resp = client.get("/api/public/v1/docs")
+        assert resp.status_code == 200
+        assert "swagger" in resp.text.lower() or "openapi" in resp.text.lower()
+
+    def test_openapi_lists_public_paths(self, client):
+        resp = client.get("/api/public/v1/openapi.json")
+        assert resp.status_code == 200
+        paths = resp.json()["paths"]
+        assert "/api/public/v1/customers" in paths
+        assert "/api/public/v1/customers/{customer_email}/health" in paths
+        assert "/api/public/v1/churn/customers" in paths
+        assert all(p.startswith("/api/public/v1/") for p in paths)
