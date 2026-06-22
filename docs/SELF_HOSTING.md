@@ -1,0 +1,98 @@
+# Self-Hosting Rereflect
+
+Rereflect is open source (MIT) and designed to run entirely on your own
+infrastructure. **All features are unlocked** on a self-hosted instance — there are
+no paid tiers, seat limits, or feedback quotas. The `SELF_HOSTED=true` flag (the
+default) treats every instance as fully featured.
+
+- [Prerequisites](#prerequisites)
+- [Quick start (Docker Compose)](#quick-start-docker-compose)
+- [Required environment variables](#required-environment-variables)
+- [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
+- [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
+- [Production notes](#production-notes)
+
+## Prerequisites
+
+- Docker + Docker Compose
+- (Optional) Your own LLM API key for AI features — **not required**
+
+## Quick start (Docker Compose)
+
+The bundled `docker-compose.prod.yml` brings up Postgres, Redis, the backend, the
+Celery worker and the frontend together.
+
+```bash
+# 1. Copy and edit the production env template
+cp .env.prod.example .env
+
+# 2. Generate the required secrets and fill them into .env (see below)
+
+# 3. Build and start everything
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Then open the frontend at `http://localhost:3000` and log in with the `ADMIN_EMAIL` /
+`ADMIN_PASSWORD` you set in `.env` (the first admin user is seeded on startup).
+
+Generate the two required secrets:
+
+```bash
+# JWT_SECRET
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+
+# LLM_ENCRYPTION_KEY (Fernet)
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+## Required environment variables
+
+Set these in your `.env` (see [`.env.prod.example`](../.env.prod.example) for the full
+annotated list):
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `JWT_SECRET` | Secret for signing auth tokens (random 32+ chars) |
+| `LLM_ENCRYPTION_KEY` | Fernet key used to encrypt stored BYOK LLM keys |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeds the first admin account |
+| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `SELF_HOSTED` | Keep `true` — unlocks all features |
+| `ai_analysis_enabled` | `false` by default — runs on free local VADER |
+
+## Running with no API key ($0, fully local)
+
+Out of the box (`ai_analysis_enabled=false`, no LLM key), Rereflect runs the **free
+local VADER + keyword analysis pipeline**. Sentiment, pain-point, feature-request, and
+heuristic churn detection all work end-to-end with **no external API and no cost**.
+This is the default and recommended starting point.
+
+## Adding your own LLM key (BYOK)
+
+To enable LLM-powered analysis and the AI copilot, bring your own key:
+
+- **In-app (canonical):** Sign in, go to **Settings → AI**, and paste your OpenAI /
+  Anthropic / Google key. Keys are encrypted at rest with `LLM_ENCRYPTION_KEY` (Fernet)
+  and scoped per organization.
+- **From env (single-tenant convenience):** You may also seed an operator key via
+  `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_AI_API_KEY` in `.env`. This is
+  treated as **your own key** for your own instance — Rereflect never provides or
+  proxies a key.
+
+There is no system/vendor key. If an organization has no key configured, AI features
+degrade gracefully back to the free VADER pipeline rather than erroring.
+
+## Production notes
+
+- **The frontend bakes its API URL at build time.** `NEXT_PUBLIC_API_URL` is embedded
+  into the frontend image during `docker build`. If you deploy on a real host/domain,
+  set `NEXT_PUBLIC_API_URL` to your backend's public URL and **rebuild** the frontend
+  image:
+  ```bash
+  docker compose -f docker-compose.prod.yml build frontend
+  ```
+- **No TLS in the bundled compose.** Services bind plain HTTP on `:3000` (frontend) and
+  `:8000` (backend). For internet-facing deployments, put a reverse proxy (Caddy, nginx,
+  Traefik) in front for TLS.
+- **Backups.** Your data lives in the Postgres volume. Snapshot it (or run
+  `pg_dump`) on a schedule before upgrades.

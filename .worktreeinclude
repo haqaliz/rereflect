@@ -1,0 +1,6 @@
+.claude/skills/
+services/backend-api/.env
+services/worker-service/.env
+services/analysis-engine/.env
+services/frontend-web/.env.local
+services/frontend-web/.env.sentry-build-plugin

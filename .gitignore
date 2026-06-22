@@ -381,4 +381,6 @@ services/backend-api/changelog_commits.json
 *.orig
 
 # AI Tools
-.claude
+.claude/settings.local.json
+.claude/worktrees/
+.claude/plan.md
