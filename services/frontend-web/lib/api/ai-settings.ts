@@ -2,13 +2,6 @@ import apiClient from '../api-client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface AIBudget {
-  monthly_limit_cents: number;
-  used_cents: number;
-  resets_at: string;
-  is_exceeded: boolean;
-}
-
 export interface AIModels {
   categorization: string;
   analysis: string;
@@ -21,7 +14,6 @@ export interface AISettings {
   default_provider: string;
   base_url: string | null;
   models: AIModels;
-  budget: AIBudget;
 }
 
 export interface AISettingsUpdate {
@@ -156,12 +148,6 @@ export const aiSettingsAPI = {
 
   getUsageDaily: async (): Promise<AIUsageDaily> => {
     const response = await apiClient.get('/api/v1/settings/ai/usage/daily');
-    return response.data;
-  },
-
-  // Budget (used by banner)
-  getBudget: async (): Promise<AIBudget> => {
-    const response = await apiClient.get('/api/v1/settings/ai/budget');
     return response.data;
   },
 };

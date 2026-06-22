@@ -13,7 +13,6 @@ vi.mock('@/lib/api/ai-settings', () => ({
   aiSettingsAPI: {
     get: vi.fn(),
     update: vi.fn(),
-    getBudget: vi.fn(),
   },
 }));
 
@@ -37,12 +36,6 @@ const mockSettings = {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',
     insights: 'gpt-4o-mini',
-  },
-  budget: {
-    monthly_limit_cents: 1000,
-    used_cents: 720,
-    resets_at: '2026-03-01T00:00:00Z',
-    is_exceeded: false,
   },
 };
 
@@ -80,38 +73,6 @@ describe('AISettingsGeneral', () => {
     );
     const toggle = screen.getByRole('switch');
     expect(toggle).toHaveAttribute('aria-checked', 'false');
-  });
-
-  it('shows budget progress bar', () => {
-    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    // Should show budget section
-    expect(screen.getAllByText(/budget/i).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('shows budget used and limit amounts', () => {
-    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    // $7.20 used, $10.00 limit
-    expect(screen.getByText(/\$7\.20/)).toBeInTheDocument();
-    expect(screen.getByText(/\$10\.00/)).toBeInTheDocument();
-  });
-
-  it('shows budget reset date', () => {
-    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    expect(screen.getByText(/Mar/i)).toBeInTheDocument();
-  });
-
-  it('shows exceeded warning when budget is exceeded', () => {
-    const exceededSettings = {
-      ...mockSettings,
-      budget: { ...mockSettings.budget, is_exceeded: true, used_cents: 1000 },
-    };
-    render(<AISettingsGeneral settings={exceededSettings} onUpdate={vi.fn()} />);
-    expect(screen.getByText(/budget.*exceeded|exceeded.*budget/i)).toBeInTheDocument();
-  });
-
-  it('does not show exceeded warning when budget is within limit', () => {
-    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    expect(screen.queryByText(/budget.*exceeded|exceeded.*budget/i)).not.toBeInTheDocument();
   });
 
   it('calls onUpdate when toggle is clicked', async () => {
