@@ -36,6 +36,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+// The public API + its Swagger docs are served by the BACKEND, not the Next.js app.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string | null): string {
@@ -250,12 +253,12 @@ function RevealDialog({ apiKey, onClose }: RevealDialogProps) {
             <p>
               Public API docs:{' '}
               <a
-                href="/api/public/v1/docs"
+                href={`${API_BASE}/api/public/v1/docs`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline underline-offset-2 hover:text-foreground inline-flex items-center gap-1"
               >
-                /api/public/v1/docs <ExternalLink className="w-3 h-3" />
+                {`${API_BASE}/api/public/v1/docs`} <ExternalLink className="w-3 h-3" />
               </a>
             </p>
           </div>
@@ -368,7 +371,7 @@ export default function ApiKeysPage() {
 
             <div className="flex items-center gap-3">
               <a
-                href="/api/public/v1/docs"
+                href={`${API_BASE}/api/public/v1/docs`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-muted-foreground hover:text-foreground underline underline-offset-2 inline-flex items-center gap-1"
@@ -489,17 +492,17 @@ export default function ApiKeysPage() {
             <div className="space-y-1.5 text-xs text-muted-foreground">
               <p>Include the key in every request:</p>
               <pre className="bg-background border rounded p-2 font-mono text-xs overflow-auto">
-                {`# Authorization header (recommended)\ncurl -H "Authorization: Bearer rrf_..." /api/public/v1/feedback\n\n# X-API-Key header\ncurl -H "X-API-Key: rrf_..." /api/public/v1/feedback`}
+                {`# Authorization header (recommended)\ncurl -H "Authorization: Bearer rrf_..." ${API_BASE}/api/public/v1/feedback\n\n# X-API-Key header\ncurl -H "X-API-Key: rrf_..." ${API_BASE}/api/public/v1/feedback`}
               </pre>
               <p className="pt-1">
                 Full interactive docs:{' '}
                 <a
-                  href="/api/public/v1/docs"
+                  href={`${API_BASE}/api/public/v1/docs`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="underline underline-offset-2 hover:text-foreground"
                 >
-                  /api/public/v1/docs
+                  {`${API_BASE}/api/public/v1/docs`}
                 </a>
               </p>
             </div>
