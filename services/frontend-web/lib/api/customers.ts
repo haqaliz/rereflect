@@ -13,6 +13,8 @@ export interface CustomerListItem {
   confidence_level: 'low' | 'medium' | 'high';
   feedback_count: number;
   last_feedback_at: string | null;
+  /** Product-usage last-active timestamp (from usage_component rollup; absent when no events) */
+  last_active_at?: string | null;
   sentiment_trend: SentimentTrend;
   is_archived: boolean;
   has_llm_analysis: boolean;

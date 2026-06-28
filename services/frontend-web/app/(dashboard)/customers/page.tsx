@@ -302,10 +302,21 @@ export default function CustomersPage() {
     },
     {
       accessorKey: 'last_feedback_at',
-      header: 'Last Active',
+      header: 'Last Active (feedback)',
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">
           {getRelativeTime(row.original.last_feedback_at)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'last_active_at',
+      header: 'Last Active (product)',
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">
+          {row.original.last_active_at != null
+            ? getRelativeTime(row.original.last_active_at)
+            : '—'}
         </span>
       ),
     },
