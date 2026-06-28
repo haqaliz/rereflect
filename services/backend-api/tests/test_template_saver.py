@@ -1,6 +1,9 @@
 """
 TDD tests for the Template Saver (RED → GREEN → REFACTOR).
 
+Updated for template-matching-local: embedder injection, provider/dim persistence
+on every mapping (ORM + raw-SQL fallback), and provider-aware idempotent seeding.
+
 Tests cover:
 - New SQL creates new template + mapping
 - Identical SQL links to existing template (idempotent)
@@ -8,6 +11,10 @@ Tests cover:
 - usage_count increments on match
 - last_used_at updates
 - System templates pre-populated
+- Embedding generation via injected embedder
+- _create_mapping persists embedding_provider + embedding_dimension
+- seed_system_templates is provider-aware: re-seeds if provider/dim differs
+- seed_system_templates is idempotent when provider/dim matches
 """
 
 import pytest
@@ -29,6 +36,28 @@ def saver():
 
 
 @pytest.fixture
+def mock_embedder_openai():
+    """Mock ResolvedEmbedder for OpenAI / 1536-dim."""
+    resolved = MagicMock()
+    resolved.provider = "openai"
+    resolved.embedder = MagicMock()
+    resolved.embedder.embed.return_value = [0.1] * 1536
+    resolved.embedder.dimension = 1536
+    return resolved
+
+
+@pytest.fixture
+def mock_embedder_local():
+    """Mock ResolvedEmbedder for local / 768-dim."""
+    resolved = MagicMock()
+    resolved.provider = "openai_compatible"
+    resolved.embedder = MagicMock()
+    resolved.embedder.embed.return_value = [0.2] * 768
+    resolved.embedder.dimension = 768
+    return resolved
+
+
+@pytest.fixture
 def sample_sql():
     return "SELECT sentiment_label, COUNT(*) as count FROM feedback_items WHERE organization_id = :org_id GROUP BY sentiment_label LIMIT 100"
 
@@ -43,58 +72,54 @@ def sample_question():
 class TestSavingNewTemplates:
     """Test auto-saving new LLM-generated SQL as templates."""
 
-    def test_new_sql_creates_new_template(self, saver, mock_db, sample_sql, sample_question):
-        # No existing template with this SQL
+    def test_new_sql_creates_new_template(self, saver, mock_db, sample_sql, sample_question, mock_embedder_openai):
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
-            result = saver.save_template(
-                sql_query=sample_sql,
-                question=sample_question,
-                description="Count feedbacks by sentiment",
-                parameter_schema={"org_id": "integer"},
-                created_by="llm",
-                org_id=None,
-                db=mock_db
-            )
+        result = saver.save_template(
+            sql_query=sample_sql,
+            question=sample_question,
+            description="Count feedbacks by sentiment",
+            parameter_schema={"org_id": "integer"},
+            created_by="llm",
+            org_id=None,
+            db=mock_db,
+            embedder=mock_embedder_openai,
+        )
 
         # Should have written to db (add or execute for new template + mapping)
         assert mock_db.add.called or mock_db.execute.called
 
-    def test_new_sql_creates_mapping(self, saver, mock_db, sample_sql, sample_question):
+    def test_new_sql_creates_mapping(self, saver, mock_db, sample_sql, sample_question, mock_embedder_openai):
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
-            saver.save_template(
-                sql_query=sample_sql,
-                question=sample_question,
-                description="Count feedbacks by sentiment",
-                parameter_schema={"org_id": "integer"},
-                created_by="llm",
-                org_id=None,
-                db=mock_db
-            )
+        saver.save_template(
+            sql_query=sample_sql,
+            question=sample_question,
+            description="Count feedbacks by sentiment",
+            parameter_schema={"org_id": "integer"},
+            created_by="llm",
+            org_id=None,
+            db=mock_db,
+            embedder=mock_embedder_openai,
+        )
 
         # db.add or execute should be called (template + mapping)
         total_writes = mock_db.add.call_count + mock_db.execute.call_count
         assert total_writes >= 2
 
-    def test_save_commits_to_db(self, saver, mock_db, sample_sql, sample_question):
+    def test_save_commits_to_db(self, saver, mock_db, sample_sql, sample_question, mock_embedder_openai):
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
-            saver.save_template(
-                sql_query=sample_sql,
-                question=sample_question,
-                description="Count feedbacks by sentiment",
-                parameter_schema={},
-                created_by="llm",
-                org_id=None,
-                db=mock_db
-            )
+        saver.save_template(
+            sql_query=sample_sql,
+            question=sample_question,
+            description="Count feedbacks by sentiment",
+            parameter_schema={},
+            created_by="llm",
+            org_id=None,
+            db=mock_db,
+            embedder=mock_embedder_openai,
+        )
 
         mock_db.commit.assert_called()
 
@@ -104,33 +129,28 @@ class TestSavingNewTemplates:
 class TestIdempotentSaving:
     """Identical SQL should reuse existing template, just add new mapping."""
 
-    def test_existing_sql_reuses_template(self, saver, mock_db, sample_sql, sample_question):
-        # Existing template with same SQL
+    def test_existing_sql_reuses_template(self, saver, mock_db, sample_sql, sample_question, mock_embedder_openai):
         existing_template = MagicMock()
         existing_template.id = "tpl_001"
         existing_template.sql_query = sample_sql
         existing_template.usage_count = 5
 
-        # Simulate: first call finds template by SQL
         mock_db.query.return_value.filter_by.return_value.first.return_value = existing_template
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
-            result = saver.save_template(
-                sql_query=sample_sql,
-                question="different phrasing of same question",
-                description="Count feedbacks",
-                parameter_schema={},
-                created_by="llm",
-                org_id=None,
-                db=mock_db
-            )
+        result = saver.save_template(
+            sql_query=sample_sql,
+            question="different phrasing of same question",
+            description="Count feedbacks",
+            parameter_schema={},
+            created_by="llm",
+            org_id=None,
+            db=mock_db,
+            embedder=mock_embedder_openai,
+        )
 
-        # Should NOT create a new template (only a new mapping)
-        # Check that result references existing template ID
         assert result is not None
 
-    def test_existing_sql_adds_new_mapping(self, saver, mock_db, sample_sql):
+    def test_existing_sql_adds_new_mapping(self, saver, mock_db, sample_sql, mock_embedder_openai):
         existing_template = MagicMock()
         existing_template.id = "tpl_001"
         existing_template.sql_query = sample_sql
@@ -138,17 +158,16 @@ class TestIdempotentSaving:
 
         mock_db.query.return_value.filter_by.return_value.first.return_value = existing_template
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
-            saver.save_template(
-                sql_query=sample_sql,
-                question="alternate question phrasing",
-                description="Count feedbacks",
-                parameter_schema={},
-                created_by="llm",
-                org_id=None,
-                db=mock_db
-            )
+        saver.save_template(
+            sql_query=sample_sql,
+            question="alternate question phrasing",
+            description="Count feedbacks",
+            parameter_schema={},
+            created_by="llm",
+            org_id=None,
+            db=mock_db,
+            embedder=mock_embedder_openai,
+        )
 
         # A new mapping should be added (via db.add or db.execute)
         assert mock_db.add.called or mock_db.execute.called
@@ -272,13 +291,11 @@ class TestSystemTemplates:
             assert sql.startswith("SELECT"), \
                 f"Template SQL must be SELECT only: {template['description']}\nSQL: {sql}"
 
-    def test_seed_system_templates_to_db(self, saver, mock_db):
-        """Test that seeding system templates to DB works."""
+    def test_seed_system_templates_to_db(self, saver, mock_db, mock_embedder_openai):
+        """Test that seeding system templates to DB works with injected embedder."""
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
-            saver.seed_system_templates(db=mock_db)
+        saver.seed_system_templates(db=mock_db, embedder=mock_embedder_openai)
 
         # Should have written to db (add or execute) and committed
         assert mock_db.add.called or mock_db.execute.called
@@ -290,11 +307,29 @@ class TestSystemTemplates:
 class TestSaverEmbedding:
     """Test embedding generation during save."""
 
-    def test_embedding_generated_for_each_question_pattern(self, saver, mock_db, sample_sql):
+    def test_embedding_generated_for_each_question_pattern(self, saver, mock_db, sample_sql, mock_embedder_openai):
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.return_value = [0.1] * 1536
+        saver.save_template(
+            sql_query=sample_sql,
+            question="how many feedbacks",
+            description="Count feedbacks",
+            parameter_schema={},
+            created_by="llm",
+            org_id=None,
+            db=mock_db,
+            embedder=mock_embedder_openai,
+        )
+
+        # Embedding should be generated via the embedder
+        mock_embedder_openai.embedder.embed.assert_called()
+
+    def test_embedding_failure_does_not_save(self, saver, mock_db, sample_sql, mock_embedder_openai):
+        """If embedding generation fails, template should not be saved."""
+        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_embedder_openai.embedder.embed.side_effect = Exception("endpoint error")
+
+        with pytest.raises(Exception):
             saver.save_template(
                 sql_query=sample_sql,
                 question="how many feedbacks",
@@ -302,26 +337,156 @@ class TestSaverEmbedding:
                 parameter_schema={},
                 created_by="llm",
                 org_id=None,
-                db=mock_db
+                db=mock_db,
+                embedder=mock_embedder_openai,
             )
 
-        # Embedding should be generated for the question
-        mock_embed.assert_called()
 
-    def test_embedding_failure_does_not_save(self, saver, mock_db, sample_sql):
-        """If embedding generation fails, template should not be saved."""
+# ── PROVIDER/DIM PERSISTENCE ──────────────────────────────────────────────────
+
+class TestProviderDimPersistence:
+    """
+    Verify that _create_mapping persists embedding_provider and embedding_dimension
+    on every mapping written (both ORM path and raw-SQL fallback).
+    """
+
+    def test_create_mapping_sets_provider_and_dim_via_orm(self, saver, db):
+        """
+        With a real SQLite DB, _create_mapping writes the provider/dim columns.
+        Uses the `db` fixture from conftest (Base.metadata.create_all).
+        """
+        from src.models.query_template import QueryTemplate
+        from src.models.query_template_mapping import QueryTemplateMapping
+
+        template = QueryTemplate(
+            sql_query="SELECT 1",
+            description="test",
+            parameter_schema={},
+            created_by="system",
+            organization_id=None,
+            usage_count=0,
+            is_active=True,
+        )
+        db.add(template)
+        db.flush()
+
+        embedding = [0.5] * 768
+        saver._create_mapping(
+            template_id=template.id,
+            question="test question",
+            embedding=embedding,
+            provider="openai_compatible",
+            db=db,
+        )
+        db.commit()
+
+        fetched = db.query(QueryTemplateMapping).filter_by(template_id=template.id).first()
+        assert fetched is not None
+        assert fetched.embedding_provider == "openai_compatible"
+        assert fetched.embedding_dimension == 768
+
+    def test_save_template_uses_actual_vector_len_for_dimension(
+        self, saver, mock_db, sample_sql, mock_embedder_local
+    ):
+        """save_template uses len(vector) — not a hint — for embedding_dimension."""
+        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        # Local provider returns 768-dim; provider hint might say 0 (unknown pre-embed)
+        mock_embedder_local.embedder.embed.return_value = [0.2] * 768
+
+        with patch.object(saver, '_create_mapping') as mock_create_mapping:
+            saver.save_template(
+                sql_query=sample_sql,
+                question="count feedbacks",
+                description="Count feedbacks",
+                parameter_schema={},
+                created_by="llm",
+                org_id=1,
+                db=mock_db,
+                embedder=mock_embedder_local,
+            )
+
+        mock_create_mapping.assert_called_once()
+        call_kwargs = mock_create_mapping.call_args
+        # provider should be the resolved provider name
+        assert call_kwargs.kwargs.get('provider') == "openai_compatible"
+
+
+# ── PROVIDER-AWARE SEEDING ────────────────────────────────────────────────────
+
+class TestProviderAwareSeeding:
+    """seed_system_templates is provider+dim-aware idempotent."""
+
+    def test_seed_skips_when_same_provider_already_seeded(self, saver, mock_db, mock_embedder_openai):
+        """
+        If all system templates are already seeded with the same provider/dim,
+        seed_system_templates does NOT re-embed (embedder.embed is NOT called).
+        """
+        # Simulate: each template already exists with openai/1536 mappings
+        existing_mapping = MagicMock()
+        existing_mapping.embedding_provider = "openai"
+        existing_mapping.embedding_dimension = 1536
+
+        def find_template_side_effect(sql_query, org_id, db, provider=None, dim=None):
+            # Return a "found" template whose first mapping matches current provider/dim
+            mock_tmpl = MagicMock()
+            mock_mapping = MagicMock()
+            mock_mapping.embedding_provider = "openai"
+            mock_mapping.embedding_dimension = 1536
+            mock_tmpl._first_mapping = mock_mapping
+            return mock_tmpl
+
+        with patch.object(saver, '_find_template_by_sql_with_mapping',
+                          side_effect=find_template_side_effect):
+            saver.seed_system_templates(db=mock_db, embedder=mock_embedder_openai)
+
+        # embedder should NOT have been called (same provider already seeded)
+        mock_embedder_openai.embedder.embed.assert_not_called()
+
+    def test_seed_reembeds_when_provider_changes(self, saver, mock_db, mock_embedder_local):
+        """
+        If system templates exist but were embedded with openai/1536, and the
+        active provider is now openai_compatible/768, seed_system_templates
+        re-embeds them (embedder.embed IS called).
+        """
+        # Existing mapping has wrong provider/dim
+        mock_mapping = MagicMock()
+        mock_mapping.embedding_provider = "openai"      # old
+        mock_mapping.embedding_dimension = 1536         # old
+
+        mock_existing = MagicMock()
+        mock_existing.id = 99
+        # The first mapping is stale (wrong provider)
+        mock_existing.mappings = [mock_mapping]
+
+        call_count = [0]
+
+        def find_template_side_effect(sql_query, org_id, db):
+            # Return existing template on first few calls, then None (after reseed clears)
+            call_count[0] += 1
+            if call_count[0] <= 3:  # First 3 templates exist but are stale
+                return mock_existing
+            return None  # remaining templates don't exist yet
+
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-        with patch.object(saver, "_generate_embedding") as mock_embed:
-            mock_embed.side_effect = Exception("OpenAI API error")
+        with patch.object(saver, '_find_template_by_sql', side_effect=find_template_side_effect):
+            saver.seed_system_templates(db=mock_db, embedder=mock_embedder_local)
 
-            with pytest.raises(Exception):
-                saver.save_template(
-                    sql_query=sample_sql,
-                    question="how many feedbacks",
-                    description="Count feedbacks",
-                    parameter_schema={},
-                    created_by="llm",
-                    org_id=None,
-                    db=mock_db
-                )
+        # embedder.embed MUST have been called (to re-embed)
+        assert mock_embedder_local.embedder.embed.called
+
+    def test_seed_with_no_embedder_skips_cleanly(self, saver, mock_db):
+        """seed_system_templates(embedder=None) returns without error and without embedding."""
+        # Should not raise or call db
+        saver.seed_system_templates(db=mock_db, embedder=None)
+        # No templates should be written
+        mock_db.add.assert_not_called()
+        mock_db.execute.assert_not_called()
+
+    def test_seed_unreachable_embedder_does_not_crash(self, saver, mock_db, mock_embedder_openai):
+        """If the embedding endpoint raises, seeding logs and continues (doesn't raise)."""
+        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_embedder_openai.embedder.embed.side_effect = Exception("Connection refused")
+
+        # Must not raise
+        saver.seed_system_templates(db=mock_db, embedder=mock_embedder_openai)
