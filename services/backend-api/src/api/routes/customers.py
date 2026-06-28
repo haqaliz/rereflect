@@ -841,3 +841,134 @@ def get_customer_churn_factors(
         aggregated_factors=aggregated_factors,
         top_risk_drivers=top_risk_drivers,
     )
+
+
+# ---------------------------------------------------------------------------
+# Usage rollup + time-series endpoint  (aspect 3 — usage-rollup-and-score)
+# ---------------------------------------------------------------------------
+
+_VALID_USAGE_DAYS = {30, 60, 90}
+
+
+class UsageRollupResponse(BaseModel):
+    """Snapshot of the customer_usage rollup row."""
+    customer_email: str
+    usage_score: int
+    events_total: int
+    last_active_at: Optional[datetime]
+    first_seen_at: Optional[datetime]
+    login_count_7d: Optional[int]
+    login_count_30d: Optional[int]
+    active_days_7d: Optional[int]
+    active_days_30d: Optional[int]
+    distinct_features: Optional[List[str]]
+    distinct_feature_count: Optional[int]
+    updated_at: Optional[datetime]
+
+
+class UsageTimeSeriesBucket(BaseModel):
+    """Daily event count bucket for the chart."""
+    date: str          # ISO date string, e.g. "2026-06-28"
+    event_count: int
+
+
+class CustomerUsageResponse(BaseModel):
+    """Combined rollup + daily time series for the customer usage card."""
+    rollup: UsageRollupResponse
+    time_series: List[UsageTimeSeriesBucket]
+    period_days: int
+
+
+@router.get(
+    "/{email}/usage",
+    response_model=CustomerUsageResponse,
+)
+def get_customer_usage(
+    email: str,
+    days: int = Query(30, ge=1),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the product-usage rollup and a daily event time series for a customer.
+
+    Args:
+        email: Customer email (URL-encoded if needed).
+        days:  Rolling window size for the time series (must be 30, 60, or 90).
+               Defaults to 30.
+
+    Returns:
+        JSON with ``rollup`` (snapshot) and ``time_series`` (daily buckets).
+
+    Raises:
+        422 if ``days`` is not one of the valid values.
+        404 if no usage rollup exists for this customer in the caller's org.
+    """
+    from src.models.customer_usage import CustomerUsage as CustomerUsageModel
+    from src.models.usage_event import UsageEvent as UsageEventModel
+    from collections import defaultdict
+
+    if days not in _VALID_USAGE_DAYS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"'days' must be one of {sorted(_VALID_USAGE_DAYS)}; got {days}.",
+        )
+
+    # Fetch rollup (org-scoped)
+    rollup = (
+        db.query(CustomerUsageModel)
+        .filter_by(organization_id=current_org.id, customer_email=email)
+        .first()
+    )
+    if rollup is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No usage data found for customer '{email}'.",
+        )
+
+    # Build daily time series from raw events within the window
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+
+    events = (
+        db.query(UsageEventModel)
+        .filter(
+            UsageEventModel.organization_id == current_org.id,
+            UsageEventModel.customer_email == email,
+            UsageEventModel.occurred_at >= cutoff,
+        )
+        .all()
+    )
+
+    # Bucket events by calendar day
+    counts: dict = defaultdict(int)
+    for ev in events:
+        if ev.occurred_at:
+            day_key = ev.occurred_at.date().isoformat()
+            counts[day_key] += 1
+
+    time_series = [
+        UsageTimeSeriesBucket(date=day, event_count=cnt)
+        for day, cnt in sorted(counts.items())
+    ]
+
+    rollup_response = UsageRollupResponse(
+        customer_email=rollup.customer_email,
+        usage_score=rollup.usage_score,
+        events_total=rollup.events_total,
+        last_active_at=rollup.last_active_at,
+        first_seen_at=rollup.first_seen_at,
+        login_count_7d=rollup.login_count_7d,
+        login_count_30d=rollup.login_count_30d,
+        active_days_7d=rollup.active_days_7d,
+        active_days_30d=rollup.active_days_30d,
+        distinct_features=rollup.distinct_features,
+        distinct_feature_count=rollup.distinct_feature_count,
+        updated_at=rollup.updated_at,
+    )
+
+    return CustomerUsageResponse(
+        rollup=rollup_response,
+        time_series=time_series,
+        period_days=days,
+    )
