@@ -445,12 +445,101 @@ class TestUsageIngestLargeProperties:
         assert body["accepted"] == 1
         assert body["skipped"] == 0
 
-        # Row exists with truncated properties
+        # Row exists; guard_properties replaces oversize payload with {}
         row = db.query(UsageEvent).first()
         assert row is not None
-        # Properties should be empty/truncated (not the original 17KB payload)
-        assert row.properties is not None
-        assert len(json.dumps(row.properties)) < 17 * 1024
+        # Truncation actually happened: properties must be the empty sentinel, not the 17 KB blob
+        assert row.properties == {}
+
+
+class TestUsageIngestBatchIsolation:
+    """Important-1 (TDD RED→GREEN): per-event savepoint isolation.
+
+    Simulates the race-condition scenario where two concurrent ingest requests
+    both pass the SELECT dedup check, but the second event's flush fails with
+    an IntegrityError (UniqueViolation).
+
+    On the unpatched code: db.rollback() is called, which wipes the ENTIRE
+    session transaction — including the first event that was already flushed and
+    counted as accepted. The first event's row disappears from the DB while
+    accepted=1 is still returned, creating a phantom acceptance.
+
+    After the savepoint fix: sp.rollback() rolls back only the failing event's
+    savepoint; the first event (released into the outer transaction via
+    sp_a.commit()) survives and is committed normally.
+
+    Test name:
+        test_batch_first_event_survives_when_second_flush_raises_integrity_error
+    """
+
+    def test_batch_first_event_survives_when_second_flush_raises_integrity_error(
+        self, client: TestClient, db: Session
+    ):
+        import sqlalchemy.exc
+        from src.models.usage_event import UsageEvent
+
+        org = _make_org(db)
+        raw_key, _ = _make_api_key(db, org.id)
+
+        # Two distinct, valid events — second's flush will be mocked to fail.
+        events = [
+            _track_event("race-msg-A", "alice@example.com"),
+            _track_event("race-msg-B", "bob@example.com"),
+        ]
+
+        # Patch db.flush to raise IntegrityError specifically when the second
+        # event (race-msg-B) is pending in the session — simulating the race-
+        # condition window where the SELECT passed but the DB rejects the
+        # INSERT due to a concurrent duplicate insert committed between the
+        # SELECT and the flush.
+        original_flush = db.flush
+
+        def _patched_flush(*args, **kwargs):
+            pending_b = [
+                obj for obj in db.new
+                if hasattr(obj, "external_event_id")
+                and obj.external_event_id == "race-msg-B"
+            ]
+            if pending_b:
+                raise sqlalchemy.exc.IntegrityError(
+                    "UNIQUE constraint failed: usage_events.organization_id,"
+                    " usage_events.external_event_id",
+                    {},
+                    Exception("UNIQUE constraint failed"),
+                )
+            return original_flush(*args, **kwargs)
+
+        patcher, _ = _celery_mock()
+        with patcher:
+            with patch.object(db, "flush", side_effect=_patched_flush):
+                resp = client.post(
+                    USAGE_URL,
+                    json={"events": events},
+                    headers={"X-API-Key": raw_key},
+                )
+
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["accepted"] == 1, f"expected accepted=1, got {body['accepted']}"
+        assert body["skipped_reasons"].get("duplicate", 0) == 1
+
+        # The FIRST event's row MUST exist in the DB.
+        # On unpatched code: db.rollback() wipes it → this assertion FAILS (RED).
+        # After savepoint fix: sp.rollback() undoes only event-B → PASSES (GREEN).
+        db.expire_all()
+        row = (
+            db.query(UsageEvent)
+            .filter(
+                UsageEvent.organization_id == org.id,
+                UsageEvent.external_event_id == "race-msg-A",
+            )
+            .first()
+        )
+        assert row is not None, (
+            "Savepoint bug: first event's row was wiped by db.rollback() "
+            "when the second event's flush raised IntegrityError"
+        )
+        assert row.customer_email == "alice@example.com"
 
 
 class TestUsageIngestCeleryEnqueue:

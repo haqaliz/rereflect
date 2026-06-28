@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +19,9 @@ _PROPERTIES_MAX_BYTES = 16 * 1024
 class UsageEventIn(BaseModel):
     """A single inbound usage event (Segment-compatible normalized shape)."""
 
-    type: str = Field(..., description="Event type: 'identify' or 'track'")
+    type: Literal["identify", "track"] = Field(
+        ..., description="Event type: 'identify' or 'track'"
+    )
     email: Optional[str] = None
     userId: Optional[str] = None
     event: Optional[str] = None       # track: event name (e.g. "login")
@@ -28,10 +30,6 @@ class UsageEventIn(BaseModel):
     messageId: Optional[str] = None
     properties: dict[str, Any] = Field(default_factory=dict)
     traits: dict[str, Any] = Field(default_factory=dict)
-
-    def model_post_init(self, __context: Any) -> None:  # noqa: D401
-        if self.type not in ("identify", "track"):
-            raise ValueError(f"Unknown event type: {self.type!r}. Must be 'identify' or 'track'.")
 
 
 class UsageBatchIn(BaseModel):

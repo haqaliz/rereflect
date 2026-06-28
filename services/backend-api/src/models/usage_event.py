@@ -8,7 +8,7 @@ Unique constraint ``uq_usage_event_org_ext`` on (organization_id, external_event
 provides the dedup guarantee for duplicate messageId submissions.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -52,7 +52,7 @@ class UsageEvent(Base):
 
     # Timing
     occurred_at = Column(DateTime, nullable=True)      # from event timestamp
-    received_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    received_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Raw properties payload (size-guarded before insert)
     properties = Column(JSON, nullable=True)

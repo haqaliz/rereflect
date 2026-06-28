@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import sqlalchemy.exc
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -135,12 +137,15 @@ def ingest_usage_events(
             received_at=received_at,
             properties=props,
         )
+        # Isolate each insert in a SAVEPOINT so that a race-condition
+        # UniqueViolation on this event does not roll back previously
+        # accepted rows in the same batch.
+        sp = db.begin_nested()
         db.add(row)
-
         try:
-            db.flush()  # Catch unique-constraint violations from race conditions
-        except Exception:
-            db.rollback()
+            sp.commit()  # flushes the row within the savepoint
+        except sqlalchemy.exc.IntegrityError:
+            sp.rollback()  # only THIS event is undone; prior accepted rows survive
             skipped += 1
             skipped_reasons["duplicate"] = skipped_reasons.get("duplicate", 0) + 1
             continue
