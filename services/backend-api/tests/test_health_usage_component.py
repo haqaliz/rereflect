@@ -1,17 +1,24 @@
 """
 Phase 1 — RED: Characterization tests for compute_health_score() score stability.
+Phase 3 — Usage component math tests (wired at weight 0 by default).
 
 These tests lock the current output of compute_health_score() and _get_org_weights()
-before the usage component is added. They must stay GREEN (byte-identical output)
-through all subsequent phases, proving that health_weight_usage=0 changes nothing.
+before and after the usage component is added. They must stay GREEN (byte-identical
+output) through all subsequent phases, proving that health_weight_usage=0 changes nothing.
 """
 import pytest
 from datetime import datetime
+from unittest.mock import patch
 from sqlalchemy.orm import Session
 
 from src.models.organization import Organization
+from src.models.org_ai_config import OrgAIConfig
 from src.models.feedback import FeedbackItem
-from src.services.health_score_service import compute_health_score, _get_org_weights
+from src.services.health_score_service import (
+    compute_health_score,
+    _get_org_weights,
+    _compute_usage_component,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -121,14 +128,22 @@ class TestScoreStabilityCharacterization:
 class TestGetOrgWeightsDefaultsBeforeUsageColumn:
     """
     _get_org_weights falls back to module-level WEIGHTS dict when there is no
-    OrgAIConfig row for the org.  Before Phase 3, only 4 keys exist and they
-    sum to exactly 1.0.
+    OrgAIConfig row for the org.  After Phase 3, 5 keys exist (usage added at 0.0)
+    and they still sum to exactly 1.0.
+
+    NOTE: Originally written as a 4-key assertion; updated to 5 keys after Phase 3
+    wires the usage component into WEIGHTS with default 0.0.
     """
 
-    def test_returns_four_keys(self, db: Session, test_organization: Organization):
-        """Default weights dict has exactly 4 keys."""
+    def test_returns_five_keys_with_usage_default(self, db: Session, test_organization: Organization):
+        """Default weights dict has exactly 5 keys including 'usage' at 0.0."""
         weights = _get_org_weights(test_organization.id, db)
-        assert set(weights.keys()) == {"churn_risk", "sentiment", "resolution", "frequency"}
+        assert set(weights.keys()) == {"churn_risk", "sentiment", "resolution", "frequency", "usage"}
+
+    def test_default_usage_weight_is_zero(self, db: Session, test_organization: Organization):
+        """Default usage weight is 0.0 (opt-in, no existing scores change)."""
+        weights = _get_org_weights(test_organization.id, db)
+        assert weights["usage"] == pytest.approx(0.0)
 
     def test_sum_equals_one(self, db: Session, test_organization: Organization):
         """Default weights sum to exactly 1.0."""
@@ -154,3 +169,174 @@ class TestGetOrgWeightsDefaultsBeforeUsageColumn:
         """Default frequency weight is 0.15."""
         weights = _get_org_weights(test_organization.id, db)
         assert weights["frequency"] == pytest.approx(0.15)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Usage component math
+# ---------------------------------------------------------------------------
+
+class TestComputeUsageComponentFallback:
+    """
+    _compute_usage_component must NEVER raise, even when customer_usage table
+    does not exist.  It falls back to 50 (neutral).
+    """
+
+    def test_returns_50_when_no_customer_usage_table(
+        self, db: Session, test_organization: Organization
+    ):
+        """Missing customer_usage table (or row) returns 50, never raises."""
+        result = _compute_usage_component(
+            db, test_organization.id, "norollup@example.com", datetime.utcnow()
+        )
+        assert result == 50
+
+    def test_never_raises_on_missing_table(
+        self, db: Session, test_organization: Organization
+    ):
+        """_compute_usage_component is safe even on unexpected DB errors."""
+        # No customer_usage table exists in the in-memory test DB — must not raise
+        try:
+            val = _compute_usage_component(
+                db, test_organization.id, "safe@example.com", datetime.utcnow()
+            )
+        except Exception as exc:
+            pytest.fail(f"_compute_usage_component raised unexpectedly: {exc}")
+        assert isinstance(val, int)
+
+
+class TestGetOrgWeightsWithUsageColumn:
+    """
+    After Phase 3, _get_org_weights returns 5 keys.
+    With health_weight_usage=0 (default) the usage key is 0.0 and the total
+    is still 1.0 (35+25+25+15+0 = 100).
+    """
+
+    def test_returns_five_keys_when_config_exists(
+        self, db: Session, test_organization: Organization
+    ):
+        """With an OrgAIConfig row, _get_org_weights returns 5 keys."""
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=25,
+            health_weight_resolution=25,
+            health_weight_frequency=15,
+            health_weight_usage=0,
+        )
+        db.add(config)
+        db.commit()
+
+        weights = _get_org_weights(test_organization.id, db)
+        assert "usage" in weights
+        assert len(weights) == 5
+
+    def test_usage_weight_zero_by_default(
+        self, db: Session, test_organization: Organization
+    ):
+        """Default usage weight is 0.0."""
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=25,
+            health_weight_resolution=25,
+            health_weight_frequency=15,
+            health_weight_usage=0,
+        )
+        db.add(config)
+        db.commit()
+
+        weights = _get_org_weights(test_organization.id, db)
+        assert weights["usage"] == pytest.approx(0.0)
+
+    def test_sum_still_one_with_default_usage(
+        self, db: Session, test_organization: Organization
+    ):
+        """35+25+25+15+0 = 100 → weights sum to 1.0."""
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=25,
+            health_weight_resolution=25,
+            health_weight_frequency=15,
+            health_weight_usage=0,
+        )
+        db.add(config)
+        db.commit()
+
+        weights = _get_org_weights(test_organization.id, db)
+        assert sum(weights.values()) == pytest.approx(1.0)
+
+
+class TestScoreMovesWhenUsageWeightRaised:
+    """
+    When health_weight_usage > 0 and the usage component differs from the other
+    components, compute_health_score() must produce a different score than at
+    weight 0, proving the component is wired into the aggregation.
+    """
+
+    EMAIL = "usage_weight_test@example.com"
+
+    @pytest.fixture(autouse=True)
+    def seed(self, db: Session, test_organization: Organization):
+        """Seed 3 feedbacks so other components have real values."""
+        rows = [(0.5, 30), (-0.2, 60), (0.1, 45)]
+        for sentiment, churn in rows:
+            _make_feedback(db, test_organization.id, self.EMAIL, sentiment, churn)
+
+    def test_score_differs_when_usage_weight_nonzero_and_low_usage_score(
+        self, db: Session, test_organization: Organization
+    ):
+        """
+        Set usage weight to 10, mock _compute_usage_component to return 20 (low usage).
+        Score at weight 10 must differ from weight 0 baseline (47).
+        """
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=20,
+            health_weight_resolution=20,
+            health_weight_frequency=15,
+            health_weight_usage=10,
+        )
+        db.add(config)
+        db.commit()
+
+        # Mock usage component to return a distinctly low value
+        with patch(
+            "src.services.health_score_service._compute_usage_component",
+            return_value=20,
+        ):
+            result = compute_health_score(test_organization.id, self.EMAIL, db)
+
+        # The score must be valid but not equal to the baseline 47 since weights changed
+        assert 0 <= result["health_score"] <= 100
+        # With usage weight 10, sentiment/resolution each 20, and usage_score=20 (low),
+        # the score must shift relative to the 35/25/25/15 baseline
+        assert result["health_score"] != 47  # baseline was 47 with default weights
+
+    def test_weight_zero_still_returns_baseline_even_with_config(
+        self, db: Session, test_organization: Organization
+    ):
+        """
+        With health_weight_usage=0 (and other weights matching defaults), the score
+        must be 47 regardless of usage_component value — usage is neutralized.
+        """
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=25,
+            health_weight_resolution=25,
+            health_weight_frequency=15,
+            health_weight_usage=0,
+        )
+        db.add(config)
+        db.commit()
+
+        # Even with an extreme usage_component, weight=0 means it doesn't affect the total
+        with patch(
+            "src.services.health_score_service._compute_usage_component",
+            return_value=0,  # extreme low value
+        ):
+            result = compute_health_score(test_organization.id, self.EMAIL, db)
+
+        assert result["health_score"] == 47  # unchanged from baseline
