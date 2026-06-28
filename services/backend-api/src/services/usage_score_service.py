@@ -1,3 +1,5 @@
+# DUPLICATED: keep in sync with the worker-service copy at
+# services/worker-service/src/services/usage_score_service.py. See TRACKING.md.
 """
 Usage score computation service.
 

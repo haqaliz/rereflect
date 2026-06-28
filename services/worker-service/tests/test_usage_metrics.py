@@ -422,3 +422,72 @@ class TestRecomputeUsageScores:
             result = um.recompute_usage_scores()
 
         assert result["updated"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Critical: recompute_usage_scores must be a registered Celery task
+# ---------------------------------------------------------------------------
+
+
+class TestRecomputeUsageScoresCeleryRegistration:
+    def test_recompute_usage_scores_is_registered_celery_task(self):
+        """
+        RED before fix: recompute_usage_scores is a plain function — not registered
+        in celery_app.tasks — so beat raises NotRegistered at runtime.
+        GREEN after fix: @shared_task(name=...) decorator registers it.
+
+        Imports celery_app (which the conftest env supports via mocked src.config)
+        and forces the task module to be (re)loaded so @shared_task decorators fire.
+        """
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)  # ensure @shared_task decorators have fired
+
+        from src.celery_app import celery_app
+        assert "src.tasks.usage_metrics.recompute_usage_scores" in celery_app.tasks, (
+            "recompute_usage_scores is not registered as a Celery task; "
+            "decorate it with @shared_task(name='src.tasks.usage_metrics.recompute_usage_scores')"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Important 1: SQLAlchemyError from _call_update_health must propagate
+# ---------------------------------------------------------------------------
+
+
+class TestCallUpdateHealthErrorPropagation:
+    def test_sqlalchemy_error_propagates_not_swallowed(self):
+        """
+        RED before fix: bare except Exception swallows SQLAlchemyError, returns silently.
+        GREEN after fix: only ImportError is swallowed; DB errors propagate for Celery retry.
+        """
+        from sqlalchemy.exc import SQLAlchemyError
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        mock_health = MagicMock()
+        mock_health.update_customer_health.side_effect = SQLAlchemyError("transient DB error")
+        sys.modules["src.services.health_score_service"] = mock_health
+
+        try:
+            with pytest.raises(SQLAlchemyError):
+                um._call_update_health(1, "test@example.com", None)
+        finally:
+            sys.modules.pop("src.services.health_score_service", None)
+            importlib.reload(um)  # restore module to clean state
+
+    def test_import_error_still_swallowed(self):
+        """ImportError (partial-deploy) is still tolerated — no exception raised."""
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        # Remove module so the import inside _call_update_health fails
+        sys.modules.pop("src.services.health_score_service", None)
+
+        try:
+            # Should not raise — ImportError path is still swallowed
+            um._call_update_health(1, "test@example.com", None)
+        finally:
+            importlib.reload(um)

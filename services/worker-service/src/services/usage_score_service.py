@@ -1,3 +1,5 @@
+# DUPLICATED: keep in sync with the backend-api copy at
+# services/backend-api/src/services/usage_score_service.py. See TRACKING.md.
 """
 Usage score computation service.
 

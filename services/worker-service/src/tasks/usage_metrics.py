@@ -136,8 +136,11 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
     """
     Trigger a health-score recompute for the customer.
 
-    Wrapped in a try/except so that the task does not fail if the
-    health_score_service is unavailable (e.g. ImportError in worker context).
+    ImportError is silently tolerated: during a partial-deploy the
+    health_score_service module may not yet be present in the worker image.
+    All other errors (e.g. sqlalchemy.exc.SQLAlchemyError for transient DB
+    issues) are intentionally NOT caught here so that they propagate to the
+    Celery task and trigger the configured retry policy.
     """
     try:
         from src.services.health_score_service import update_customer_health
@@ -146,11 +149,6 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
         logger.warning(
             "health_score_service not available; skipping health recompute "
             "for org=%s email=%s", org_id, customer_email,
-        )
-    except Exception:
-        logger.exception(
-            "update_customer_health failed for org=%s email=%s",
-            org_id, customer_email,
         )
 
 
@@ -170,6 +168,10 @@ def _do_process_usage_event(
     This function is designed to be fully idempotent: re-processing the same
     ``external_event_id`` produces the same rollup because the raw-event table
     already dedups on (organization_id, external_event_id).
+
+    Note: ``occurred_at_iso`` is accepted for the enqueue contract (callers
+    pass the timestamp at enqueue time) but the authoritative timestamp is
+    read from the persisted UsageEvent row, not from this argument.
     """
     from src.models import UsageEvent
 
@@ -296,6 +298,12 @@ def process_usage_event(
 # ---------------------------------------------------------------------------
 
 
+# Same @shared_task pattern as process_usage_event above.
+# NOTE: churn_calibration.py beat tasks (refit_all_orgs, refit_global_calibration,
+# purge_old_calibration_models) appear to be plain functions without @shared_task
+# decorators — they are likely silently unregistered.  See TRACKING.md follow-up.
+# Do NOT edit churn_calibration.py here; address in a separate audit pass.
+@shared_task(name="src.tasks.usage_metrics.recompute_usage_scores")
 def recompute_usage_scores() -> Dict[str, int]:
     """
     Re-derive usage_score for every customer_usage row across all orgs.
