@@ -75,6 +75,8 @@ export interface CustomerProfileData {
   sentiment_component: number;
   resolution_component: number;
   frequency_component: number;
+  // Usage health component (0-100; undefined on older payloads → treat as 50/neutral)
+  usage_component?: number;
   // Structured LLM analysis fields
   llm_analysis_summary: string | null;
   llm_recommended_actions: string[] | null;
@@ -93,6 +95,24 @@ export interface CustomerProfileData {
   churn_probability_high?: number | null;
   time_to_churn_bucket?: 'immediate' | '2w' | '2-4w' | '1-3m' | 'low' | null;
   has_potential_winback?: boolean;
+}
+
+export interface UsageHistoryEntry {
+  date: string;
+  events: number;
+}
+
+export interface CustomerUsageResponse {
+  email: string;
+  last_active_at: string | null;
+  login_count_7d: number;
+  login_count_30d: number;
+  active_days_30d: number;
+  distinct_feature_count: number;
+  /** Usage score 0-100; 50 = neutral when no data */
+  usage_score: number;
+  period_days: number;
+  series: UsageHistoryEntry[];
 }
 
 export interface HealthHistoryEntry {
@@ -225,6 +245,13 @@ export const customersAPI = {
   getChurnFactors: async (email: string): Promise<ChurnFactorsResponse> => {
     const response = await apiClient.get(
       `/api/v1/customers/${encodeURIComponent(email)}/churn-factors`
+    );
+    return response.data;
+  },
+
+  getUsage: async (email: string, days = 30): Promise<CustomerUsageResponse> => {
+    const response = await apiClient.get(
+      `/api/v1/customers/${encodeURIComponent(email)}/usage?days=${days}`
     );
     return response.data;
   },
