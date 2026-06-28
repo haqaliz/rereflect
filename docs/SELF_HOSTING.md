@@ -9,6 +9,7 @@ default) treats every instance as fully featured.
 - [Quick start (Docker Compose)](#quick-start-docker-compose)
 - [Required environment variables](#required-environment-variables)
 - [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
+- [Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
 - [Production notes](#production-notes)
 
@@ -67,9 +68,37 @@ local VADER + keyword analysis pipeline**. Sentiment, pain-point, feature-reques
 heuristic churn detection all work end-to-end with **no external API and no cost**.
 This is the default and recommended starting point.
 
+## Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)
+
+You can run **every** AI feature — LLM analysis, the AI Copilot (natural-language
+queries, NL→SQL, analysis, reports) **and** the Copilot's template matching — against a
+local model with **no cloud API key at all**. Point Rereflect at [Ollama](https://ollama.com)
+or any OpenAI-compatible endpoint (vLLM, LM Studio, LocalAI):
+
+1. Run a model and an embedding model locally, e.g.:
+   ```bash
+   ollama pull llama3.1        # generation
+   ollama pull nomic-embed-text # embeddings (used by the Copilot's template matching)
+   ```
+2. In the app, go to **Settings → AI** and set the provider to **Ollama /
+   OpenAI-compatible** with the **Base URL** of your endpoint (e.g.
+   `http://localhost:11434/v1`). No API key is required for local providers.
+
+The Copilot generates and runs queries through your local model; the same SQL safety
+checks (read-only, organization-scoped, join/row limits, timeouts) apply regardless of
+provider. **Answer quality scales with the model you run** — a small local model may
+produce weaker queries than a frontier cloud model, and when it can't produce a safe
+query you get an honest "couldn't answer that with the current model" message rather than
+a wrong-but-confident answer.
+
+> Embeddings are provider/dimension-aware: switching the embedding model re-embeds the
+> built-in query templates automatically on the next startup. Vectors from different
+> providers are never mixed.
+
 ## Adding your own LLM key (BYOK)
 
-To enable LLM-powered analysis and the AI copilot, bring your own key:
+To use a hosted frontier model for analysis and the AI Copilot instead of (or alongside)
+a local one, bring your own key:
 
 - **In-app (canonical):** Sign in, go to **Settings → AI**, and paste your OpenAI /
   Anthropic / Google key. Keys are encrypted at rest with `LLM_ENCRYPTION_KEY` (Fernet)
