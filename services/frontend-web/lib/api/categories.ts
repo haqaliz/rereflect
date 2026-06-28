@@ -28,6 +28,14 @@ export interface HealthWeights {
   frequency: number;
 }
 
+/** Extended response that includes the usage-activity weight returned by the backend.
+ *  The four base weights (churn/sentiment/resolution/frequency) remain in `HealthWeights`
+ *  so existing callers (e.g. HealthWeightsEditor) are unaffected.
+ *  `usage` is 0 until an operator opts in via Settings → Preferences. */
+export interface HealthWeightsResponse extends HealthWeights {
+  usage: number;
+}
+
 export const categoriesAPI = {
   list: async (categoryType?: string): Promise<CustomCategory[]> => {
     const params = categoryType ? { category_type: categoryType } : {};
@@ -49,7 +57,7 @@ export const categoriesAPI = {
     await apiClient.delete(`/api/v1/categories/custom/${id}`);
   },
 
-  getHealthWeights: async (): Promise<HealthWeights> => {
+  getHealthWeights: async (): Promise<HealthWeightsResponse> => {
     const response = await apiClient.get('/api/v1/categories/health-weights');
     return response.data;
   },

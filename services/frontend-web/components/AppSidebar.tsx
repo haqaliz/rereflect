@@ -35,6 +35,7 @@ import {
   ListChecks,
   Gauge,
   Key,
+  Activity,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -146,6 +147,7 @@ const settingsNavItems = [
   { title: 'Automations', href: '/settings/automations', icon: Zap },
   { title: 'Playbooks', href: '/settings/playbooks', icon: ListChecks },
   { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },
+  { title: 'Usage Events', href: '/settings/usage-events', icon: Activity, requiredRole: 'admin' as const },
 ];
 
 const systemNavItems = [

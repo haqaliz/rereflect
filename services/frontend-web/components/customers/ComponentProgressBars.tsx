@@ -1,3 +1,7 @@
+'use client';
+
+import { useQuery } from '@tanstack/react-query';
+import { categoriesAPI } from '@/lib/api/categories';
 import { getHealthColor } from './HealthScoreCircle';
 import {
   Tooltip,
@@ -23,8 +27,9 @@ const components = [
   { key: 'usage', label: 'Usage Activity' },
 ] as const;
 
-/** Default health-score weights (sum = 100). Usage defaults to 0 until the
- *  operator opts in via org_ai_config.health_weight_usage. */
+/** Documented fallback weights used until org weights have loaded.
+ *  Mirrors the backend defaults: churn 35 / sentiment 25 / resolution 25 / frequency 15 / usage 0.
+ *  Usage is 0 until an operator opts in via Settings → Preferences. */
 const DEFAULT_WEIGHTS: Record<string, number> = {
   churn_risk: 35,
   sentiment: 25,
@@ -81,6 +86,24 @@ export function ComponentProgressBars({
   frequency_component,
   usage_component = 50,
 }: ComponentProgressBarsProps) {
+  // Fetch the org's live health-score weights. Shared cache key with HealthWeightsEditor
+  // so a single network request is reused across the page.
+  const { data: healthWeights } = useQuery({
+    queryKey: ['health-weights'],
+    queryFn: () => categoriesAPI.getHealthWeights(),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // Map backend field names (churn/sentiment/resolution/frequency/usage) to component keys.
+  // Fall back to documented defaults until the query resolves or if the fetch fails.
+  const liveWeights: Record<string, number> = {
+    churn_risk: healthWeights?.churn ?? DEFAULT_WEIGHTS.churn_risk,
+    sentiment: healthWeights?.sentiment ?? DEFAULT_WEIGHTS.sentiment,
+    resolution: healthWeights?.resolution ?? DEFAULT_WEIGHTS.resolution,
+    frequency: healthWeights?.frequency ?? DEFAULT_WEIGHTS.frequency,
+    usage: healthWeights?.usage ?? DEFAULT_WEIGHTS.usage,
+  };
+
   const values: Record<string, number> = {
     churn_risk: churn_risk_component,
     sentiment: sentiment_component,
@@ -94,7 +117,7 @@ export function ComponentProgressBars({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {components.map(({ key, label }) => {
           const score = values[key];
-          const weight = DEFAULT_WEIGHTS[key];
+          const weight = liveWeights[key];
           const color = getHealthColor(score);
           const description = descriptions[key](score);
           return (
