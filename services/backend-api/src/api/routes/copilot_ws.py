@@ -46,6 +46,7 @@ from src.services.copilot.report_generator import ReportGenerator
 from src.models.subscription import Subscription
 from src.models.report import Report
 from src.config.plans import has_feature
+from src.services.embeddings import resolve_embedding_provider
 
 logger = logging.getLogger(__name__)
 
@@ -550,13 +551,20 @@ async def _handle_query(
         sql_columns = None
         sql_rows = None
 
+        # Resolve embedding provider once for this request (None = unconfigured org, degrade gracefully)
+        resolved_embedder = None
+        try:
+            resolved_embedder = resolve_embedding_provider(org.id, db)
+        except Exception as emb_err:
+            logger.debug(f"Embedding provider resolution failed, degrading: {emb_err}")
+
         if intent in ("data", "analysis"):
             # 7a. Try template matching (fast path — may fail if no embeddings/tables)
             template_match = None
             try:
                 matcher = TemplateMatcher()
                 template_match = await asyncio.to_thread(
-                    matcher.find_match, content, org.id, db
+                    matcher.find_match, content, org.id, db, resolved_embedder
                 )
             except Exception as e:
                 logger.info(f"Template matching skipped: {e}")
@@ -795,6 +803,7 @@ async def _handle_query(
                     created_by="llm",
                     org_id=org.id,
                     db=db,
+                    embedder=resolved_embedder,
                 )
                 logger.info(f"Template saved for: {content[:50]}")
             except Exception as e:
