@@ -31,24 +31,31 @@ import { UsageTimeline } from '../../components/customers/UsageTimeline';
 const mockGetUsage = customersAPI.getUsage as ReturnType<typeof vi.fn>;
 
 const mockUsageWithSeries = {
-  email: 'alice@acme.com',
-  last_active_at: '2026-06-28T08:00:00Z',
-  login_count_7d: 5,
-  login_count_30d: 18,
-  active_days_30d: 14,
-  distinct_feature_count: 6,
-  usage_score: 72,
-  period_days: 30,
-  series: [
-    { date: '2026-06-01', events: 4 },
-    { date: '2026-06-02', events: 7 },
-    { date: '2026-06-03', events: 2 },
+  rollup: {
+    customer_email: 'alice@acme.com',
+    usage_score: 72,
+    events_total: 13,
+    last_active_at: '2026-06-28T08:00:00Z',
+    first_seen_at: '2026-01-01T00:00:00Z',
+    login_count_7d: 5,
+    login_count_30d: 18,
+    active_days_7d: 5,
+    active_days_30d: 14,
+    distinct_features: ['dashboard', 'reports', 'export'],
+    distinct_feature_count: 6,
+    updated_at: '2026-06-28T08:00:00Z',
+  },
+  time_series: [
+    { date: '2026-06-01', event_count: 4 },
+    { date: '2026-06-02', event_count: 7 },
+    { date: '2026-06-03', event_count: 2 },
   ],
+  period_days: 30,
 };
 
 const mockUsageEmpty = {
   ...mockUsageWithSeries,
-  series: [],
+  time_series: [],
 };
 
 function renderWithQueryClient(ui: React.ReactElement) {

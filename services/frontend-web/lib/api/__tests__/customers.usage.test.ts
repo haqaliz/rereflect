@@ -14,7 +14,8 @@ import apiClient from '@/lib/api-client';
 import {
   customersAPI,
   type CustomerUsageResponse,
-  type UsageHistoryEntry,
+  type UsageRollup,
+  type UsageTimeSeriesBucket,
   type CustomerProfileData,
 } from '@/lib/api/customers';
 
@@ -22,22 +23,31 @@ const mockGet = apiClient.get as ReturnType<typeof vi.fn>;
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const mockSeries: UsageHistoryEntry[] = [
-  { date: '2026-06-01', events: 4 },
-  { date: '2026-06-02', events: 7 },
-  { date: '2026-06-03', events: 2 },
+const mockTimeSeries: UsageTimeSeriesBucket[] = [
+  { date: '2026-06-01', event_count: 4 },
+  { date: '2026-06-02', event_count: 7 },
+  { date: '2026-06-03', event_count: 2 },
 ];
 
-const mockUsageResponse: CustomerUsageResponse = {
-  email: 'alice@acme.com',
+const mockRollup: UsageRollup = {
+  customer_email: 'alice@acme.com',
+  usage_score: 72,
+  events_total: 13,
   last_active_at: '2026-06-28T08:00:00Z',
+  first_seen_at: '2026-01-01T00:00:00Z',
   login_count_7d: 5,
   login_count_30d: 18,
+  active_days_7d: 5,
   active_days_30d: 14,
+  distinct_features: ['dashboard', 'reports', 'export', 'settings', 'api', 'webhooks'],
   distinct_feature_count: 6,
-  usage_score: 72,
+  updated_at: '2026-06-28T08:00:00Z',
+};
+
+const mockUsageResponse: CustomerUsageResponse = {
+  rollup: mockRollup,
+  time_series: mockTimeSeries,
   period_days: 30,
-  series: mockSeries,
 };
 
 // ─── getUsage ────────────────────────────────────────────────────────────────
@@ -69,44 +79,49 @@ describe('customersAPI.getUsage', () => {
     );
   });
 
-  it('returns CustomerUsageResponse with all required fields', async () => {
+  it('returns CustomerUsageResponse with nested rollup and time_series', async () => {
     mockGet.mockResolvedValue({ data: mockUsageResponse });
     const result = await customersAPI.getUsage('alice@acme.com');
 
-    expect(result.email).toBe('alice@acme.com');
-    expect(result.last_active_at).toBe('2026-06-28T08:00:00Z');
-    expect(result.login_count_7d).toBe(5);
-    expect(result.login_count_30d).toBe(18);
-    expect(result.active_days_30d).toBe(14);
-    expect(result.distinct_feature_count).toBe(6);
-    expect(result.usage_score).toBe(72);
+    expect(result.rollup.customer_email).toBe('alice@acme.com');
+    expect(result.rollup.last_active_at).toBe('2026-06-28T08:00:00Z');
+    expect(result.rollup.login_count_7d).toBe(5);
+    expect(result.rollup.login_count_30d).toBe(18);
+    expect(result.rollup.active_days_30d).toBe(14);
+    expect(result.rollup.distinct_feature_count).toBe(6);
+    expect(result.rollup.usage_score).toBe(72);
     expect(result.period_days).toBe(30);
   });
 
-  it('returns series array with date+events entries', async () => {
+  it('returns time_series array with date+event_count entries', async () => {
     mockGet.mockResolvedValue({ data: mockUsageResponse });
     const result = await customersAPI.getUsage('alice@acme.com');
 
-    expect(result.series).toHaveLength(3);
-    expect(result.series[0]).toEqual({ date: '2026-06-01', events: 4 });
-    expect(result.series[1].events).toBe(7);
+    expect(result.time_series).toHaveLength(3);
+    expect(result.time_series[0]).toEqual({ date: '2026-06-01', event_count: 4 });
+    expect(result.time_series[1].event_count).toBe(7);
   });
 
   it('handles null last_active_at (no usage yet)', async () => {
     const noUsage: CustomerUsageResponse = {
-      ...mockUsageResponse,
-      last_active_at: null,
-      login_count_7d: 0,
-      login_count_30d: 0,
-      active_days_30d: 0,
-      distinct_feature_count: 0,
-      usage_score: 50,
-      series: [],
+      rollup: {
+        ...mockRollup,
+        last_active_at: null,
+        login_count_7d: 0,
+        login_count_30d: 0,
+        active_days_7d: 0,
+        active_days_30d: 0,
+        distinct_feature_count: 0,
+        events_total: 0,
+        usage_score: 50,
+      },
+      time_series: [],
+      period_days: 30,
     };
     mockGet.mockResolvedValue({ data: noUsage });
     const result = await customersAPI.getUsage('alice@acme.com');
-    expect(result.last_active_at).toBeNull();
-    expect(result.series).toHaveLength(0);
+    expect(result.rollup.last_active_at).toBeNull();
+    expect(result.time_series).toHaveLength(0);
   });
 
   it('propagates errors from the API client', async () => {

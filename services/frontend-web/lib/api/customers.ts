@@ -99,22 +99,28 @@ export interface CustomerProfileData {
   has_potential_winback?: boolean;
 }
 
-export interface UsageHistoryEntry {
-  date: string;
-  events: number;
-}
-
-export interface CustomerUsageResponse {
-  email: string;
-  last_active_at: string | null;
-  login_count_7d: number;
-  login_count_30d: number;
-  active_days_30d: number;
-  distinct_feature_count: number;
+export interface UsageRollup {
+  customer_email: string;
   /** Usage score 0-100; 50 = neutral when no data */
   usage_score: number;
+  events_total: number;
+  last_active_at: string | null;
+  first_seen_at: string | null;
+  login_count_7d: number | null;
+  login_count_30d: number | null;
+  active_days_7d: number | null;
+  active_days_30d: number | null;
+  distinct_features: string[] | null;
+  distinct_feature_count: number | null;
+  updated_at: string | null;
+}
+
+export type UsageTimeSeriesBucket = { date: string; event_count: number };
+
+export interface CustomerUsageResponse {
+  rollup: UsageRollup;
+  time_series: UsageTimeSeriesBucket[];
   period_days: number;
-  series: UsageHistoryEntry[];
 }
 
 export interface HealthHistoryEntry {

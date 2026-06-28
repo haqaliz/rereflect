@@ -489,7 +489,8 @@ function UsageActivityCard({ email }: { email: string }) {
     return `${days}d ago`;
   }
 
-  const hasUsage = data && (data.login_count_30d > 0 || data.active_days_30d > 0);
+  const rollup = data?.rollup;
+  const hasUsage = rollup && ((rollup.login_count_30d ?? 0) > 0 || (rollup.active_days_30d ?? 0) > 0);
 
   return (
     <Card>
@@ -514,19 +515,19 @@ function UsageActivityCard({ email }: { email: string }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
             <div>
               <p className="text-xs text-muted-foreground">Last Active</p>
-              <p className="font-medium">{relativeTime(data?.last_active_at ?? null)}</p>
+              <p className="font-medium">{relativeTime(rollup?.last_active_at ?? null)}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Logins (30d)</p>
-              <p className="font-mono font-medium">{data?.login_count_30d ?? 0}</p>
+              <p className="font-mono font-medium">{rollup?.login_count_30d ?? 0}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Active Days (30d)</p>
-              <p className="font-mono font-medium">{data?.active_days_30d ?? 0}</p>
+              <p className="font-mono font-medium">{rollup?.active_days_30d ?? 0}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Features Used</p>
-              <p className="font-mono font-medium">{data?.distinct_feature_count ?? 0}</p>
+              <p className="font-mono font-medium">{rollup?.distinct_feature_count ?? 0}</p>
             </div>
           </div>
         )}

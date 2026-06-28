@@ -31,11 +31,7 @@ export function UsageTimeline({ email }: UsageTimelineProps) {
     retry: false,
   });
 
-  const chartData =
-    data?.series.map((entry) => ({
-      date: entry.date,
-      events: entry.events,
-    })) ?? [];
+  const chartData = data?.time_series ?? [];
 
   const isEmpty = !isLoading && (isError || chartData.length === 0);
 
@@ -95,7 +91,7 @@ export function UsageTimeline({ email }: UsageTimelineProps) {
             <Tooltip />
             <Line
               type="monotone"
-              dataKey="events"
+              dataKey="event_count"
               stroke="var(--chart-2)"
               strokeWidth={2}
               dot={{ r: 3 }}
