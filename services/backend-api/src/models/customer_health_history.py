@@ -21,6 +21,7 @@ class CustomerHealthHistory(Base):
     sentiment_component = Column(Integer, nullable=True)
     resolution_component = Column(Integer, nullable=True)
     frequency_component = Column(Integer, nullable=True)
+    usage_component = Column(Integer, nullable=True)         # Opt-in; null for history rows before usage feature
     risk_level = Column(String(20), nullable=True)
 
     recorded_at = Column(DateTime, default=datetime.utcnow)
