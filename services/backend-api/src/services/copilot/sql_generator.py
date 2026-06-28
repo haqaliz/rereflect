@@ -3,21 +3,34 @@ SQL Generator — generates safe SQL from natural language queries using LLM.
 
 Generation flow:
 1. Build LLM prompt with schema whitelist + examples
-2. LLM generates candidate SQL
+2. LLM generates candidate SQL (via local/keyless or cloud BYOK client)
 3. Pass through SQL validator (all safety guardrails)
 4. Inject org scope + row limits
 5. Return validated, safe SQL ready for execution
+
+Local / keyless path:
+  Call with base_url="http://localhost:11434/v1", api_key=None.
+  The client is constructed as an OpenAI-compatible endpoint (dummy placeholder
+  key required by the SDK; Ollama and similar endpoints ignore the value).
+
+Cloud BYOK path:
+  Call with api_key="sk-...", base_url=None (unchanged from before).
 """
 
 import logging
-import os
 import re
 from typing import Optional
+
+import openai  # imported at module level for testability (patch target)
 
 from src.services.copilot.sql_validator import SQLValidator
 from src.services.copilot.schema_whitelist import DEFAULT_WHITELIST
 
 logger = logging.getLogger(__name__)
+
+# Non-empty placeholder required by the OpenAI SDK for local/keyless endpoints.
+# Ollama and most OpenAI-compatible servers ignore this value entirely.
+_DUMMY_LLM_KEY = "ollama"
 
 # System prompt for SQL generation
 _SYSTEM_PROMPT = """You are a SQL query generator for a customer feedback analytics platform.
@@ -79,18 +92,21 @@ class SQLGenerator:
         context: Optional[str] = None,
         api_key: Optional[str] = None,
         model: str = "gpt-4o-mini",
+        base_url: Optional[str] = None,
     ) -> dict:
         """
         Generate a safe SQL query from a natural language question.
 
         Args:
-            question: User's natural language question
-            org_id: Organization ID for scope injection
-            plan: User's plan ("free", "pro", "business", "enterprise")
-            whitelist: Schema whitelist dict (uses DEFAULT_WHITELIST if None)
-            context: Optional context string (scope summary, @mentions data)
-            api_key: OpenAI API key (uses env var if None)
-            model: LLM model to use
+            question:  User's natural language question.
+            org_id:    Organization ID for scope injection.
+            plan:      User's plan ("free", "pro", "business", "enterprise").
+            whitelist: Schema whitelist dict (uses DEFAULT_WHITELIST if None).
+            context:   Optional context string (scope summary, @mentions data).
+            api_key:   BYOK API key for cloud providers; None for local endpoints.
+            model:     LLM model to use.
+            base_url:  Base URL for local/OpenAI-compatible endpoints (Ollama,
+                       LM Studio, vLLM, etc.).  When set, api_key is optional.
 
         Returns:
             {
@@ -115,6 +131,7 @@ class SQLGenerator:
                 user_prompt=user_prompt,
                 api_key=api_key,
                 model=model,
+                base_url=base_url,
             )
         except Exception as e:
             logger.error(f"LLM SQL generation failed: {e}")
@@ -184,21 +201,31 @@ class SQLGenerator:
         user_prompt: str,
         api_key: Optional[str],
         model: str,
+        base_url: Optional[str] = None,
     ) -> str:
-        """Call OpenAI to generate SQL. Returns the raw SQL string.
+        """Call the LLM to generate SQL.  Returns the raw SQL string.
 
-        api_key must be the org's BYOK key (resolved upstream). No env fallback.
+        Two paths:
+        - Local / OpenAI-compatible (base_url set):
+            Constructs an OpenAI-compatible client pointing at base_url.
+            Uses a dummy placeholder key (Ollama ignores it; required by SDK).
+            api_key is used when provided, otherwise falls back to the dummy.
+        - Cloud BYOK (api_key set, base_url=None):
+            Uses the org's own BYOK key; raises a config error if absent.
         """
-        import openai
-
-        key = api_key or ""
-        if not key:
+        if base_url:
+            # Local / OpenAI-compatible endpoint — keyless is allowed
+            key = api_key or _DUMMY_LLM_KEY
+            client = openai.OpenAI(api_key=key, base_url=base_url)
+        elif api_key:
+            # Cloud BYOK path — standard OpenAI endpoint
+            client = openai.OpenAI(api_key=api_key)
+        else:
             raise RuntimeError(
-                "No OpenAI API key configured for SQL generation. "
-                "Please add your key in Settings → AI → API Keys."
+                "No API key or local endpoint configured for SQL generation. "
+                "Please configure a model in Settings → AI."
             )
 
-        client = openai.OpenAI(api_key=key)
         response = client.chat.completions.create(
             model=model,
             messages=[

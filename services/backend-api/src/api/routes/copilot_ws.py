@@ -23,6 +23,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+import openai  # imported at module level so tests can patch src.api.routes.copilot_ws.openai
+
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
@@ -85,8 +87,6 @@ async def call_llm_stream(
     - Cloud BYOK (api_key set, base_url=None): standard OpenAI or compatible
       cloud endpoint with the org's own key.
     """
-    import openai
-
     if base_url:
         # Local / OpenAI-compatible endpoint — keyless is allowed
         key = api_key or _DUMMY_LLM_KEY
@@ -96,7 +96,7 @@ async def call_llm_stream(
         )
         client = openai.AsyncOpenAI(api_key=key, base_url=base_url, timeout=60.0)
     else:
-        # Cloud BYOK path
+        # Cloud BYOK path — no local base_url
         key = api_key or ""
         masked_key = f"***{key[-4:]}" if key and len(key) > 4 else "EMPTY"
         logger.info(
