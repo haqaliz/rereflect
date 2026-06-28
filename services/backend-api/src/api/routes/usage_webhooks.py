@@ -71,6 +71,7 @@ def ingest_usage_events(
     accepted = 0
     skipped = 0
     skipped_reasons: dict[str, int] = {}
+    truncated = 0  # informational: events whose properties were over-sized and replaced with {}
 
     received_at = datetime.now(timezone.utc)
 
@@ -121,6 +122,8 @@ def ingest_usage_events(
 
         # ── Properties size guard ─────────────────────────────────────────────
         props, _truncated = guard_properties(event.properties)
+        if _truncated:
+            truncated += 1
 
         # ── Determine event name ──────────────────────────────────────────────
         # Prefer event.event (track), fall back to event.name, else None
@@ -183,4 +186,5 @@ def ingest_usage_events(
         accepted=accepted,
         skipped=skipped,
         skipped_reasons=skipped_reasons,
+        truncated=truncated,
     )

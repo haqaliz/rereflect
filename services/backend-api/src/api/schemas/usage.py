@@ -47,6 +47,9 @@ class UsageIngestResponse(BaseModel):
     accepted: int
     skipped: int
     skipped_reasons: dict[str, int] = Field(default_factory=dict)
+    # PRD AC10: events whose properties exceeded the 16 KB limit and were truncated to {}.
+    # The event is still accepted; this is an informational counter, not a skip reason.
+    truncated: int = 0
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

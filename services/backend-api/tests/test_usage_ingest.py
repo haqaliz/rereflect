@@ -451,6 +451,48 @@ class TestUsageIngestLargeProperties:
         # Truncation actually happened: properties must be the empty sentinel, not the 17 KB blob
         assert row.properties == {}
 
+    def test_large_properties_truncation_counted_in_response(self, client: TestClient, db: Session):
+        """M1 (TDD RED→GREEN): PRD AC10 — oversized-properties event is accepted AND
+        truncation is counted in the response `truncated` field.
+
+        RED: `UsageIngestResponse` has no `truncated` field → KeyError / missing key.
+        GREEN: after adding `truncated: int = 0` + incrementing it in the route.
+        """
+        from src.models.usage_event import UsageEvent
+
+        org = _make_org(db)
+        raw_key, _ = _make_api_key(db, org.id)
+        big_props = {"data": "x" * (17 * 1024)}  # ~17 KB
+        events = [
+            {
+                "type": "track",
+                "email": "alice@example.com",
+                "event": "upload",
+                "messageId": "msg-truncate-count-001",
+                "properties": big_props,
+            }
+        ]
+        patcher, _ = _celery_mock()
+        with patcher:
+            resp = client.post(
+                USAGE_URL,
+                json={"events": events},
+                headers={"X-API-Key": raw_key},
+            )
+        assert resp.status_code == 202
+        body = resp.json()
+        # Event is accepted (not skipped)
+        assert body["accepted"] == 1
+        assert body["skipped"] == 0
+        # Truncation is counted in the dedicated `truncated` field
+        assert "truncated" in body, "Response must include a `truncated` counter field"
+        assert body["truncated"] == 1, f"Expected truncated=1, got {body.get('truncated')}"
+
+        # Row is persisted with empty properties sentinel
+        row = db.query(UsageEvent).first()
+        assert row is not None
+        assert row.properties == {}
+
 
 class TestUsageIngestBatchIsolation:
     """Important-1 (TDD RED→GREEN): per-event savepoint isolation.

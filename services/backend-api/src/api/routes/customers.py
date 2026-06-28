@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
 from src.models.customer_analysis_action import CustomerAnalysisAction
+from src.models.customer_usage import CustomerUsage
 from src.models.organization import Organization
 from src.api.dependencies import get_current_org, get_current_user, require_feature, require_system_admin
 from src.models.user import User
@@ -43,6 +44,7 @@ class CustomerListItem(BaseModel):
     confidence_level: str
     feedback_count: int
     last_feedback_at: Optional[datetime] = None
+    last_active_at: Optional[datetime] = None  # product-usage recency (from customer_usage rollup)
     sentiment_trend: SentimentTrend
     is_archived: bool
     has_llm_analysis: bool
@@ -278,6 +280,20 @@ def list_customers(
     offset = (page - 1) * page_size
     records = query.offset(offset).limit(page_size).all()
 
+    # Fetch usage rollups for this page's customers in a single query (no N+1).
+    page_emails = [r.customer_email for r in records]
+    usage_map: dict[str, datetime] = {}
+    if page_emails:
+        usage_rows = (
+            db.query(CustomerUsage.customer_email, CustomerUsage.last_active_at)
+            .filter(
+                CustomerUsage.organization_id == current_org.id,
+                CustomerUsage.customer_email.in_(page_emails),
+            )
+            .all()
+        )
+        usage_map = {row.customer_email: row.last_active_at for row in usage_rows}
+
     items = []
     for record in records:
         trend = _compute_sentiment_trend_for_customer(current_org.id, record.customer_email, db)
@@ -289,6 +305,7 @@ def list_customers(
             confidence_level=record.confidence_level or "low",
             feedback_count=record.feedback_count,
             last_feedback_at=record.last_feedback_at,
+            last_active_at=usage_map.get(record.customer_email),
             sentiment_trend=SentimentTrend(**trend),
             is_archived=record.is_archived or False,
             has_llm_analysis=record.llm_analysis_data is not None or record.llm_analysis is not None,
