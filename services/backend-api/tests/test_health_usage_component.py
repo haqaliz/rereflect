@@ -1,6 +1,7 @@
 """
 Phase 1 — RED: Characterization tests for compute_health_score() score stability.
 Phase 3 — Usage component math tests (wired at weight 0 by default).
+Phase 4 — Health-weights API accepts 5 components summing to 100.
 
 These tests lock the current output of compute_health_score() and _get_org_weights()
 before and after the usage component is added. They must stay GREEN (byte-identical
@@ -9,11 +10,14 @@ output) through all subsequent phases, proving that health_weight_usage=0 change
 import pytest
 from datetime import datetime
 from unittest.mock import patch
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from src.models.organization import Organization
 from src.models.org_ai_config import OrgAIConfig
 from src.models.feedback import FeedbackItem
+from src.models.user import User
+from src.api.auth import hash_password, create_access_token
 from src.services.health_score_service import (
     compute_health_score,
     _get_org_weights,
@@ -340,3 +344,118 @@ class TestScoreMovesWhenUsageWeightRaised:
             result = compute_health_score(test_organization.id, self.EMAIL, db)
 
         assert result["health_score"] == 47  # unchanged from baseline
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — Health-weights API: 5-field validation + GET/PUT
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def owner_user_p4(db: Session, test_organization: Organization) -> User:
+    user = User(
+        email="p4_owner@example.com",
+        password_hash=hash_password("password123"),
+        organization_id=test_organization.id,
+        role="owner",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def owner_headers_p4(owner_user_p4: User) -> dict:
+    token = create_access_token({
+        "user_id": owner_user_p4.id,
+        "organization_id": owner_user_p4.organization_id,
+        "role": owner_user_p4.role,
+    })
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestHealthWeightsApiPhase4:
+    """
+    Phase 4 — GET returns 5 keys; PUT accepts explicit usage weight; validator
+    covers all 5 fields when checking sum=100.
+    """
+
+    def test_get_returns_usage_key_with_default_zero(
+        self, client: TestClient, owner_headers_p4: dict
+    ):
+        """GET /api/v1/categories/health-weights must include 'usage': 0 in response."""
+        response = client.get("/api/v1/categories/health-weights", headers=owner_headers_p4)
+        assert response.status_code == 200
+        data = response.json()
+        assert "usage" in data
+        assert data["usage"] == 0
+
+    def test_put_with_5_fields_summing_100_returns_200(
+        self, client: TestClient, owner_headers_p4: dict
+    ):
+        """PUT with 5 fields summing to 100 (35/25/25/15/0) returns 200."""
+        response = client.put(
+            "/api/v1/categories/health-weights",
+            headers=owner_headers_p4,
+            json={"churn": 35, "sentiment": 25, "resolution": 25, "frequency": 15, "usage": 0},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["usage"] == 0
+
+    def test_put_with_nonzero_usage_persists_health_weight_usage(
+        self, client: TestClient, owner_headers_p4: dict,
+        db: Session, test_organization: Organization
+    ):
+        """PUT with usage=10 (35/20/20/15/10=100) persists health_weight_usage=10."""
+        response = client.put(
+            "/api/v1/categories/health-weights",
+            headers=owner_headers_p4,
+            json={"churn": 35, "sentiment": 20, "resolution": 20, "frequency": 15, "usage": 10},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["usage"] == 10
+
+        # Verify DB persistence
+        config = db.query(OrgAIConfig).filter_by(organization_id=test_organization.id).first()
+        assert config is not None
+        assert config.health_weight_usage == 10
+
+    def test_put_5_fields_not_summing_100_returns_422(
+        self, client: TestClient, owner_headers_p4: dict
+    ):
+        """PUT with 5 fields that sum to 110 returns 422."""
+        response = client.put(
+            "/api/v1/categories/health-weights",
+            headers=owner_headers_p4,
+            json={"churn": 35, "sentiment": 25, "resolution": 25, "frequency": 15, "usage": 10},
+        )
+        assert response.status_code == 422
+
+    def test_put_4_fields_still_works_with_usage_defaulting_to_zero(
+        self, client: TestClient, owner_headers_p4: dict
+    ):
+        """PUT with only 4 fields (usage omitted, defaults to 0) still returns 200 if sum=100."""
+        response = client.put(
+            "/api/v1/categories/health-weights",
+            headers=owner_headers_p4,
+            json={"churn": 35, "sentiment": 25, "resolution": 25, "frequency": 15},
+        )
+        assert response.status_code == 200
+        assert response.json()["usage"] == 0
+
+    def test_get_returns_configured_usage_weight(
+        self, client: TestClient, owner_headers_p4: dict,
+        db: Session, test_organization: Organization
+    ):
+        """GET returns the persisted usage weight, not zero, after PUT with usage=5."""
+        # First PUT to set usage=5
+        client.put(
+            "/api/v1/categories/health-weights",
+            headers=owner_headers_p4,
+            json={"churn": 35, "sentiment": 25, "resolution": 25, "frequency": 10, "usage": 5},
+        )
+        response = client.get("/api/v1/categories/health-weights", headers=owner_headers_p4)
+        assert response.status_code == 200
+        assert response.json()["usage"] == 5
