@@ -47,6 +47,7 @@ from src.models.subscription import Subscription
 from src.models.report import Report
 from src.config.plans import has_feature
 from src.services.embeddings import resolve_embedding_provider
+from src.services.copilot.llm_resolver import resolve_generation_llm, LLMConfig
 
 logger = logging.getLogger(__name__)
 
@@ -62,26 +63,48 @@ _CHART_KEYWORDS = {"chart", "graph", "plot", "visual", "visualize", "compare", "
 # -- LLM streaming ------------------------------------------------------------
 
 
+_DUMMY_LLM_KEY = "ollama"  # non-empty placeholder required by the OpenAI SDK for local endpoints
+
+
 async def call_llm_stream(
     messages: list,
     provider: str = "openai",
     model: str = "gpt-4o-mini",
     api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
 ):
     """
     Stream tokens from the configured LLM provider.
     Yields chunk objects with .choices[0].delta.content attribute.
     Can be patched in tests.
+
+    Supports two modes:
+    - Local / OpenAI-compatible (base_url set, api_key=None): connects to a
+      local endpoint such as Ollama or LM Studio.  Uses a dummy key placeholder
+      because the OpenAI SDK requires a non-empty api_key even for local calls.
+    - Cloud BYOK (api_key set, base_url=None): standard OpenAI or compatible
+      cloud endpoint with the org's own key.
     """
     import openai
 
-    # api_key must come from the org's BYOK — callers ensure it's non-None
-    # before reaching here (they return a WS error message if absent).
-    key = api_key or ""
-    masked_key = f"***{key[-4:]}" if key and len(key) > 4 else "EMPTY"
-    logger.info(f"call_llm_stream: provider={provider}, model={model}, key={masked_key}, messages={len(messages)}")
+    if base_url:
+        # Local / OpenAI-compatible endpoint — keyless is allowed
+        key = api_key or _DUMMY_LLM_KEY
+        logger.info(
+            f"call_llm_stream: local provider={provider}, model={model}, "
+            f"base_url={base_url}, messages={len(messages)}"
+        )
+        client = openai.AsyncOpenAI(api_key=key, base_url=base_url, timeout=60.0)
+    else:
+        # Cloud BYOK path
+        key = api_key or ""
+        masked_key = f"***{key[-4:]}" if key and len(key) > 4 else "EMPTY"
+        logger.info(
+            f"call_llm_stream: provider={provider}, model={model}, "
+            f"key={masked_key}, messages={len(messages)}"
+        )
+        client = openai.AsyncOpenAI(api_key=key, timeout=60.0)
 
-    client = openai.AsyncOpenAI(api_key=key, timeout=60.0)
     try:
         stream = await client.chat.completions.create(
             model=model,
@@ -138,6 +161,7 @@ async def _handle_report(
     provider: str,
     model: str,
     api_key: Optional[str],
+    base_url: Optional[str] = None,
 ) -> None:
     """
     Handle a 'report' intent: generate a structured AI report, stream section
@@ -251,6 +275,7 @@ async def _handle_report(
                 provider=provider,
                 model=model,
                 api_key=api_key,
+                base_url=base_url,
             ):
                 delta = ""
                 if hasattr(chunk, "choices") and chunk.choices:
@@ -440,34 +465,14 @@ async def _handle_query(
 
         # 4b. If intent == "report", delegate to the report pipeline
         if intent == "report":
-            # Resolve LLM config first (same as below, duplicated for clarity)
-            import os as _os
-            _provider = "openai"
-            _model = "gpt-4o-mini"
-            _api_key = None
-            try:
-                from src.models.org_ai_config import OrgAIConfig
-                from src.models.org_api_key import OrgApiKey
-                from src.utils.encryption import decrypt_api_key
-
-                _config = db.query(OrgAIConfig).filter_by(organization_id=org.id).first()
-                if _config:
-                    _provider = _config.default_provider
-                    _model = _config.model_analysis
-
-                from src.utils.byok import resolve_org_byok_key
-                _api_key = resolve_org_byok_key(_provider, org.id, db)
-            except Exception as _cfg_err:
-                logger.warning(f"Could not load org LLM config for report: {_cfg_err}")
-                db.rollback()
-                _api_key = None
-
-            if not _api_key:
+            # Resolve LLM config (local-capable)
+            _llm_cfg = resolve_generation_llm(org.id, db)
+            if not _llm_cfg.is_configured:
                 await websocket.send_json({
                     "type": "error",
                     "message": (
-                        "No API key configured. "
-                        "Please add your key in Settings → AI → API Keys."
+                        "No AI model configured. "
+                        "Please configure a model in Settings → AI."
                     ),
                 })
                 return
@@ -482,9 +487,10 @@ async def _handle_query(
                 context_scope=context_scope,
                 message_id=message_id,
                 plan=plan,
-                provider=_provider,
-                model=_model,
-                api_key=_api_key,
+                provider=_llm_cfg.provider,
+                model=_llm_cfg.model,
+                api_key=_llm_cfg.api_key,
+                base_url=_llm_cfg.base_url,
             )
             return
 
@@ -507,41 +513,28 @@ async def _handle_query(
         primary_scope = context_scope.split(",")[0] if context_scope else "all_data"
         context = resolver.build_context(primary_scope, org.id, db, mentions, conversation_history)
 
-        # 6. Resolve LLM provider/model for org
-        import os
-
-        provider = "openai"
-        model = "gpt-4o-mini"
-        api_key = None
-
-        try:
-            from src.models.org_ai_config import OrgAIConfig
-            from src.models.org_api_key import OrgApiKey
-            from src.utils.encryption import decrypt_api_key
-
-            config = db.query(OrgAIConfig).filter_by(organization_id=org.id).first()
-            if config:
-                provider = config.default_provider
-                model = config.model_analysis
-
-            from src.utils.byok import resolve_org_byok_key
-            api_key = resolve_org_byok_key(provider, org.id, db)
-        except Exception as cfg_err:
-            logger.warning(f"Could not load org LLM config: {cfg_err}")
-            db.rollback()
-            api_key = None
-
-        if not api_key:
+        # 6. Resolve LLM provider/model for org (local-capable)
+        llm_cfg = resolve_generation_llm(org.id, db)
+        if not llm_cfg.is_configured:
             await websocket.send_json({
                 "type": "error",
                 "message": (
-                    "No API key configured. "
-                    "Please add your key in Settings → AI → API Keys."
+                    "No AI model configured. "
+                    "Please configure a model in Settings → AI."
                 ),
             })
             return
 
-        logger.info(f"_handle_query: provider={provider}, model={model}, key={'***'+api_key[-4:] if api_key and len(api_key)>4 else 'EMPTY'}")
+        provider = llm_cfg.provider
+        model = llm_cfg.model
+        api_key = llm_cfg.api_key
+        base_url = llm_cfg.base_url
+
+        logger.info(
+            f"_handle_query: provider={provider}, model={model}, "
+            f"local={'yes' if base_url else 'no'}, "
+            f"key={'***' + api_key[-4:] if api_key and len(api_key) > 4 else 'EMPTY'}"
+        )
 
         # 7. Pipeline: data/analysis vs general
         sql_generated = None
@@ -594,6 +587,7 @@ async def _handle_query(
                     context=context,
                     api_key=api_key,
                     model=model,
+                    base_url=base_url,
                 )
                 if gen_result["sql"]:
                     sql = gen_result["sql"]
@@ -710,6 +704,7 @@ async def _handle_query(
             provider=provider,
             model=model,
             api_key=api_key,
+            base_url=base_url,
         ):
             delta = ""
             if hasattr(chunk, "choices") and chunk.choices:
