@@ -41,6 +41,9 @@ _WRITE_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 
+# Require SQL to start with SELECT (catches garbage / natural-language output from weak models)
+_SELECT_START = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
+
 # Detect multiple statements (SQL injection via semicolons)
 _MULTI_STATEMENT = re.compile(r";\s*(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|GRANT|REVOKE|CREATE)\b", re.IGNORECASE)
 
@@ -76,7 +79,13 @@ class SQLValidator:
     # ── Individual validators ─────────────────────────────────────────────────
 
     def validate_readonly(self, sql: str) -> ValidationResult:
-        """Reject any non-SELECT statement."""
+        """Reject any non-SELECT statement.
+
+        Enforces two rules:
+        1. Statement must start with SELECT (rejects garbage, natural-language output
+           from weak models, Python code, etc.).
+        2. No write-operation keywords (INSERT, UPDATE, DELETE, DROP, etc.) anywhere.
+        """
         stripped = sql.strip()
 
         # Check for multi-statement attacks
@@ -86,12 +95,23 @@ class SQLValidator:
                 error="Multi-statement SQL is not allowed"
             )
 
-        # Check write operations
+        # Check write operations (fast path before SELECT check)
         if _WRITE_KEYWORDS.match(stripped):
             keyword = stripped.split()[0].upper()
             return ValidationResult(
                 is_valid=False,
                 error=f"Write operation '{keyword}' is not allowed. Only SELECT queries are permitted."
+            )
+
+        # Must start with SELECT — catches garbage output from weak local models
+        # (e.g. "I don't know how to answer that." or code blocks).
+        if not _SELECT_START.match(stripped):
+            return ValidationResult(
+                is_valid=False,
+                error=(
+                    "Query must start with SELECT. "
+                    "The model may have returned a non-SQL response."
+                )
             )
 
         return ValidationResult(is_valid=True)

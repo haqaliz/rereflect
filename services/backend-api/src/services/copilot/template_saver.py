@@ -8,6 +8,12 @@ Saving flow:
 4. Increment usage_count on matched templates
 
 Pre-populates 10-15 common system templates on first run.
+
+Provider-aware changes (template-matching-local):
+- _generate_embedding now delegates to the injected ResolvedEmbedder
+- _create_mapping persists embedding_provider + embedding_dimension
+- seed_system_templates is provider+dim-aware: re-seeds if the active provider
+  differs from stored system-template vectors; idempotent on same provider
 """
 
 import logging
@@ -357,6 +363,7 @@ class TemplateSaver:
         created_by: str,
         org_id: Optional[int],
         db,
+        embedder=None,
     ) -> dict:
         """
         Save a query template and its question mapping.
@@ -365,19 +372,23 @@ class TemplateSaver:
         If SQL is new, creates both a new template and a mapping.
 
         Args:
-            sql_query: The SQL query with :param placeholders
-            question: The user question that generated this SQL
-            description: Human-readable description of the template
+            sql_query:        The SQL query with :param placeholders
+            question:         The user question that generated this SQL
+            description:      Human-readable description of the template
             parameter_schema: Dict of parameter names and types
-            created_by: "llm" | "admin" | "system"
-            org_id: Organization ID (None for global/system templates)
-            db: SQLAlchemy session
+            created_by:       "llm" | "admin" | "system"
+            org_id:           Organization ID (None for global/system templates)
+            db:               SQLAlchemy session
+            embedder:         ResolvedEmbedder from resolve_embedding_provider().
+                              Supplies provider name and the underlying EmbeddingProvider.
+                              The actual vector length (len(embedding)) is used for
+                              embedding_dimension — never a pre-embed hint.
 
         Returns:
             {"template_id": str, "is_new": bool}
         """
         # 1. Generate embedding for the question
-        embedding = self._generate_embedding(question)
+        embedding = self._generate_embedding(question, embedder)
 
         # 2. Check if identical SQL already exists as a template
         existing_template = self._find_template_by_sql(sql_query, org_id, db)
@@ -398,12 +409,14 @@ class TemplateSaver:
             )
             is_new = True
 
-        # 3. Add new question mapping
+        # 3. Add new question mapping with provider/dim tagging
+        provider = embedder.provider if embedder is not None else None
         self._create_mapping(
             template_id=template_id,
             question=question,
             embedding=embedding,
             db=db,
+            provider=provider,
         )
 
         db.commit()
@@ -445,69 +458,97 @@ class TemplateSaver:
         template.last_used_at = datetime.utcnow()
         db.commit()
 
-    def seed_system_templates(self, db) -> None:
+    def seed_system_templates(self, db, embedder=None) -> None:
         """
         Seed the database with pre-built system templates.
-        Idempotent: skips templates that already exist.
+
+        Provider-aware idempotency:
+          - If a system template already has a mapping tagged with the active
+            provider, skip it (no redundant re-embedding).
+          - If the template exists but mappings carry a DIFFERENT provider/dim
+            (e.g. switched from openai → openai_compatible), re-embed all its
+            patterns for the active provider.
+          - If the template doesn't exist at all, create template + mappings.
+
+        Must NOT crash boot if the embedding endpoint is unreachable — each
+        pattern embed is wrapped in try/except; failures are logged and skipped.
+
+        Args:
+            db:       SQLAlchemy session.
+            embedder: ResolvedEmbedder or None.  If None, skip silently.
         """
+        if embedder is None:
+            logger.info("seed_system_templates: no embedder resolved, skipping")
+            return
+
+        active_provider = embedder.provider
+
         for template_def in SYSTEM_TEMPLATES:
-            existing = self._find_template_by_sql(template_def["sql_query"], None, db)
-            if existing is not None:
-                continue
-
-            try:
-                embedding = self._generate_embedding(template_def["question_patterns"][0])
-            except Exception as e:
-                logger.warning(f"Failed to generate embedding for system template: {e}")
-                continue
-
-            template_id = self._create_template(
-                sql_query=template_def["sql_query"],
-                description=template_def["description"],
-                parameter_schema=template_def["parameter_schema"],
-                created_by="system",
-                org_id=None,
-                db=db,
+            # Check if already seeded for the active provider
+            existing_with_provider = self._find_template_by_sql_with_mapping(
+                template_def["sql_query"], None, db, provider=active_provider
             )
+            if existing_with_provider is not None:
+                # Template exists and has at least one mapping with the active provider
+                continue
 
-            for pattern in template_def["question_patterns"]:
+            # Need to (re-)embed.  Try first pattern to validate endpoint is reachable.
+            try:
+                first_emb = self._generate_embedding(
+                    template_def["question_patterns"][0], embedder
+                )
+            except Exception as e:
+                logger.warning(
+                    f"seed_system_templates: failed to embed system template "
+                    f"'{template_def['description']}': {e}"
+                )
+                continue
+
+            # Get or reuse existing template record (we never duplicate template rows)
+            existing_template = self._find_template_by_sql(template_def["sql_query"], None, db)
+            if existing_template is None:
+                template_id = self._create_template(
+                    sql_query=template_def["sql_query"],
+                    description=template_def["description"],
+                    parameter_schema=template_def["parameter_schema"],
+                    created_by="system",
+                    org_id=None,
+                    db=db,
+                )
+            else:
+                template_id = existing_template.id
+
+            # Create mappings for all patterns under the active provider
+            for i, pattern in enumerate(template_def["question_patterns"]):
                 try:
-                    emb = self._generate_embedding(pattern)
+                    emb = first_emb if i == 0 else self._generate_embedding(pattern, embedder)
                 except Exception:
-                    emb = embedding
+                    emb = first_emb  # fallback to first pattern's embedding
 
                 self._create_mapping(
                     template_id=template_id,
                     question=pattern,
                     embedding=emb,
                     db=db,
+                    provider=active_provider,
                 )
 
         db.commit()
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _generate_embedding(self, text: str, api_key: Optional[str] = None) -> list:
-        """Generate embedding vector for text. Separated for testability.
-
-        SELF-HOSTED NOTE (A4): api_key must be the org's BYOK key. No env
-        fallback. Template saving is silently skipped for orgs without an
-        OpenAI key — accepted behaviour (PRD §A4 known limitation).
+    def _generate_embedding(self, text: str, embedder) -> list:
         """
-        key = api_key or ""
-        if not key:
-            raise RuntimeError(
-                "No OpenAI API key configured for embedding. "
-                "Please add your OpenAI key in Settings → AI → API Keys."
-            )
+        Generate embedding vector for text via the injected ResolvedEmbedder.
 
-        import openai
-        client = openai.OpenAI(api_key=key)
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text,
-        )
-        return response.data[0].embedding
+        Args:
+            text:     The text to embed.
+            embedder: ResolvedEmbedder — uses embedder.embedder.embed(text).
+
+        Raises:
+            Exception: Provider errors propagate so callers can decide to skip.
+        """
+        return embedder.embedder.embed(text)
 
     def _find_template_by_sql(self, sql_query: str, org_id: Optional[int], db):
         """Find an existing template with identical SQL."""
@@ -523,6 +564,58 @@ class TemplateSaver:
         except Exception as e:
             logger.debug(f"Template lookup failed: {e}")
             return None
+
+    def _find_template_by_sql_with_mapping(
+        self,
+        sql_query: str,
+        org_id: Optional[int],
+        db,
+        provider: Optional[str] = None,
+    ):
+        """
+        Find a template by SQL that also has at least one mapping matching
+        the given embedding provider.
+
+        Used by seed_system_templates for provider-aware idempotency: if the
+        template is already seeded for the active provider, we skip re-embedding.
+
+        Args:
+            sql_query: The SQL to look up.
+            org_id:    Organization scope (None for system templates).
+            db:        SQLAlchemy session.
+            provider:  Active embedding provider name to check for.
+
+        Returns:
+            The template ORM object if found with a matching-provider mapping,
+            None otherwise.
+        """
+        template = self._find_template_by_sql(sql_query, org_id, db)
+        if template is None:
+            return None
+
+        # Try DB query for matching mapping (fast path)
+        try:
+            from src.models.query_template_mapping import QueryTemplateMapping
+            mapping = db.query(QueryTemplateMapping).filter_by(
+                template_id=template.id,
+                embedding_provider=provider,
+            ).first()
+            if mapping is not None:
+                return template
+        except Exception:
+            pass
+
+        # Fallback: inspect template.mappings if loaded (works with mock objects in tests)
+        try:
+            mappings = getattr(template, 'mappings', None)
+            if mappings:
+                for m in mappings:
+                    if getattr(m, 'embedding_provider', None) == provider:
+                        return template
+        except Exception:
+            pass
+
+        return None
 
     def _create_template(
         self,
@@ -571,14 +664,39 @@ class TemplateSaver:
             row = result.fetchone()
             return row[0] if row else None
 
-    def _create_mapping(self, template_id, question: str, embedding: list, db) -> None:
-        """Create a new QueryTemplateMapping record."""
+    def _create_mapping(
+        self,
+        template_id,
+        question: str,
+        embedding: list,
+        db,
+        provider: Optional[str] = None,
+    ) -> None:
+        """
+        Create a new QueryTemplateMapping record.
+
+        Always persists embedding_provider and embedding_dimension derived from
+        the actual vector length — never a pre-embed hint.  This ensures that
+        the matcher's skip-filter has accurate metadata for every stored vector.
+
+        Args:
+            template_id: FK to query_templates.
+            question:    The question text (stored lowercased).
+            embedding:   The embedding vector as a Python list of floats.
+            db:          SQLAlchemy session.
+            provider:    The embedding provider name (e.g. 'openai', 'openai_compatible').
+                         None for stale / unknown rows.
+        """
+        dimension = len(embedding) if embedding else None
+
         try:
             from src.models.query_template_mapping import QueryTemplateMapping
             mapping = QueryTemplateMapping(
                 template_id=template_id,
                 question_pattern=question.lower(),
                 question_embedding=embedding,
+                embedding_provider=provider,
+                embedding_dimension=dimension,
                 match_count=0,
             )
             db.add(mapping)
@@ -589,13 +707,17 @@ class TemplateSaver:
             db.execute(
                 text(
                     "INSERT INTO query_template_mappings "
-                    "(template_id, question_pattern, question_embedding, match_count, created_at) "
-                    "VALUES (:template_id, :pattern, :embedding, 0, :now)"
+                    "(template_id, question_pattern, question_embedding, "
+                    " embedding_provider, embedding_dimension, match_count, created_at) "
+                    "VALUES (:template_id, :pattern, :embedding, "
+                    "        :provider, :dimension, 0, :now)"
                 ),
                 {
                     "template_id": template_id,
                     "pattern": question.lower(),
                     "embedding": _json.dumps(embedding),
+                    "provider": provider,
+                    "dimension": dimension,
                     "now": datetime.utcnow(),
                 }
             )
