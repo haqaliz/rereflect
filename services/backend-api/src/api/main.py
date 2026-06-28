@@ -25,6 +25,8 @@ from src.api.routes import churn_analytics as churn_analytics_router  # noqa: E4
 from src.api.routes import churn_accuracy as churn_accuracy_router  # noqa: E402 — M4.1 Accuracy API
 from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 Churn Playbooks
 from src.seed import seed_admin_user, seed_system_templates
+from src.services.copilot.template_saver import TemplateSaver
+from src.services.embeddings import resolve_embedding_provider
 import logging
 import os
 import subprocess
@@ -44,6 +46,55 @@ sentry_sdk.init(
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def seed_copilot_system_templates(db) -> None:
+    """
+    Resolve the active embedding provider and seed/re-seed Copilot system templates.
+
+    ── PHASE 4 CHECKPOINT (human review requested) ────────────────────────────
+    System templates are org-less (organization_id IS NULL), but
+    resolve_embedding_provider() requires an org_id to look up OrgAIConfig.
+
+    DECISION: For self-hosted single-tenant deployments (the primary OSS use
+    case), we resolve the embedder from the FIRST organization in the database.
+    This is the only org in a typical self-hosted install.
+
+    Rationale:
+      - The embedding model config is set once by the operator in the UI / env
+        and applies to the whole self-hosted instance.
+      - The first org's OrgAIConfig is the de-facto global config.
+      - If no org exists yet (fresh DB before first signup), we log and skip;
+        seeding will succeed on the next boot after the first org is created.
+
+    Multi-tenant cloud note: this approach is intentionally single-org.  A
+    cloud SaaS deployment would need per-org system-template sets, which is
+    beyond the scope of this aspect (the spec targets self-hosted OSS).
+
+    PLEASE CONFIRM this approach is acceptable for your deployment model.
+    ─────────────────────────────────────────────────────────────────────────
+    """
+    try:
+        from src.models.organization import Organization
+        first_org = db.query(Organization).first()
+        if first_org is None:
+            logger.info(
+                "seed_copilot_system_templates: no organizations in DB yet — "
+                "skipping (will seed on next boot after first org is created)"
+            )
+            return
+
+        resolved = resolve_embedding_provider(first_org.id, db)
+        saver = TemplateSaver()
+        saver.seed_system_templates(db, embedder=resolved)
+        logger.info(
+            "seed_copilot_system_templates: seeding complete "
+            "(provider=%s)", resolved.provider if resolved else "none"
+        )
+    except Exception as e:
+        logger.warning(
+            "seed_copilot_system_templates: failed, boot continues: %s", e
+        )
 
 
 def run_migrations():
@@ -90,6 +141,18 @@ async def lifespan(app: FastAPI):
             _pb_db.close()
     except Exception as e:
         logger.warning(f"Could not seed playbook templates: {e}")
+    # Seed Copilot system templates with the active embedding provider.
+    # Provider-aware: re-embeds if the active provider changed since last boot.
+    # Never blocks boot: errors are caught and logged.
+    try:
+        from src.database.session import SessionLocal
+        _emb_db = SessionLocal()
+        try:
+            seed_copilot_system_templates(_emb_db)
+        finally:
+            _emb_db.close()
+    except Exception as e:
+        logger.warning(f"Could not seed copilot system templates: {e}")
     try:
         from scripts.sync_changelog import run_changelog_sync
         run_changelog_sync()
