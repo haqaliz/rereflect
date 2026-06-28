@@ -61,10 +61,16 @@ def _compute_usage_component(db: Session, org_id: int, customer_email: str, now:
 
     Contract: this function NEVER raises; it is always safe to call.
     The actual usage_score is computed by aspect `usage-rollup-and-score`.
+
+    Args:
+        now: Timestamp of the computation; not used in this function but kept
+             to match the _compute_* calling convention shared across all
+             component functions (all receive the same timestamp from the caller).
     """
+    from sqlalchemy import text
     try:
-        from sqlalchemy import text
-        result = db.execute(
+        sp = db.begin_nested()  # SAVEPOINT — isolates this read from the outer transaction
+        row = db.execute(
             text(
                 "SELECT usage_score FROM customer_usage "
                 "WHERE organization_id = :org_id AND customer_email = :email "
@@ -72,11 +78,17 @@ def _compute_usage_component(db: Session, org_id: int, customer_email: str, now:
             ),
             {"org_id": org_id, "email": customer_email},
         ).fetchone()
-        if result is not None and result[0] is not None:
-            return int(result[0])
+        sp.commit()
+        if row is not None and row[0] is not None:
+            return int(row[0])
     except Exception:
-        # Table does not exist yet or any other DB error — return neutral score
-        pass
+        # Table does not exist yet or any other DB error — roll back only the
+        # SAVEPOINT so the outer transaction remains usable (avoids
+        # PendingRollbackError on the next query in the same request).
+        try:
+            sp.rollback()
+        except Exception:
+            pass
     return 50
 
 

@@ -459,3 +459,84 @@ class TestHealthWeightsApiPhase4:
         response = client.get("/api/v1/categories/health-weights", headers=owner_headers_p4)
         assert response.status_code == 200
         assert response.json()["usage"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Fix wave 1 — Regression: SAVEPOINT isolation for missing customer_usage table
+# ---------------------------------------------------------------------------
+
+class TestUsageComponentSavepointIsolation:
+    """
+    Regression: _compute_usage_component must use db.begin_nested() (SAVEPOINT)
+    to isolate the usage read so a DB error (missing customer_usage table) cannot
+    put the outer PostgreSQL transaction into an aborted state, causing
+    PendingRollbackError on the next query in the same request.
+
+    SQLite (the test DB) lacks aborted-transaction semantics, so this test
+    asserts the structural property — that begin_nested is called — rather than
+    observing session invalidation directly. On PostgreSQL, skipping begin_nested
+    means any downstream db.query(...) after a failed usage read raises
+    PendingRollbackError → HTTP 500.
+
+    RED on old bare-except code: begin_nested is never called (call_count == 0),
+    so the assertion fails.
+    GREEN on fixed code: begin_nested is called once before the execute
+    (call_count >= 1).
+    """
+
+    def test_begin_nested_called_during_usage_read(
+        self, db: Session, test_organization: Organization
+    ):
+        """
+        begin_nested() must be invoked during the usage component read to
+        SAVEPOINT-isolate any DB error.
+
+        RED on old code: bare-except never calls begin_nested → call_count == 0
+        → assertion fails.
+        GREEN on fixed code: begin_nested called once → call_count >= 1 → passes.
+        """
+        with patch.object(db, "begin_nested", wraps=db.begin_nested) as spy:
+            result = _compute_usage_component(
+                db, test_organization.id, "savepoint_spy@example.com", datetime.utcnow()
+            )
+
+        assert result == 50  # missing table → neutral fallback
+        assert spy.call_count >= 1, (
+            "begin_nested must be called to SAVEPOINT-isolate the usage read. "
+            "Without it, a PostgreSQL-level SQL error leaves the session in an "
+            "aborted-transaction state and the next db.query(...) raises "
+            "PendingRollbackError (HTTP 500 in production)."
+        )
+
+    def test_session_still_usable_after_simulated_usage_error(
+        self, db: Session, test_organization: Organization
+    ):
+        """
+        After _compute_usage_component handles a simulated execute error, the
+        session must still accept further queries (SAVEPOINT was rolled back).
+
+        On SQLite this is not a strict RED/GREEN split (SQLite doesn't abort
+        transactions on Python-level exceptions), but it documents and guards the
+        expected behaviour. The companion test above is the reliable RED guard.
+        """
+        from sqlalchemy import text as sql_text
+
+        original_execute = db.execute
+        first_call = [True]
+
+        def failing_execute(statement, *args, **kwargs):
+            if first_call[0]:
+                first_call[0] = False
+                raise Exception("simulated: table customer_usage does not exist")
+            return original_execute(statement, *args, **kwargs)
+
+        with patch.object(db, "execute", side_effect=failing_execute):
+            result = _compute_usage_component(
+                db, test_organization.id, "session_recovery@example.com", datetime.utcnow()
+            )
+
+        assert result == 50  # neutral fallback even after simulated error
+
+        # Session must still be usable — not in an aborted/invalid state
+        val = db.execute(sql_text("SELECT 1")).scalar()
+        assert val == 1, "Session must be usable after a savepoint-isolated usage error"
