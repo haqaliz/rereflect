@@ -7,13 +7,14 @@ const defaultProps = {
   sentiment_component: 38,
   resolution_component: 45,
   frequency_component: 30,
+  usage_component: 55,
 };
 
 describe('ComponentProgressBars', () => {
-  it('renders 4 progress bars', () => {
+  it('renders 5 progress bars', () => {
     const { container } = render(<ComponentProgressBars {...defaultProps} />);
     const bars = container.querySelectorAll('[data-testid^="progress-bar-"]');
-    expect(bars).toHaveLength(4);
+    expect(bars).toHaveLength(5);
   });
 
   it('renders Churn Risk label with weight 35%', () => {
@@ -38,6 +39,11 @@ describe('ComponentProgressBars', () => {
     expect(screen.getByText(/15%/)).toBeInTheDocument();
   });
 
+  it('renders Usage Activity label', () => {
+    render(<ComponentProgressBars {...defaultProps} />);
+    expect(screen.getByText(/Usage Activity/i)).toBeInTheDocument();
+  });
+
   it('renders score display e.g. "22/100"', () => {
     render(<ComponentProgressBars {...defaultProps} />);
     expect(screen.getByText('22/100')).toBeInTheDocument();
@@ -48,6 +54,18 @@ describe('ComponentProgressBars', () => {
     expect(screen.getByText('38/100')).toBeInTheDocument();
     expect(screen.getByText('45/100')).toBeInTheDocument();
     expect(screen.getByText('30/100')).toBeInTheDocument();
+    expect(screen.getByText('55/100')).toBeInTheDocument();
+  });
+
+  it('defaults usage_component to 50 when not provided', () => {
+    const props = {
+      churn_risk_component: 22,
+      sentiment_component: 38,
+      resolution_component: 45,
+      frequency_component: 30,
+    };
+    render(<ComponentProgressBars {...props} />);
+    expect(screen.getByText('50/100')).toBeInTheDocument();
   });
 
   it('uses red color for score < 30', () => {
@@ -57,11 +75,11 @@ describe('ComponentProgressBars', () => {
         sentiment_component={50}
         resolution_component={50}
         frequency_component={50}
+        usage_component={50}
       />
     );
     const bar = container.querySelector('[data-testid="progress-bar-churn_risk"]');
     expect(bar).not.toBeNull();
-    // The bar fill should have the destructive color
     const fill = bar?.querySelector('[data-testid="progress-fill-churn_risk"]');
     expect(fill).not.toBeNull();
     expect(fill).toHaveStyle({ backgroundColor: 'var(--destructive)' });
@@ -74,6 +92,7 @@ describe('ComponentProgressBars', () => {
         sentiment_component={50}
         resolution_component={50}
         frequency_component={50}
+        usage_component={50}
       />
     );
     const fill = container.querySelector('[data-testid="progress-fill-churn_risk"]');
@@ -88,6 +107,7 @@ describe('ComponentProgressBars', () => {
         sentiment_component={50}
         resolution_component={50}
         frequency_component={50}
+        usage_component={50}
       />
     );
     const fill = container.querySelector('[data-testid="progress-fill-churn_risk"]');
@@ -102,6 +122,7 @@ describe('ComponentProgressBars', () => {
         sentiment_component={50}
         resolution_component={50}
         frequency_component={50}
+        usage_component={50}
       />
     );
     const fill = container.querySelector('[data-testid="progress-fill-churn_risk"]');
@@ -113,5 +134,11 @@ describe('ComponentProgressBars', () => {
     const { container } = render(<ComponentProgressBars {...defaultProps} />);
     const fill = container.querySelector('[data-testid="progress-fill-churn_risk"]');
     expect(fill).toHaveStyle({ width: '22%' });
+  });
+
+  it('renders usage progress bar data-testid', () => {
+    const { container } = render(<ComponentProgressBars {...defaultProps} />);
+    const usageBar = container.querySelector('[data-testid="progress-bar-usage"]');
+    expect(usageBar).not.toBeNull();
   });
 });
