@@ -38,6 +38,7 @@ vi.mock('@/lib/api/customers', () => ({
     getFeedbacks: vi.fn(),
     getActivity: vi.fn(),
     requestAnalysis: vi.fn(),
+    getUsage: vi.fn(),
   },
 }));
 
@@ -120,6 +121,17 @@ describe('CustomerProfilePage', () => {
     (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
     (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      email: 'john@acme.com',
+      last_active_at: '2026-06-01T10:00:00Z',
+      login_count_7d: 3,
+      login_count_30d: 12,
+      active_days_30d: 9,
+      distinct_feature_count: 4,
+      usage_score: 65,
+      period_days: 30,
+      series: [{ date: '2026-06-01', events: 5 }],
+    });
   });
 
   it('renders the breadcrumb with Customers link', async () => {
@@ -220,6 +232,17 @@ describe('CustomerProfilePage - low confidence badge', () => {
     (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
     (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      email: 'john@acme.com',
+      last_active_at: null,
+      login_count_7d: 0,
+      login_count_30d: 0,
+      active_days_30d: 0,
+      distinct_feature_count: 0,
+      usage_score: 50,
+      period_days: 30,
+      series: [],
+    });
   });
 
   it('renders confidence badge for low confidence', async () => {
