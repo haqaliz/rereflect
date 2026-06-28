@@ -543,6 +543,7 @@ async def _handle_query(
         query_type = intent
         sql_columns = None
         sql_rows = None
+        sql_gen_error = None  # reason when SQL generation/validation fails
 
         # Resolve embedding provider once for this request (None = unconfigured org, degrade gracefully)
         resolved_embedder = None
@@ -596,7 +597,8 @@ async def _handle_query(
                     sql_generated = sql
                     logger.info(f"SQL generated: type={query_type}, sql={sql[:120]}")
                 elif gen_result["error"]:
-                    logger.warning(f"SQL generation failed: {gen_result['error']}")
+                    sql_gen_error = gen_result["error"]
+                    logger.warning(f"SQL generation failed: {sql_gen_error}")
 
             # 7c. Execute SQL
             if sql:
@@ -655,17 +657,36 @@ async def _handle_query(
                 {"role": "user", "content": content},
             ]
         elif intent in ("data", "analysis"):
-            # Data intent but SQL failed or returned empty — give context-aware response
+            # Data intent but SQL failed or returned empty — give a context-aware response.
+            # When the failure was a safety-check violation (local/weak model produced
+            # invalid SQL), be honest about it rather than pretending the data is absent.
+            safety_failed = (
+                sql_gen_error is not None
+                and "safety check" in sql_gen_error.lower()
+            )
+
+            if safety_failed:
+                # Honest weak-model UX: tell the user the model couldn't produce safe SQL
+                system_content = (
+                    "You are an AI assistant for the Rereflect customer feedback platform.\n"
+                    f"Context about the organization's data:\n{context}\n\n"
+                    "I couldn't turn that question into a safe, valid SQL query with the "
+                    "current model. This can happen with smaller or less capable local models.\n"
+                    "A stronger model typically improves results.\n"
+                    "Please acknowledge this honestly, suggest the user try rephrasing, and "
+                    "briefly describe what data is available to help them ask a better question."
+                )
+            else:
+                # Generic fallback: SQL returned empty or generation failed for other reasons
+                system_content = (
+                    "You are an AI assistant for the Rereflect customer feedback platform.\n"
+                    f"Here is context about the organization's data:\n{context}\n\n"
+                    "The user asked a data question but the query returned no results.\n"
+                    "Help them understand what data is available and suggest alternative questions."
+                )
+
             llm_messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an AI assistant for the Rereflect customer feedback platform.\n"
-                        f"Here is context about the organization's data:\n{context}\n\n"
-                        "The user asked a data question but the query returned no results.\n"
-                        "Help them understand what data is available and suggest alternative questions."
-                    ),
-                },
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": content},
             ]
         else:
