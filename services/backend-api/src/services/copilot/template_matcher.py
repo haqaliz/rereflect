@@ -3,10 +3,12 @@ Template Matcher — semantic matching of user questions against saved query tem
 
 Matching flow:
 1. Normalize user question (lowercase, remove stopwords)
-2. Generate embedding via OpenAI text-embedding-3-small (1536 dims)
+2. Generate embedding via the injected EmbeddingProvider (pluggable: OpenAI, local, Google)
 3. Cosine similarity search against query_template_mappings
+   - Skip rows whose embedding_provider/embedding_dimension ≠ active provider/dim
+     (never compare vectors across incompatible spaces — zip-truncation gives garbage)
 4. If similarity > threshold (0.85) → return matching template
-5. If no match → return None (fall through to LLM SQL generation)
+5. If no embedder supplied, or no match → return None (fall through to LLM SQL generation)
 
 If pgvector is not available, fallback to JSONB + Python cosine similarity.
 """
@@ -20,9 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Similarity threshold for template matching
 _DEFAULT_THRESHOLD = 0.85
-
-# Embedding dimensions
-_EMBEDDING_DIMS = 1536
 
 # Common English stopwords to remove during normalization
 _STOPWORDS = {
@@ -48,6 +47,9 @@ class TemplateMatcher:
     """
     Matches user questions against saved query templates using
     cosine similarity on embeddings.
+
+    All embedding work is delegated to an injected ResolvedEmbedder from
+    src.services.embeddings.  No OpenAI-specific code lives here any more.
     """
 
     # ── Math utilities ────────────────────────────────────────────────────────
@@ -94,44 +96,21 @@ class TemplateMatcher:
 
     # ── Embedding generation ──────────────────────────────────────────────────
 
-    def generate_embedding(self, text: str) -> list:
+    def generate_embedding(self, text: str, embedder) -> list:
         """
-        Generate an embedding vector for the given text.
-        Uses OpenAI text-embedding-3-small (1536 dimensions).
+        Generate an embedding vector for the given text via the injected provider.
+
+        Args:
+            text:     Text to embed (already normalized by the caller).
+            embedder: An EmbeddingProvider instance (embedder.embed(text) → list[float]).
+
+        Returns:
+            list[float] — the embedding vector.
 
         Raises:
-            Exception: If the embedding API call fails
+            Exception: Provider-specific errors propagate to the caller.
         """
-        embedding = self._call_embedding_api(text)
-        if len(embedding) != _EMBEDDING_DIMS:
-            raise ValueError(
-                f"Expected {_EMBEDDING_DIMS}-dim embedding, got {len(embedding)}"
-            )
-        return embedding
-
-    def _call_embedding_api(self, text: str, api_key: Optional[str] = None) -> list:
-        """
-        Call OpenAI embeddings API. Separated for testability.
-
-        SELF-HOSTED NOTE (A4): api_key must be the org's BYOK key. No env
-        fallback. Orgs without an OpenAI BYOK key will not get template
-        matching — that is accepted behaviour (see PRD §A4 known limitation).
-        """
-        import openai
-
-        key = api_key or ""
-        if not key:
-            raise RuntimeError(
-                "No OpenAI API key configured for embeddings. "
-                "Please add your OpenAI key in Settings → AI → API Keys."
-            )
-
-        client = openai.OpenAI(api_key=key)
-        response = client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text,
-        )
-        return response.data[0].embedding
+        return embedder.embed(text)
 
     # ── Template matching ─────────────────────────────────────────────────────
 
@@ -140,16 +119,19 @@ class TemplateMatcher:
         question: str,
         org_id: int,
         db,
+        embedder=None,
         threshold: float = _DEFAULT_THRESHOLD,
     ) -> Optional[dict]:
         """
         Find the best matching template for a user question.
 
         Args:
-            question: The user's question text
-            org_id: Organization ID (for org-specific templates)
-            db: SQLAlchemy session
-            threshold: Minimum cosine similarity for a match (default 0.85)
+            question:  The user's question text.
+            org_id:    Organization ID (for org-specific templates).
+            db:        SQLAlchemy session.
+            embedder:  ResolvedEmbedder from resolve_embedding_provider().
+                       Pass None to skip matching entirely (degrade cleanly).
+            threshold: Minimum cosine similarity for a match (default 0.85).
 
         Returns:
             Dict with template info if match found:
@@ -160,11 +142,27 @@ class TemplateMatcher:
                 "parameter_schema": dict,
                 "similarity": float,
             }
-            Or None if no match above threshold.
+            Or None if no match above threshold, no embedder, or an error.
+
+        Skip rule (cross-provider safety):
+            Rows whose stored embedding_provider ≠ resolved.provider OR whose
+            embedding_dimension ≠ len(query_vector) are EXCLUDED before the
+            cosine comparison.  This prevents comparing vectors from different
+            embedding spaces (which would give meaningless results due to
+            dimensionality mismatch or feature-space incompatibility).
         """
+        if embedder is None:
+            # No embedding provider configured for this org — degrade gracefully.
+            return None
+
         # 1. Normalize and generate embedding
         normalized = self.normalize_question(question)
-        query_embedding = self.generate_embedding(normalized)
+        query_embedding = self.generate_embedding(normalized, embedder.embedder)
+
+        # Active provider name and dimension come from the actual vector length
+        # (not a hint — local providers only know their dim after the first embed call).
+        active_provider: str = embedder.provider
+        active_dim: int = len(query_embedding)
 
         # 2. Fetch all active mappings from DB
         # We fetch all and compute similarity in Python (fallback for no pgvector)
@@ -172,7 +170,7 @@ class TemplateMatcher:
         from sqlalchemy import text
         try:
             mappings = db.execute(
-                text("SELECT template_id, question_embedding FROM query_template_mappings"),
+                text("SELECT template_id, question_embedding, embedding_provider, embedding_dimension FROM query_template_mappings"),
                 {}
             ).fetchall()
         except Exception:
@@ -182,15 +180,24 @@ class TemplateMatcher:
         if not mappings:
             return None
 
-        # 3. Find best matching mapping
+        # 3. Find best matching mapping, skipping cross-provider/dim rows
         best_match = None
         best_similarity = -1.0
 
         for mapping in mappings:
             template_id = mapping.template_id
             stored_embedding = mapping.question_embedding
+            stored_provider = mapping.embedding_provider
+            stored_dim = mapping.embedding_dimension
 
             if not stored_embedding:
+                continue
+
+            # ── Provider/dim skip-filter ────────────────────────────────────
+            # Comparing vectors from different embedding spaces produces garbage
+            # (even if dims coincidentally match, the feature spaces differ).
+            # NULL provider/dim means the row is stale (pre-migration) — skip.
+            if stored_provider != active_provider or stored_dim != active_dim:
                 continue
 
             # Convert from JSONB array if needed
