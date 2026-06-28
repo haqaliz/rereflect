@@ -1,82 +1,65 @@
-# Phase 2 — Understanding note
+# Understanding — Product Usage Enrichment (Phase 2 dig)
 
-## What the task is really asking
+Synthesized from three read-only dig agents (health/churn scoring, webhook/ingest+auth, frontend Customer 360). All paths relative to the worktree.
 
-Let a fully self-hosted, keyless install (local / OpenAI-compatible LLM, e.g. Ollama)
-get a working AI Copilot. Today the Copilot is OpenAI-bound in **two** independent
-places, both of which must be considered:
+## What the feature really asks
 
-1. **Template-matching embeddings** (the stated slice) — `template_matcher.py` /
-   `template_saver.py` hardcode OpenAI `text-embedding-3-small` (1536-dim) and raise
-   if no OpenAI key. This is the query→template fast-path.
-2. **⚠️ Copilot LLM generation itself** — `copilot_ws.py:521-541` resolves a BYOK key
-   via `resolve_org_byok_key(...)` and **returns an error immediately if the key is
-   None**, *before* template matching even runs. The Copilot's SQL/analysis/report
-   generation uses its own OpenAI-BYOK client, **separate** from the analysis
-   pipeline's local-capable provider chain (which lives in `worker-service/src/llm/`).
+Add a **real product-usage signal** (logins, feature usage, last-active per customer) into Rereflect and feed it into the customer health score — the canonical leading churn indicator that is currently **absent**. First slice = inbound usage-event receiver → per-customer usage aggregates → a usage component in health + a usage section on the customer profile.
 
-**Scope implication:** fixing only #1 makes *template matching* local but a keyless org
-still can't use the Copilot at all, because #2 bails first. "Fully offline Copilot" =
-both must route through the local-capable provider. This is the key scope decision for
-the interview / review gate.
+## The confirmed gap (the whole reason this is high-leverage)
 
-## Affected areas (services + files)
+`services/backend-api/src/services/health_score_service.py:435-471` — the existing **"frequency" component measures feedback complaint cadence**, not product usage (last-7d vs 30d *feedback* count). There is **no product-usage input anywhere** in the health score or the 9-factor churn scorer. The customers list "Last Active" column (`customers/page.tsx:304`) is `last_feedback_at` — also feedback-derived, not usage. So a genuine usage signal is net-new.
 
-### backend-api (primary)
-- `src/services/copilot/template_matcher.py` — `_EMBEDDING_DIMS=1536` (L25),
-  `generate_embedding` (L97), `_call_embedding_api` → OpenAI `text-embedding-3-small`
-  (L112-134), `cosine_similarity` over JSON arrays (L55), threshold `0.85` (L22).
-  `find_match()` (L138) has **no api_key/provider param** — must thread through.
-- `src/services/copilot/template_saver.py` — `_generate_embedding` OpenAI (L490-510);
-  `save_template` (L351), `seed_system_templates` (L448), `SYSTEM_TEMPLATES` 15 defs
-  (L64-338). Seeder idempotent **by SQL match** (L454) → won't re-embed on provider
-  change unless made provider-aware.
-- `src/api/routes/copilot_ws.py` — resolves BYOK key + bails if None (L521-541);
-  calls `find_match` without api_key (L557-560); auto-saves templates (L788-798).
-- `src/models/query_template_mapping.py` — `question_embedding = Column(JSON)` (L15),
-  **no provider/dim recorded**, no pgvector (TODO only).
-- `src/models/org_ai_config.py` — **already has `base_url` (L16)**, `default_provider`,
-  `model_*` columns. Reuse; likely add `model_embeddings`.
-- `src/utils/byok.py` (`resolve_org_byok_key`), `src/utils/encryption.py`
-  (`decrypt_api_key`, `LLM_ENCRYPTION_KEY`), `src/models/org_api_key.py` — BYOK plumbing
-  already in backend-api. **No embeddings abstraction exists anywhere yet.**
-- `src/api/main.py` — startup lifespan seeds **ResponseTemplate only** (L80);
-  `TemplateSaver.seed_system_templates()` (the QueryTemplate seeder) is **never wired
-  at startup** — only called in tests. So the 15 system query-templates may not be
-  seeded in prod at all.
+## How customers + health are modeled (no Customer table)
 
-### worker-service (reference pattern to mirror, NOT to import directly)
-- `src/llm/factory.py` — `LLMProviderFactory.create()` dispatches openai / anthropic /
-  google / ollama / openai_compatible; `_OLLAMA_DEFAULT_BASE_URL="http://localhost:11434/v1"`.
-- `src/llm/org_resolver.py` — `build_fallback_chain` (L84) with `_LOCAL_PROVIDERS`
-  (ollama, openai_compatible) keyless path requiring `base_url` (L114-127); BYOK decrypt
-  (L129-152). Mirrors the VADER-style graceful fallback. **Gap noted:** `call_llm_for_org`
-  doesn't extract `base_url` from OrgAIConfig.
-- No embeddings types exist (`types.py` is chat-only).
+- A "customer" = **`customer_email`**, scoped per org. No dedicated table.
+- `customer_health_scores` (`models/customer_health.py`) — unique on `(organization_id, customer_email)` (`:78`). Holds `health_score`, the 4 `*_component` columns, `risk_level`, confidence, churn probability/CI/bucket, LLM analysis.
+- `customer_health_history` (`models/customer_health_history.py`) — snapshots each component on score change ≥2 pts.
 
-## Migration / re-embed surface
+## Health score internals
 
-- New Alembic migration on `query_template_mappings`: add `embedding_provider`
-  (String, default `'openai'`) + `embedding_dimension` (Int, default `1536`); backfill
-  existing rows. No pgvector needed (stays JSON; cosine in Python).
-- Cross-provider vectors are incomparable. On provider change: matcher must **ignore
-  mismatched-provider rows** (degrade to LLM path) and the seeder must **re-embed**
-  system templates for the active provider (make idempotency provider-aware, not
-  SQL-only). Auto-saved org templates: re-embed lazily or mark stale.
+- 4 components, default weights in `health_score_service.py:24-29` — churn_risk .35, sentiment .25, resolution .25, frequency .15.
+- Per-org weights in `org_ai_config` table (`models/org_ai_config.py:18-21`: `health_weight_churn/sentiment/resolution/frequency`, INT %). Read by `_get_org_weights()` (`:32-46`).
+- **Sum-to-100 validation** in `api/routes/categories.py:185-190` (Pydantic `model_validator`); GET/PUT at `:193-238`.
+- Each component returns **50 (neutral) when it has no data** — built-in degrade pattern.
+- Recompute trigger: `analyze_single_feedback` Celery task → `_analyze_feedback_item` → `update_customer_health()` (worker `analysis.py:408-416`) → `compute_health_score()` → health-drop alert (`health_score_service.py:473-540`).
 
-## Tests to extend (TDD)
-- `tests/test_template_matcher.py` (15 tests; hardcode `[0.1]*1536`).
-- `tests/test_template_saver.py` (9 tests; `seed_system_templates` mocks `[0.1]*1536`).
-- Both must be parameterized for variable dims / provider.
+### → Adding a 5th "usage" component (caveat resolution)
 
-## Open questions for the interview
-1. **Scope: embeddings-only or full offline Copilot?** Does this slice also route the
-   Copilot's *LLM generation* (`copilot_ws.py`) through the local-capable provider, or
-   only the template-matching embeddings? (Embeddings-only leaves keyless orgs still
-   unable to use the Copilot.)
-2. **Embedding providers to support:** OpenAI + OpenAI-compatible/Ollama only (Anthropic
-   has no first-party embeddings API; Google optional)?
-3. **Re-embed trigger on provider switch:** lazy/ignore-mismatch + provider-aware
-   re-seed at startup, vs. an explicit admin "rebuild embeddings" action?
-4. **No-embedding-provider behavior:** confirm degrade = Copilot answers via LLM path
-   with template fast-match disabled (mirror VADER fallback).
+The caveat (re-weighting + don't double-count) resolves cleanly with **two layers of safe degradation**:
+1. **Add** a 5th component (don't replace the feedback-"frequency" one — different signal). New `health_weight_usage` column **defaulting to 0**, so *existing orgs' scores are mathematically unchanged* until an operator opts in by re-weighting (sum still 100).
+2. `_compute_usage_component()` returns **50 (neutral)** for customers/orgs with no usage events — mirrors the existing per-component no-data behavior. So even at a non-zero weight, no-usage customers aren't penalized.
+
+Touch list for the component: `org_ai_config` (+column, migration), `_get_org_weights`, new `_compute_usage_component`, `compute_health_score` aggregation, `categories.py` validation (5 weights → 100), `customer_health_scores.usage_component` (+column), `customer_health_history.usage_component` (+column), frontend `ComponentProgressBars` (5th bar).
+
+## 9-factor churn scorer (optional v2 hook)
+
+`worker-service/src/tasks/analysis.py:566-833` `_compute_heuristic_churn_risk` — 9 weighted factors incl. a `feedback_frequency` factor (again feedback cadence). A usage factor could be added here later, but the **health component is the cleaner first slice** (usage already flows into churn indirectly via health). Keep churn-scorer changes out of slice 1.
+
+## Inbound ingestion (the receiver)
+
+- **Reuse the public API-key system** for auth: `verify_api_key` + `require_scope("ingest")` (`api/public/auth.py:74-129`), already org-scoped via `auth.organization_id`. No new secret scheme; an operator mints an ingest-scoped key (`models/api_key.py`, scopes col `:22`). This beats a hardcoded env secret for multi-tenant + matches existing `/api/public` feedback ingest (`public_api.py:212-242`).
+- New router `api/routes/usage_webhooks.py`, prefix `/api/v1/webhooks/usage` (or under `/api/public/v1/usage` to sit with ingest — decide in PRD), registered in `api/main.py` (include_router pattern `:226-296`).
+- Pattern: **Route → auth/validate → dedup → queue Celery → 200**. Dedup via unique constraint on `(org, external_event_id)` like `feedback_source_event.py:35-40`.
+- Celery task `worker-service/src/tasks/usage_metrics.py::process_usage_event` (`@shared_task`, mirror `source_events.py:18-30`); enqueue by name via `get_celery_app().send_task(...)`.
+- New model(s): a raw `usage_event` log (JSON payload, dedup key) + a per-customer rollup (logins, feature-event count, last_active_at, derived usage_score). Alembic head = **`y4z5a6b7c8d9`** (new `down_revision`).
+
+## Frontend surfaces
+
+- Profile page `app/(dashboard)/customers/[email]/page.tsx` — new "Usage Activity" Card slots after Health Timeline (`~:688`). Data via new `customersAPI.getUsage(email, days)` (`lib/api/customers.ts` pattern `:163-231`; axios bearer interceptor `lib/api-client.ts:14-29`).
+- `components/customers/ComponentProgressBars.tsx:16-21` — add 5th `{key:'usage'}` entry + tooltip; needs `usage_component` on `CustomerProfileData`.
+- `components/customers/HealthTimeline.tsx` — copy to `UsageTimeline.tsx` (Recharts LineChart, period toggle).
+- Operator setup UI: surface the ingest API key + the usage webhook URL/schema (reuse `settings/` patterns; NOTE the existing `settings/webhooks` page is **outbound** delivery — our receiver is inbound, so this is new copy, not that page's CRUD).
+
+## Stale-doc guardrails honored
+
+- Ignore plan-gating / `PLAN_WEBHOOK_LIMITS` / Pro+ tiers (pre-pivot, OSS = all unlocked).
+- No vendor OAuth; receiver is a plain authenticated POST endpoint (self-hosted-first).
+
+## Genuine product decisions to settle in the interview
+
+1. **Endpoint shape & schema** — accept Segment `identify`+`track` verbatim, or a normalized `{event, userId/email, name, timestamp, properties}` subset (Segment-compatible but simpler)? Mount under `/api/v1/webhooks/usage` vs `/api/public/v1/usage`?
+2. **Customer matching** — map Segment `email` trait (or `userId`) → existing `customer_email`. What happens to events with no resolvable email (drop, or store anonymous)?
+3. **Which metrics define `usage_score`** in slice 1 — recency of last-active + login frequency + distinct-feature count? Need a concrete 0-100 mapping (like the resolution/frequency mappings).
+4. **Default usage weight** — confirm 0 (opt-in re-weight) vs a small default like 10 (auto-reduce others). Recommend 0 for zero-surprise upgrades.
+5. **Retention** — how long to keep raw usage events vs just the rollup.
