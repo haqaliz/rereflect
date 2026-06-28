@@ -90,6 +90,7 @@ class CustomerProfileResponse(BaseModel):
     sentiment_component: int
     resolution_component: int
     frequency_component: int
+    usage_component: Optional[int] = None
     # Structured LLM analysis fields
     llm_analysis_summary: Optional[str] = None
     llm_recommended_actions: Optional[List[str]] = None
@@ -366,6 +367,7 @@ def get_customer_profile(
         sentiment_component=record.sentiment_component or 50,
         resolution_component=record.resolution_component or 50,
         frequency_component=record.frequency_component or 50,
+        usage_component=record.usage_component,
         llm_analysis_summary=llm_analysis_summary,
         llm_recommended_actions=llm_recommended_actions,
         llm_risk_drivers=llm_risk_drivers,
