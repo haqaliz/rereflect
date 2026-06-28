@@ -61,13 +61,14 @@ describe('BentoFeatures', () => {
     expect(screen.getByTestId('card-ai-copilot')).toHaveTextContent('Ask your feedback data anything');
   });
 
-  it('AI Copilot card shows 4 bullet points: Cmd+K command bar, Natural language queries, SQL generation, Charts and tables', () => {
+  it('AI Copilot card shows 5 bullet points: Cmd+K command bar, Natural language queries, SQL generation, Charts and tables, runs on a local model', () => {
     render(<BentoFeatures />);
     const card = screen.getByTestId('card-ai-copilot');
     expect(card).toHaveTextContent('Cmd+K command bar');
     expect(card).toHaveTextContent('Natural language queries');
     expect(card).toHaveTextContent('SQL generation');
     expect(card).toHaveTextContent('Charts and tables');
+    expect(card).toHaveTextContent('Runs on your local model too');
   });
 
   it('AI Copilot card has large variant styling (data-size="large")', () => {
@@ -102,19 +103,19 @@ describe('BentoFeatures', () => {
     expect(screen.getByTestId('card-multi-model')).toHaveTextContent('Choose Your AI');
   });
 
-  it('Multi-Model card shows subtext about BYOK', () => {
+  it('Multi-Model card shows subtext about bringing your own key', () => {
     render(<BentoFeatures />);
-    expect(screen.getByTestId('card-multi-model')).toHaveTextContent('BYOK');
+    expect(screen.getByTestId('card-multi-model')).toHaveTextContent('Bring your own key');
   });
 
-  it('Multi-Model card shows 3 key points: OpenAI/Anthropic/Google, Automatic fallback chains, Per-org budget tracking', () => {
+  it('Multi-Model card shows 3 key points: OpenAI/Anthropic/Google, fully offline with Ollama, free local VADER fallback', () => {
     render(<BentoFeatures />);
     const card = screen.getByTestId('card-multi-model');
     expect(card).toHaveTextContent('OpenAI');
     expect(card).toHaveTextContent('Anthropic');
     expect(card).toHaveTextContent('Google');
-    expect(card).toHaveTextContent('Automatic fallback chains');
-    expect(card).toHaveTextContent('Per-org budget tracking');
+    expect(card).toHaveTextContent('Run fully offline');
+    expect(card).toHaveTextContent('VADER');
   });
 
   // Small cards (8 total)
@@ -188,7 +189,7 @@ describe('BentoFeatures', () => {
   });
 
   // Total count
-  it('renders exactly 14 feature cards total (1 large + 2 medium + 11 small)', () => {
+  it('renders exactly 16 feature cards total (1 large + 2 medium + 13 small)', () => {
     render(<BentoFeatures />);
     const largeCards = document.querySelectorAll('[data-size="large"]');
     const mediumCards = document.querySelectorAll('[data-size="medium"]');
@@ -196,7 +197,7 @@ describe('BentoFeatures', () => {
 
     expect(largeCards).toHaveLength(1);
     expect(mediumCards).toHaveLength(2);
-    expect(smallCards).toHaveLength(11);
+    expect(smallCards).toHaveLength(13);
   });
 
   // Churn prediction card

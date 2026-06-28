@@ -85,6 +85,7 @@ const copilotBullets = [
   'Natural language queries: "What are the top pain points this week?"',
   'SQL generation with safety guardrails',
   'Charts and tables in responses, with deep links',
+  'Runs on your local model too — Ollama or any OpenAI-compatible endpoint, no cloud key required',
 ];
 
 const customer360Bullets = [
@@ -95,7 +96,7 @@ const customer360Bullets = [
 
 const multiModelBullets = [
   'OpenAI, Anthropic, Google — bring your own key',
-  'Run fully offline with Ollama or any OpenAI-compatible endpoint',
+  'Run fully offline with Ollama or any OpenAI-compatible endpoint — analysis and Copilot',
   'No key? Falls back to free local VADER analysis',
 ];
 
