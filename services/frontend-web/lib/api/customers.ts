@@ -13,6 +13,8 @@ export interface CustomerListItem {
   confidence_level: 'low' | 'medium' | 'high';
   feedback_count: number;
   last_feedback_at: string | null;
+  /** Product-usage last-active timestamp (from usage_component rollup; absent when no events) */
+  last_active_at?: string | null;
   sentiment_trend: SentimentTrend;
   is_archived: boolean;
   has_llm_analysis: boolean;
@@ -75,6 +77,8 @@ export interface CustomerProfileData {
   sentiment_component: number;
   resolution_component: number;
   frequency_component: number;
+  // Usage health component (0-100; undefined on older payloads → treat as 50/neutral)
+  usage_component?: number;
   // Structured LLM analysis fields
   llm_analysis_summary: string | null;
   llm_recommended_actions: string[] | null;
@@ -93,6 +97,30 @@ export interface CustomerProfileData {
   churn_probability_high?: number | null;
   time_to_churn_bucket?: 'immediate' | '2w' | '2-4w' | '1-3m' | 'low' | null;
   has_potential_winback?: boolean;
+}
+
+export interface UsageRollup {
+  customer_email: string;
+  /** Usage score 0-100; 50 = neutral when no data */
+  usage_score: number;
+  events_total: number;
+  last_active_at: string | null;
+  first_seen_at: string | null;
+  login_count_7d: number | null;
+  login_count_30d: number | null;
+  active_days_7d: number | null;
+  active_days_30d: number | null;
+  distinct_features: string[] | null;
+  distinct_feature_count: number | null;
+  updated_at: string | null;
+}
+
+export type UsageTimeSeriesBucket = { date: string; event_count: number };
+
+export interface CustomerUsageResponse {
+  rollup: UsageRollup;
+  time_series: UsageTimeSeriesBucket[];
+  period_days: number;
 }
 
 export interface HealthHistoryEntry {
@@ -225,6 +253,13 @@ export const customersAPI = {
   getChurnFactors: async (email: string): Promise<ChurnFactorsResponse> => {
     const response = await apiClient.get(
       `/api/v1/customers/${encodeURIComponent(email)}/churn-factors`
+    );
+    return response.data;
+  },
+
+  getUsage: async (email: string, days = 30): Promise<CustomerUsageResponse> => {
+    const response = await apiClient.get(
+      `/api/v1/customers/${encodeURIComponent(email)}/usage?days=${days}`
     );
     return response.data;
   },

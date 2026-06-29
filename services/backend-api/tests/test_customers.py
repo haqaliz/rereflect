@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
 from src.models.customer_health import CustomerHealth
+from src.models.customer_usage import CustomerUsage
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.models.user import User
@@ -446,3 +447,92 @@ class TestCustomerListSummary:
         item = response.json()["items"][0]
         assert "direction" in item["sentiment_trend"]
         assert "change_percent" in item["sentiment_trend"]
+
+
+# ---------------------------------------------------------------------------
+# I1 (TDD) — last_active_at (product usage) on customer list items
+# ---------------------------------------------------------------------------
+
+def _make_customer_usage(db: Session, org_id: int, email: str, last_active_at: datetime) -> CustomerUsage:
+    """Seed a CustomerUsage rollup row."""
+    row = CustomerUsage(
+        organization_id=org_id,
+        customer_email=email,
+        last_active_at=last_active_at,
+        usage_score=60,
+        events_total=10,
+        distinct_feature_count=2,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+class TestCustomerListLastActiveAt:
+    """I1: list endpoint exposes product-usage last_active_at per item."""
+
+    def test_last_active_at_populated_when_usage_rollup_exists(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """Customer with a customer_usage row → last_active_at populated in list response."""
+        expected_ts = datetime.utcnow() - timedelta(days=2)
+        make_customer_health(db, pro_org, "active@example.com")
+        _make_customer_usage(db, pro_org.id, "active@example.com", last_active_at=expected_ts)
+
+        response = client.get("/api/v1/customers/", headers=pro_headers)
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert len(items) == 1
+        item = items[0]
+        assert "last_active_at" in item
+        assert item["last_active_at"] is not None
+
+    def test_last_active_at_none_when_no_usage_rollup(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """Customer without a customer_usage row → last_active_at is None in list response."""
+        make_customer_health(db, pro_org, "norollup@example.com")
+        # Deliberately do NOT add a CustomerUsage row.
+
+        response = client.get("/api/v1/customers/", headers=pro_headers)
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert len(items) == 1
+        assert items[0]["last_active_at"] is None
+
+    def test_last_active_at_mixed_customers(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """Some customers have rollup, others don't — both coexist in one page."""
+        ts = datetime.utcnow() - timedelta(days=5)
+        make_customer_health(db, pro_org, "with@example.com")
+        make_customer_health(db, pro_org, "without@example.com")
+        _make_customer_usage(db, pro_org.id, "with@example.com", last_active_at=ts)
+
+        response = client.get(
+            "/api/v1/customers/?sort_by=customer_email&sort_order=asc", headers=pro_headers
+        )
+        assert response.status_code == 200
+        items = {it["customer_email"]: it for it in response.json()["items"]}
+        assert items["with@example.com"]["last_active_at"] is not None
+        assert items["without@example.com"]["last_active_at"] is None
+
+    def test_last_active_at_org_scoped_no_cross_tenant(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """Usage rollup from another org must not populate last_active_at for caller's customer."""
+        other_org = Organization(name="OtherCo", plan="pro")
+        db.add(other_org)
+        db.commit()
+        db.refresh(other_org)
+
+        make_customer_health(db, pro_org, "alice@example.com")
+        # Usage row exists, but scoped to other_org — must NOT bleed into pro_org's response.
+        _make_customer_usage(db, other_org.id, "alice@example.com", last_active_at=datetime.utcnow())
+
+        response = client.get("/api/v1/customers/", headers=pro_headers)
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert len(items) == 1
+        assert items[0]["last_active_at"] is None

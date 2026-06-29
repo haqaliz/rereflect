@@ -778,3 +778,62 @@ class ChurnPlaybookExecution(Base):
         Index("ix_playbook_exec_playbook_created", "playbook_id", "created_at"),
         Index("ix_playbook_exec_email_created", "customer_email", "created_at"),
     )
+
+
+class UsageEvent(Base):
+    """Raw usage event log — lightweight mirror of backend-api model (no FKs)."""
+    __tablename__ = "usage_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False, index=True)
+    customer_email = Column(String(255), nullable=True, index=True)
+    event_type = Column(String(50), nullable=False)
+    event_name = Column(String(255), nullable=True)
+    external_event_id = Column(String(255), nullable=False, index=True)
+    occurred_at = Column(DateTime, nullable=True)
+    received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    properties = Column(JSON, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "external_event_id",
+            name="uq_usage_event_org_ext",
+        ),
+        Index(
+            "ix_usage_events_org_email_occurred",
+            "organization_id",
+            "customer_email",
+            "occurred_at",
+        ),
+    )
+
+
+class CustomerUsage(Base):
+    """Per-customer product-usage rollup — lightweight mirror of backend-api model."""
+    __tablename__ = "customer_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False, index=True)
+    customer_email = Column(String(255), nullable=False, index=True)
+    last_active_at = Column(DateTime, nullable=True)
+    login_count_7d = Column(Integer, nullable=True, default=0)
+    login_count_30d = Column(Integer, nullable=True, default=0)
+    active_days_7d = Column(Integer, nullable=True, default=0)
+    active_days_30d = Column(Integer, nullable=True, default=0)
+    distinct_features = Column(JSON, nullable=True, default=list)
+    distinct_feature_count = Column(Integer, nullable=True, default=0)
+    usage_score = Column(Integer, nullable=False, default=50)
+    events_total = Column(Integer, nullable=False, default=0)
+    first_seen_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "customer_email",
+            name="uq_customer_usage_org_email",
+        ),
+        Index("ix_customer_usage_org_score", "organization_id", "usage_score"),
+    )

@@ -38,6 +38,7 @@ vi.mock('@/lib/api/customers', () => ({
     getFeedbacks: vi.fn(),
     getActivity: vi.fn(),
     requestAnalysis: vi.fn(),
+    getUsage: vi.fn(),
   },
 }));
 
@@ -120,6 +121,24 @@ describe('CustomerProfilePage', () => {
     (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
     (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rollup: {
+        customer_email: 'john@acme.com',
+        usage_score: 65,
+        events_total: 5,
+        last_active_at: '2026-06-01T10:00:00Z',
+        first_seen_at: '2026-01-01T00:00:00Z',
+        login_count_7d: 3,
+        login_count_30d: 12,
+        active_days_7d: 3,
+        active_days_30d: 9,
+        distinct_features: ['dashboard', 'reports', 'export', 'settings'],
+        distinct_feature_count: 4,
+        updated_at: '2026-06-01T10:00:00Z',
+      },
+      time_series: [{ date: '2026-06-01', event_count: 5 }],
+      period_days: 30,
+    });
   });
 
   it('renders the breadcrumb with Customers link', async () => {
@@ -220,6 +239,24 @@ describe('CustomerProfilePage - low confidence badge', () => {
     (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
     (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rollup: {
+        customer_email: 'john@acme.com',
+        usage_score: 50,
+        events_total: 0,
+        last_active_at: null,
+        first_seen_at: null,
+        login_count_7d: 0,
+        login_count_30d: 0,
+        active_days_7d: 0,
+        active_days_30d: 0,
+        distinct_features: null,
+        distinct_feature_count: 0,
+        updated_at: null,
+      },
+      time_series: [],
+      period_days: 30,
+    });
   });
 
   it('renders confidence badge for low confidence', async () => {

@@ -19,6 +19,8 @@ class OrgAIConfig(Base):
     health_weight_sentiment = Column(Integer, default=25, nullable=False)
     health_weight_resolution = Column(Integer, default=25, nullable=False)
     health_weight_frequency = Column(Integer, default=15, nullable=False)
+    # Opt-in usage component weight; defaults to 0 so existing scores are unchanged
+    health_weight_usage = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

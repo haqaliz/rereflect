@@ -45,6 +45,7 @@ celery_app = Celery(
         "src.tasks.automation",
         "src.tasks.churn_playbooks",
         "src.tasks.churn_calibration",
+        "src.tasks.usage_metrics",
     ],
 )
 
@@ -184,6 +185,11 @@ celery_app.conf.beat_schedule = {
     "purge-old-calibration-models": {
         "task": "src.tasks.churn_calibration.purge_old_calibration_models",
         "schedule": crontab(hour=3, minute=30, day_of_week=0),
+    },
+    # Recompute usage scores daily so recency decays without new events — 04:00 UTC
+    "recompute-usage-scores-daily": {
+        "task": "src.tasks.usage_metrics.recompute_usage_scores",
+        "schedule": crontab(hour=4, minute=0),
     },
 }
 

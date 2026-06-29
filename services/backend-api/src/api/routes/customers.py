@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
 from src.models.customer_analysis_action import CustomerAnalysisAction
+from src.models.customer_usage import CustomerUsage
 from src.models.organization import Organization
 from src.api.dependencies import get_current_org, get_current_user, require_feature, require_system_admin
 from src.models.user import User
@@ -43,6 +44,7 @@ class CustomerListItem(BaseModel):
     confidence_level: str
     feedback_count: int
     last_feedback_at: Optional[datetime] = None
+    last_active_at: Optional[datetime] = None  # product-usage recency (from customer_usage rollup)
     sentiment_trend: SentimentTrend
     is_archived: bool
     has_llm_analysis: bool
@@ -90,6 +92,7 @@ class CustomerProfileResponse(BaseModel):
     sentiment_component: int
     resolution_component: int
     frequency_component: int
+    usage_component: Optional[int] = None
     # Structured LLM analysis fields
     llm_analysis_summary: Optional[str] = None
     llm_recommended_actions: Optional[List[str]] = None
@@ -277,6 +280,20 @@ def list_customers(
     offset = (page - 1) * page_size
     records = query.offset(offset).limit(page_size).all()
 
+    # Fetch usage rollups for this page's customers in a single query (no N+1).
+    page_emails = [r.customer_email for r in records]
+    usage_map: dict[str, datetime] = {}
+    if page_emails:
+        usage_rows = (
+            db.query(CustomerUsage.customer_email, CustomerUsage.last_active_at)
+            .filter(
+                CustomerUsage.organization_id == current_org.id,
+                CustomerUsage.customer_email.in_(page_emails),
+            )
+            .all()
+        )
+        usage_map = {row.customer_email: row.last_active_at for row in usage_rows}
+
     items = []
     for record in records:
         trend = _compute_sentiment_trend_for_customer(current_org.id, record.customer_email, db)
@@ -288,6 +305,7 @@ def list_customers(
             confidence_level=record.confidence_level or "low",
             feedback_count=record.feedback_count,
             last_feedback_at=record.last_feedback_at,
+            last_active_at=usage_map.get(record.customer_email),
             sentiment_trend=SentimentTrend(**trend),
             is_archived=record.is_archived or False,
             has_llm_analysis=record.llm_analysis_data is not None or record.llm_analysis is not None,
@@ -366,6 +384,7 @@ def get_customer_profile(
         sentiment_component=record.sentiment_component or 50,
         resolution_component=record.resolution_component or 50,
         frequency_component=record.frequency_component or 50,
+        usage_component=record.usage_component,
         llm_analysis_summary=llm_analysis_summary,
         llm_recommended_actions=llm_recommended_actions,
         llm_risk_drivers=llm_risk_drivers,
@@ -840,4 +859,135 @@ def get_customer_churn_factors(
         feedback_count=len(feedbacks),
         aggregated_factors=aggregated_factors,
         top_risk_drivers=top_risk_drivers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Usage rollup + time-series endpoint  (aspect 3 — usage-rollup-and-score)
+# ---------------------------------------------------------------------------
+
+_VALID_USAGE_DAYS = {30, 60, 90}
+
+
+class UsageRollupResponse(BaseModel):
+    """Snapshot of the customer_usage rollup row."""
+    customer_email: str
+    usage_score: int
+    events_total: int
+    last_active_at: Optional[datetime]
+    first_seen_at: Optional[datetime]
+    login_count_7d: Optional[int]
+    login_count_30d: Optional[int]
+    active_days_7d: Optional[int]
+    active_days_30d: Optional[int]
+    distinct_features: Optional[List[str]]
+    distinct_feature_count: Optional[int]
+    updated_at: Optional[datetime]
+
+
+class UsageTimeSeriesBucket(BaseModel):
+    """Daily event count bucket for the chart."""
+    date: str          # ISO date string, e.g. "2026-06-28"
+    event_count: int
+
+
+class CustomerUsageResponse(BaseModel):
+    """Combined rollup + daily time series for the customer usage card."""
+    rollup: UsageRollupResponse
+    time_series: List[UsageTimeSeriesBucket]
+    period_days: int
+
+
+@router.get(
+    "/{email}/usage",
+    response_model=CustomerUsageResponse,
+)
+def get_customer_usage(
+    email: str,
+    days: int = Query(30, ge=1),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the product-usage rollup and a daily event time series for a customer.
+
+    Args:
+        email: Customer email (URL-encoded if needed).
+        days:  Rolling window size for the time series (must be 30, 60, or 90).
+               Defaults to 30.
+
+    Returns:
+        JSON with ``rollup`` (snapshot) and ``time_series`` (daily buckets).
+
+    Raises:
+        422 if ``days`` is not one of the valid values.
+        404 if no usage rollup exists for this customer in the caller's org.
+    """
+    from src.models.customer_usage import CustomerUsage as CustomerUsageModel
+    from src.models.usage_event import UsageEvent as UsageEventModel
+    from collections import defaultdict
+
+    if days not in _VALID_USAGE_DAYS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"'days' must be one of {sorted(_VALID_USAGE_DAYS)}; got {days}.",
+        )
+
+    # Fetch rollup (org-scoped)
+    rollup = (
+        db.query(CustomerUsageModel)
+        .filter_by(organization_id=current_org.id, customer_email=email)
+        .first()
+    )
+    if rollup is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No usage data found for customer '{email}'.",
+        )
+
+    # Build daily time series from raw events within the window
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+
+    events = (
+        db.query(UsageEventModel)
+        .filter(
+            UsageEventModel.organization_id == current_org.id,
+            UsageEventModel.customer_email == email,
+            UsageEventModel.occurred_at >= cutoff,
+        )
+        .all()
+    )
+
+    # Bucket events by calendar day
+    counts: dict = defaultdict(int)
+    for ev in events:
+        if ev.occurred_at:
+            day_key = ev.occurred_at.date().isoformat()
+            counts[day_key] += 1
+
+    time_series = [
+        UsageTimeSeriesBucket(date=day, event_count=cnt)
+        for day, cnt in sorted(counts.items())
+    ]
+
+    rollup_response = UsageRollupResponse(
+        customer_email=rollup.customer_email,
+        usage_score=rollup.usage_score,
+        events_total=rollup.events_total,
+        last_active_at=rollup.last_active_at,
+        first_seen_at=rollup.first_seen_at,
+        login_count_7d=rollup.login_count_7d,
+        login_count_30d=rollup.login_count_30d,
+        active_days_7d=rollup.active_days_7d,
+        active_days_30d=rollup.active_days_30d,
+        distinct_features=rollup.distinct_features,
+        distinct_feature_count=rollup.distinct_feature_count,
+        updated_at=rollup.updated_at,
+    )
+
+    return CustomerUsageResponse(
+        rollup=rollup_response,
+        time_series=time_series,
+        period_days=days,
     )

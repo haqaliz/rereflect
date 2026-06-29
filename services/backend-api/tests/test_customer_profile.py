@@ -200,6 +200,28 @@ class TestCustomerProfile:
         assert data["llm_analysis"] == "Customer is at risk of churning"
         assert data["llm_analyzed_at"] is not None
 
+    def test_profile_includes_usage_component_when_set(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """usage_component stored on the health row must be surfaced on the profile response."""
+        make_health(db, pro_org, "usage_set@acme.com", usage_component=72)
+        response = client.get("/api/v1/customers/usage_set@acme.com", headers=pro_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "usage_component" in data, "usage_component field must be present in profile response"
+        assert data["usage_component"] == 72
+
+    def test_profile_usage_component_is_none_when_null(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """When usage_component column is NULL (legacy row), the field must be None/null — not fabricated."""
+        make_health(db, pro_org, "usage_null@acme.com")  # no usage_component → NULL
+        response = client.get("/api/v1/customers/usage_null@acme.com", headers=pro_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "usage_component" in data, "usage_component field must be present even when NULL"
+        assert data["usage_component"] is None
+
 
 # ---------------------------------------------------------------------------
 # History Endpoint: GET /api/v1/customers/{email}/history

@@ -156,7 +156,8 @@ describe('CustomersPage', () => {
       expect(screen.getByText('Health Score')).toBeInTheDocument();
       expect(screen.getByText('Churn Probability')).toBeInTheDocument();
       expect(screen.getByText('Feedbacks')).toBeInTheDocument();
-      expect(screen.getByText('Last Active')).toBeInTheDocument();
+      expect(screen.getByText('Last Active (feedback)')).toBeInTheDocument();
+      expect(screen.getByText('Last Active (product)')).toBeInTheDocument();
       expect(screen.getByText('Trend')).toBeInTheDocument();
     });
   });

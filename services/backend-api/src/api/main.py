@@ -24,6 +24,7 @@ from src.api.routes import public_api as public_api_router  # noqa: E402 — Fea
 from src.api.routes import churn_analytics as churn_analytics_router  # noqa: E402 — M4.1 Cohort Analytics
 from src.api.routes import churn_accuracy as churn_accuracy_router  # noqa: E402 — M4.1 Accuracy API
 from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 Churn Playbooks
+from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402 — product-usage ingest receiver
 from src.seed import seed_admin_user, seed_system_templates
 from src.services.copilot.template_saver import TemplateSaver
 from src.services.embeddings import resolve_embedding_provider
@@ -291,6 +292,8 @@ app.include_router(automations_router.router)
 # NOTE: executions static route must win over {playbook_id} wildcard — router
 # handles this via ordering of routes within the module.
 app.include_router(playbooks_router.router)
+# Product-Usage Ingest Receiver (aspect 2)
+app.include_router(usage_webhooks_router.router)
 # Feature C — Public REST API (key management + public surface)
 app.include_router(api_keys_router.router)
 app.include_router(public_api_router.router)

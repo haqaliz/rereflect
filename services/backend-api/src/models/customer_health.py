@@ -21,6 +21,7 @@ class CustomerHealth(Base):
     sentiment_component = Column(Integer, default=50)        # 25% weight
     resolution_component = Column(Integer, default=50)       # 25% weight
     frequency_component = Column(Integer, default=50)        # 15% weight
+    usage_component = Column(Integer, nullable=True)         # 0% default weight (opt-in); neutral 50 when no rollup
 
     # Metadata
     feedback_count = Column(Integer, default=0)

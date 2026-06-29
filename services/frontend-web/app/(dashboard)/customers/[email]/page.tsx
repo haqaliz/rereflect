@@ -18,6 +18,7 @@ import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBa
 import { ChurnTimelineBadge } from '@/components/customers/ChurnTimelineBadge';
 import { ComponentProgressBars } from '@/components/customers/ComponentProgressBars';
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
+import { UsageTimeline } from '@/components/customers/UsageTimeline';
 import { ActivityTimeline } from '@/components/customers/ActivityTimeline';
 import { CustomerFeedbackList } from '@/components/customers/CustomerFeedbackList';
 import { ChurnRiskDrivers } from '@/components/customers/ChurnRiskDrivers';
@@ -465,6 +466,79 @@ function FlagDialog({ open, onOpenChange, healthScore }: FlagDialogProps) {
   );
 }
 
+// ─── Usage Activity Card ────────────────────────────────────────────────────
+
+function UsageActivityCard({ email }: { email: string }) {
+  const [days, setDays] = useState(30);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['customer-usage', email, days],
+    queryFn: () => customersAPI.getUsage(email, days),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  function relativeTime(dateStr: string | null): string {
+    if (!dateStr) return 'Never';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  const rollup = data?.rollup;
+  const hasUsage = rollup && ((rollup.login_count_30d ?? 0) > 0 || (rollup.active_days_30d ?? 0) > 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Usage Activity</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <div className="space-y-2">
+            <div className="h-4 w-1/3 bg-muted rounded animate-pulse" />
+            <div className="h-4 w-1/2 bg-muted rounded animate-pulse" />
+          </div>
+        ) : !hasUsage ? (
+          <p className="text-sm text-muted-foreground">
+            No product-usage events recorded yet. Send events via{' '}
+            <code className="text-xs bg-muted px-1 py-0.5 rounded">
+              POST /api/v1/webhooks/usage
+            </code>{' '}
+            to start tracking engagement.
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">Last Active</p>
+              <p className="font-medium">{relativeTime(rollup?.last_active_at ?? null)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Logins (30d)</p>
+              <p className="font-mono font-medium">{rollup?.login_count_30d ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Active Days (30d)</p>
+              <p className="font-mono font-medium">{rollup?.active_days_30d ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Features Used</p>
+              <p className="font-mono font-medium">{rollup?.distinct_feature_count ?? 0}</p>
+            </div>
+          </div>
+        )}
+        <UsageTimeline email={email} />
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Main Page ───────────────────────────────────────────────────────────────
+
 export default function CustomerProfilePage() {
   const router = useRouter();
   const params = useParams();
@@ -528,6 +602,15 @@ export default function CustomerProfilePage() {
   return (
     <TooltipProvider>
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Link href="/customers" className="hover:text-foreground transition-colors">
+            Customers
+          </Link>
+          <span>/</span>
+          <span className="text-foreground truncate max-w-xs">{profile.customer_email}</span>
+        </nav>
+
         {/* Profile Header */}
         <Card>
           <CardContent className="pt-6">
@@ -672,6 +755,7 @@ export default function CustomerProfilePage() {
                   sentiment_component={profile.sentiment_component}
                   resolution_component={profile.resolution_component}
                   frequency_component={profile.frequency_component}
+                  usage_component={profile.usage_component}
                 />
               </CardContent>
             </Card>
@@ -685,6 +769,9 @@ export default function CustomerProfilePage() {
                 <HealthTimeline email={profile.customer_email} />
               </CardContent>
             </Card>
+
+            {/* Usage Activity */}
+            <UsageActivityCard email={profile.customer_email} />
 
             {/* LLM Analysis */}
             <LLMSection

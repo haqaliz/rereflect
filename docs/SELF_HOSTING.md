@@ -111,6 +111,77 @@ a local one, bring your own key:
 There is no system/vendor key. If an organization has no key configured, AI features
 degrade gracefully back to the free VADER pipeline rather than erroring.
 
+## Send product-usage events
+
+Rereflect can ingest per-customer product activity and surface it on the Customer 360
+profile — giving you a real engagement signal alongside feedback-based health scores.
+
+### How it works
+
+1. **Create an ingest-scoped API key** in **Settings → API Keys**. Select the
+   `ingest` scope. The key starts with `rrf_`.
+
+2. **POST events** to the ingest endpoint:
+
+   ```bash
+   curl -X POST http://localhost:8000/api/v1/webhooks/usage \
+     -H "X-API-Key: rrf_YOUR_INGEST_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "events": [
+         {
+           "type": "track",
+           "email": "alice@acme.com",
+           "event": "feature_used",
+           "name": "export_csv",
+           "timestamp": "2026-06-28T10:00:00Z",
+           "messageId": "evt_abc123",
+           "properties": { "plan": "team" }
+         },
+         {
+           "type": "identify",
+           "email": "alice@acme.com",
+           "timestamp": "2026-06-28T10:01:00Z",
+           "messageId": "evt_abc124",
+           "traits": { "name": "Alice" }
+         }
+       ]
+     }'
+   ```
+
+   The endpoint is Segment-compatible. Supported types: `track`, `identify`. Events
+   are matched to customers by the `email` field; events without a resolvable email
+   are skipped and counted in the `skipped` response field.
+
+3. **Verify it's working**: open the customer's profile page. Within one Celery cycle
+   (typically < 30 s), the **Usage Activity** card shows `Last Active`, login counts,
+   and active-days.
+
+4. **Optionally factor usage into health scores**: go to
+   **Settings → Preferences** and raise the **Usage Activity** weight above 0
+   (the five weights must sum to 100). The default is 0 so existing scores are
+   unchanged until you opt in.
+
+### Schema reference
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `type` | Yes | `"track"` or `"identify"` |
+| `email` | Yes | Identifies the customer — must match an email in your org |
+| `event` | No | Machine-readable event key (e.g. `"login"`, `"feature_used"`) |
+| `name` | No | Human-readable event/feature name |
+| `timestamp` | No | ISO 8601; defaults to ingest time |
+| `messageId` | No | Dedup key — safe to replay; idempotent |
+| `properties` | No | Arbitrary JSON, max 16 KB |
+| `traits` | No | For identify events (e.g. `{"name": "Alice"}`) |
+
+Max batch size: **1 000 events per request**. Oversized requests return `413`.
+
+### In-app docs
+
+Full setup docs are also available in the app under
+**Settings → Usage Events** (admin/owner only).
+
 ## Production notes
 
 - **The frontend bakes its API URL at build time.** `NEXT_PUBLIC_API_URL` is embedded

@@ -21,11 +21,13 @@ DEFAULT_ALERT_THRESHOLD = 50.0  # absolute threshold: alert when score drops bel
 DEFAULT_DROP_THRESHOLD = 15     # point-drop threshold: alert when score drops by this many pts
 
 # Weight distribution (churn-heavy as per PRD)
+# Usage defaults to 0.0 — opt-in only; existing scores unchanged until re-weighted.
 WEIGHTS = {
     "churn_risk": 0.35,
     "sentiment": 0.25,
     "resolution": 0.25,
     "frequency": 0.15,
+    "usage": 0.0,
 }
 
 
@@ -40,10 +42,54 @@ def _get_org_weights(org_id: int, db: Session) -> dict:
                 "sentiment": config.health_weight_sentiment / 100.0,
                 "resolution": config.health_weight_resolution / 100.0,
                 "frequency": config.health_weight_frequency / 100.0,
+                "usage": config.health_weight_usage / 100.0,
             }
     except Exception:
         pass
     return WEIGHTS
+
+
+def _compute_usage_component(db: Session, org_id: int, customer_email: str, now: datetime) -> int:
+    """
+    Fetch the pre-computed usage_score from customer_usage rollup table.
+
+    Returns 50 (neutral) when:
+      - The customer_usage table does not yet exist (aspect usage-rollup-and-score
+        creates it later in the feature chain).
+      - No rollup row exists for this customer.
+      - Any other error occurs during the query.
+
+    Contract: this function NEVER raises; it is always safe to call.
+    The actual usage_score is computed by aspect `usage-rollup-and-score`.
+
+    Args:
+        now: Timestamp of the computation; not used in this function but kept
+             to match the _compute_* calling convention shared across all
+             component functions (all receive the same timestamp from the caller).
+    """
+    from sqlalchemy import text
+    try:
+        sp = db.begin_nested()  # SAVEPOINT — isolates this read from the outer transaction
+        row = db.execute(
+            text(
+                "SELECT usage_score FROM customer_usage "
+                "WHERE organization_id = :org_id AND customer_email = :email "
+                "ORDER BY updated_at DESC LIMIT 1"
+            ),
+            {"org_id": org_id, "email": customer_email},
+        ).fetchone()
+        sp.commit()
+        if row is not None and row[0] is not None:
+            return int(row[0])
+    except Exception:
+        # Table does not exist yet or any other DB error — roll back only the
+        # SAVEPOINT so the outer transaction remains usable (avoids
+        # PendingRollbackError on the next query in the same request).
+        try:
+            sp.rollback()
+        except Exception:
+            pass
+    return 50
 
 
 def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
@@ -64,13 +110,18 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
     # Frequency component (15% default): stable/declining frequency = healthy
     frequency_component = _compute_frequency_component(db, org_id, customer_email, now)
 
+    # Usage component (0% default, opt-in): sourced from customer_usage rollup;
+    # falls back to 50 (neutral) when no rollup exists.
+    usage_component = _compute_usage_component(db, org_id, customer_email, now)
+
     # Weighted sum using per-org configured weights (or defaults)
     weights = _get_org_weights(org_id, db)
     health_score = int(
         churn_component * weights["churn_risk"] +
         sentiment_component * weights["sentiment"] +
         resolution_component * weights["resolution"] +
-        frequency_component * weights["frequency"]
+        frequency_component * weights["frequency"] +
+        usage_component * weights["usage"]
     )
     health_score = max(0, min(100, health_score))
 
@@ -120,6 +171,7 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
         "sentiment_component": sentiment_component,
         "resolution_component": resolution_component,
         "frequency_component": frequency_component,
+        "usage_component": usage_component,
         "risk_level": risk_level,
         "feedback_count": feedback_count,
         "last_feedback_at": last_feedback,
@@ -170,6 +222,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
         existing.sentiment_component = result["sentiment_component"]
         existing.resolution_component = result["resolution_component"]
         existing.frequency_component = result["frequency_component"]
+        existing.usage_component = result["usage_component"]
         existing.risk_level = result["risk_level"]
         existing.feedback_count = result["feedback_count"]
         existing.last_feedback_at = result["last_feedback_at"]
@@ -228,6 +281,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             sentiment_component=result["sentiment_component"],
             resolution_component=result["resolution_component"],
             frequency_component=result["frequency_component"],
+            usage_component=result["usage_component"],
             feedback_count=result["feedback_count"],
             last_feedback_at=result["last_feedback_at"],
             risk_level=result["risk_level"],
@@ -250,6 +304,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             sentiment_component=result["sentiment_component"],
             resolution_component=result["resolution_component"],
             frequency_component=result["frequency_component"],
+            usage_component=result["usage_component"],
             risk_level=result["risk_level"],
         )
         db.add(history)
