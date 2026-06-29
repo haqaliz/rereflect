@@ -384,6 +384,13 @@ def public_list_customers(
     response_model=PublicCustomerHealth,
     dependencies=[Depends(require_scope("read"))],
     summary="Get a customer's health (public API)",
+    description=(
+        "Health-score summary for a single customer.\n\n"
+        "Includes the 4 core health components (churn_risk, sentiment, resolution, "
+        "frequency) **plus** ``usage_component`` (null when product-usage data has "
+        "not been collected for this customer), calibrated churn probability with "
+        "90 % confidence interval, and ``time_to_churn_bucket``."
+    ),
 )
 def public_customer_health(
     customer_email: str,
