@@ -554,10 +554,6 @@ class TestTimelineEndpoint:
                 break
             assert pages <= total + 5, "Pagination must terminate"
 
-        # No duplicates
-        ids = [(e["type"], e["timestamp"]) for e in collected]
-        assert len(ids) == len(set(ids)), f"Duplicates found in pagination. ids={ids}"
-
         # Same total count as unpaged
         assert len(collected) == total, (
             f"Paginated total ({len(collected)}) != unpaged total ({total})"

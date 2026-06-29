@@ -147,10 +147,21 @@ class ActivityEvent(BaseModel):
     feedback_id: Optional[int] = None
     old_score: Optional[int] = None
     new_score: Optional[int] = None
+    # New fields added in timeline-service-v1 (additive only — all Optional)
+    risk_level: Optional[str] = None
+    reason_code: Optional[str] = None
+    feature_name: Optional[str] = None
+    source: Optional[str] = None
+    gap_days: Optional[int] = None
 
 
 class CustomerActivityResponse(BaseModel):
     events: List[ActivityEvent]
+
+
+class TimelineResponse(BaseModel):
+    events: List[ActivityEvent]
+    next_cursor: Optional[str] = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -509,6 +520,23 @@ def get_customer_feedbacks(
     )
 
 
+def _timeline_event_to_activity(event) -> ActivityEvent:
+    """Convert an internal TimelineEvent to the external ActivityEvent Pydantic model."""
+    return ActivityEvent(
+        type=event.type,
+        timestamp=event.timestamp,
+        description=event.description,
+        feedback_id=event.feedback_id,
+        old_score=event.old_score,
+        new_score=event.new_score,
+        risk_level=event.risk_level,
+        reason_code=event.reason_code,
+        feature_name=event.feature_name,
+        source=event.source,
+        gap_days=event.gap_days,
+    )
+
+
 @router.get(
     "/{email}/activity",
     response_model=CustomerActivityResponse,
@@ -519,96 +547,61 @@ def get_customer_activity(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
-    """Get last 10 mixed activity events for a customer."""
-    from src.models.feedback import FeedbackItem as FeedbackModel
-    from src.models.feedback_workflow_event import FeedbackWorkflowEvent
-    from src.models.customer_health_history import CustomerHealthHistory
+    """Get last 10 mixed activity events for a customer.
 
-    events = []
+    Delegates to the shared timeline service — same external response shape
+    as before, now including usage and churn events where present.
+    """
+    from src.services.customer_timeline_service import build_timeline
 
-    # 1. feedback_created events
-    recent_feedbacks = db.query(FeedbackModel).filter(
-        FeedbackModel.organization_id == current_org.id,
-        FeedbackModel.customer_email == email,
-    ).order_by(desc(FeedbackModel.created_at)).limit(10).all()
+    timeline_events, _ = build_timeline(db, current_org.id, email, limit=10)
+    activity_events = [_timeline_event_to_activity(e) for e in timeline_events]
+    return CustomerActivityResponse(events=activity_events)
 
-    for fb in recent_feedbacks:
-        events.append(ActivityEvent(
-            type="feedback_created",
-            description="New feedback submitted",
-            timestamp=fb.created_at,
-            feedback_id=fb.id,
-        ))
 
-    # 2. status_changed events from workflow
-    feedback_ids = [fb.id for fb in recent_feedbacks]
-    if feedback_ids:
-        status_events = db.query(FeedbackWorkflowEvent).filter(
-            FeedbackWorkflowEvent.organization_id == current_org.id,
-            FeedbackWorkflowEvent.feedback_id.in_(feedback_ids),
-            FeedbackWorkflowEvent.event_type == "status_changed",
-        ).order_by(desc(FeedbackWorkflowEvent.created_at)).limit(10).all()
+@router.get(
+    "/{email}/timeline",
+    response_model=TimelineResponse,
+    dependencies=[Depends(require_feature("customer_health_scores"))],
+)
+def get_customer_timeline(
+    email: str,
+    before: Optional[str] = Query(None, description="Opaque cursor from a previous next_cursor"),
+    limit: int = Query(20, ge=1, le=100, description="Max events per page (1-100)"),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Cursor-paged, reverse-chronological timeline for a customer.
 
-        for ev in status_events:
-            events.append(ActivityEvent(
-                type="status_changed",
-                description=f"Feedback #{ev.feedback_id} moved to {ev.new_value}",
-                timestamp=ev.created_at,
-                feedback_id=ev.feedback_id,
-            ))
+    Merges all event sources: feedback, health, churn, and notable usage events.
 
-    # 3. health_score_changed events from history
-    health = db.query(CustomerHealth).filter(
-        CustomerHealth.organization_id == current_org.id,
-        CustomerHealth.customer_email == email,
-    ).first()
+    Query params:
+    - before: opaque cursor string (value of next_cursor from a previous response)
+    - limit: number of events per page (default 20, max 100)
 
-    if health:
-        hist_records = db.query(CustomerHealthHistory).filter(
-            CustomerHealthHistory.customer_health_id == health.id,
-        ).order_by(desc(CustomerHealthHistory.recorded_at)).limit(10).all()
+    Response:
+    - events: list of timeline events (newest first)
+    - next_cursor: opaque cursor to fetch the next page; null on the last page
+    """
+    from src.services.customer_timeline_service import build_timeline
+    from fastapi import HTTPException
 
-        for i, hist in enumerate(hist_records):
-            prev_score = hist_records[i + 1].health_score if i + 1 < len(hist_records) else None
-            desc_text = f"Health score changed to {hist.health_score}"
-            if prev_score is not None:
-                desc_text = f"Health score changed from {prev_score} to {hist.health_score}"
-            events.append(ActivityEvent(
-                type="health_score_changed",
-                description=desc_text,
-                timestamp=hist.recorded_at,
-                old_score=prev_score,
-                new_score=hist.health_score,
-            ))
+    # Validate / decode the before cursor early so we return 422 on bad input
+    if before is not None:
+        from src.services.customer_timeline_service import _decode_cursor
+        try:
+            _decode_cursor(before)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid cursor: {exc}",
+            )
 
-        # 4. llm_analysis_generated event
-        if health.llm_analyzed_at:
-            events.append(ActivityEvent(
-                type="llm_analysis_generated",
-                description="AI analysis generated",
-                timestamp=health.llm_analyzed_at,
-            ))
-
-        # 5. action_completed events
-        completed_actions = db.query(CustomerAnalysisAction).filter(
-            CustomerAnalysisAction.customer_health_id == health.id,
-            CustomerAnalysisAction.status.in_(["completed", "dismissed"]),
-        ).order_by(desc(CustomerAnalysisAction.completed_at)).limit(10).all()
-
-        for action in completed_actions:
-            if action.completed_at:
-                verb = "completed" if action.status == "completed" else "dismissed"
-                events.append(ActivityEvent(
-                    type="action_completed",
-                    description=f"Action {verb}: {action.action_text[:60]}",
-                    timestamp=action.completed_at,
-                ))
-
-    # Sort all events by timestamp descending and take top 10
-    events.sort(key=lambda e: e.timestamp, reverse=True)
-    events = events[:10]
-
-    return CustomerActivityResponse(events=events)
+    timeline_events, next_cursor = build_timeline(
+        db, current_org.id, email, before=before, limit=limit
+    )
+    activity_events = [_timeline_event_to_activity(e) for e in timeline_events]
+    return TimelineResponse(events=activity_events, next_cursor=next_cursor)
 
 
 @router.post(

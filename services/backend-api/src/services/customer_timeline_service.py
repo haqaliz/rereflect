@@ -202,7 +202,7 @@ def _fetch_feedback_created(
             FeedbackModel.created_at, FeedbackModel.id,
             "feedback_created", cursor_ts, cursor_type, cursor_source_id,
         ))
-    rows = q.order_by(desc(FeedbackModel.created_at)).limit(limit).all()
+    rows = q.order_by(desc(FeedbackModel.created_at), asc(FeedbackModel.id)).limit(limit).all()
 
     return [
         TimelineEvent(
@@ -245,7 +245,7 @@ def _fetch_status_changed(
             FeedbackWorkflowEvent.created_at, FeedbackWorkflowEvent.id,
             "status_changed", cursor_ts, cursor_type, cursor_source_id,
         ))
-    rows = q.order_by(desc(FeedbackWorkflowEvent.created_at)).limit(limit).all()
+    rows = q.order_by(desc(FeedbackWorkflowEvent.created_at), asc(FeedbackWorkflowEvent.id)).limit(limit).all()
 
     return [
         TimelineEvent(
@@ -290,7 +290,7 @@ def _fetch_health_score_changed(
             CustomerHealthHistory.recorded_at, CustomerHealthHistory.id,
             "health_score_changed", cursor_ts, cursor_type, cursor_source_id,
         ))
-    rows = q.order_by(desc(CustomerHealthHistory.recorded_at)).limit(limit + 1).all()
+    rows = q.order_by(desc(CustomerHealthHistory.recorded_at), asc(CustomerHealthHistory.id)).limit(limit + 1).all()
 
     events: List[TimelineEvent] = []
     for i, row in enumerate(rows):
@@ -373,7 +373,7 @@ def _fetch_action_completed(
             CustomerAnalysisAction.completed_at, CustomerAnalysisAction.id,
             "action_completed", cursor_ts, cursor_type, cursor_source_id,
         ))
-    rows = q.order_by(desc(CustomerAnalysisAction.completed_at)).limit(limit).all()
+    rows = q.order_by(desc(CustomerAnalysisAction.completed_at), asc(CustomerAnalysisAction.id)).limit(limit).all()
 
     events: List[TimelineEvent] = []
     for row in rows:
