@@ -356,15 +356,11 @@ def get_customer_profile(
             detail=f"No health record found for customer '{email}'",
         )
 
-    # Extract structured LLM fields from JSON
-    analysis_data = record.llm_analysis_data or {}
-    llm_analysis_summary = analysis_data.get("analysis") if analysis_data else None
-    llm_recommended_actions = analysis_data.get("recommended_actions") if analysis_data else None
-    llm_risk_drivers = analysis_data.get("risk_drivers") if analysis_data else None
-    llm_urgency = analysis_data.get("estimated_urgency") if analysis_data else None
-    llm_analysis_type = analysis_data.get("analysis_type") if analysis_data else None
+    # Delegate core field mapping to the shared serializer (no drift vs. public API).
+    from src.services.customer_profile_serializer import serialize_customer_profile
+    profile_data = serialize_customer_profile(record)
 
-    # Load action items only for Business+ plans
+    # Load plan-gated action items on top (Business+ only).
     llm_actions = None
     if has_feature(current_org.plan, "ai_analysis_actions"):
         action_records = db.query(CustomerAnalysisAction).filter(
@@ -384,28 +380,8 @@ def get_customer_profile(
         ]
 
     return CustomerProfileResponse(
-        customer_email=record.customer_email,
-        customer_name=record.customer_name,
-        health_score=record.health_score,
-        risk_level=record.risk_level,
-        confidence_level=record.confidence_level or "low",
-        feedback_count=record.feedback_count,
-        last_feedback_at=record.last_feedback_at,
-        churn_risk_component=record.churn_risk_component or 50,
-        sentiment_component=record.sentiment_component or 50,
-        resolution_component=record.resolution_component or 50,
-        frequency_component=record.frequency_component or 50,
-        usage_component=record.usage_component,
-        llm_analysis_summary=llm_analysis_summary,
-        llm_recommended_actions=llm_recommended_actions,
-        llm_risk_drivers=llm_risk_drivers,
-        llm_urgency=llm_urgency,
-        llm_analysis_type=llm_analysis_type,
-        llm_analyzed_at=record.llm_analyzed_at,
+        **{k: v for k, v in profile_data.items() if k in CustomerProfileResponse.model_fields},
         llm_actions=llm_actions,
-        llm_analysis=record.llm_analysis,
-        is_archived=record.is_archived or False,
-        created_at=record.created_at,
     )
 
 
