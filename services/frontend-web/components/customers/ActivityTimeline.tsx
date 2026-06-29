@@ -2,7 +2,17 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { MessageSquarePlus, ArrowRightLeft, TrendingDown, Sparkles, CheckCircle2 } from 'lucide-react';
+import {
+  MessageSquarePlus,
+  ArrowRightLeft,
+  TrendingDown,
+  Sparkles,
+  CheckCircle2,
+  UserMinus,
+  UserCheck,
+  Zap,
+  Activity,
+} from 'lucide-react';
 import { customersAPI, ActivityEvent } from '@/lib/api/customers';
 
 interface ActivityTimelineProps {
@@ -30,7 +40,7 @@ interface EventIconConfig {
   bg: string;
 }
 
-const eventIconMap: Record<ActivityEvent['type'], EventIconConfig> = {
+export const eventIconMap: Record<ActivityEvent['type'], EventIconConfig> = {
   feedback_created: {
     icon: MessageSquarePlus,
     color: 'var(--chart-2)',
@@ -55,6 +65,33 @@ const eventIconMap: Record<ActivityEvent['type'], EventIconConfig> = {
     icon: CheckCircle2,
     color: 'var(--chart-5)',
     bg: 'color-mix(in oklch, var(--chart-5) 10%, transparent)',
+  },
+  // Churn events
+  churned: {
+    icon: UserMinus,
+    color: 'var(--destructive)',
+    bg: 'color-mix(in oklch, var(--destructive) 10%, transparent)',
+  },
+  churn_recovered: {
+    icon: UserCheck,
+    color: 'var(--chart-5)',
+    bg: 'color-mix(in oklch, var(--chart-5) 10%, transparent)',
+  },
+  // Usage events
+  usage_first_seen: {
+    icon: Sparkles,
+    color: 'var(--chart-2)',
+    bg: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
+  },
+  usage_feature_adopted: {
+    icon: Zap,
+    color: 'var(--chart-2)',
+    bg: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
+  },
+  usage_reactivated: {
+    icon: Activity,
+    color: 'var(--chart-2)',
+    bg: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
   },
 };
 
