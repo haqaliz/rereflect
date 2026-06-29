@@ -20,6 +20,7 @@ import { ComponentProgressBars } from '@/components/customers/ComponentProgressB
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
 import { UsageTimeline } from '@/components/customers/UsageTimeline';
 import { ActivityTimeline } from '@/components/customers/ActivityTimeline';
+import { CustomerTimeline } from '@/components/customers/CustomerTimeline';
 import { CustomerFeedbackList } from '@/components/customers/CustomerFeedbackList';
 import { ChurnRiskDrivers } from '@/components/customers/ChurnRiskDrivers';
 import { ModelAccuracyCard } from '@/components/dashboard/widgets/ModelAccuracyCard';
@@ -801,6 +802,9 @@ export default function CustomerProfilePage() {
                 <ActivityTimeline email={profile.customer_email} />
               </CardContent>
             </Card>
+
+            {/* Full paginated timeline (usage + churn + feedback interleaved) */}
+            <CustomerTimeline email={profile.customer_email} />
           </TabsContent>
 
           {/* Feedbacks Tab */}

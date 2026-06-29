@@ -52,6 +52,8 @@
 | AI Trust: Human-in-the-Loop | Yes | Thumbs up/down on Copilot, category/sentiment corrections, AI Accuracy tab | Pro+ |
 | AI Workflow Automation | Yes | Settings > Automations (list, create, detail, templates, execution log) | Pro+ (5 rules), Business (20), Enterprise (unlimited) |
 | Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
+| Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
+| Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
 
 ---
 
@@ -198,12 +200,12 @@
 - [x] 9 backend + 7 frontend tests
 - [ ] Corrections feed into fine-tuning pipeline (M4.2)
 
-#### M3.4 — Enhanced Customer 360 (2 weeks)
-- [ ] Unified customer timeline: feedback + CRM events + usage events in chronological order
-- [ ] Customer segments: auto-group by behavior (power users, silent churners, happy advocates)
+#### M3.4 — Enhanced Customer 360 (2 weeks) — PARTIAL (unified timeline + Customer 360 API shipped 2026-06-29)
+- [x] Unified customer timeline: feedback + usage + churn + health-score events in chronological order (cursor-paginated `/timeline` endpoint + shared service; the existing `/activity` widget now delegates to it). **CRM events deferred** until HubSpot (M3.1) — the event shape is source-extensible.
+- [ ] Customer segments: auto-group by behavior (power users, silent churners, happy advocates) — deferred (would be heuristic-only today; no ML segmentation)
 - [ ] Bulk actions: export customer list, bulk assign CS owner, trigger outreach campaign
-- [ ] Customer 360 API (for external consumption)
-- [ ] Health score API endpoint for programmatic access
+- [x] Customer 360 API (for external consumption): public read endpoints `GET /api/public/v1/customers/{email}` (full profile) + `/timeline` (API-key `read` scope)
+- [x] Health score API endpoint for programmatic access: `GET /api/public/v1/customers/{email}/health` (extended with component breakdown incl. usage)
 
 **Q3 Deliverables**: HubSpot integration, Segment integration, human-in-the-loop (M3.3 COMPLETE), enriched Customer 360
 **Plan Gating**: CRM/usage integrations = Business+, corrections = Pro+

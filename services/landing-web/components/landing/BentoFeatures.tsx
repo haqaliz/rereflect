@@ -91,6 +91,7 @@ const copilotBullets = [
 const customer360Bullets = [
   'Health score dashboard',
   '9-factor churn risk',
+  'Unified activity timeline — feedback, usage & churn',
   'Automated recovery alerts',
 ];
 

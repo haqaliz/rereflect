@@ -130,6 +130,7 @@ class PublicCustomerHealth(BaseModel):
     sentiment_component: Optional[float] = None
     resolution_component: Optional[float] = None
     frequency_component: Optional[float] = None
+    usage_component: Optional[int] = None           # additive — Phase 4
     churn_probability: Optional[float] = None
     churn_probability_low: Optional[float] = None
     churn_probability_high: Optional[float] = None
@@ -139,6 +140,44 @@ class PublicCustomerHealth(BaseModel):
     last_feedback_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class PublicCustomerProfile360(BaseModel):
+    """Full Customer 360 profile exposed on the public surface.
+
+    Mirrors the v1 ``CustomerProfileResponse`` shape (via the shared serializer)
+    and adds churn_probability / time_to_churn_bucket which the v1 profile schema
+    doesn't currently expose.
+
+    TODO: redact LLM free-text for the public surface?
+    Default: NO (operator's own self-hosted data).  Revisit if a consumer objects.
+    """
+
+    customer_email: str
+    customer_name: Optional[str] = None
+    health_score: int
+    risk_level: str
+    confidence_level: str
+    feedback_count: int
+    last_feedback_at: Optional[datetime] = None
+    churn_risk_component: int
+    sentiment_component: int
+    resolution_component: int
+    frequency_component: int
+    usage_component: Optional[int] = None
+    churn_probability: Optional[float] = None
+    churn_probability_low: Optional[float] = None
+    churn_probability_high: Optional[float] = None
+    time_to_churn_bucket: Optional[str] = None
+    llm_analysis_summary: Optional[str] = None
+    llm_recommended_actions: Optional[List[str]] = None
+    llm_risk_drivers: Optional[List[str]] = None
+    llm_urgency: Optional[str] = None
+    llm_analysis_type: Optional[str] = None
+    llm_analyzed_at: Optional[datetime] = None
+    llm_analysis: Optional[str] = None
+    is_archived: bool
+    created_at: Optional[datetime] = None
 
 
 # ─── Feedback read endpoints ──────────────────────────────────────────────────
@@ -345,6 +384,13 @@ def public_list_customers(
     response_model=PublicCustomerHealth,
     dependencies=[Depends(require_scope("read"))],
     summary="Get a customer's health (public API)",
+    description=(
+        "Health-score summary for a single customer.\n\n"
+        "Includes the 4 core health components (churn_risk, sentiment, resolution, "
+        "frequency) **plus** ``usage_component`` (null when product-usage data has "
+        "not been collected for this customer), calibrated churn probability with "
+        "90 % confidence interval, and ``time_to_churn_bucket``."
+    ),
 )
 def public_customer_health(
     customer_email: str,
@@ -362,6 +408,138 @@ def public_customer_health(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer health not found")
     return PublicCustomerHealth.model_validate(row)
+
+
+# ─── Customer 360 profile (public) ───────────────────────────────────────────
+
+
+@router.get(
+    "/customers/{customer_email}",
+    response_model=PublicCustomerProfile360,
+    dependencies=[Depends(require_scope("read"))],
+    summary="Get Customer 360 profile (public API)",
+    description=(
+        "Full Customer 360 profile for a customer by email — health score, "
+        "5 health components (including usage), churn probability, and LLM "
+        "analysis fields.  Mirrors the v1 profile shape via the shared serializer."
+    ),
+)
+def public_customer_profile(
+    customer_email: str,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicCustomerProfile360:
+    row = (
+        db.query(CustomerHealth)
+        .filter(
+            CustomerHealth.organization_id == auth.organization_id,
+            CustomerHealth.customer_email == customer_email,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No health record found for customer '{customer_email}'",
+        )
+
+    from src.services.customer_profile_serializer import serialize_customer_profile
+    profile_data = serialize_customer_profile(row)
+    return PublicCustomerProfile360(**profile_data)
+
+
+# ─── Customer timeline (public) ───────────────────────────────────────────────
+
+
+class PublicActivityEvent(BaseModel):
+    """A single timeline event on the public surface.
+
+    Field layout matches the v1 ``ActivityEvent`` to ensure wire-shape parity.
+    """
+
+    type: str
+    description: str
+    timestamp: datetime
+    feedback_id: Optional[int] = None
+    old_score: Optional[int] = None
+    new_score: Optional[int] = None
+    risk_level: Optional[str] = None
+    reason_code: Optional[str] = None
+    feature_name: Optional[str] = None
+    source: Optional[str] = None
+    gap_days: Optional[int] = None
+
+
+class PublicTimelineResponse(BaseModel):
+    events: List[PublicActivityEvent]
+    next_cursor: Optional[str] = None
+
+
+@router.get(
+    "/customers/{customer_email}/timeline",
+    response_model=PublicTimelineResponse,
+    dependencies=[Depends(require_scope("read"))],
+    summary="Get customer timeline (public API)",
+    description=(
+        "Cursor-paged, reverse-chronological activity timeline for a customer. "
+        "Merges feedback, health-score changes, churn, and notable usage events. "
+        "Backed by the same ``build_timeline`` service as the v1 timeline endpoint "
+        "— identical cursor encoding, sort order, and pagination semantics.\n\n"
+        "**Cursor pagination:** pass the ``next_cursor`` value from any response as "
+        "the ``before`` query parameter to fetch the next page.  A ``null`` "
+        "``next_cursor`` indicates the last page.  Malformed cursors return 422."
+    ),
+    response_description=(
+        "``events``: list of timeline events, newest first.  "
+        "``next_cursor``: opaque string for the next page; null on last page."
+    ),
+)
+def public_customer_timeline(
+    customer_email: str,
+    before: Optional[str] = Query(
+        None, description="Opaque cursor from a previous next_cursor value"
+    ),
+    limit: int = Query(20, ge=1, le=100, description="Max events per page (1–100)"),
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicTimelineResponse:
+    # Validate that the customer exists in this org (cross-org isolation).
+    row = (
+        db.query(CustomerHealth)
+        .filter(
+            CustomerHealth.organization_id == auth.organization_id,
+            CustomerHealth.customer_email == customer_email,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No health record found for customer '{customer_email}'",
+        )
+
+    # Validate / decode the cursor early so we return 422 on malformed input.
+    if before is not None:
+        from src.services.customer_timeline_service import _decode_cursor
+        try:
+            _decode_cursor(before)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid cursor: {exc}",
+            )
+
+    from src.services.customer_timeline_service import build_timeline
+    from src.api.routes.customers import _timeline_event_to_activity
+
+    timeline_events, next_cursor = build_timeline(
+        db, auth.organization_id, customer_email, before=before, limit=limit
+    )
+    # Reuse the v1 helper to convert internal events → ActivityEvent shape.
+    # We then re-serialize to PublicActivityEvent (same fields, no drift possible).
+    activity_events = [_timeline_event_to_activity(e) for e in timeline_events]
+    public_events = [PublicActivityEvent(**e.model_dump()) for e in activity_events]
+    return PublicTimelineResponse(events=public_events, next_cursor=next_cursor)
 
 
 @router.get(

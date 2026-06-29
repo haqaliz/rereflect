@@ -157,16 +157,38 @@ export interface CustomerFeedbacksResponse {
 }
 
 export interface ActivityEvent {
-  type: 'feedback_created' | 'status_changed' | 'health_score_changed' | 'llm_analysis_generated' | 'action_completed';
+  type:
+    | 'feedback_created'
+    | 'status_changed'
+    | 'health_score_changed'
+    | 'llm_analysis_generated'
+    | 'action_completed'
+    | 'churned'
+    | 'churn_recovered'
+    | 'usage_first_seen'
+    | 'usage_feature_adopted'
+    | 'usage_reactivated';
   description: string;
+  timestamp: string;
+  // Existing optional fields
   feedback_id?: number;
   old_score?: number;
   new_score?: number;
-  timestamp: string;
+  // New optional fields (timeline-service-v1 contract)
+  risk_level?: string;
+  reason_code?: string;
+  feature_name?: string;
+  source?: string;
+  gap_days?: number;
 }
 
 export interface CustomerActivityResponse {
   events: ActivityEvent[];
+}
+
+export interface CustomerTimelineResponse {
+  events: ActivityEvent[];
+  next_cursor: string | null;
 }
 
 export interface AnalyzeResponse {
@@ -260,6 +282,20 @@ export const customersAPI = {
   getUsage: async (email: string, days = 30): Promise<CustomerUsageResponse> => {
     const response = await apiClient.get(
       `/api/v1/customers/${encodeURIComponent(email)}/usage?days=${days}`
+    );
+    return response.data;
+  },
+
+  getTimeline: async (
+    email: string,
+    params?: { before?: string; limit?: number }
+  ): Promise<CustomerTimelineResponse> => {
+    const query = new URLSearchParams();
+    if (params?.before) query.set('before', params.before);
+    if (params?.limit !== undefined) query.set('limit', String(params.limit));
+    const qs = query.toString();
+    const response = await apiClient.get(
+      `/api/v1/customers/${encodeURIComponent(email)}/timeline${qs ? `?${qs}` : ''}`
     );
     return response.data;
   },

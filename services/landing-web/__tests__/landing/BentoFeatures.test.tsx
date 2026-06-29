@@ -88,11 +88,12 @@ describe('BentoFeatures', () => {
     expect(screen.getByTestId('card-customer-360')).toHaveTextContent('Health scores');
   });
 
-  it('Customer 360 card shows 3 key points: Health score dashboard, 9-factor churn risk, Automated recovery alerts', () => {
+  it('Customer 360 card shows key points: Health score dashboard, 9-factor churn risk, Unified activity timeline, Automated recovery alerts', () => {
     render(<BentoFeatures />);
     const card = screen.getByTestId('card-customer-360');
     expect(card).toHaveTextContent('Health score dashboard');
     expect(card).toHaveTextContent('9-factor churn risk');
+    expect(card).toHaveTextContent('Unified activity timeline');
     expect(card).toHaveTextContent('Automated recovery alerts');
   });
 

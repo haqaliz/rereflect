@@ -52,6 +52,7 @@ all behind a multi-tenant dashboard you host yourself.
 |---|---|
 | 🧠 **AI feedback analysis** | Sentiment, pain points, feature requests, urgency and topic clustering — local (VADER) or LLM-powered (BYOK). |
 | 📉 **Churn risk scoring** | Per-item churn risk with suggested actions, plus cohort analytics and playbooks. |
+| 🧑‍💼 **Customer 360 + timeline** | Per-customer health profile with a unified, paginated activity timeline (feedback, product usage, churn and health-score events) — also readable over the public API. |
 | 🗂️ **Team workflow** | Kanban board, statuses, auto-assignment rules and round-robin routing. |
 | 🔌 **Sources & integrations** | CSV import, email, webhooks and Slack in; alerts and digests out. |
 | 📊 **Analytics & sharing** | Trends, distributions and top-insight tables, exportable to PDF and shareable via signed links. |

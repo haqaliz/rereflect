@@ -1,65 +1,100 @@
-# Understanding — Product Usage Enrichment (Phase 2 dig)
+# Understanding — feat/customer-360-unified-timeline (Phase 2 deep dig)
 
-Synthesized from three read-only dig agents (health/churn scoring, webhook/ingest+auth, frontend Customer 360). All paths relative to the worktree.
+## Headline finding: this is NOT greenfield
 
-## What the feature really asks
+The brief (via `rereflect-next`) assumed "nothing stitches the event sources together."
+**That's wrong** — a customer activity timeline already exists and merges 5 sources.
+The real gap is narrower and more honest. Surfacing this contradiction up front.
 
-Add a **real product-usage signal** (logins, feature usage, last-active per customer) into Rereflect and feed it into the customer health score — the canonical leading churn indicator that is currently **absent**. First slice = inbound usage-event receiver → per-customer usage aggregates → a usage component in health + a usage section on the customer profile.
+### What already exists
 
-## The confirmed gap (the whole reason this is high-leverage)
+- **`GET /api/v1/customers/{email}/activity`** → `CustomerActivityResponse{ events: ActivityEvent[] }`
+  (`services/backend-api/src/api/routes/customers.py:512-611`). It already merges:
+  - `feedback_created` (from `feedback_items.created_at`)
+  - `status_changed` (from `feedback_workflow_events`, `event_type="status_changed"`)
+  - `health_score_changed` (from `customer_health_history.recorded_at`, with old→new score)
+  - `llm_analysis_generated` (from `customer_health.llm_analyzed_at`)
+  - `action_completed` (from `customer_analysis_actions.completed_at`, status completed/dismissed)
+- **It is capped, not paginated**: each source is `.limit(10)`, merged, sorted desc, then `events[:10]`.
+  Docstring literally says *"Get last 10 mixed activity events."* No `page`/`page_size`/cursor.
+- **Frontend already renders it**: `ActivityTimeline` (`components/customers/ActivityTimeline.tsx`)
+  on the profile **Overview tab** as a "Recent Activity" card
+  (`app/(dashboard)/customers/[email]/page.tsx:795-803`). It has an icon-per-type system,
+  loading skeleton, and empty state. `customersAPI.getActivity(email)` in `lib/api/customers.ts`.
 
-`services/backend-api/src/services/health_score_service.py:435-471` — the existing **"frequency" component measures feedback complaint cadence**, not product usage (last-7d vs 30d *feedback* count). There is **no product-usage input anywhere** in the health score or the 9-factor churn scorer. The customers list "Last Active" column (`customers/page.tsx:304`) is `last_feedback_at` — also feedback-derived, not usage. So a genuine usage signal is net-new.
+### What's genuinely missing (the actual work)
 
-## How customers + health are modeled (no Customer table)
+1. **Usage events are NOT a timeline source.** M3.2 usage data (`usage_events`,
+   `customer_usage`) just shipped (`a8047d9`) but the activity endpoint predates it and
+   ignores it. The `ActivityEvent` union has no usage type. **This is the freshly-unblocked
+   gap that motivated the pick.**
+2. **Churn events are NOT a timeline source.** `customer_churn_events` (M4.1) exists
+   (`models/churn_event.py`) — manual/CSV/auto churn marks with `churned_at` + `recovered_at`
+   — but aren't in the timeline.
+3. **No full, paginated, browsable timeline.** "Recent Activity" is a 10-item widget.
+   M3.4's intent ("unified customer timeline ... in chronological order") is a browsable
+   history. Need pagination (or "load more") over the merged sources.
+4. **No public-API surface.** The activity endpoint is v1/JWT only, behind
+   `require_feature("customer_health_scores")`. M3.4 also calls for a **Customer 360 API +
+   health-score API for programmatic/external consumption**. Public API
+   (`routes/public_api.py`, API-key + `require_scope("read")`) currently has `/customers`
+   (list) and `/customers/{email}/health` — but **no full Customer 360 profile** and **no
+   timeline**.
 
-- A "customer" = **`customer_email`**, scoped per org. No dedicated table.
-- `customer_health_scores` (`models/customer_health.py`) — unique on `(organization_id, customer_email)` (`:78`). Holds `health_score`, the 4 `*_component` columns, `risk_level`, confidence, churn probability/CI/bucket, LLM analysis.
-- `customer_health_history` (`models/customer_health_history.py`) — snapshots each component on score change ≥2 pts.
+## Reframed scope (to confirm in the interview)
 
-## Health score internals
+This slice = **extend the existing activity timeline into a true unified, paginated timeline**
+(add usage + churn sources), **+ expose read-only Customer 360 / health-score (and possibly
+timeline) endpoints on the public API.** Build on the existing `ActivityEvent` / `ActivityTimeline`
+patterns rather than inventing parallel ones.
 
-- 4 components, default weights in `health_score_service.py:24-29` — churn_risk .35, sentiment .25, resolution .25, frequency .15.
-- Per-org weights in `org_ai_config` table (`models/org_ai_config.py:18-21`: `health_weight_churn/sentiment/resolution/frequency`, INT %). Read by `_get_org_weights()` (`:32-46`).
-- **Sum-to-100 validation** in `api/routes/categories.py:185-190` (Pydantic `model_validator`); GET/PUT at `:193-238`.
-- Each component returns **50 (neutral) when it has no data** — built-in degrade pattern.
-- Recompute trigger: `analyze_single_feedback` Celery task → `_analyze_feedback_item` → `update_customer_health()` (worker `analysis.py:408-416`) → `compute_health_score()` → health-drop alert (`health_score_service.py:473-540`).
+## Event sources — confirmed data shapes & timestamps
 
-### → Adding a 5th "usage" component (caveat resolution)
+| Source | Table / model | Timeline timestamp | Org scope | Notes |
+|---|---|---|---|---|
+| Feedback | `feedback_items` | `created_at` (ingest) | `organization_id` | sentiment/category/churn_risk_score/is_urgent available |
+| Health score change | `customer_health_history` | `recorded_at` | `organization_id` | one row per ≥2pt change or risk-level change; has old→new |
+| Status change | `feedback_workflow_events` | `created_at` | `organization_id` | `event_type="status_changed"`, `new_value` |
+| LLM analysis | `customer_health.llm_analyzed_at` | that column | `organization_id` | single latest, not historical |
+| Action completed | `customer_analysis_actions.completed_at` | that column | — (via health_id) | completed/dismissed |
+| **Usage (NEW)** | `usage_events` (raw) / `customer_usage` (rollup) | `occurred_at` / `updated_at` | `organization_id` | **raw events are HIGH-VOLUME** (every track/identify) — see open Q |
+| **Churn (NEW)** | `customer_churn_events` | `churned_at` (+ `recovered_at`) | `organization_id` | reason_code, source manual/csv/auto |
 
-The caveat (re-weighting + don't double-count) resolves cleanly with **two layers of safe degradation**:
-1. **Add** a 5th component (don't replace the feedback-"frequency" one — different signal). New `health_weight_usage` column **defaulting to 0**, so *existing orgs' scores are mathematically unchanged* until an operator opts in by re-weighting (sum still 100).
-2. `_compute_usage_component()` returns **50 (neutral)** for customers/orgs with no usage events — mirrors the existing per-component no-data behavior. So even at a non-zero weight, no-usage customers aren't penalized.
+## Conventions to reuse
 
-Touch list for the component: `org_ai_config` (+column, migration), `_get_org_weights`, new `_compute_usage_component`, `compute_health_score` aggregation, `categories.py` validation (5 weights → 100), `customer_health_scores.usage_component` (+column), `customer_health_history.usage_component` (+column), frontend `ComponentProgressBars` (5th bar).
+- **v1 pagination**: `page` (≥1), `page_size` (1–100), `sort_by`, `sort_order`; org via
+  `get_current_org` (JWT → `current_user.organization`).
+- **Public API**: `verify_api_key` + `require_scope("read")` (`api/public/auth.py:74-129`),
+  `rrf_` keys, org resolved from key. Add new read endpoint mirroring
+  `/customers/{email}/health` (`routes/public_api.py:343-364`).
+- **Frontend**: `ActivityEvent` discriminated union + `eventIconMap` (extend with usage/churn
+  icons), React Query (`useQuery`), Card/Skeleton/Badge, Sunset-Horizon CSS vars + `color-mix`
+  (no hardcoded colors). Precedent feed UIs: `ActivityTimeline.tsx`, `NotificationBell.tsx`.
 
-## 9-factor churn scorer (optional v2 hook)
+## Open questions for the requirements interview (Phase 3)
 
-`worker-service/src/tasks/analysis.py:566-833` `_compute_heuristic_churn_risk` — 9 weighted factors incl. a `feedback_frequency` factor (again feedback cadence). A usage factor could be added here later, but the **health component is the cleaner first slice** (usage already flows into churn indirectly via health). Keep churn-scorer changes out of slice 1.
+1. **Extend `/activity` or add a new `/timeline` endpoint?** Options: (a) add a separate
+   paginated `GET /customers/{email}/timeline` and keep `/activity` as the capped 10-item
+   widget; (b) refactor `/activity` to delegate to a shared timeline service with `limit=10`.
+   Recommend (a)+(b): one service, two entry points.
+2. **How to represent usage in the timeline without flooding it?** Raw `usage_events` are
+   per-track-event (could be thousands). Options: (a) raw events (noisy), (b) **notable usage
+   events only** — first-seen, reactivation-after-dormancy, first-use-of-feature, usage-drop;
+   (c) daily/weekly buckets. Leaning (b)/(c). **Needs a decision.**
+3. **Pagination strategy:** offset `page/page_size` (matches house style but awkward across a
+   merged multi-source UNION) vs **cursor by timestamp** (cleaner for heterogeneous merge).
+4. **Churn representation:** emit `recovered_at` as a separate "recovered" event? Churn is
+   near-terminal — does the timeline keep accumulating after it?
+5. **Public API scope:** which exactly — full Customer 360 profile endpoint, health-score
+   endpoint, and/or the timeline itself? (`/customers/{email}/health` already exists.)
+6. **`require_feature` gate:** the v1 activity/customer routes sit behind
+   `require_feature("customer_health_scores")`. OSS self-hosted unlocks everything — confirm
+   the new endpoints follow the same (now no-op) gate or drop it.
 
-## Inbound ingestion (the receiver)
+## Affected files (anchor list for plan)
 
-- **Reuse the public API-key system** for auth: `verify_api_key` + `require_scope("ingest")` (`api/public/auth.py:74-129`), already org-scoped via `auth.organization_id`. No new secret scheme; an operator mints an ingest-scoped key (`models/api_key.py`, scopes col `:22`). This beats a hardcoded env secret for multi-tenant + matches existing `/api/public` feedback ingest (`public_api.py:212-242`).
-- New router `api/routes/usage_webhooks.py`, prefix `/api/v1/webhooks/usage` (or under `/api/public/v1/usage` to sit with ingest — decide in PRD), registered in `api/main.py` (include_router pattern `:226-296`).
-- Pattern: **Route → auth/validate → dedup → queue Celery → 200**. Dedup via unique constraint on `(org, external_event_id)` like `feedback_source_event.py:35-40`.
-- Celery task `worker-service/src/tasks/usage_metrics.py::process_usage_event` (`@shared_task`, mirror `source_events.py:18-30`); enqueue by name via `get_celery_app().send_task(...)`.
-- New model(s): a raw `usage_event` log (JSON payload, dedup key) + a per-customer rollup (logins, feature-event count, last_active_at, derived usage_score). Alembic head = **`y4z5a6b7c8d9`** (new `down_revision`).
-
-## Frontend surfaces
-
-- Profile page `app/(dashboard)/customers/[email]/page.tsx` — new "Usage Activity" Card slots after Health Timeline (`~:688`). Data via new `customersAPI.getUsage(email, days)` (`lib/api/customers.ts` pattern `:163-231`; axios bearer interceptor `lib/api-client.ts:14-29`).
-- `components/customers/ComponentProgressBars.tsx:16-21` — add 5th `{key:'usage'}` entry + tooltip; needs `usage_component` on `CustomerProfileData`.
-- `components/customers/HealthTimeline.tsx` — copy to `UsageTimeline.tsx` (Recharts LineChart, period toggle).
-- Operator setup UI: surface the ingest API key + the usage webhook URL/schema (reuse `settings/` patterns; NOTE the existing `settings/webhooks` page is **outbound** delivery — our receiver is inbound, so this is new copy, not that page's CRUD).
-
-## Stale-doc guardrails honored
-
-- Ignore plan-gating / `PLAN_WEBHOOK_LIMITS` / Pro+ tiers (pre-pivot, OSS = all unlocked).
-- No vendor OAuth; receiver is a plain authenticated POST endpoint (self-hosted-first).
-
-## Genuine product decisions to settle in the interview
-
-1. **Endpoint shape & schema** — accept Segment `identify`+`track` verbatim, or a normalized `{event, userId/email, name, timestamp, properties}` subset (Segment-compatible but simpler)? Mount under `/api/v1/webhooks/usage` vs `/api/public/v1/usage`?
-2. **Customer matching** — map Segment `email` trait (or `userId`) → existing `customer_email`. What happens to events with no resolvable email (drop, or store anonymous)?
-3. **Which metrics define `usage_score`** in slice 1 — recency of last-active + login frequency + distinct-feature count? Need a concrete 0-100 mapping (like the resolution/frequency mappings).
-4. **Default usage weight** — confirm 0 (opt-in re-weight) vs a small default like 10 (auto-reduce others). Recommend 0 for zero-surprise upgrades.
-5. **Retention** — how long to keep raw usage events vs just the rollup.
+- Backend: `routes/customers.py` (timeline endpoint + schemas), new `services/customer_timeline_service.py`,
+  `routes/public_api.py` (+ `api/public/auth.py` patterns), models already exist (no new tables expected).
+- Frontend: `components/customers/ActivityTimeline.tsx` (extend) or new `CustomerTimeline.tsx`,
+  `lib/api/customers.ts` (+ types), profile page Overview tab.
+- Likely **no migration** — all source tables exist. Confirm in plan.
