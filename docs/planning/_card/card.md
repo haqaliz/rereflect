@@ -1,64 +1,82 @@
-# Card — Product Usage Enrichment (freeform)
+# Card — feat/customer-360-unified-timeline
 
 **Type:** feat
-**Slug:** product-usage-enrichment
-**Branch:** feat/product-usage-enrichment
-**Source:** freeform task (no GitHub issue) — picked by `rereflect-next` as the next highest-leverage feature.
-**Roadmap ref:** AI-TRACKING.md M3.2 — "Segment Product Usage Integration" (pending); DEV-TRACKING.md integration backlog.
+**Slug / branch id:** `customer-360-unified-timeline`
+**Source:** Freeform task (no GitHub issue) — selected via `rereflect-next` as the highest-leverage next feature.
+**Worktree:** `.claude/worktrees/feat-customer-360-unified-timeline`
+**Branch:** `feat/customer-360-unified-timeline`
 
 ---
 
-## Brief (from the rereflect-next handoff)
+## Brief (from rereflect-next handoff)
 
-Build **product-usage enrichment** for Customer 360 + churn (AI-TRACKING M3.2).
+Build the **AI-TRACKING M3.4 "unified customer timeline"** first slice.
 
-**First slice:** a Segment-compatible usage-event webhook receiver (`identify` / `track` schema)
-that writes per-customer usage metrics (login frequency, feature usage, last-active),
-surfaced as a usage section on the customer profile, and wired as a real component into the
-health / churn score.
+A single org-scoped, paginated endpoint that merges each customer's existing event
+sources into one **reverse-chronological timeline**:
 
-**Self-hosted-first:** accept any CDP or custom backend POSTing the event schema — no vendor
-OAuth required. An operator points Segment *or* their own backend at the instance.
+- **Feedback items** (the customer's feedback, with sentiment/category)
+- **Product-usage events** (the `customer_usage` / `usage_event` tables that just
+  merged in M3.2, commit `a8047d9`)
+- **Churn / health-score change events** (health score changes, risk-level changes)
+
+The timeline is surfaced on the existing `/customers/[email]` profile page, plus the
+**read-only Customer 360 + health-score API endpoints** from AI-TRACKING M3.4
+(`AI-TRACKING.md:201-206`).
+
+### In scope (this slice)
+
+- Unified, reverse-chronological, paginated timeline endpoint (3 sources: feedback +
+  usage + churn/health).
+- Surface the timeline on the existing `/customers/[email]` profile page.
+- Read-only Customer 360 API + health-score API endpoints (programmatic / self-host
+  consumption — fits BYOK/self-hosted positioning).
+- Everything **unlocked** (OSS self-hosted — no plan gating).
+
+### Out of scope (later slices / deferred)
+
+- **CRM events** in the timeline — CRM (HubSpot, M3.1) is **not built**. Design the
+  timeline event shape to be **source-extensible**, but do NOT build CRM rows now.
+  CRM rows slot in when M3.1 ships.
+- **Customer segments** (M3.4 "auto-group power users / silent churners / advocates")
+  — leave out of this slice. Today this could only be heuristic/keyword-based; there
+  is **no ML segmentation** and it must not be implied as such.
+- **Bulk actions** (M3.4 export / bulk-assign CS owner / trigger outreach) — later slice.
 
 ---
 
-## Why this was picked (moat + shipped-state grounding)
+## Why this was picked (moat / context)
 
-- **Fills the biggest gap in the killer feature.** AI-TRACKING's stated killer feature is
-  "churn prediction that actually works," yet `services/backend-api/src/services/health_score_service.py:64`
-  shows the only usage-like component ("frequency") is just **feedback cadence** — a weak proxy.
-  Real product-usage signal (declining logins = the canonical churn predictor) is **absent**.
-  This is the highest-leverage signal to add to the churn → health → playbook loop.
-- **Best OSS / self-hosted fit of the pending set.** A webhook receiver (operator points
-  Segment or any CDP / their own backend at the instance) has far lower setup friction than
-  HubSpot's OAuth-app-registration flow, and avoids vendor lock-in. Listed as M3.2 in both
-  AI-TRACKING and DEV-TRACKING.
-- **Unblocked, depth-first, clear first slice.** First slice = a usage-event ingest endpoint
-  (identify/track schema) + a per-customer usage metrics model, testable immediately — no
-  dependency on the other Q3 items. (Enhanced-360's timeline, M3.4, is half-blocked until an
-  enrichment source like this exists.)
+- **Freshly unblocked by what just merged.** M3.2 usage events landed this week
+  (`a8047d9`), so feedback + product-usage + churn events now all exist per-customer —
+  but nothing stitches them together. AI-TRACKING M3.4's "unified customer timeline:
+  feedback + CRM events + usage events in chronological order" is still pending `[ ]`
+  (`AI-TRACKING.md:202`).
+- **Deepens the real moat** on two axes: hardens the churn→health→playbook loop (a
+  single chronological view is where an operator sees *why* a health score moved), and
+  adds the **Customer 360 API + health-score API** (`AI-TRACKING.md:204-206`) — the
+  programmatic/self-host developer surface, which fits OSS/BYOK and compounds as
+  operators build on it.
+- **Clean, testable, no external dependency.** First slice = a chronological merge of
+  three event sources that already exist into one org-scoped endpoint, surfaced on the
+  existing `/customers/[email]` profile. Unlike the CRM alternate, it needs no OAuth
+  app registration to demo.
 
-## Known caveat (carried into the dig + PRD)
+## Known caveats (carry into PRD/dig)
 
-- The health-score weights config currently validates **4 components summing to 100**
-  (`health_weight_frequency` etc., in `health_score_service.py`). Adding a usage component
-  means a **migration + re-validating the weight sum**, and a decision on whether usage
-  **replaces or supplements** the existing feedback-"frequency" component (don't double-count).
-- Usage enrichment only helps orgs that actually emit usage events. For everyone else the
-  component must **degrade to a neutral score gracefully** (mirror the embedding-resolver's
-  degrade-to-None pattern) — never tank an org's health to zero just because they emit no
-  usage events.
+- M3.4's timeline spec lists **CRM events** as a source, but CRM isn't built — first
+  slice covers feedback + usage + churn only; event shape must stay source-extensible.
+- "Customer segments" is heuristic-only today — don't ship/sell it as ML. Keep it out
+  of this slice.
+- CLAUDE.md's billing / plan-tier / Resend / Stripe sections are **stale** (pre-OSS
+  pivot). Everything ships unlocked. Use CLAUDE.md only for architecture/service layout.
 
-## Out of scope (initial slice — confirm in PRD)
+## Roadmap references
 
-- HubSpot / CRM enrichment (M3.1) — separate feature.
-- Full Segment OAuth / Connections API management UI — the receiver is a plain authenticated webhook.
-- Enhanced Customer 360 unified timeline (M3.4) — downstream; this slice provides the usage source it needs.
-
-## Open questions for the interview
-
-1. Auth model for the webhook: reuse the existing public-API key (ingest scope) or a dedicated usage-source secret?
-2. Usage component: replace the feedback-"frequency" component, or add a 5th component and re-weight?
-3. What minimal usage metrics define the first slice (login frequency, last-active, feature-usage count)?
-4. Event schema: accept Segment `identify`+`track` verbatim, or a normalized subset?
-5. Customer matching key — `customer_email` (existing) vs Segment `userId`/`anonymousId`.
+- `AI-TRACKING.md:201-206` — M3.4 Enhanced Customer 360 (unified timeline, segments,
+  bulk actions, Customer 360 API, health score API) — pending `[ ]`.
+- M3.2 product-usage enrichment SHIPPED — merge `a8047d9` + ~24 commits (usage_event
+  model, ingest receiver, rollup+score, health 5th component, profile usage card/timeline).
+- M1.2 Customer 360 page (`/customers` list + `/customers/[email]` profile) — COMPLETE.
+- `PRD-CUSTOMER-360.md` — original M1.2 PRD (profile page already exists;
+  `customer_health_history` model already stores health-score snapshots).
