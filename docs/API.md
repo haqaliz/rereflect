@@ -63,6 +63,39 @@ PATCH  /api/v1/team/{id}/role        # Change role
 DELETE /api/v1/team/{id}             # Remove member
 ```
 
+## Public API (API keys)
+
+In addition to the JWT-authenticated `/api/v1` routes above, Rereflect exposes a read-only
+**public API** under `/api/public/v1` for programmatic access. Authenticate with an API key
+(`rrf_…`, created in **Settings → API Keys**) instead of a JWT:
+
+```
+Authorization: Bearer rrf_xxxxxxxx        # or:  X-API-Key: rrf_xxxxxxxx
+```
+
+Keys carry scopes (`read`, `ingest`); the endpoints below require `read`. As always, data is
+scoped to the key's organization.
+
+### Customer 360
+
+```
+GET /api/public/v1/customers                      # List customers (health-scored)
+GET /api/public/v1/customers/{email}              # Full Customer 360 profile (health, components, churn, LLM summary)
+GET /api/public/v1/customers/{email}/health       # Health score + component breakdown (incl. usage)
+GET /api/public/v1/customers/{email}/timeline     # Unified activity timeline (cursor-paginated)
+```
+
+The timeline merges feedback, product-usage, churn and health-score events in reverse-chronological
+order. Page with an opaque cursor:
+
+```
+GET /api/public/v1/customers/{email}/timeline?limit=20
+GET /api/public/v1/customers/{email}/timeline?before=<next_cursor>&limit=20
+→ { "events": [ … ], "next_cursor": "<cursor|null>" }
+```
+
+`limit` must be 1–100 (default 20). When `next_cursor` is `null`, there are no more events.
+
 ## Common gotchas
 
 - **Trailing slashes** — match the route exactly; a missing/extra `/` can return 422.
