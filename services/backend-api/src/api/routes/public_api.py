@@ -476,7 +476,15 @@ class PublicTimelineResponse(BaseModel):
     description=(
         "Cursor-paged, reverse-chronological activity timeline for a customer. "
         "Merges feedback, health-score changes, churn, and notable usage events. "
-        "Uses the same ``build_timeline`` service as the v1 endpoint."
+        "Backed by the same ``build_timeline`` service as the v1 timeline endpoint "
+        "— identical cursor encoding, sort order, and pagination semantics.\n\n"
+        "**Cursor pagination:** pass the ``next_cursor`` value from any response as "
+        "the ``before`` query parameter to fetch the next page.  A ``null`` "
+        "``next_cursor`` indicates the last page.  Malformed cursors return 422."
+    ),
+    response_description=(
+        "``events``: list of timeline events, newest first.  "
+        "``next_cursor``: opaque string for the next page; null on last page."
     ),
 )
 def public_customer_timeline(
