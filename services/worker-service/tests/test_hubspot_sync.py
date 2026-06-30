@@ -808,10 +808,15 @@ class TestHardeningEdgeCases:
         # self.retry should raise Retry (that's how Celery works)
         task_self.retry.side_effect = Retry()
 
+        # Patch HubSpotClient in the task module's namespace (not the source module)
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.list_contacts.side_effect = hs.HubSpotTransientError("rate limited")
+
         with patch.object(hs, "get_db_session", _fake_db_session), \
              patch.object(hs, "_decrypt", return_value="plain-token"), \
-             patch("src.clients.hubspot.HubSpotClient") as MockClient:
-            MockClient.return_value.__enter__.return_value.list_contacts.side_effect = hs.HubSpotTransientError("rate limited")
+             patch.object(hs, "HubSpotClient", return_value=mock_client_instance):
             with pytest.raises(Retry):
                 hs._sync_hubspot_org_body(task_self, integ.id)
 
