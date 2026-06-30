@@ -585,12 +585,63 @@ class TestPublicCustomerProfile:
             "resolution_component", "frequency_component", "usage_component",
             "llm_analysis_summary", "llm_recommended_actions", "llm_risk_drivers",
             "llm_urgency", "llm_analysis_type", "is_archived",
+            # CRM fields (B2)
+            "crm_company_name", "crm_lifecycle_stage", "crm_arr",
+            "crm_renewal_date", "crm_deal_name", "crm_deal_stage", "crm_deal_amount",
         ]
         for field in parity_fields:
             assert field in pub, f"Field '{field}' missing from public profile"
             assert v1.get(field) == pub.get(field), (
                 f"Parity mismatch for '{field}': v1={v1.get(field)!r} pub={pub.get(field)!r}"
             )
+
+    def test_public_profile_crm_fields_when_row_exists(self, client: TestClient, db: Session):
+        """B2-RED: public profile returns all 7 crm_* fields when CrmEnrichment row exists."""
+        import datetime as dt
+        org = _make_org(db)
+        _make_health(db, org.id, "crmpu@acme.com")
+        db.add(CrmEnrichment(
+            organization_id=org.id,
+            customer_email="crmpu@acme.com",
+            company_name="PubCo",
+            lifecycle_stage="lead",
+            arr=10000.0,
+            renewal_date=dt.datetime(2026, 11, 1),
+            deal_name="PubDeal",
+            deal_stage="open",
+            deal_amount=5000.0,
+            last_synced_at=dt.datetime(2026, 6, 29, 9, 0, 0),
+        ))
+        db.commit()
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+
+        resp = client.get(
+            "/api/public/v1/customers/crmpu@acme.com",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["crm_company_name"] == "PubCo"
+        assert data["crm_lifecycle_stage"] == "lead"
+        assert abs(data["crm_arr"] - 10000.0) < 0.01
+        assert data["crm_deal_name"] == "PubDeal"
+        assert data["crm_deal_stage"] == "open"
+
+    def test_public_profile_crm_fields_none_when_no_row(self, client: TestClient, db: Session):
+        """B2-RED: public profile returns null crm_* when no CrmEnrichment row."""
+        org = _make_org(db)
+        _make_health(db, org.id, "nocrmpu@acme.com")
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+
+        resp = client.get(
+            "/api/public/v1/customers/nocrmpu@acme.com",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        for field in ["crm_company_name", "crm_lifecycle_stage", "crm_arr",
+                      "crm_renewal_date", "crm_deal_name", "crm_deal_stage", "crm_deal_amount"]:
+            assert data.get(field) is None, f"Expected {field} to be null"
 
     def test_revoked_key_returns_401(self, client: TestClient, db: Session):
         org = _make_org(db)
