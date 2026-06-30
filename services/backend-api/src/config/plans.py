@@ -49,6 +49,8 @@ PLANS = {
             # Copilot: free users get basic access (no folders, no analysis)
             # Custom Webhooks M3.1 (limited: 2 endpoints, fire-and-forget only, 2 headers)
             "custom_webhooks",
+            # HubSpot CRM enrichment (hubspot-connection aspect)
+            "hubspot_integration",
         ],
         "stripe_price_monthly": None,
         "stripe_price_annual": None,
@@ -95,6 +97,8 @@ PLANS = {
             "custom_webhooks",
             # AI Workflow Automation M4.4
             "workflow_automation",
+            # HubSpot CRM enrichment (hubspot-connection aspect)
+            "hubspot_integration",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -155,6 +159,8 @@ PLANS = {
             "churn_cohorts",
             "churn_playbooks",
             "churn_accuracy_card",
+            # HubSpot CRM enrichment (hubspot-connection aspect)
+            "hubspot_integration",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -215,6 +221,8 @@ PLANS = {
             "churn_playbooks",
             "churn_accuracy_card",
             "custom_probability_bands",
+            # HubSpot CRM enrichment (hubspot-connection aspect)
+            "hubspot_integration",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -284,6 +292,8 @@ FEATURE_PLANS = {
     "churn_playbooks": "business",
     "churn_accuracy_card": "business",
     "custom_probability_bands": "enterprise",
+    # HubSpot CRM enrichment (hubspot-connection aspect) — free so all plans unlock
+    "hubspot_integration": "free",
 }
 
 
