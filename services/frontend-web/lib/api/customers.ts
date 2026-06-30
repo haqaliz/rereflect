@@ -97,6 +97,14 @@ export interface CustomerProfileData {
   churn_probability_high?: number | null;
   time_to_churn_bucket?: 'immediate' | '2w' | '2-4w' | '1-3m' | 'low' | null;
   has_potential_winback?: boolean;
+  // CRM enrichment fields (HubSpot)
+  crm_company_name?: string | null;
+  crm_lifecycle_stage?: string | null;
+  crm_arr?: number | null;
+  crm_renewal_date?: string | null;
+  crm_deal_name?: string | null;
+  crm_deal_stage?: string | null;
+  crm_deal_amount?: number | null;
 }
 
 export interface UsageRollup {
@@ -167,7 +175,9 @@ export interface ActivityEvent {
     | 'churn_recovered'
     | 'usage_first_seen'
     | 'usage_feature_adopted'
-    | 'usage_reactivated';
+    | 'usage_reactivated'
+    | 'crm_contact_synced'
+    | 'crm_renewal_upcoming';
   description: string;
   timestamp: string;
   // Existing optional fields
@@ -180,6 +190,11 @@ export interface ActivityEvent {
   feature_name?: string;
   source?: string;
   gap_days?: number;
+  // CRM payload fields
+  company_name?: string;
+  renewal_date?: string;
+  deal_stage?: string;
+  arr?: number;
 }
 
 export interface CustomerActivityResponse {
