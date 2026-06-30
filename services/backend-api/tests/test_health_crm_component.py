@@ -103,17 +103,17 @@ class TestScoreStabilityWithCrmWeightZero:
 class TestComputeCrmComponentFallback:
     """_compute_crm_component must NEVER raise and returns 50.0 on no data."""
 
-    def test_returns_neutral_when_no_crm_enrichment_table(
+    def test_returns_neutral_when_no_crm_row_for_email(
         self, db, test_organization
     ):
-        """Missing crm_enrichment table returns 50.0, never raises."""
+        """No crm_enrichment row for this email returns 50.0 (neutral, no-data path)."""
         result = _compute_crm_component(
             db, test_organization.id, "norow@example.com", datetime.utcnow()
         )
         assert result == pytest.approx(50.0)
 
-    def test_never_raises_on_missing_table(self, db, test_organization):
-        """_compute_crm_component is safe even with unexpected DB errors."""
+    def test_returns_neutral_when_crm_row_absent(self, db, test_organization):
+        """_compute_crm_component returns a float neutral value when no row exists."""
         try:
             val = _compute_crm_component(
                 db, test_organization.id, "safe@example.com", datetime.utcnow()
@@ -196,6 +196,44 @@ class TestCrmComponentSavepointIsolation:
         assert result == pytest.approx(50.0)
         val = db.execute(sql_text("SELECT 1")).scalar()
         assert val == 1, "Session must be usable after SAVEPOINT-isolated CRM error"
+
+    def test_real_missing_table_savepoint_path(self, db, test_organization):
+        """
+        Genuinely exercises the SAVEPOINT/except branch by dropping crm_enrichment
+        from the live test DB so the SQL SELECT inside _compute_crm_component raises
+        an OperationalError for real (no mocking).
+
+        Contract under test:
+          1. Returns CRM_SCORE_NEUTRAL (50.0) — not a re-raise.
+          2. The outer session remains usable after the SAVEPOINT is rolled back.
+
+        Why this would FAIL without db.begin_nested():
+          Without a SAVEPOINT, an OperationalError from a missing table puts the
+          SQLAlchemy session into an aborted state. Any subsequent db.execute()
+          would raise sqlalchemy.exc.PendingRollbackError (or the underlying
+          "transaction is aborted" DB error). The assertion `val == 1` below
+          would therefore fail, proving that begin_nested() is load-bearing.
+        """
+        from sqlalchemy import text as sql_text
+
+        # Drop the table for real so the query raises OperationalError
+        db.execute(sql_text("DROP TABLE IF EXISTS crm_enrichment"))
+        db.commit()  # commit the DDL so the table is genuinely absent
+
+        result = _compute_crm_component(
+            db, test_organization.id, "droptable@example.com", datetime.utcnow()
+        )
+        assert result == pytest.approx(50.0), (
+            "Must return neutral (50.0) when crm_enrichment table is missing"
+        )
+
+        # Session must still be usable — SAVEPOINT rolled back cleanly
+        val = db.execute(sql_text("SELECT 1")).scalar()
+        assert val == 1, (
+            "Session must remain usable after the missing-table exception — "
+            "begin_nested() ensures only the SAVEPOINT is rolled back, "
+            "not the entire outer transaction"
+        )
 
 
 # ---------------------------------------------------------------------------
