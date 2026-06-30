@@ -166,7 +166,10 @@ def delete_custom_category(
 
 # ── Health weights ──────────────────────────────────────────────────────────
 
-_DEFAULT_WEIGHTS = {"churn": 35, "sentiment": 25, "resolution": 25, "frequency": 15, "usage": 0}
+_DEFAULT_WEIGHTS = {
+    "churn": 35, "sentiment": 25, "resolution": 25,
+    "frequency": 15, "usage": 0, "crm": 0,
+}
 
 
 class HealthWeightsResponse(BaseModel):
@@ -174,7 +177,8 @@ class HealthWeightsResponse(BaseModel):
     sentiment: int
     resolution: int
     frequency: int
-    usage: int = 0  # Opt-in usage component; 0 = disabled
+    usage: int = 0   # Opt-in usage component; 0 = disabled
+    crm: int = 0     # Opt-in CRM component weight; 0 = disabled
 
 
 class HealthWeightsUpdate(BaseModel):
@@ -183,10 +187,12 @@ class HealthWeightsUpdate(BaseModel):
     resolution: int = Field(..., ge=0, le=100)
     frequency: int = Field(..., ge=0, le=100)
     usage: int = Field(default=0, ge=0, le=100)  # Optional; defaults to 0
+    crm: int = Field(default=0, ge=0, le=100)    # Optional; defaults to 0
 
     @model_validator(mode="after")
     def validate_sum_is_100(self) -> "HealthWeightsUpdate":
-        total = self.churn + self.sentiment + self.resolution + self.frequency + self.usage
+        total = (self.churn + self.sentiment + self.resolution +
+                 self.frequency + self.usage + self.crm)
         if total != 100:
             raise ValueError(f"Health weights must sum to exactly 100, got {total}")
         return self
@@ -206,6 +212,7 @@ def get_health_weights(
             resolution=config.health_weight_resolution,
             frequency=config.health_weight_frequency,
             usage=config.health_weight_usage,
+            crm=config.health_weight_crm,
         )
     return HealthWeightsResponse(**_DEFAULT_WEIGHTS)
 
@@ -231,6 +238,7 @@ def update_health_weights(
     config.health_weight_resolution = data.resolution
     config.health_weight_frequency = data.frequency
     config.health_weight_usage = data.usage
+    config.health_weight_crm = data.crm
 
     db.commit()
     db.refresh(config)
@@ -240,4 +248,5 @@ def update_health_weights(
         resolution=config.health_weight_resolution,
         frequency=config.health_weight_frequency,
         usage=config.health_weight_usage,
+        crm=config.health_weight_crm,
     )
