@@ -24,6 +24,7 @@ import { CustomerTimeline } from '@/components/customers/CustomerTimeline';
 import { CustomerFeedbackList } from '@/components/customers/CustomerFeedbackList';
 import { ChurnRiskDrivers } from '@/components/customers/ChurnRiskDrivers';
 import { ModelAccuracyCard } from '@/components/dashboard/widgets/ModelAccuracyCard';
+import { CrmCompanyCard } from '@/components/customers/CrmCompanyCard';
 import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -745,6 +746,9 @@ export default function CustomerProfilePage() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-4">
+            {/* CRM / Company — shows HubSpot-synced data when available */}
+            <CrmCompanyCard email={profile.customer_email} />
+
             {/* Health Score Components */}
             <Card>
               <CardHeader className="pb-3">
