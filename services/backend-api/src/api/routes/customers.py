@@ -161,6 +161,11 @@ class ActivityEvent(BaseModel):
     feature_name: Optional[str] = None
     source: Optional[str] = None
     gap_days: Optional[int] = None
+    # CRM payload fields (additive — all Optional)
+    company_name: Optional[str] = None
+    renewal_date: Optional[datetime] = None
+    deal_stage: Optional[str] = None
+    arr: Optional[float] = None
 
 
 class CustomerActivityResponse(BaseModel):
@@ -518,6 +523,10 @@ def _timeline_event_to_activity(event) -> ActivityEvent:
         feature_name=event.feature_name,
         source=event.source,
         gap_days=event.gap_days,
+        company_name=getattr(event, "company_name", None),
+        renewal_date=getattr(event, "renewal_date", None),
+        deal_stage=getattr(event, "deal_stage", None),
+        arr=getattr(event, "arr", None),
     )
 
 

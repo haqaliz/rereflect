@@ -36,6 +36,7 @@ DORMANCY_DAYS: int = 14
 DEFAULT_LIMIT: int = 20
 MAX_LIMIT: int = 100
 USAGE_SCAN_WINDOW_DAYS: int = 365
+CRM_RENEWAL_WINDOW_DAYS: int = 30
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,11 @@ class TimelineEvent:
     reason_code: Optional[str] = None
     feature_name: Optional[str] = None
     gap_days: Optional[int] = None
+    # CRM payload fields (HubSpot)
+    company_name: Optional[str] = None
+    renewal_date: Optional[datetime] = None
+    deal_stage: Optional[str] = None
+    arr: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +432,65 @@ def _fetch_churn_events(
     return events
 
 
+def _fetch_crm_events(
+    db: Session,
+    org_id: int,
+    email: str,
+) -> List[TimelineEvent]:
+    """Derive CRM timeline events from the current crm_enrichment snapshot.
+
+    Returns crm_contact_synced (anchored at last_synced_at) and optionally
+    crm_renewal_upcoming (when renewal_date is within CRM_RENEWAL_WINDOW_DAYS).
+    Both events are anchored at last_synced_at (not future dates) to keep the
+    timeline reverse-chronological and cursor-safe.
+
+    crm_deal_stage_changed is DEFERRED to v2 — a single current-state snapshot
+    cannot detect a stage change (no per-sync history table in v1).
+    """
+    try:
+        from src.models.crm_enrichment import CrmEnrichment
+    except ImportError:
+        return []
+
+    row = db.query(CrmEnrichment).filter(
+        CrmEnrichment.organization_id == org_id,
+        CrmEnrichment.customer_email == email,
+    ).first()
+
+    if not row or not row.last_synced_at:
+        return []
+
+    events: List[TimelineEvent] = []
+    sync_ts = _to_naive_utc(row.last_synced_at)
+
+    events.append(TimelineEvent(
+        type="crm_contact_synced",
+        timestamp=sync_ts,
+        description="CRM contact synced from HubSpot"
+                    + (f" — {row.company_name}" if row.company_name else ""),
+        source="hubspot",
+        source_id=row.id,
+        company_name=row.company_name,
+    ))
+
+    if row.renewal_date:
+        rd = _to_naive_utc(row.renewal_date)
+        now = datetime.utcnow()
+        if now <= rd <= now + timedelta(days=CRM_RENEWAL_WINDOW_DAYS):
+            events.append(TimelineEvent(
+                type="crm_renewal_upcoming",
+                timestamp=sync_ts,  # anchored at detection time, not the future date
+                description=f"Renewal upcoming on {rd.date().isoformat()}",
+                source="hubspot",
+                source_id=row.id,
+                renewal_date=rd,
+                deal_stage=row.deal_stage,
+                arr=float(row.arr) if row.arr is not None else None,
+            ))
+
+    return events
+
+
 def _derive_notable_usage_events(
     db: Session,
     org_id: int,
@@ -568,6 +633,11 @@ def build_timeline(
     # Churn uses Python-only cursor filtering (multi-type from same table, few rows)
     all_events.extend(
         _fetch_churn_events(db, org_id, email)
+    )
+
+    # CRM uses Python-only cursor filtering (single snapshot row, few events)
+    all_events.extend(
+        _fetch_crm_events(db, org_id, email)
     )
 
     # Notable usage: always scan full window, cursor applied below

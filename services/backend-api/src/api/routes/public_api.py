@@ -476,6 +476,11 @@ class PublicActivityEvent(BaseModel):
     feature_name: Optional[str] = None
     source: Optional[str] = None
     gap_days: Optional[int] = None
+    # CRM payload fields (additive — all Optional)
+    company_name: Optional[str] = None
+    renewal_date: Optional[datetime] = None
+    deal_stage: Optional[str] = None
+    arr: Optional[float] = None
 
 
 class PublicTimelineResponse(BaseModel):

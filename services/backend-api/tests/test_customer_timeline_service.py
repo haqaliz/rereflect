@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from src.models.customer_health import CustomerHealth
 from src.models.customer_health_history import CustomerHealthHistory
 from src.models.customer_analysis_action import CustomerAnalysisAction
+from src.models.crm_enrichment import CrmEnrichment
 from src.models.feedback import FeedbackItem
 from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.churn_event import CustomerChurnEvent
@@ -768,3 +769,185 @@ class TestTimelinePhase4:
         for a, b in zip(run1, run2):
             assert a.type == b.type
             assert a.timestamp == b.timestamp
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — CRM events (crm_contact_synced + crm_renewal_upcoming)
+# ---------------------------------------------------------------------------
+
+def _crm(db, org, email, *, last_synced_at, renewal_date=None, **cols) -> CrmEnrichment:
+    row = CrmEnrichment(
+        organization_id=org.id,
+        customer_email=email,
+        last_synced_at=last_synced_at,
+        renewal_date=renewal_date,
+        **cols,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+class TestTimelinePhase5:
+    """CRM events: crm_contact_synced and crm_renewal_upcoming."""
+
+    def test_crm_contact_synced_appears(self, db: Session):
+        """crm_contact_synced event appears at last_synced_at when a row exists."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        sync_ts = datetime.utcnow() - timedelta(hours=3)
+        _health(db, org, "p5sync@acme.com")
+        _crm(db, org, "p5sync@acme.com", last_synced_at=sync_ts, company_name="SyncCo")
+
+        events, _ = build_timeline(db, org.id, "p5sync@acme.com", limit=50)
+        types = [e.type for e in events]
+        assert "crm_contact_synced" in types
+
+        ev = next(e for e in events if e.type == "crm_contact_synced")
+        assert ev.source == "hubspot"
+        assert ev.timestamp.replace(microsecond=0) == sync_ts.replace(microsecond=0)
+
+    def test_crm_contact_synced_absent_when_no_row(self, db: Session):
+        """No CrmEnrichment row → no crm_contact_synced event."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        _health(db, org, "p5nocrm@acme.com")
+        _feedback(db, org, "p5nocrm@acme.com", ts=datetime.utcnow() - timedelta(hours=1))
+
+        events, _ = build_timeline(db, org.id, "p5nocrm@acme.com", limit=50)
+        assert all(e.type != "crm_contact_synced" for e in events)
+
+    def test_crm_renewal_upcoming_appears_when_in_window(self, db: Session):
+        """crm_renewal_upcoming emitted when renewal_date is within 30 days."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        sync_ts = datetime.utcnow() - timedelta(hours=1)
+        renewal = datetime.utcnow() + timedelta(days=14)
+        _health(db, org, "p5renew@acme.com")
+        _crm(db, org, "p5renew@acme.com", last_synced_at=sync_ts, renewal_date=renewal)
+
+        events, _ = build_timeline(db, org.id, "p5renew@acme.com", limit=50)
+        types = [e.type for e in events]
+        assert "crm_renewal_upcoming" in types
+
+        ev = next(e for e in events if e.type == "crm_renewal_upcoming")
+        assert ev.source == "hubspot"
+        # Anchored at last_synced_at, not at the future renewal_date
+        assert ev.timestamp.replace(microsecond=0) == sync_ts.replace(microsecond=0)
+
+    def test_crm_renewal_absent_when_none(self, db: Session):
+        """renewal_date=None → no crm_renewal_upcoming event."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        _health(db, org, "p5norenew@acme.com")
+        _crm(db, org, "p5norenew@acme.com",
+              last_synced_at=datetime.utcnow() - timedelta(hours=2),
+              renewal_date=None)
+
+        events, _ = build_timeline(db, org.id, "p5norenew@acme.com", limit=50)
+        assert all(e.type != "crm_renewal_upcoming" for e in events)
+
+    def test_crm_renewal_absent_when_far_future(self, db: Session):
+        """renewal_date beyond 30 days → no crm_renewal_upcoming."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        _health(db, org, "p5farfuture@acme.com")
+        _crm(db, org, "p5farfuture@acme.com",
+              last_synced_at=datetime.utcnow() - timedelta(hours=1),
+              renewal_date=datetime.utcnow() + timedelta(days=60))
+
+        events, _ = build_timeline(db, org.id, "p5farfuture@acme.com", limit=50)
+        assert all(e.type != "crm_renewal_upcoming" for e in events)
+
+    def test_crm_renewal_absent_when_past(self, db: Session):
+        """renewal_date in the past → no crm_renewal_upcoming."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        _health(db, org, "p5past@acme.com")
+        _crm(db, org, "p5past@acme.com",
+              last_synced_at=datetime.utcnow() - timedelta(hours=1),
+              renewal_date=datetime.utcnow() - timedelta(days=10))
+
+        events, _ = build_timeline(db, org.id, "p5past@acme.com", limit=50)
+        assert all(e.type != "crm_renewal_upcoming" for e in events)
+
+    def test_crm_events_interleaved_correctly(self, db: Session):
+        """CRM events appear in correct reverse-chron order with feedback events."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        now = datetime.utcnow()
+
+        # Feedback 2 hours ago
+        fb_ts = now - timedelta(hours=2)
+        _feedback(db, org, "p5interleave@acme.com", ts=fb_ts)
+        _health(db, org, "p5interleave@acme.com")
+
+        # CRM synced 3 hours ago (older than feedback)
+        sync_ts = now - timedelta(hours=3)
+        _crm(db, org, "p5interleave@acme.com", last_synced_at=sync_ts)
+
+        events, _ = build_timeline(db, org.id, "p5interleave@acme.com", limit=50)
+        types = [e.type for e in events]
+        assert "feedback_created" in types
+        assert "crm_contact_synced" in types
+
+        fb_idx = next(i for i, e in enumerate(events) if e.type == "feedback_created")
+        crm_idx = next(i for i, e in enumerate(events) if e.type == "crm_contact_synced")
+        # feedback is newer → appears earlier (lower index)
+        assert fb_idx < crm_idx, "Newer feedback should appear before older CRM event"
+
+    def test_crm_cursor_pagination_no_skip(self, db: Session):
+        """Cursor pagination with CRM events present — no skips or duplicates."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        now = datetime.utcnow()
+        _health(db, org, "p5page@acme.com")
+
+        # Add several feedback events
+        for i in range(3):
+            _feedback(db, org, "p5page@acme.com", ts=now - timedelta(hours=i + 5))
+
+        # Add CRM row
+        _crm(db, org, "p5page@acme.com",
+              last_synced_at=now - timedelta(hours=1),
+              renewal_date=now + timedelta(days=7))
+
+        # Full list
+        all_events, _ = build_timeline(db, org.id, "p5page@acme.com", limit=100)
+        assert len(all_events) >= 3
+
+        # Paginate with limit=1
+        collected = []
+        cursor = None
+        for _ in range(20):
+            page, cursor = build_timeline(db, org.id, "p5page@acme.com", before=cursor, limit=1)
+            collected.extend(page)
+            if cursor is None:
+                break
+
+        composite = [(e.type, e.timestamp, e.source_id) for e in collected]
+        assert len(composite) == len(set(composite)), "Duplicates detected in CRM pagination"
+        assert len(collected) == len(all_events), (
+            f"Paginated ({len(collected)}) != full ({len(all_events)})"
+        )
+
+    def test_crm_multi_tenant_isolation(self, db: Session):
+        """CRM row for org B must not appear in org A's timeline."""
+        from src.services.customer_timeline_service import build_timeline
+        org_a = _org(db)
+        org_b = Organization(name="Org B", plan="pro")
+        db.add(org_b)
+        db.commit()
+        db.refresh(org_b)
+
+        email = "shared@acme.com"
+        _health(db, org_a, email)
+
+        # CRM row for org B only
+        _crm(db, org_b, email, last_synced_at=datetime.utcnow() - timedelta(hours=1))
+
+        events, _ = build_timeline(db, org_a.id, email, limit=50)
+        assert all(e.type != "crm_contact_synced" for e in events), (
+            "CRM events from org B leaked into org A's timeline"
+        )
