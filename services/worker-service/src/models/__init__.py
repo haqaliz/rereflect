@@ -429,6 +429,9 @@ class CustomerHealth(Base):
     sentiment_component = Column(Integer, default=50)
     resolution_component = Column(Integer, default=50)
     frequency_component = Column(Integer, default=50)
+    usage_component = Column(Integer, nullable=True)    # catch-up: added by z5a6b7c8d9e0
+    crm_component   = Column(Float,   nullable=True)    # crm-health-component aspect
+    confidence_score = Column(Integer, default=0)       # catch-up: added by previous migration
 
     feedback_count = Column(Integer, default=0)
     last_feedback_at = Column(DateTime, nullable=True)
@@ -481,6 +484,8 @@ class CustomerHealthHistory(Base):
     sentiment_component = Column(Integer, nullable=True)
     resolution_component = Column(Integer, nullable=True)
     frequency_component = Column(Integer, nullable=True)
+    usage_component = Column(Integer, nullable=True)    # catch-up: added by z5a6b7c8d9e0
+    crm_component   = Column(Float,   nullable=True)    # crm-health-component aspect
     risk_level = Column(String(20), nullable=True)
 
     recorded_at = Column(DateTime, default=datetime.utcnow)
@@ -591,6 +596,10 @@ class OrgAIConfig(Base):
     health_weight_sentiment = Column(Integer, default=25, nullable=False)
     health_weight_resolution = Column(Integer, default=25, nullable=False)
     health_weight_frequency = Column(Integer, default=15, nullable=False)
+    # Opt-in usage component weight (mirrors backend-api; catch-up from z5a6b7c8d9e0)
+    health_weight_usage = Column(Integer, default=0, nullable=False)
+    # Opt-in CRM component weight (this aspect: crm-health-component)
+    health_weight_crm   = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
