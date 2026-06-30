@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index, JSON, Numeric
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Index, JSON, Numeric, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -22,6 +22,7 @@ class CustomerHealth(Base):
     resolution_component = Column(Integer, default=50)       # 25% weight
     frequency_component = Column(Integer, default=50)        # 15% weight
     usage_component = Column(Integer, nullable=True)         # 0% default weight (opt-in); neutral 50 when no rollup
+    crm_component = Column(Float, nullable=True)             # 0% default weight (opt-in); neutral 50.0 when no enrichment
 
     # Metadata
     feedback_count = Column(Integer, default=0)

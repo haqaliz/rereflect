@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, Float
 from datetime import datetime
 from .base import Base
 
@@ -22,6 +22,7 @@ class CustomerHealthHistory(Base):
     resolution_component = Column(Integer, nullable=True)
     frequency_component = Column(Integer, nullable=True)
     usage_component = Column(Integer, nullable=True)         # Opt-in; null for history rows before usage feature
+    crm_component = Column(Float, nullable=True)             # Opt-in; null for history rows before CRM feature
     risk_level = Column(String(20), nullable=True)
 
     recorded_at = Column(DateTime, default=datetime.utcnow)
