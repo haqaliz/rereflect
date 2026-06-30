@@ -54,6 +54,7 @@ class AISettingsResponse(BaseModel):
     ai_analysis_enabled: bool
     default_provider: str
     base_url: Optional[str] = None
+    model_embeddings: Optional[str] = None
     models: ModelConfig
 
 
@@ -61,6 +62,7 @@ class AISettingsUpdate(BaseModel):
     ai_analysis_enabled: Optional[bool] = None
     default_provider: Optional[str] = None
     base_url: Optional[str] = None
+    model_embeddings: Optional[str] = Field(None, max_length=100)
     model_categorization: Optional[str] = None
     model_analysis: Optional[str] = None
     model_insights: Optional[str] = None
@@ -190,11 +192,13 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         )
 
     base_url = config.base_url if config and hasattr(config, "base_url") else None
+    model_embeddings = config.model_embeddings if config and hasattr(config, "model_embeddings") else None
 
     return AISettingsResponse(
         ai_analysis_enabled=org.ai_analysis_enabled,
         default_provider=default_provider,
         base_url=base_url,
+        model_embeddings=model_embeddings,
         models=model_config,
     )
 
@@ -402,6 +406,10 @@ def update_ai_settings(
     # Persist base_url if explicitly included in the request (even as null).
     if "base_url" in data.model_fields_set and hasattr(config, "base_url"):
         config.base_url = data.base_url
+
+    # Persist model_embeddings if explicitly included in the request (even as null).
+    if "model_embeddings" in data.model_fields_set and hasattr(config, "model_embeddings"):
+        config.model_embeddings = data.model_embeddings
 
     if data.model_categorization is not None:
         config.model_categorization = data.model_categorization

@@ -222,3 +222,78 @@ class TestUpdateAISettingsLocalProviders:
         response = client.get("/api/v1/settings/ai", headers=admin_headers_local)
         assert response.status_code == 200
         assert response.json()["base_url"] == url
+
+
+class TestOrgAIConfigModelEmbeddings:
+    """Model-level: model_embeddings column exists on OrgAIConfig (S1)."""
+
+    def test_column_exists_and_defaults_to_none(self, db: Session, test_organization: Organization):
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            default_provider="openai",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+        assert config.model_embeddings is None
+
+    def test_column_stores_explicit_override(self, db: Session, test_organization: Organization):
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            default_provider="ollama",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+            model_embeddings="nomic-embed-text",
+        )
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+        assert config.model_embeddings == "nomic-embed-text"
+
+
+class TestAISettingsModelEmbeddings:
+    """GET/PATCH /api/v1/settings/ai — model_embeddings field (S1)."""
+
+    def test_get_returns_model_embeddings_field_null_by_default(self, client: TestClient, auth_headers: dict):
+        response = client.get("/api/v1/settings/ai", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "model_embeddings" in data, "GET response must include model_embeddings field"
+        assert data["model_embeddings"] is None
+
+    def test_patch_sets_model_embeddings(self, client: TestClient, admin_headers_local: dict):
+        response = client.patch(
+            "/api/v1/settings/ai",
+            headers=admin_headers_local,
+            json={"model_embeddings": "text-embedding-3-large"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["model_embeddings"] == "text-embedding-3-large"
+
+    def test_model_embeddings_round_trips_on_get(self, client: TestClient, owner_headers_local: dict):
+        client.patch(
+            "/api/v1/settings/ai",
+            headers=owner_headers_local,
+            json={"model_embeddings": "nomic-embed-text"},
+        )
+        response = client.get("/api/v1/settings/ai", headers=owner_headers_local)
+        assert response.status_code == 200
+        assert response.json()["model_embeddings"] == "nomic-embed-text"
+
+    def test_patch_can_clear_model_embeddings(self, client: TestClient, owner_headers_local: dict):
+        client.patch(
+            "/api/v1/settings/ai",
+            headers=owner_headers_local,
+            json={"model_embeddings": "nomic-embed-text"},
+        )
+        response = client.patch(
+            "/api/v1/settings/ai",
+            headers=owner_headers_local,
+            json={"model_embeddings": None},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["model_embeddings"] is None
