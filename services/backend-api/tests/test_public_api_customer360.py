@@ -29,6 +29,7 @@ from src.database.session import get_db
 from src.models.api_key import ApiKey
 from src.models.base import Base
 from src.models.customer_health import CustomerHealth
+from src.models.crm_enrichment import CrmEnrichment
 from src.models.feedback import FeedbackItem
 from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.customer_health_history import CustomerHealthHistory
@@ -322,6 +323,69 @@ class TestCustomerProfileSerializer:
         record = _make_health(db, org.id, "nousage@acme.com")  # usage_component not set
         result = serialize_customer_profile(record)
         assert result["usage_component"] is None
+
+    def test_serializer_crm_fields_when_row_exists(self, db: Session):
+        """B1-RED: serializer returns all 7 crm_* fields from a CrmEnrichment row."""
+        from src.services.customer_profile_serializer import serialize_customer_profile
+        import datetime as dt
+
+        org = _make_org(db)
+        record = _make_health(db, org.id, "crm@acme.com")
+        sync_at = dt.datetime(2026, 6, 1, 12, 0, 0)
+        renewal = dt.datetime(2026, 9, 1, 0, 0, 0)
+        crm_row = CrmEnrichment(
+            organization_id=org.id,
+            customer_email="crm@acme.com",
+            company_name="Acme Corp",
+            lifecycle_stage="customer",
+            arr=24000.0,
+            renewal_date=renewal,
+            deal_name="Enterprise Renewal",
+            deal_stage="Closed Won",
+            deal_amount=12000.0,
+            last_synced_at=sync_at,
+        )
+        db.add(crm_row)
+        db.commit()
+
+        result = serialize_customer_profile(record, db)
+
+        assert result["crm_company_name"] == "Acme Corp"
+        assert result["crm_lifecycle_stage"] == "customer"
+        assert abs(result["crm_arr"] - 24000.0) < 0.01
+        assert result["crm_renewal_date"] == renewal
+        assert result["crm_deal_name"] == "Enterprise Renewal"
+        assert result["crm_deal_stage"] == "Closed Won"
+        assert abs(result["crm_deal_amount"] - 12000.0) < 0.01
+
+    def test_serializer_crm_fields_none_when_no_row(self, db: Session):
+        """B1-RED: when no CrmEnrichment row exists, all 7 crm_* fields are None."""
+        from src.services.customer_profile_serializer import serialize_customer_profile
+
+        org = _make_org(db)
+        record = _make_health(db, org.id, "nocrm@acme.com")
+
+        result = serialize_customer_profile(record, db)
+
+        assert result["crm_company_name"] is None
+        assert result["crm_lifecycle_stage"] is None
+        assert result["crm_arr"] is None
+        assert result["crm_renewal_date"] is None
+        assert result["crm_deal_name"] is None
+        assert result["crm_deal_stage"] is None
+        assert result["crm_deal_amount"] is None
+
+    def test_serializer_crm_fields_none_when_db_not_passed(self, db: Session):
+        """B1-RED: backward-compatible — db=None gives all 7 crm_* fields as None."""
+        from src.services.customer_profile_serializer import serialize_customer_profile
+
+        org = _make_org(db)
+        record = _make_health(db, org.id, "nodbarg@acme.com")
+
+        result = serialize_customer_profile(record)  # no db argument
+
+        assert result["crm_company_name"] is None
+        assert result["crm_arr"] is None
 
     def test_v1_profile_endpoint_uses_serializer_shape(self, client: TestClient, db: Session):
         """Characterization: v1 GET /api/v1/customers/{email} still returns the

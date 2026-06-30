@@ -15,7 +15,7 @@ from typing import Optional
 from src.models.customer_health import CustomerHealth
 
 
-def serialize_customer_profile(record: CustomerHealth) -> dict:
+def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
     """Build a Customer 360 profile dict from a ``CustomerHealth`` ORM row.
 
     Returns all *non-plan-gated* profile fields.  The caller must inject
@@ -83,4 +83,33 @@ def serialize_customer_profile(record: CustomerHealth) -> dict:
         "llm_analysis_type": llm_analysis_type,
         "llm_analyzed_at": record.llm_analyzed_at,
         "llm_analysis": record.llm_analysis,        # legacy text field
+        # ── CRM enrichment (HubSpot) ──────────────────────────────────────────
+        **_read_crm_fields(record, db),
+    }
+
+
+def _read_crm_fields(record: CustomerHealth, db) -> dict:
+    """Read CRM enrichment fields for this customer; all None when unavailable."""
+    crm = None
+    if db is not None:
+        try:
+            from src.models.crm_enrichment import CrmEnrichment
+            crm = db.query(CrmEnrichment).filter(
+                CrmEnrichment.organization_id == record.organization_id,
+                CrmEnrichment.customer_email == record.customer_email,
+            ).first()
+        except Exception:
+            crm = None
+
+    def _f(val):
+        return float(val) if val is not None else None
+
+    return {
+        "crm_company_name":    crm.company_name    if crm else None,
+        "crm_lifecycle_stage": crm.lifecycle_stage if crm else None,
+        "crm_arr":             _f(crm.arr)          if crm else None,
+        "crm_renewal_date":    crm.renewal_date    if crm else None,
+        "crm_deal_name":       crm.deal_name       if crm else None,
+        "crm_deal_stage":      crm.deal_stage      if crm else None,
+        "crm_deal_amount":     _f(crm.deal_amount)  if crm else None,
     }
