@@ -837,3 +837,33 @@ class CustomerUsage(Base):
         ),
         Index("ix_customer_usage_org_score", "organization_id", "usage_score"),
     )
+
+
+class HubSpotIntegration(Base):
+    """HubSpot connection per org — no-FK mirror for worker read access."""
+    __tablename__ = "hubspot_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    access_token = Column(Text, nullable=False)
+    token_hint = Column(String(8), nullable=True)
+    hub_id = Column(String(64), nullable=True)
+    portal_name = Column(String(255), nullable=True)
+    arr_property_name = Column(String(255), nullable=False,
+                               server_default="annualrevenue")
+    connected_by_user_id = Column(Integer, nullable=True)
+    connected_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String(50), nullable=True)
+    last_error = Column(Text, nullable=True)
+    contacts_synced = Column(Integer, nullable=False, default=0)
+    contacts_matched = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id",
+                         name="uq_hubspot_integrations_org_id"),
+        Index("ix_hubspot_integrations_org_id", "organization_id"),
+    )

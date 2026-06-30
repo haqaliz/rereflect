@@ -50,6 +50,7 @@ from .churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
 from .api_key import ApiKey
 from .usage_event import UsageEvent
 from .customer_usage import CustomerUsage
+from .hubspot_integration import HubSpotIntegration
 
 __all__ = [
     "Base",
@@ -110,4 +111,5 @@ __all__ = [
     "ApiKey",
     "UsageEvent",
     "CustomerUsage",
+    "HubSpotIntegration",
 ]
