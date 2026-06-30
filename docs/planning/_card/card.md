@@ -1,82 +1,85 @@
-# Card — feat/customer-360-unified-timeline
+# Card — HubSpot CRM Enrichment (freeform)
 
 **Type:** feat
-**Slug / branch id:** `customer-360-unified-timeline`
-**Source:** Freeform task (no GitHub issue) — selected via `rereflect-next` as the highest-leverage next feature.
-**Worktree:** `.claude/worktrees/feat-customer-360-unified-timeline`
-**Branch:** `feat/customer-360-unified-timeline`
+**Slug / branch:** `feat/hubspot-crm-enrichment`
+**Worktree:** `.claude/worktrees/feat-hubspot-crm-enrichment`
+**Source:** Freeform task (no GitHub issue). Selected by `rereflect-next` as the
+single highest-leverage next feature; started via `rbf feat hubspot-crm-enrichment`.
 
 ---
 
 ## Brief (from rereflect-next handoff)
 
-Build the **AI-TRACKING M3.4 "unified customer timeline"** first slice.
+Build **HubSpot CRM enrichment for Customer 360 and churn** — the last open
+data-enrichment source. After product-usage enrichment (M3.2, merged `a8047d9`)
+and the unified Customer 360 timeline + public API (M3.4, merged `ca73cc9`)
+shipped, HubSpot is the one enrichment source still pending.
 
-A single org-scoped, paginated endpoint that merges each customer's existing event
-sources into one **reverse-chronological timeline**:
+Scope the **first slice** around a HubSpot **private-app access token**
+(BYOK-style, pasted by the self-hoster — **not** the OAuth marketplace flow,
+which needs a public redirect URI and is awkward for a self-hosted product):
 
-- **Feedback items** (the customer's feedback, with sentiment/category)
-- **Product-usage events** (the `customer_usage` / `usage_event` tables that just
-  merged in M3.2, commit `a8047d9`)
-- **Churn / health-score change events** (health score changes, risk-level changes)
-
-The timeline is surfaced on the existing `/customers/[email]` profile page, plus the
-**read-only Customer 360 + health-score API endpoints** from AI-TRACKING M3.4
-(`AI-TRACKING.md:201-206`).
-
-### In scope (this slice)
-
-- Unified, reverse-chronological, paginated timeline endpoint (3 sources: feedback +
-  usage + churn/health).
-- Surface the timeline on the existing `/customers/[email]` profile page.
-- Read-only Customer 360 API + health-score API endpoints (programmatic / self-host
-  consumption — fits BYOK/self-hosted positioning).
-- Everything **unlocked** (OSS self-hosted — no plan gating).
-
-### Out of scope (later slices / deferred)
-
-- **CRM events** in the timeline — CRM (HubSpot, M3.1) is **not built**. Design the
-  timeline event shape to be **source-extensible**, but do NOT build CRM rows now.
-  CRM rows slot in when M3.1 ships.
-- **Customer segments** (M3.4 "auto-group power users / silent churners / advocates")
-  — leave out of this slice. Today this could only be heuristic/keyword-based; there
-  is **no ML segmentation** and it must not be implied as such.
-- **Bulk actions** (M3.4 export / bulk-assign CS owner / trigger outreach) — later slice.
+1. **Connect** — operator pastes a HubSpot private-app access token (stored
+   encrypted, per-org), with connect / disconnect / test.
+2. **Sync contacts by email** — pull HubSpot contacts and match them to Rereflect
+   customers by `customer_email` (the email-match machinery already exists from
+   the usage work).
+3. **Enrich Customer 360** — surface company name, ARR / deal value, contract
+   renewal date, deal stage, lifecycle stage on `/customers/[email]`.
+4. **Churn/health signal** — feed a CRM-renewal factor into the health/churn
+   signal: "renewal coming up + declining health = critical".
+5. **Timeline** — surface CRM events on the unified customer timeline. The
+   timeline event shape was deliberately left **source-extensible** for exactly
+   this; CRM events are the deferred-until-HubSpot item from `AI-TRACKING.md:204`.
 
 ---
 
-## Why this was picked (moat / context)
+## Why this feature (moat grounding)
 
-- **Freshly unblocked by what just merged.** M3.2 usage events landed this week
-  (`a8047d9`), so feedback + product-usage + churn events now all exist per-customer —
-  but nothing stitches them together. AI-TRACKING M3.4's "unified customer timeline:
-  feedback + CRM events + usage events in chronological order" is still pending `[ ]`
-  (`AI-TRACKING.md:202`).
-- **Deepens the real moat** on two axes: hardens the churn→health→playbook loop (a
-  single chronological view is where an operator sees *why* a health score moved), and
-  adds the **Customer 360 API + health-score API** (`AI-TRACKING.md:204-206`) — the
-  programmatic/self-host developer surface, which fits OSS/BYOK and compounds as
-  operators build on it.
-- **Clean, testable, no external dependency.** First slice = a chronological merge of
-  three event sources that already exist into one org-scoped endpoint, surfaced on the
-  existing `/customers/[email]` profile. Unlike the CRM alternate, it needs no OAuth
-  app registration to demo.
+- **Next explicitly-pending milestone**, not shipped and not blocker-deferred:
+  `AI-TRACKING.md` M3.1 (lines 178–186) is entirely unchecked; `DEV-TRACKING.md`
+  M3.5 (lines 209–213) restates it.
+- **Feeds the killer feature** — "churn prediction that actually works"
+  (`AI-TRACKING.md:5`). Renewal date / ARR / deal stage are the most predictive
+  external churn signals the model currently lacks (`AI-TRACKING.md:183`).
+- **Unblocked + depth-first** — unblocks the CRM timeline events deferred in the
+  just-shipped Customer 360 timeline (`AI-TRACKING.md:204`), and follows an
+  already-proven integration pattern (Intercom / Slack: adapter + webhook
+  receiver + email-match + two-way sync, `DEV-TRACKING.md:606`).
 
-## Known caveats (carry into PRD/dig)
+## Fit with OSS / self-hosted / BYOK
 
-- M3.4's timeline spec lists **CRM events** as a source, but CRM isn't built — first
-  slice covers feedback + usage + churn only; event shape must stay source-extensible.
-- "Customer segments" is heuristic-only today — don't ship/sell it as ML. Keep it out
-  of this slice.
-- CLAUDE.md's billing / plan-tier / Resend / Stripe sections are **stale** (pre-OSS
-  pivot). Everything ships unlocked. Use CLAUDE.md only for architecture/service layout.
+- MIT, all features unlocked — **no plan gating** (the `Business+` framing in
+  `AI-TRACKING.md` M3.1 and `CLAUDE.md` is pre-pivot and stale).
+- Single-tenant: the operator connects **their own** HubSpot portal. No central
+  cross-customer dataset.
+- BYOK-style: private-app token pasted by the operator, stored encrypted (reuse
+  the existing Fernet encryption pattern used for LLM keys / webhook headers).
 
-## Roadmap references
+---
 
-- `AI-TRACKING.md:201-206` — M3.4 Enhanced Customer 360 (unified timeline, segments,
-  bulk actions, Customer 360 API, health score API) — pending `[ ]`.
-- M3.2 product-usage enrichment SHIPPED — merge `a8047d9` + ~24 commits (usage_event
-  model, ingest receiver, rollup+score, health 5th component, profile usage card/timeline).
-- M1.2 Customer 360 page (`/customers` list + `/customers/[email]` profile) — COMPLETE.
-- `PRD-CUSTOMER-360.md` — original M1.2 PRD (profile page already exists;
-  `customer_health_history` model already stores health-score snapshots).
+## Known caveats / open questions (to resolve in deep dig + PRD interview)
+
+1. **No dedicated HubSpot PRD exists.** The feature lives only in `AI-TRACKING.md`
+   M3.1 + `DEV-TRACKING.md` M3.5 bullets + the enrichment hooks in
+   `PRD-CUSTOMER-360.md`. The PRD will be written from those during this run.
+2. **Auth method:** first slice uses a **private-app access token**, not OAuth.
+   Full OAuth marketplace app + bi-directional push-back (health scores → HubSpot
+   custom properties) are **deferred to v2**.
+3. **Sync model:** pull-only for v1 (read from HubSpot). Bi-directional push is v2.
+4. **Sync trigger:** on-demand vs scheduled (Celery beat) vs both — TBD.
+5. **Data model:** where CRM enrichment lives (new table vs columns on an existing
+   customer/profile model) — TBD in deep dig + interview.
+6. **Health-score integration:** whether CRM becomes a new weighted component or a
+   modifier/override on the existing components — TBD (interacts with the
+   configurable per-org health weights shipped in M4.2).
+
+---
+
+## Reference files (in primary repo root)
+
+- `AI-TRACKING.md` — M3.1 (HubSpot), M3.4 (Customer 360, CRM events deferred)
+- `DEV-TRACKING.md` — M3.5 (HubSpot), integration backlog + Intercom pattern
+- `PRD-CUSTOMER-360.md` — Customer 360 enrichment hooks
+- `PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md` — OSS pivot context, public API
+- `memory/rereflect-oss-pivot.md` — OSS/self-hosted/BYOK reality + stale-CLAUDE.md caveat
