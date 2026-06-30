@@ -178,6 +178,14 @@ class PublicCustomerProfile360(BaseModel):
     llm_analysis: Optional[str] = None
     is_archived: bool
     created_at: Optional[datetime] = None
+    # CRM enrichment fields (HubSpot)
+    crm_company_name: Optional[str] = None
+    crm_lifecycle_stage: Optional[str] = None
+    crm_arr: Optional[float] = None
+    crm_renewal_date: Optional[datetime] = None
+    crm_deal_name: Optional[str] = None
+    crm_deal_stage: Optional[str] = None
+    crm_deal_amount: Optional[float] = None
 
 
 # ─── Feedback read endpoints ──────────────────────────────────────────────────
@@ -444,7 +452,7 @@ def public_customer_profile(
         )
 
     from src.services.customer_profile_serializer import serialize_customer_profile
-    profile_data = serialize_customer_profile(row)
+    profile_data = serialize_customer_profile(row, db)
     return PublicCustomerProfile360(**profile_data)
 
 

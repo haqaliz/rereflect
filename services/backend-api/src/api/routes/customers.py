@@ -105,6 +105,14 @@ class CustomerProfileResponse(BaseModel):
     llm_analysis: Optional[str] = None
     is_archived: bool
     created_at: Optional[datetime] = None
+    # CRM enrichment fields (HubSpot)
+    crm_company_name: Optional[str] = None
+    crm_lifecycle_stage: Optional[str] = None
+    crm_arr: Optional[float] = None
+    crm_renewal_date: Optional[datetime] = None
+    crm_deal_name: Optional[str] = None
+    crm_deal_stage: Optional[str] = None
+    crm_deal_amount: Optional[float] = None
 
 
 class HealthHistoryItem(BaseModel):
@@ -358,7 +366,7 @@ def get_customer_profile(
 
     # Delegate core field mapping to the shared serializer (no drift vs. public API).
     from src.services.customer_profile_serializer import serialize_customer_profile
-    profile_data = serialize_customer_profile(record)
+    profile_data = serialize_customer_profile(record, db)
 
     # Load plan-gated action items on top (Business+ only).
     llm_actions = None

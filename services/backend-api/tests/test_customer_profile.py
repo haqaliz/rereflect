@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.models.customer_health import CustomerHealth
 from src.models.customer_health_history import CustomerHealthHistory
+from src.models.crm_enrichment import CrmEnrichment
 from src.models.feedback import FeedbackItem
 from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.organization import Organization
@@ -221,6 +222,52 @@ class TestCustomerProfile:
         data = response.json()
         assert "usage_component" in data, "usage_component field must be present even when NULL"
         assert data["usage_component"] is None
+
+    def test_profile_includes_crm_fields_when_row_exists(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """B2-RED: v1 profile returns all 7 crm_* fields when a CrmEnrichment row exists."""
+        import datetime as dt
+        make_health(db, pro_org, "crmdata@acme.com")
+        db.add(CrmEnrichment(
+            organization_id=pro_org.id,
+            customer_email="crmdata@acme.com",
+            company_name="HubSpot Co",
+            lifecycle_stage="customer",
+            arr=50000.0,
+            renewal_date=dt.datetime(2026, 12, 31),
+            deal_name="Renewal Deal",
+            deal_stage="negotiation",
+            deal_amount=25000.0,
+            last_synced_at=dt.datetime(2026, 6, 30, 10, 0, 0),
+        ))
+        db.commit()
+
+        response = client.get("/api/v1/customers/crmdata@acme.com", headers=pro_headers)
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["crm_company_name"] == "HubSpot Co"
+        assert data["crm_lifecycle_stage"] == "customer"
+        assert abs(data["crm_arr"] - 50000.0) < 0.01
+        assert data["crm_renewal_date"] is not None
+        assert data["crm_deal_name"] == "Renewal Deal"
+        assert data["crm_deal_stage"] == "negotiation"
+        assert abs(data["crm_deal_amount"] - 25000.0) < 0.01
+
+    def test_profile_crm_fields_none_when_no_row(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """B2-RED: v1 profile returns None for all 7 crm_* fields when no CrmEnrichment row."""
+        make_health(db, pro_org, "nocrm2@acme.com")
+
+        response = client.get("/api/v1/customers/nocrm2@acme.com", headers=pro_headers)
+        assert response.status_code == 200
+        data = response.json()
+
+        for field in ["crm_company_name", "crm_lifecycle_stage", "crm_arr",
+                      "crm_renewal_date", "crm_deal_name", "crm_deal_stage", "crm_deal_amount"]:
+            assert data.get(field) is None, f"Expected {field} to be null"
 
 
 # ---------------------------------------------------------------------------
