@@ -113,4 +113,5 @@ __all__ = [
     "UsageEvent",
     "CustomerUsage",
     "HubSpotIntegration",
+    "CrmEnrichment",
 ]

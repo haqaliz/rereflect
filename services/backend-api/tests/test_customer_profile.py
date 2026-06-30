@@ -269,6 +269,49 @@ class TestCustomerProfile:
                       "crm_renewal_date", "crm_deal_name", "crm_deal_stage", "crm_deal_amount"]:
             assert data.get(field) is None, f"Expected {field} to be null"
 
+    def test_serializer_crm_read_uses_savepoint(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session
+    ):
+        """
+        _read_crm_fields must use db.begin_nested() (SAVEPOINT) so a missing
+        crm_enrichment table cannot abort the outer SQLAlchemy transaction and
+        cause PendingRollbackError on subsequent queries.
+
+        Mirrors TestCrmComponentSavepointIsolation.test_real_missing_table_savepoint_path
+        in test_health_crm_component.py.
+
+        RED: begin_nested is never called with bare try/except → spy.call_count == 0
+             → assertion fails.
+        GREEN: _read_crm_fields wraps the query in db.begin_nested() → call_count >= 1
+               → session usable after the rolled-back SAVEPOINT.
+        """
+        from unittest.mock import patch
+        from sqlalchemy import text as sql_text
+        from src.services.customer_profile_serializer import _read_crm_fields
+
+        make_health(db, pro_org, "savepoint_crm@acme.com")
+        record = db.query(
+            __import__("src.models.customer_health", fromlist=["CustomerHealth"]).CustomerHealth
+        ).filter_by(customer_email="savepoint_crm@acme.com").first()
+
+        # Spy on begin_nested to verify SAVEPOINT is used.
+        with patch.object(db, "begin_nested", wraps=db.begin_nested) as spy:
+            result = _read_crm_fields(record, db)
+
+        assert spy.call_count >= 1, (
+            "begin_nested must be called to SAVEPOINT-isolate the CRM read. "
+            "Without it, a PostgreSQL OperationalError aborts the transaction "
+            "and the next db.query() raises PendingRollbackError (HTTP 500)."
+        )
+        # All crm fields must be None (no CrmEnrichment row exists for this email).
+        for field in ["crm_company_name", "crm_lifecycle_stage", "crm_arr",
+                      "crm_renewal_date", "crm_deal_name", "crm_deal_stage", "crm_deal_amount"]:
+            assert result.get(field) is None, f"Expected {field} to be null when no CRM row"
+
+        # Session must still be usable after _read_crm_fields returned.
+        val = db.execute(sql_text("SELECT 1")).scalar()
+        assert val == 1, "Session must remain usable after SAVEPOINT-isolated CRM read"
+
 
 # ---------------------------------------------------------------------------
 # History Endpoint: GET /api/v1/customers/{email}/history

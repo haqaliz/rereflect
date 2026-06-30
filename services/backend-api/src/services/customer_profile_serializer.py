@@ -89,16 +89,31 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
 
 
 def _read_crm_fields(record: CustomerHealth, db) -> dict:
-    """Read CRM enrichment fields for this customer; all None when unavailable."""
+    """Read CRM enrichment fields for this customer; all None when unavailable.
+
+    Contract: this function NEVER raises. It uses a SAVEPOINT so a missing
+    crm_enrichment table cannot abort the outer SQLAlchemy transaction and
+    cause PendingRollbackError on subsequent queries (mirrors the SAVEPOINT
+    pattern in _compute_crm_component in health_score_service.py).
+    """
     crm = None
     if db is not None:
+        sp = db.begin_nested()  # SAVEPOINT — isolates this read from the outer transaction
         try:
             from src.models.crm_enrichment import CrmEnrichment
             crm = db.query(CrmEnrichment).filter(
                 CrmEnrichment.organization_id == record.organization_id,
                 CrmEnrichment.customer_email == record.customer_email,
             ).first()
+            sp.commit()
         except Exception:
+            # Table does not exist yet or any other DB error — roll back only the
+            # SAVEPOINT so the outer transaction remains usable (avoids
+            # PendingRollbackError on the next query in the same request).
+            try:
+                sp.rollback()
+            except Exception:
+                pass
             crm = None
 
     def _f(val):

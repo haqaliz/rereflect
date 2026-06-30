@@ -12,6 +12,14 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/customers/john%40acme.com',
 }));
 
+// Mock next/link — prevents jsdom prefetch XHR requests that cause UND_ERR_INVALID_ARG
+import React from 'react';
+vi.mock('next/link', () => ({
+  default: ({ children, href, ...props }: { children: React.ReactNode; href: string; [key: string]: unknown }) => (
+    <a href={href} {...(props as Record<string, unknown>)}>{children}</a>
+  ),
+}));
+
 // Mock AuthContext - Pro plan user
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -39,8 +47,24 @@ vi.mock('@/lib/api/customers', () => ({
     getActivity: vi.fn(),
     requestAnalysis: vi.fn(),
     getUsage: vi.fn(),
+    getTimeline: vi.fn(),
   },
 }));
+
+// Mock churn-accuracy API (used by ModelAccuracyCard)
+vi.mock('@/lib/api/churn-accuracy', () => ({
+  getAccuracyCard: vi.fn().mockResolvedValue(null),
+  formatMetricPercent: (n: number) => `${n}%`,
+}));
+
+// Suppress all outbound axios requests — prevents jsdom/undici XHR errors for
+// unmocked API modules rendered inside this page (e.g. components that use
+// apiClient directly rather than through the customersAPI mock).
+vi.mock('@/lib/api-client', () => {
+  const noop = () => Promise.resolve({ data: null, status: 200 });
+  const client = { get: noop, post: noop, put: noop, patch: noop, delete: noop };
+  return { default: client, apiClient: client, publicApiClient: client };
+});
 
 // Mock Recharts
 vi.mock('recharts', () => ({
@@ -121,6 +145,7 @@ describe('CustomerProfilePage', () => {
     (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
     (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getTimeline as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [], next_cursor: null });
     (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
       rollup: {
         customer_email: 'john@acme.com',
@@ -239,6 +264,7 @@ describe('CustomerProfilePage - low confidence badge', () => {
     (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
     (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getTimeline as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [], next_cursor: null });
     (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
       rollup: {
         customer_email: 'john@acme.com',
