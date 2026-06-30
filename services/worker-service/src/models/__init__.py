@@ -839,6 +839,50 @@ class CustomerUsage(Base):
     )
 
 
+# R4: Keep in sync with services/backend-api/src/models/crm_enrichment.py
+# No shared package enforces consistency — a test (test_worker_and_backend_crm_enrichment_columns_match)
+# asserts column parity at CI time.
+class CrmEnrichment(Base):
+    """Per-customer HubSpot CRM enrichment snapshot — no-FK worker mirror."""
+    __tablename__ = "crm_enrichment"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+
+    # Company info
+    company_name = Column(String(255), nullable=True)
+    lifecycle_stage = Column(String(100), nullable=True)
+    arr = Column(Float, nullable=True)
+
+    # Renewal proxy — highest-amount open deal with a closedate
+    renewal_date = Column(DateTime, nullable=True)
+    deal_name = Column(String(255), nullable=True)
+    deal_stage = Column(String(100), nullable=True)
+    deal_amount = Column(Float, nullable=True)
+
+    # HubSpot object IDs
+    hubspot_contact_id = Column(String(100), nullable=True)
+    hubspot_company_id = Column(String(100), nullable=True)
+    hubspot_deal_id = Column(String(100), nullable=True)
+
+    last_synced_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "customer_email",
+            name="uq_crm_enrichment_org_email",
+        ),
+        Index("ix_crm_enrichment_org", "organization_id"),
+        Index("ix_crm_enrichment_org_email", "organization_id", "customer_email"),
+    )
+
+
 class HubSpotIntegration(Base):
     """HubSpot connection per org — no-FK mirror for worker read access."""
     __tablename__ = "hubspot_integrations"

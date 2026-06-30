@@ -51,6 +51,7 @@ from .api_key import ApiKey
 from .usage_event import UsageEvent
 from .customer_usage import CustomerUsage
 from .hubspot_integration import HubSpotIntegration
+from .crm_enrichment import CrmEnrichment
 
 __all__ = [
     "Base",
