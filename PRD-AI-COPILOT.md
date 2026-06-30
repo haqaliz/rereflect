@@ -599,6 +599,17 @@ No hard limit on conversation length. Internally, when conversation history exce
 - Cosine similarity search with threshold (>0.85 = match)
 - Fallback to LLM generation if no template matches above threshold
 
+> **Update (shipped — `local-embeddings-offline-copilot`):** the Copilot is no longer
+> OpenAI-bound. Both the template-matching embeddings **and** answer generation now run
+> through a pluggable provider layer, so a keyless local-LLM org (Ollama / any
+> OpenAI-compatible endpoint) gets an end-to-end working Copilot — resolving the
+> "requires an OpenAI key" limitation noted below. Stored vectors are provider/dimension
+> tagged and never compared across providers; system templates auto-re-embed for the
+> active provider at startup, and with no embedding provider the Copilot degrades to the
+> LLM path (template fast-match silently skipped). The NL→SQL safety validator runs
+> unconditionally for every provider. Embeddings stay JSON + Python cosine (no pgvector).
+> See `docs/planning/local-embeddings-offline-copilot/prd.md`.
+
 ### WebSocket Scaling
 - FastAPI WebSocket with connection manager
 - Redis pub/sub for multi-worker WebSocket message routing
@@ -641,6 +652,6 @@ No hard limit on conversation length. Internally, when conversation history exce
 
 1. **pgvector availability**: Is pgvector already available on our Railway PostgreSQL instance, or do we need to enable/migrate?
 2. **WebSocket on Railway**: Does our Railway deployment support persistent WebSocket connections, or do we need to configure anything?
-3. **Embedding model cost**: At scale, should we switch from OpenAI embeddings to a self-hosted model (e.g., Sentence-BERT) to reduce costs?
+3. **Embedding model cost**: At scale, should we switch from OpenAI embeddings to a self-hosted model (e.g., Sentence-BERT) to reduce costs? — **Resolved (`local-embeddings-offline-copilot`):** embeddings are now pluggable; operators can point at a local/OpenAI-compatible endpoint (e.g. Ollama `nomic-embed-text`) for keyless, zero-cost embeddings.
 4. **Conversation retention**: How long should we keep conversation history? Forever, or prune after X months for storage management?
 5. **Dynamic indexing**: Should auto-index suggestions be applied automatically or require admin approval?

@@ -51,6 +51,7 @@ all behind a multi-tenant dashboard you host yourself.
 | | |
 |---|---|
 | 🧠 **AI feedback analysis** | Sentiment, pain points, feature requests, urgency and topic clustering — local (VADER) or LLM-powered (BYOK). |
+| 💬 **AI Copilot (Cmd+K)** | Ask questions in natural language, generate reports and draft responses. Runs **fully offline on a local model** (Ollama or any OpenAI-compatible endpoint) — including the template-matching embeddings — or on your BYOK cloud key. |
 | 📉 **Churn risk scoring** | Per-item churn risk with suggested actions, plus cohort analytics and playbooks. |
 | 🧑‍💼 **Customer 360 + timeline** | Per-customer health profile with a unified, paginated activity timeline (feedback, product usage, churn and health-score events) — also readable over the public API. |
 | 🗂️ **Team workflow** | Kanban board, statuses, auto-assignment rules and round-robin routing. |
@@ -84,8 +85,11 @@ docs live at **http://localhost:8000/docs**.
 
 > Out of the box (`ai_analysis_enabled=false`, no LLM key) Rereflect runs the **free
 > local pipeline** — sentiment, pain points, feature requests and heuristic churn all
-> work with no external API and no cost. Add a key in **Settings → AI** whenever you
-> want LLM-grade results.
+> work with no external API and no cost. Point **Settings → AI** at a local model
+> (Ollama or any OpenAI-compatible endpoint) and even the **AI Copilot runs fully
+> offline** — its template-matching embeddings and answer generation both use your
+> local provider, no OpenAI key required. Add a cloud BYOK key instead whenever you
+> want a stronger hosted model.
 
 👉 Full deployment guide, env reference and BYOK setup: **[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md)**.
 Developing locally instead of via Docker? See **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**.

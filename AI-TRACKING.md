@@ -269,6 +269,7 @@
 - [x] **Local / Offline LLM** — run the analysis pipeline against Ollama or any OpenAI-compatible endpoint, keyless (no API key, no system key); falls back to free local VADER when no model is configured. Cloud BYOK unchanged. (extends M2.1 Multi-Model)
 - [x] **Custom AI** — custom pain-point/feature-request/urgency taxonomies into the analyzer + per-org configurable customer-health-score weights (M4.2 partial)
 - [x] **Public REST API** — API-key auth (read/ingest scopes), read endpoints (feedback/customers/health/churn/analytics), feedback ingestion, webhook management, OpenAPI docs
+- [x] **Fully-offline AI Copilot** — the Copilot's template-matching embeddings + answer generation now run through a pluggable provider layer, so a keyless local-LLM org (Ollama / OpenAI-compatible) gets an end-to-end working Copilot; vectors are provider/dim-tagged, system templates auto-re-embed at startup, and it degrades to the LLM path when no embedding provider resolves. (extends M2.2 Copilot + the Local/Offline LLM batch above). See `PRD-AI-COPILOT.md` + `docs/planning/local-embeddings-offline-copilot/prd.md`.
 
 > **Note:** the Plan Gating tables below are pre-pivot and now stale — every feature is unlocked in the open-source self-hosted edition.
 
