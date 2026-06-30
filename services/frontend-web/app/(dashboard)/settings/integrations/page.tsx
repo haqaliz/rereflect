@@ -41,6 +41,7 @@ import { LinearIcon } from '@/components/icons/LinearIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
+import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 
 function IntegrationsContent() {
   const router = useRouter();
@@ -52,6 +53,7 @@ function IntegrationsContent() {
   const [testResult, setTestResult] = useState<{ id: number; success: boolean; message: string } | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [linearStatus, setLinearStatus] = useState<LinearConnectionStatus | null>(null);
+  const [hubspotStatus, setHubspotStatus] = useState<HubSpotConnectionStatus | null>(null);
   const [linearTesting, setLinearTesting] = useState(false);
   const [linearTestResult, setLinearTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
@@ -99,15 +101,19 @@ function IntegrationsContent() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [integrationResponse, linearStatusResponse] = await Promise.allSettled([
+      const [integrationResponse, linearStatusResponse, hubspotStatusResponse] = await Promise.allSettled([
         integrationsAPI.list(),
         linearAPI.getStatus(),
+        hubspotAPI.getStatus(),
       ]);
       if (integrationResponse.status === 'fulfilled') {
         setIntegrations(integrationResponse.value.integrations);
       }
       if (linearStatusResponse.status === 'fulfilled') {
         setLinearStatus(linearStatusResponse.value);
+      }
+      if (hubspotStatusResponse.status === 'fulfilled') {
+        setHubspotStatus(hubspotStatusResponse.value);
       }
     } catch (err) {
       console.error('Failed to load integrations:', err);
@@ -209,7 +215,7 @@ function IntegrationsContent() {
             <CardTitle>Active Integrations</CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
-            {integrations.length === 0 && !(linearStatus?.connected) ? (
+            {integrations.length === 0 && !(linearStatus?.connected) && !(hubspotStatus?.connected) ? (
               <div className="text-center py-12">
                 <Settings2 className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold text-foreground mb-2">No integrations yet</h3>
@@ -366,6 +372,63 @@ function IntegrationsContent() {
                     )}
                   </div>
                 ))}
+
+                {/* HubSpot CRM — Active Integration Card */}
+                {hubspotStatus?.connected && (
+                  <div className="p-4 border border-border rounded-xl bg-card/50 hover:bg-card/80 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <Link
+                        href="/settings/integrations/hubspot"
+                        className="flex items-center gap-3 flex-1 group"
+                      >
+                        <div className="p-2 rounded-lg bg-[#FF7A59]/10">
+                          {/* HubSpot brand orange icon */}
+                          <div className="w-6 h-6 rounded flex items-center justify-center bg-[#FF7A59] text-white text-xs font-bold leading-none">
+                            HS
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                              HubSpot CRM
+                            </span>
+                            <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950">
+                              Connected
+                            </Badge>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            {hubspotStatus.portal_name && (
+                              <span>{hubspotStatus.portal_name}</span>
+                            )}
+                          </div>
+                          {hubspotStatus.token_hint && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Token: {hubspotStatus.token_hint}
+                            </p>
+                          )}
+                        </div>
+                      </Link>
+                      {isAdminOrOwner && (
+                        <div className="flex items-center gap-2 ml-4">
+                          <Link href="/settings/integrations/hubspot">
+                            <Button variant="outline" size="sm" title="Configure">
+                              <Settings2 className="w-4 h-4" />
+                            </Button>
+                          </Link>
+                        </div>
+                      )}
+                    </div>
+                    {hubspotStatus.connected_at && (
+                      <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground ml-11">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Connected: {new Date(hubspotStatus.connected_at).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Linear — Active Integration Card */}
                 {linearStatus?.connected && (
@@ -577,6 +640,33 @@ function IntegrationsContent() {
                   </div>
                 </div>
               </Link>
+
+              {/* HubSpot CRM - Available (only shown when not connected) */}
+              {!hubspotStatus?.connected && (
+                <Link href="/settings/integrations/hubspot">
+                  <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-[#FF7A59]/10 rounded-lg">
+                        <div className="w-6 h-6 rounded flex items-center justify-center bg-[#FF7A59] text-white text-xs font-bold leading-none">
+                          HS
+                        </div>
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground group-hover:text-primary transition-colors">HubSpot CRM</span>
+                          <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                            Available
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Enrich customer profiles with CRM data
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    </div>
+                  </div>
+                </Link>
+              )}
 
               {/* Linear - Available (only shown when not connected) */}
               {!linearStatus?.connected && (
