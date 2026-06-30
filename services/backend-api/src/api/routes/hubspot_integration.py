@@ -321,6 +321,58 @@ def hubspot_test(
         return {"success": False, "message": str(exc)}
 
 
+# ──────────────────────── Sync trigger endpoint ──────────────────────────────
+
+
+def _get_celery_app():
+    """Lazy accessor for the Celery client app — injectable in tests."""
+    from src.background.celery_client import get_celery_app
+    return get_celery_app()
+
+
+class HubSpotSyncResponse(BaseModel):
+    status: str
+    integration_id: int
+
+
+@router.post(
+    "/sync",
+    response_model=HubSpotSyncResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_trigger_sync(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually enqueue a HubSpot CRM sync for this org.
+
+    Requires admin or owner role and active integration.
+    Enqueues sync_hubspot_org via Celery send_task (non-blocking).
+    Returns {"status": "queued", "integration_id": <id>}.
+    """
+    integ = _get_active_integration(current_org.id, db)
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active HubSpot integration found.",
+        )
+
+    _get_celery_app().send_task(
+        "src.tasks.hubspot_sync.sync_hubspot_org",
+        args=[integ.id],
+    )
+    logger.info(
+        "HubSpot sync manually triggered for org %s (integration_id=%s)",
+        current_org.id,
+        integ.id,
+    )
+    return HubSpotSyncResponse(status="queued", integration_id=integ.id)
+
+
 # ──────────────────────── Exported helper for hubspot-sync ───────────────────
 
 
