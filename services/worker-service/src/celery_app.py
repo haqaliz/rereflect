@@ -46,6 +46,7 @@ celery_app = Celery(
         "src.tasks.churn_playbooks",
         "src.tasks.churn_calibration",
         "src.tasks.usage_metrics",
+        "src.tasks.hubspot_sync",
     ],
 )
 
@@ -190,6 +191,11 @@ celery_app.conf.beat_schedule = {
     "recompute-usage-scores-daily": {
         "task": "src.tasks.usage_metrics.recompute_usage_scores",
         "schedule": crontab(hour=4, minute=0),
+    },
+    # Sync HubSpot CRM data daily at 03:00 UTC — between integrations (02:00) and usage (04:00)
+    "sync-hubspot-daily": {
+        "task": "src.tasks.hubspot_sync.sync_all_hubspot",
+        "schedule": crontab(hour=3, minute=0),
     },
 }
 
