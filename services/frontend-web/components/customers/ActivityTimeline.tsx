@@ -12,6 +12,8 @@ import {
   UserCheck,
   Zap,
   Activity,
+  Building2,
+  CalendarClock,
 } from 'lucide-react';
 import { customersAPI, ActivityEvent } from '@/lib/api/customers';
 
@@ -92,6 +94,17 @@ export const eventIconMap: Record<ActivityEvent['type'], EventIconConfig> = {
     icon: Activity,
     color: 'var(--chart-2)',
     bg: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
+  },
+  // CRM events
+  crm_contact_synced: {
+    icon: Building2,
+    color: 'var(--chart-3)',
+    bg: 'color-mix(in oklch, var(--chart-3) 10%, transparent)',
+  },
+  crm_renewal_upcoming: {
+    icon: CalendarClock,
+    color: 'var(--chart-1)',
+    bg: 'color-mix(in oklch, var(--chart-1) 10%, transparent)',
   },
 };
 
