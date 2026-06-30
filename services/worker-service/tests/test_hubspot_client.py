@@ -1,0 +1,330 @@
+"""
+TDD tests for HubSpotClient (src/clients/hubspot.py).
+
+No real HTTP. Uses unittest.mock.patch on httpx.Client methods.
+"""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock, patch, call
+
+import pytest
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_resp(status_code: int = 200, json_data: dict = None, headers: dict = None) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = json_data or {}
+    resp.headers = headers or {}
+    if status_code >= 400:
+        from httpx import HTTPStatusError, Request, Response
+        resp.raise_for_status.side_effect = HTTPStatusError(
+            f"HTTP {status_code}",
+            request=MagicMock(),
+            response=MagicMock(status_code=status_code),
+        )
+    else:
+        resp.raise_for_status = MagicMock()
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# TestHubSpotClientPagination
+# ---------------------------------------------------------------------------
+
+
+class TestHubSpotClientPagination:
+    def test_list_contacts_single_page(self):
+        """Single-page response (no paging key) returns that page's contacts."""
+        from src.clients.hubspot import HubSpotClient
+
+        page_data = {
+            "results": [
+                {"id": "1", "properties": {"email": "a@test.com"}},
+            ],
+            # no "paging" key → no next page
+        }
+        mock_resp = _make_resp(200, page_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = mock_resp
+
+            with HubSpotClient("test-token") as client:
+                contacts = client.list_contacts()
+
+        assert len(contacts) == 1
+        assert contacts[0]["id"] == "1"
+
+    def test_list_contacts_multi_page(self):
+        """Multi-page response accumulates contacts from all pages."""
+        from src.clients.hubspot import HubSpotClient
+
+        page1 = {
+            "results": [{"id": "1", "properties": {"email": "a@test.com"}}],
+            "paging": {"next": {"after": "cursor-abc"}},
+        }
+        page2 = {
+            "results": [{"id": "2", "properties": {"email": "b@test.com"}}],
+            # no next page
+        }
+
+        resp1 = _make_resp(200, page1)
+        resp2 = _make_resp(200, page2)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.side_effect = [resp1, resp2]
+
+            with HubSpotClient("test-token") as client:
+                contacts = client.list_contacts()
+
+        assert len(contacts) == 2
+        ids = {c["id"] for c in contacts}
+        assert ids == {"1", "2"}
+
+    def test_list_contacts_respects_per_run_cap(self, caplog):
+        """Pagination stops at PER_RUN_PAGE_CAP and emits a WARNING."""
+        from src.clients.hubspot import HubSpotClient
+
+        original_cap = HubSpotClient.PER_RUN_PAGE_CAP
+        HubSpotClient.PER_RUN_PAGE_CAP = 2
+
+        def _page_with_cursor(cursor="next"):
+            return {
+                "results": [{"id": cursor, "properties": {"email": f"{cursor}@test.com"}}],
+                "paging": {"next": {"after": f"cursor-{cursor}"}},
+            }
+
+        page1 = _page_with_cursor("1")
+        page2 = _page_with_cursor("2")
+        page3 = _page_with_cursor("3")  # should never be fetched
+
+        resp1 = _make_resp(200, page1)
+        resp2 = _make_resp(200, page2)
+        resp3 = _make_resp(200, page3)
+
+        try:
+            with patch("httpx.Client") as MockHTTP, \
+                 caplog.at_level("WARNING"):
+                instance = MockHTTP.return_value
+                instance.get.side_effect = [resp1, resp2, resp3]
+
+                with HubSpotClient("test-token") as client:
+                    contacts = client.list_contacts()
+
+            # Should have stopped after 2 pages (cap=2)
+            assert len(contacts) == 2
+            # Warning must be emitted
+            warning_msgs = [r.message for r in caplog.records if r.levelname == "WARNING"]
+            assert any("cap" in msg.lower() or "per-run" in msg.lower() for msg in warning_msgs)
+        finally:
+            HubSpotClient.PER_RUN_PAGE_CAP = original_cap
+
+
+# ---------------------------------------------------------------------------
+# TestHubSpotClient429
+# ---------------------------------------------------------------------------
+
+
+class TestHubSpotClient429:
+    def test_429_raises_transient_error(self):
+        """HTTP 429 causes HubSpotTransientError to be raised."""
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "1"}
+
+        with patch("httpx.Client") as MockHTTP, \
+             patch("time.sleep"):
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_contacts()
+
+    def test_429_honors_retry_after_header(self):
+        """time.sleep is called with the Retry-After value."""
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "7"}
+
+        with patch("httpx.Client") as MockHTTP, \
+             patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_contacts()
+
+        mock_sleep.assert_called_once_with(7)
+
+    def test_5xx_raises_transient_error(self):
+        """HTTP 5xx raises HubSpotTransientError."""
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_500 = MagicMock()
+        resp_500.status_code = 500
+        resp_500.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_500
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_contacts()
+
+
+# ---------------------------------------------------------------------------
+# TestHubSpotClientGetCompany
+# ---------------------------------------------------------------------------
+
+
+class TestHubSpotClientGetCompany:
+    def test_get_company_returns_name_and_arr(self):
+        """Company dict contains name and annualrevenue."""
+        from src.clients.hubspot import HubSpotClient
+
+        company_data = {
+            "id": "co1",
+            "properties": {
+                "name": "Acme Corp",
+                "annualrevenue": "100000",
+            },
+        }
+        resp = _make_resp(200, company_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with HubSpotClient("test-token") as client:
+                result = client.get_company("co1")
+
+        assert result["name"] == "Acme Corp"
+        assert result["annualrevenue"] == "100000"
+
+    def test_get_company_custom_arr_property(self):
+        """Client initialized with custom arr_property_name requests that property."""
+        from src.clients.hubspot import HubSpotClient
+
+        company_data = {
+            "id": "co1",
+            "properties": {
+                "name": "Acme Corp",
+                "mrr": "5000",
+            },
+        }
+        resp = _make_resp(200, company_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with HubSpotClient("test-token", arr_property_name="mrr") as client:
+                result = client.get_company("co1")
+
+        # Verify the correct property was requested in the URL
+        call_kwargs = instance.get.call_args
+        url = call_kwargs[0][0] if call_kwargs[0] else call_kwargs[1].get("url", "")
+        params = call_kwargs[1].get("params", {}) if call_kwargs[1] else {}
+        assert "mrr" in str(params) or "mrr" in str(url)
+
+    def test_get_company_not_found_returns_none(self):
+        """HTTP 404 returns None (no raise)."""
+        from src.clients.hubspot import HubSpotClient
+
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_404
+
+            with HubSpotClient("test-token") as client:
+                result = client.get_company("missing-id")
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestHubSpotClientGetDeals
+# ---------------------------------------------------------------------------
+
+
+class TestHubSpotClientGetDeals:
+    def test_get_open_deals_returns_only_open(self):
+        """Closed deals (closedwon/closedlost) are not returned."""
+        from src.clients.hubspot import HubSpotClient
+
+        deals_data = {
+            "results": [
+                {
+                    "id": "d1",
+                    "properties": {
+                        "dealstage": "closedwon",
+                        "amount": "10000",
+                        "closedate": "2026-01-01T00:00:00Z",
+                        "dealname": "Won Deal",
+                    },
+                },
+                {
+                    "id": "d2",
+                    "properties": {
+                        "dealstage": "contractsent",
+                        "amount": "5000",
+                        "closedate": "2026-09-01T00:00:00Z",
+                        "dealname": "Open Deal",
+                    },
+                },
+                {
+                    "id": "d3",
+                    "properties": {
+                        "dealstage": "closedlost",
+                        "amount": "3000",
+                        "closedate": "2026-02-01T00:00:00Z",
+                        "dealname": "Lost Deal",
+                    },
+                },
+            ]
+        }
+        resp = _make_resp(200, deals_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("co1")
+
+        assert len(deals) == 1
+        assert deals[0]["id"] == "d2"
+
+    def test_get_open_deals_empty(self):
+        """No deals returns empty list."""
+        from src.clients.hubspot import HubSpotClient
+
+        deals_data = {"results": []}
+        resp = _make_resp(200, deals_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("co1")
+
+        assert deals == []
