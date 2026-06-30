@@ -266,46 +266,105 @@ class TestHubSpotClientGetCompany:
 
 
 class TestHubSpotClientGetDeals:
+    """
+    Tests for get_open_deals_for_company.
+
+    The correct implementation MUST:
+      1. Call GET /crm/v3/objects/companies/{company_id}/associations/deals
+         so that company_id scopes the request (not a global deal scan).
+      2. Fetch deal properties only for the associated IDs
+         (POST /crm/v3/objects/deals/batch/read).
+      3. Filter open stages client-side (exclude closedwon / closedlost).
+    """
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _assoc_resp(self, deal_ids: list, next_after: str = None):
+        """Build a mock associations-endpoint response."""
+        data = {
+            "results": [{"id": did, "type": "company_to_deal"} for did in deal_ids]
+        }
+        if next_after:
+            data["paging"] = {"next": {"after": next_after}}
+        return _make_resp(200, data)
+
+    def _batch_resp(self, deals: list):
+        """Build a mock batch/read response."""
+        return _make_resp(200, {"results": deals, "status": "COMPLETE"})
+
+    # ------------------------------------------------------------------
+    # RED-first: must fail against the old buggy code which calls
+    # GET /crm/v3/objects/deals (all portal deals) instead of the
+    # company-scoped associations endpoint.
+    # ------------------------------------------------------------------
+
+    def test_associations_endpoint_called_with_company_id(self):
+        """
+        company_id MUST appear in the GET request path via the associations
+        endpoint (/crm/v3/objects/companies/{company_id}/associations/deals).
+
+        FAILS against old code which calls /crm/v3/objects/deals with no
+        company scoping at all.
+        """
+        from src.clients.hubspot import HubSpotClient
+
+        # Associations endpoint returns no deals — short-circuit after step 1.
+        assoc_resp = self._assoc_resp([])
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+
+            with HubSpotClient("test-token") as client:
+                client.get_open_deals_for_company("co1")
+
+        get_calls = instance.get.call_args_list
+        called_urls = [str(c[0][0]) for c in get_calls]
+        assert any("companies/co1/associations/deals" in url for url in called_urls), (
+            f"Expected 'companies/co1/associations/deals' in a GET URL, got: {called_urls}"
+        )
+
     def test_get_open_deals_returns_only_open(self):
         """Closed deals (closedwon/closedlost) are not returned."""
         from src.clients.hubspot import HubSpotClient
 
-        deals_data = {
-            "results": [
-                {
-                    "id": "d1",
-                    "properties": {
-                        "dealstage": "closedwon",
-                        "amount": "10000",
-                        "closedate": "2026-01-01T00:00:00Z",
-                        "dealname": "Won Deal",
-                    },
+        assoc_resp = self._assoc_resp(["d1", "d2", "d3"])
+        batch_resp = self._batch_resp([
+            {
+                "id": "d1",
+                "properties": {
+                    "dealstage": "closedwon",
+                    "amount": "10000",
+                    "closedate": "2026-01-01T00:00:00Z",
+                    "dealname": "Won Deal",
                 },
-                {
-                    "id": "d2",
-                    "properties": {
-                        "dealstage": "contractsent",
-                        "amount": "5000",
-                        "closedate": "2026-09-01T00:00:00Z",
-                        "dealname": "Open Deal",
-                    },
+            },
+            {
+                "id": "d2",
+                "properties": {
+                    "dealstage": "contractsent",
+                    "amount": "5000",
+                    "closedate": "2026-09-01T00:00:00Z",
+                    "dealname": "Open Deal",
                 },
-                {
-                    "id": "d3",
-                    "properties": {
-                        "dealstage": "closedlost",
-                        "amount": "3000",
-                        "closedate": "2026-02-01T00:00:00Z",
-                        "dealname": "Lost Deal",
-                    },
+            },
+            {
+                "id": "d3",
+                "properties": {
+                    "dealstage": "closedlost",
+                    "amount": "3000",
+                    "closedate": "2026-02-01T00:00:00Z",
+                    "dealname": "Lost Deal",
                 },
-            ]
-        }
-        resp = _make_resp(200, deals_data)
+            },
+        ])
 
         with patch("httpx.Client") as MockHTTP:
             instance = MockHTTP.return_value
-            instance.get.return_value = resp
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
 
             with HubSpotClient("test-token") as client:
                 deals = client.get_open_deals_for_company("co1")
@@ -314,17 +373,66 @@ class TestHubSpotClientGetDeals:
         assert deals[0]["id"] == "d2"
 
     def test_get_open_deals_empty(self):
-        """No deals returns empty list."""
+        """No associated deals returns an empty list; batch read is never called."""
         from src.clients.hubspot import HubSpotClient
 
-        deals_data = {"results": []}
-        resp = _make_resp(200, deals_data)
+        assoc_resp = self._assoc_resp([])
 
         with patch("httpx.Client") as MockHTTP:
             instance = MockHTTP.return_value
-            instance.get.return_value = resp
+            instance.get.return_value = assoc_resp
 
             with HubSpotClient("test-token") as client:
                 deals = client.get_open_deals_for_company("co1")
 
         assert deals == []
+        # No POST (batch read) should be issued when there are no deal IDs.
+        instance.post.assert_not_called()
+
+    def test_different_company_deals_not_returned(self):
+        """
+        Only deals associated with company 'co1' are returned.
+        Deal 'd2' (belonging to co2) is never requested and must not appear.
+
+        FAILS against old code which fetches all portal deals and would
+        include d2 if co2's deals happened to be open.
+        """
+        from src.clients.hubspot import HubSpotClient
+
+        # co1's associations: only deal "d1"
+        co1_assoc_resp = self._assoc_resp(["d1"])
+        batch_resp = self._batch_resp([
+            {
+                "id": "d1",
+                "properties": {
+                    "dealstage": "contractsent",
+                    "amount": "5000",
+                    "closedate": "2026-09-01T00:00:00Z",
+                    "dealname": "co1 Deal",
+                },
+            },
+        ])
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = co1_assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("co1")
+
+        # Only co1's deal is returned.
+        assert len(deals) == 1
+        assert deals[0]["id"] == "d1"
+
+        # Batch read only requested "d1", not "d2" (co2's deal).
+        post_call = instance.post.call_args
+        assert post_call is not None, "Expected a batch/read POST call"
+        # Support both positional and keyword json arg
+        body = (
+            post_call[1].get("json")
+            or (post_call[0][1] if len(post_call[0]) > 1 else {})
+        ) or {}
+        requested_ids = {inp["id"] for inp in body.get("inputs", [])}
+        assert "d1" in requested_ids
+        assert "d2" not in requested_ids

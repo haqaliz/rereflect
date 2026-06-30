@@ -169,39 +169,95 @@ class HubSpotClient:
         """
         Return open deals associated with a company (not closedwon / closedlost).
 
-        Uses the CRM v3 associations endpoint to find deals for the company,
-        then filters open ones client-side.
+        Step 1: GET /crm/v3/objects/companies/{company_id}/associations/deals
+                — retrieves deal IDs scoped to this company (paginated).
+        Step 2: POST /crm/v3/objects/deals/batch/read
+                — fetches deal properties for those IDs in one call.
+        Step 3: Filter open stages client-side (exclude closedwon / closedlost).
         """
-        # Fetch all deals where this company is the associated company.
-        # HubSpot associations: GET /crm/v3/objects/deals?associations=companies
-        # is not directly filtered by company. Simpler: use the search API or
-        # fetch via associations endpoint for the specific company.
-        params = {
-            "limit": 100,
-            "properties": "dealname,dealstage,amount,closedate",
-            "associations": "companies",
+        # ------------------------------------------------------------------
+        # Step 1: Collect deal IDs via the company-scoped associations endpoint
+        # ------------------------------------------------------------------
+        deal_ids: list[str] = []
+        after: Optional[str] = None
+
+        while True:
+            params: dict = {"limit": 100}
+            if after:
+                params["after"] = after
+
+            resp = self._client.get(
+                f"/crm/v3/objects/companies/{company_id}/associations/deals",
+                params=params,
+            )
+
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", "10"))
+                logger.warning(
+                    "hubspot_client: 429 rate limited fetching associations; sleeping %ss",
+                    retry_after,
+                )
+                time.sleep(retry_after)
+                raise HubSpotTransientError(
+                    f"HubSpot rate limited fetching associations, retry after {retry_after}s"
+                )
+
+            if resp.status_code >= 500:
+                raise HubSpotTransientError(
+                    f"HubSpot server error {resp.status_code} "
+                    f"fetching associations for company {company_id}"
+                )
+
+            if resp.status_code == 404:
+                return []
+
+            data = resp.json()
+            for result in data.get("results", []):
+                deal_ids.append(result["id"])
+
+            paging = data.get("paging", {})
+            after = paging.get("next", {}).get("after")
+            if not after:
+                break
+
+        if not deal_ids:
+            return []
+
+        # ------------------------------------------------------------------
+        # Step 2: Batch-read deal properties for the collected IDs
+        # ------------------------------------------------------------------
+        batch_payload = {
+            "inputs": [{"id": did} for did in deal_ids],
+            "properties": ["dealname", "dealstage", "amount", "closedate"],
         }
-        resp = self._client.get("/crm/v3/objects/deals", params=params)
+        resp = self._client.post(
+            "/crm/v3/objects/deals/batch/read",
+            json=batch_payload,
+        )
 
         if resp.status_code == 429:
             retry_after = int(resp.headers.get("Retry-After", "10"))
+            logger.warning(
+                "hubspot_client: 429 rate limited batch-reading deals; sleeping %ss",
+                retry_after,
+            )
             time.sleep(retry_after)
             raise HubSpotTransientError(
-                f"HubSpot rate limited fetching deals, retry after {retry_after}s"
+                f"HubSpot rate limited batch-reading deals, retry after {retry_after}s"
             )
 
         if resp.status_code >= 500:
             raise HubSpotTransientError(
-                f"HubSpot server error {resp.status_code} fetching deals"
+                f"HubSpot server error {resp.status_code} batch-reading deals"
             )
 
-        data = resp.json()
-        all_deals = data.get("results", [])
+        all_deals = resp.json().get("results", [])
 
-        # Filter: only open deals (not closedwon or closedlost)
+        # ------------------------------------------------------------------
+        # Step 3: Filter open deals (exclude closedwon / closedlost)
+        # ------------------------------------------------------------------
         closed_stages = {"closedwon", "closedlost"}
-        open_deals = [
+        return [
             d for d in all_deals
             if d.get("properties", {}).get("dealstage") not in closed_stages
         ]
-        return open_deals

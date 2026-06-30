@@ -755,7 +755,7 @@ class TestCeleryTaskRegistration:
         entry = schedule["sync-hubspot-daily"]
         cron = entry["schedule"]
         assert cron.hour == {3}
-        assert cron.minute == {0}
+        assert cron.minute == {15}  # 03:15 — avoids collision with refit-global-calibration-daily at 03:00
 
 
 # ---------------------------------------------------------------------------
