@@ -140,9 +140,10 @@ class TestGetOrgWeightsDefaultsBeforeUsageColumn:
     """
 
     def test_returns_five_keys_with_usage_default(self, db: Session, test_organization: Organization):
-        """Default weights dict has exactly 5 keys including 'usage' at 0.0."""
+        """Default weights dict has exactly 6 keys including 'usage' and 'crm' at 0.0.
+        NOTE: Updated from 5→6 keys in crm-health-component aspect; 'crm' defaults to 0.0."""
         weights = _get_org_weights(test_organization.id, db)
-        assert set(weights.keys()) == {"churn_risk", "sentiment", "resolution", "frequency", "usage"}
+        assert set(weights.keys()) == {"churn_risk", "sentiment", "resolution", "frequency", "usage", "crm"}
 
     def test_default_usage_weight_is_zero(self, db: Session, test_organization: Organization):
         """Default usage weight is 0.0 (opt-in, no existing scores change)."""
@@ -218,7 +219,8 @@ class TestGetOrgWeightsWithUsageColumn:
     def test_returns_five_keys_when_config_exists(
         self, db: Session, test_organization: Organization
     ):
-        """With an OrgAIConfig row, _get_org_weights returns 5 keys."""
+        """With an OrgAIConfig row, _get_org_weights returns 6 keys (usage + crm added).
+        NOTE: Updated from 5→6 keys in crm-health-component aspect."""
         config = OrgAIConfig(
             organization_id=test_organization.id,
             health_weight_churn=35,
@@ -232,7 +234,8 @@ class TestGetOrgWeightsWithUsageColumn:
 
         weights = _get_org_weights(test_organization.id, db)
         assert "usage" in weights
-        assert len(weights) == 5
+        assert "crm" in weights
+        assert len(weights) == 6
 
     def test_usage_weight_zero_by_default(
         self, db: Session, test_organization: Organization

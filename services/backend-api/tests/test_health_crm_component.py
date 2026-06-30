@@ -45,39 +45,20 @@ def _make_feedback(db, org_id, email, sentiment_score, churn_risk_score):
 
 
 # ---------------------------------------------------------------------------
-# Fixture: crm_enrichment table (raw DDL, no hubspot-sync dependency)
+# Fixture: crm_enrichment table
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=False)
 def crm_enrichment_table(db):
     """
-    Create the crm_enrichment table in the in-memory SQLite DB for CRM tests.
-    Uses raw DDL so this aspect has no runtime dependency on hubspot-sync.
+    The crm_enrichment table is already created by Base.metadata.create_all()
+    in conftest (hubspot-sync aspect is on this branch). This fixture is kept
+    for API compatibility with tests that declare it, but performs no DDL.
+
+    Tests insert rows using the CrmEnrichment ORM model (or raw SQL with all
+    required columns) and rely on the existing table definition.
     """
-    from sqlalchemy import text
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS crm_enrichment (
-            id              INTEGER PRIMARY KEY,
-            organization_id INTEGER NOT NULL,
-            customer_email  TEXT    NOT NULL,
-            company_name    TEXT,
-            lifecycle_stage TEXT,
-            arr             REAL,
-            renewal_date    TEXT,
-            deal_name       TEXT,
-            deal_stage      TEXT,
-            deal_amount     REAL,
-            hubspot_contact_id TEXT,
-            hubspot_company_id TEXT,
-            hubspot_deal_id    TEXT,
-            last_synced_at  TEXT,
-            UNIQUE (organization_id, customer_email)
-        )
-    """))
-    db.commit()
     yield
-    db.execute(text("DROP TABLE IF EXISTS crm_enrichment"))
-    db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -145,11 +126,14 @@ class TestComputeCrmComponentFallback:
         self, db, test_organization, crm_enrichment_table
     ):
         """Row with renewal_date=NULL returns 50.0 (neutral)."""
-        from sqlalchemy import text
-        db.execute(text(
-            "INSERT INTO crm_enrichment "
-            "(organization_id, customer_email, renewal_date) VALUES (:o, :e, NULL)"
-        ), {"o": test_organization.id, "e": "nullrenewal@example.com"})
+        from src.models.crm_enrichment import CrmEnrichment
+        row = CrmEnrichment(
+            organization_id=test_organization.id,
+            customer_email="nullrenewal@example.com",
+            renewal_date=None,
+            last_synced_at=datetime.utcnow(),
+        )
+        db.add(row)
         db.commit()
         result = _compute_crm_component(
             db, test_organization.id, "nullrenewal@example.com", datetime.utcnow()
@@ -225,22 +209,32 @@ class TestCrmComponentRenewalProximityScoring:
     All assertions are deterministic against the documented module constants.
     """
 
+    @staticmethod
+    def _today_midnight():
+        """Return today's date as midnight datetime for day-precision comparison."""
+        today = date.today()
+        return datetime(today.year, today.month, today.day)
+
     def _insert_renewal(self, db, org_id, email, days_from_now):
-        """Insert a crm_enrichment row with renewal_date = now + days_from_now."""
-        from sqlalchemy import text
-        renewal = (date.today() + timedelta(days=days_from_now)).isoformat()
-        db.execute(text(
-            "INSERT INTO crm_enrichment "
-            "(organization_id, customer_email, renewal_date) "
-            "VALUES (:o, :e, :r)"
-        ), {"o": org_id, "e": email, "r": renewal})
+        """Insert a crm_enrichment row with renewal_date = midnight(today + days_from_now).
+        Using midnight ensures days_to_renewal arithmetic is exact when now=today_midnight()."""
+        from src.models.crm_enrichment import CrmEnrichment
+        renewal_date_obj = date.today() + timedelta(days=days_from_now)
+        renewal_dt = datetime(renewal_date_obj.year, renewal_date_obj.month, renewal_date_obj.day)
+        row = CrmEnrichment(
+            organization_id=org_id,
+            customer_email=email,
+            renewal_date=renewal_dt,
+            last_synced_at=datetime.utcnow(),
+        )
+        db.add(row)
         db.commit()
 
     def test_no_renewal_returns_neutral(
         self, db, test_organization, crm_enrichment_table
     ):
         """Customer with no row returns 50.0 (neutral)."""
-        now = datetime.utcnow()
+        now = self._today_midnight()
         result = _compute_crm_component(
             db, test_organization.id, "norenewal@example.com", now
         )
@@ -251,7 +245,7 @@ class TestCrmComponentRenewalProximityScoring:
     ):
         """31 days out → outside warn band → 50.0 neutral."""
         self._insert_renewal(db, test_organization.id, "r31@example.com", 31)
-        now = datetime.utcnow()
+        now = self._today_midnight()
         result = _compute_crm_component(
             db, test_organization.id, "r31@example.com", now
         )
@@ -262,7 +256,7 @@ class TestCrmComponentRenewalProximityScoring:
     ):
         """Renewal in 25 days → warn band → score < 50 (more risk than no renewal)."""
         self._insert_renewal(db, test_organization.id, "r25@example.com", 25)
-        now = datetime.utcnow()
+        now = self._today_midnight()
         result = _compute_crm_component(
             db, test_organization.id, "r25@example.com", now
         )
@@ -274,7 +268,7 @@ class TestCrmComponentRenewalProximityScoring:
     ):
         """10 days out → high band (25.0) < warn band (35.0)."""
         self._insert_renewal(db, test_organization.id, "r10@example.com", 10)
-        now = datetime.utcnow()
+        now = self._today_midnight()
         result = _compute_crm_component(
             db, test_organization.id, "r10@example.com", now
         )
@@ -285,7 +279,7 @@ class TestCrmComponentRenewalProximityScoring:
     ):
         """3 days out → critical band (15.0) is the lowest documented score."""
         self._insert_renewal(db, test_organization.id, "r3@example.com", 3)
-        now = datetime.utcnow()
+        now = self._today_midnight()
         result = _compute_crm_component(
             db, test_organization.id, "r3@example.com", now
         )
@@ -295,7 +289,7 @@ class TestCrmComponentRenewalProximityScoring:
         self, db, test_organization, crm_enrichment_table
     ):
         """Scores are monotonically non-decreasing as renewal distance grows."""
-        now = datetime.utcnow()
+        now = self._today_midnight()
         scores = {}
         for days, key in [(3, "3d"), (10, "10d"), (25, "25d"), (45, "45d")]:
             email = f"mono_{key}@example.com"
@@ -310,7 +304,7 @@ class TestCrmComponentRenewalProximityScoring:
     ):
         """A renewal date in the past (−5 days) returns 50.0 — not actionable in v1."""
         self._insert_renewal(db, test_organization.id, "past@example.com", -5)
-        now = datetime.utcnow()
+        now = self._today_midnight()
         result = _compute_crm_component(
             db, test_organization.id, "past@example.com", now
         )
@@ -412,6 +406,7 @@ class TestCrmComponentPersisted:
             return_value=25.0,
         ):
             update_customer_health(test_organization.id, self.EMAIL, db)
+        db.flush()
 
         from src.models.customer_health import CustomerHealth
         row = db.query(CustomerHealth).filter_by(
@@ -430,6 +425,7 @@ class TestCrmComponentPersisted:
             return_value=35.0,
         ):
             update_customer_health(test_organization.id, self.EMAIL, db)
+        db.flush()
 
         from src.models.customer_health_history import CustomerHealthHistory
         row = db.query(CustomerHealthHistory).filter_by(

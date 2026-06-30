@@ -21,14 +21,26 @@ DEFAULT_ALERT_THRESHOLD = 50.0  # absolute threshold: alert when score drops bel
 DEFAULT_DROP_THRESHOLD = 15     # point-drop threshold: alert when score drops by this many pts
 
 # Weight distribution (churn-heavy as per PRD)
-# Usage defaults to 0.0 — opt-in only; existing scores unchanged until re-weighted.
+# Usage and CRM default to 0.0 — opt-in only; existing scores unchanged until re-weighted.
 WEIGHTS = {
     "churn_risk": 0.35,
     "sentiment": 0.25,
     "resolution": 0.25,
     "frequency": 0.15,
     "usage": 0.0,
+    "crm": 0.0,   # Opt-in CRM component; existing scores unchanged at weight 0
 }
+
+# CRM component — renewal-proximity heuristic constants.
+# This is a documented heuristic, NOT a trained model. Operators opt in by
+# setting health_weight_crm > 0. Tune thresholds here without a schema change.
+CRM_RENEWAL_DAYS_WARN   = 30    # <= this many days to renewal -> risk territory
+CRM_RENEWAL_DAYS_HIGH   = 14    # <= this many days -> higher risk
+CRM_RENEWAL_DAYS_CRIT   = 7     # <= this many days -> critical risk
+CRM_SCORE_NEUTRAL       = 50.0  # No enrichment row / no renewal date -> neutral
+CRM_SCORE_WARN          = 35.0  # Renewal within 30 days
+CRM_SCORE_HIGH          = 25.0  # Renewal within 14 days
+CRM_SCORE_CRIT          = 15.0  # Renewal within 7 days
 
 
 def _get_org_weights(org_id: int, db: Session) -> dict:
@@ -43,6 +55,7 @@ def _get_org_weights(org_id: int, db: Session) -> dict:
                 "resolution": config.health_weight_resolution / 100.0,
                 "frequency": config.health_weight_frequency / 100.0,
                 "usage": config.health_weight_usage / 100.0,
+                "crm": config.health_weight_crm / 100.0,
             }
     except Exception:
         pass
@@ -92,6 +105,82 @@ def _compute_usage_component(db: Session, org_id: int, customer_email: str, now:
     return 50
 
 
+def _compute_crm_component(
+    db: Session, org_id: int, customer_email: str, now: datetime
+) -> float:
+    """
+    Read renewal_date from crm_enrichment for (org, email) and return a
+    0-100 float encoding renewal-proximity risk (lower = more risk).
+
+    Renewal-proximity heuristic (documented constants at module top):
+      - No row / no renewal_date -> 50.0 (neutral, same as no data)
+      - Renewal date already passed -> 50.0 (not actionable in v1)
+      - days_to_renewal <= CRM_RENEWAL_DAYS_CRIT (7)  -> CRM_SCORE_CRIT  (15.0)
+      - days_to_renewal <= CRM_RENEWAL_DAYS_HIGH (14) -> CRM_SCORE_HIGH  (25.0)
+      - days_to_renewal <= CRM_RENEWAL_DAYS_WARN (30) -> CRM_SCORE_WARN  (35.0)
+      - Otherwise                                     -> CRM_SCORE_NEUTRAL (50.0)
+
+    This is a HEURISTIC, not a trained model. See module-level constants for
+    threshold/score values. Operators set health_weight_crm > 0 to opt in.
+
+    Contract: this function NEVER raises. It uses a SAVEPOINT so a missing
+    crm_enrichment table cannot abort the outer SQLAlchemy transaction.
+
+    Args:
+        now: Computation timestamp (passed by caller for consistency with
+             other _compute_* functions; used for days_to_renewal arithmetic).
+    """
+    from sqlalchemy import text
+    try:
+        sp = db.begin_nested()  # SAVEPOINT — isolates this read from the outer transaction
+        row = db.execute(
+            text(
+                "SELECT renewal_date FROM crm_enrichment "
+                "WHERE organization_id = :org_id AND customer_email = :email "
+                "LIMIT 1"
+            ),
+            {"org_id": org_id, "email": customer_email},
+        ).fetchone()
+        sp.commit()
+        if row is not None and row[0] is not None:
+            renewal_date = row[0]
+            # Normalize to datetime. SQLAlchemy+SQLite returns datetime objects
+            # (via native_datetime mode) or ISO8601 strings. Handle both.
+            if isinstance(renewal_date, str):
+                # Python 3.9's date.fromisoformat() only accepts "YYYY-MM-DD";
+                # datetime.fromisoformat() accepts full datetime strings.
+                # Strip microseconds suffix if present, then parse.
+                raw = renewal_date.strip()
+                try:
+                    renewal_date = datetime.fromisoformat(raw)
+                except ValueError:
+                    # Fallback: try parsing just the date portion
+                    renewal_date = datetime.strptime(raw[:10], "%Y-%m-%d")
+            elif not isinstance(renewal_date, datetime):
+                # date object
+                renewal_date = datetime(
+                    renewal_date.year, renewal_date.month, renewal_date.day
+                )
+            days_to_renewal = (renewal_date - now).days
+            if days_to_renewal < 0:
+                return CRM_SCORE_NEUTRAL        # past renewal — not actionable in v1
+            if days_to_renewal <= CRM_RENEWAL_DAYS_CRIT:
+                return max(0.0, min(100.0, CRM_SCORE_CRIT))
+            if days_to_renewal <= CRM_RENEWAL_DAYS_HIGH:
+                return max(0.0, min(100.0, CRM_SCORE_HIGH))
+            if days_to_renewal <= CRM_RENEWAL_DAYS_WARN:
+                return max(0.0, min(100.0, CRM_SCORE_WARN))
+    except Exception:
+        # Table does not exist yet or any other DB error — roll back only the
+        # SAVEPOINT so the outer transaction remains usable (avoids
+        # PendingRollbackError on the next query in the same request).
+        try:
+            sp.rollback()
+        except Exception:
+            pass
+    return CRM_SCORE_NEUTRAL
+
+
 def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
     """Compute 0-100 health score (higher = healthier) for a customer."""
     from src.models.feedback import FeedbackItem
@@ -114,6 +203,10 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
     # falls back to 50 (neutral) when no rollup exists.
     usage_component = _compute_usage_component(db, org_id, customer_email, now)
 
+    # CRM component (0% default, opt-in): renewal-proximity risk from crm_enrichment;
+    # falls back to 50.0 (neutral) when no enrichment row exists.
+    crm_component = _compute_crm_component(db, org_id, customer_email, now)
+
     # Weighted sum using per-org configured weights (or defaults)
     weights = _get_org_weights(org_id, db)
     health_score = int(
@@ -121,7 +214,8 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
         sentiment_component * weights["sentiment"] +
         resolution_component * weights["resolution"] +
         frequency_component * weights["frequency"] +
-        usage_component * weights["usage"]
+        usage_component * weights["usage"] +
+        crm_component * weights["crm"]
     )
     health_score = max(0, min(100, health_score))
 
@@ -172,6 +266,7 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
         "resolution_component": resolution_component,
         "frequency_component": frequency_component,
         "usage_component": usage_component,
+        "crm_component": crm_component,
         "risk_level": risk_level,
         "feedback_count": feedback_count,
         "last_feedback_at": last_feedback,
@@ -223,6 +318,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
         existing.resolution_component = result["resolution_component"]
         existing.frequency_component = result["frequency_component"]
         existing.usage_component = result["usage_component"]
+        existing.crm_component = result["crm_component"]
         existing.risk_level = result["risk_level"]
         existing.feedback_count = result["feedback_count"]
         existing.last_feedback_at = result["last_feedback_at"]
@@ -282,6 +378,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             resolution_component=result["resolution_component"],
             frequency_component=result["frequency_component"],
             usage_component=result["usage_component"],
+            crm_component=result["crm_component"],
             feedback_count=result["feedback_count"],
             last_feedback_at=result["last_feedback_at"],
             risk_level=result["risk_level"],
@@ -305,6 +402,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             resolution_component=result["resolution_component"],
             frequency_component=result["frequency_component"],
             usage_component=result["usage_component"],
+            crm_component=result["crm_component"],
             risk_level=result["risk_level"],
         )
         db.add(history)
