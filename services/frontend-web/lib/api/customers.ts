@@ -97,7 +97,7 @@ export interface CustomerProfileData {
   churn_probability_high?: number | null;
   time_to_churn_bucket?: 'immediate' | '2w' | '2-4w' | '1-3m' | 'low' | null;
   has_potential_winback?: boolean;
-  // CRM enrichment fields (HubSpot)
+  // CRM enrichment fields (HubSpot or Salesforce — see crm_provider)
   crm_company_name?: string | null;
   crm_lifecycle_stage?: string | null;
   crm_arr?: number | null;
@@ -105,6 +105,9 @@ export interface CustomerProfileData {
   crm_deal_name?: string | null;
   crm_deal_stage?: string | null;
   crm_deal_amount?: number | null;
+  // Which CRM populated the fields above ('hubspot' | 'salesforce'); absent
+  // on older payloads or when no CRM has synced yet.
+  crm_provider?: string | null;
 }
 
 export interface UsageRollup {

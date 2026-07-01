@@ -746,7 +746,7 @@ export default function CustomerProfilePage() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6 mt-4">
-            {/* CRM / Company — shows HubSpot-synced data when available */}
+            {/* CRM / Company — shows HubSpot- or Salesforce-synced data when available (see profile.crm_provider) */}
             <CrmCompanyCard crm={profile} />
 
             {/* Health Score Components */}

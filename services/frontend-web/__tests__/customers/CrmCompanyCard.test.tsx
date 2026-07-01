@@ -39,13 +39,26 @@ describe('CrmCompanyCard', () => {
     expect(screen.getByText('Enterprise Renewal')).toBeInTheDocument();
   });
 
-  it('shows empty state when all CRM fields are null', () => {
+  it('shows a provider-neutral empty state (not "Connect HubSpot") when all CRM fields are null', () => {
     render(<CrmCompanyCard crm={crmEmpty} />);
-    expect(screen.getByText(/no crm data|connect hubspot|hubspot/i)).toBeInTheDocument();
+    expect(screen.getByText(/no crm data|connect a crm/i)).toBeInTheDocument();
+    expect(screen.queryByText(/connect hubspot/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/hubspot/i)).toBeInTheDocument();
+    expect(screen.getByText(/salesforce/i)).toBeInTheDocument();
   });
 
   it('has CRM / Company title', () => {
     render(<CrmCompanyCard crm={crmWithData} />);
     expect(screen.getByText(/CRM/i)).toBeInTheDocument();
+  });
+
+  it('renders a provider badge when crm_provider is present', () => {
+    render(<CrmCompanyCard crm={{ ...crmWithData, crm_provider: 'salesforce' }} />);
+    expect(screen.getByText(/salesforce/i)).toBeInTheDocument();
+  });
+
+  it('does not crash and renders no provider badge when crm_provider is absent (older payloads)', () => {
+    render(<CrmCompanyCard crm={crmWithData} />);
+    expect(screen.getByText('Acme Corp')).toBeInTheDocument();
   });
 });

@@ -11,6 +11,7 @@ default) treats every instance as fully featured.
 - [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
 - [Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
+- [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
 - [Production notes](#production-notes)
 
 ## Prerequisites
@@ -181,6 +182,61 @@ Max batch size: **1 000 events per request**. Oversized requests return `413`.
 
 Full setup docs are also available in the app under
 **Settings → Usage Events** (admin/owner only).
+
+## Connecting Salesforce CRM enrichment
+
+Rereflect can sync Accounts, Contacts, and Opportunities from Salesforce to
+enrich the Customer 360 profile (company, lifecycle stage, ARR, renewal date,
+open deal). Only one CRM (HubSpot or Salesforce) can be connected per
+organization at a time.
+
+### 1. Create a Connected App in Salesforce
+
+1. In Salesforce Setup, go to **App Manager → New Connected App**.
+2. Enable **OAuth Settings** and set the **Callback URL** to
+   `https://<your-backend-domain>/api/v1/integrations/salesforce/callback`
+   (use `http://localhost:8000/api/v1/integrations/salesforce/callback` for
+   local development).
+3. Add the OAuth scopes: **`refresh_token offline_access api`** (these three
+   are required — no more, no less).
+4. Save, then note the **Consumer Key** (client ID) and **Consumer Secret**
+   (client secret). Salesforce may take a few minutes to activate a new
+   Connected App.
+
+### 2. Configure environment variables
+
+Set these in your backend `.env`:
+
+| Variable | Purpose |
+|----------|---------|
+| `SALESFORCE_CLIENT_ID` | Connected App Consumer Key |
+| `SALESFORCE_CLIENT_SECRET` | Connected App Consumer Secret |
+| `SALESFORCE_REDIRECT_URI` | Must exactly match the Connected App's Callback URL |
+| `SALESFORCE_LOGIN_BASE` | `https://login.salesforce.com` (production/Developer Edition) or `https://test.salesforce.com` (sandbox) |
+| `SALESFORCE_API_VERSION` | Defaults to `v60.0` — bump if you need a newer Salesforce API |
+| `FRONTEND_URL` | Used to build the post-OAuth redirect back to the app |
+
+Restart the backend after setting these so the OAuth routes pick them up.
+
+### 3. Connect from the app
+
+Go to **Settings → Integrations → Salesforce** (admin/owner only) and click
+**Connect with Salesforce**. You'll be redirected to Salesforce to log in and
+approve the requested scopes, then redirected back to Rereflect connected.
+
+### Verify
+
+- **Settings → Integrations → Salesforce** shows instance URL, org ID, and
+  contact sync counts once the first sync completes (daily, or trigger
+  manually via **Test Connection**).
+- A connected customer's **Customer 360** profile shows a **Salesforce** badge
+  on the CRM / Company card.
+
+> **Cross-origin note:** the OAuth flow relies on an HttpOnly cookie to bind
+> the authorization request to your browser session. If your frontend and
+> backend are on different origins, your reverse proxy / CORS config must
+> send `Access-Control-Allow-Credentials: true` with a specific (non-`*`)
+> allowed origin, or the callback will fail to verify.
 
 ## Production notes
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
 interface CrmData {
   crm_company_name?: string | null;
@@ -10,6 +11,18 @@ interface CrmData {
   crm_deal_name?: string | null;
   crm_deal_stage?: string | null;
   crm_deal_amount?: number | null;
+  // Absent on older payloads (pre provider-generalization) — render without
+  // a badge rather than crash.
+  crm_provider?: string | null;
+}
+
+const CRM_PROVIDER_LABELS: Record<string, string> = {
+  hubspot: 'HubSpot',
+  salesforce: 'Salesforce',
+};
+
+function providerLabel(provider: string): string {
+  return CRM_PROVIDER_LABELS[provider] ?? provider;
 }
 
 interface CrmCompanyCardProps {
@@ -41,13 +54,18 @@ export function CrmCompanyCard({ crm }: CrmCompanyCardProps) {
 
   return (
     <Card>
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base">CRM / Company</CardTitle>
+        {crm.crm_provider && (
+          <Badge variant="secondary" className="text-xs">
+            {providerLabel(crm.crm_provider)}
+          </Badge>
+        )}
       </CardHeader>
       <CardContent>
         {!hasCrm ? (
           <p className="text-sm text-muted-foreground">
-            No CRM data available. Connect HubSpot in Settings to sync company and deal information.
+            No CRM data available. Connect a CRM (HubSpot or Salesforce) in Settings to sync company and deal information.
           </p>
         ) : (
           <div className="space-y-4">
