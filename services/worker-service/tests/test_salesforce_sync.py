@@ -229,6 +229,46 @@ class TestSyncOrgUpsert:
 
 
 # ---------------------------------------------------------------------------
+# TestSyncOrgAccountMemoization (M2)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncOrgAccountMemoization:
+    def test_shared_account_fetched_once_across_matched_contacts(self, db):
+        """M2: two matched contacts sharing one AccountId must trigger only
+        ONE get_account/get_open_opportunities call per sync run, not one
+        per contact (N+1)."""
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        _make_customer(db, org.id, "bob@example.com")
+
+        client = _make_mock_client(
+            contacts=[
+                {"Id": "003c1", "Email": "alice@example.com", "AccountId": "001a1"},
+                {"Id": "003c2", "Email": "bob@example.com", "AccountId": "001a1"},
+            ],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 50000, "Type": "Customer"},
+            opportunities=[
+                {"Name": "Acme Renewal", "StageName": "Negotiation", "Amount": 1000, "CloseDate": "2026-01-01", "IsClosed": False},
+            ],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result["contacts_matched"] == 2
+        assert client.get_account.call_count == 1
+        assert client.get_open_opportunities.call_count == 1
+
+        rows = db.query(CrmEnrichment).all()
+        assert len(rows) == 2
+        for row in rows:
+            assert row.company_name == "Acme"
+            assert row.deal_name == "Acme Renewal"
+
+
+# ---------------------------------------------------------------------------
 # TestSyncOrgIdempotency
 # ---------------------------------------------------------------------------
 

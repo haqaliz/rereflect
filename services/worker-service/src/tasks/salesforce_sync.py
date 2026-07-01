@@ -225,6 +225,12 @@ def _sync_org(org_id: int, db, client: SalesforceClient) -> dict:
     contacts_matched = 0
     now = datetime.utcnow()
 
+    # M2: memoize Account + open-Opportunities fetches per sync run so
+    # multiple matched contacts sharing one AccountId don't each re-fetch
+    # the same Account/Opportunities data from Salesforce (N+1).
+    account_cache: dict[str, Optional[dict]] = {}
+    opportunities_cache: dict[str, list[dict]] = {}
+
     for contact in contacts:
         raw_email = contact.get("Email") or ""
         email_lower = raw_email.lower()
@@ -238,7 +244,9 @@ def _sync_org(org_id: int, db, client: SalesforceClient) -> dict:
         # Resolve Account via the direct Contact.AccountId FK.
         account_data = None
         if account_id:
-            account_data = client.get_account(account_id)
+            if account_id not in account_cache:
+                account_cache[account_id] = client.get_account(account_id)
+            account_data = account_cache[account_id]
 
         company_name = None
         arr = None
@@ -256,7 +264,9 @@ def _sync_org(org_id: int, db, client: SalesforceClient) -> dict:
         # Fetch open opportunities for this account.
         opportunities: list[dict] = []
         if account_id:
-            opportunities = client.get_open_opportunities(account_id)
+            if account_id not in opportunities_cache:
+                opportunities_cache[account_id] = client.get_open_opportunities(account_id)
+            opportunities = opportunities_cache[account_id]
 
         renewal_opp = _pick_renewal_opportunity(opportunities)
 
