@@ -52,6 +52,7 @@ from .usage_event import UsageEvent
 from .customer_usage import CustomerUsage
 from .hubspot_integration import HubSpotIntegration
 from .crm_enrichment import CrmEnrichment
+from .salesforce_integration import SalesforceIntegration
 
 __all__ = [
     "Base",
@@ -114,4 +115,5 @@ __all__ = [
     "CustomerUsage",
     "HubSpotIntegration",
     "CrmEnrichment",
+    "SalesforceIntegration",
 ]

@@ -926,3 +926,31 @@ class HubSpotIntegration(Base):
                          name="uq_hubspot_integrations_org_id"),
         Index("ix_hubspot_integrations_org_id", "organization_id"),
     )
+
+
+class SalesforceIntegration(Base):
+    """Salesforce connection per org — no-FK mirror for worker read access."""
+    __tablename__ = "salesforce_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    refresh_token = Column(Text, nullable=False)
+    instance_url = Column(String(255), nullable=True)
+    sf_org_id = Column(String(64), nullable=True)
+    token_hint = Column(String(8), nullable=True)
+    connected_by_user_id = Column(Integer, nullable=True)
+    connected_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String(50), nullable=True)
+    last_error = Column(Text, nullable=True)
+    contacts_synced = Column(Integer, nullable=False, default=0)
+    contacts_matched = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id",
+                         name="uq_salesforce_integrations_org_id"),
+        Index("ix_salesforce_integrations_org_id", "organization_id"),
+    )
