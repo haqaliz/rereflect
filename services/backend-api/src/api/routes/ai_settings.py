@@ -18,6 +18,8 @@ from src.models.org_ai_config import OrgAIConfig
 from src.models.org_api_key import OrgApiKey
 from src.models.llm_usage_log import LLMUsageLog
 from src.models.llm_model_price import LLMModelPrice
+from src.models.query_template import QueryTemplate
+from src.models.query_template_mapping import QueryTemplateMapping
 from src.api.dependencies import (
     get_current_user,
     get_current_org,
@@ -148,6 +150,14 @@ class BudgetResponse(BaseModel):
     used_cents: int
     resets_at: Optional[datetime]
     is_exceeded: bool
+
+
+class EmbeddingStatusResponse(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    dimension: Optional[int] = None
+    configured: bool
+    system_templates_embedded: int
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -327,6 +337,23 @@ def run_model_test(
         "cost_cents": cost_cents,
         "latency_ms": latency_ms,
     }
+
+
+def _default_embedding_model(provider: str) -> Optional[str]:
+    """Best-effort default embedding model id for a provider when no override
+    is configured (mirrors EmbeddingProviderFactory's per-provider defaults).
+    openai_compatible has no default (caller must supply one); anthropic has
+    no embeddings API at all.
+    """
+    if provider == "openai":
+        from src.services.embeddings.providers.openai import OpenAIEmbeddingProvider
+        return OpenAIEmbeddingProvider.DEFAULT_MODEL
+    if provider == "google":
+        from src.services.embeddings.providers.google import GoogleEmbeddingProvider
+        return GoogleEmbeddingProvider.DEFAULT_MODEL
+    if provider == "ollama":
+        return "nomic-embed-text"
+    return None
 
 
 def _plan_level(plan: str) -> int:
@@ -784,4 +811,56 @@ def get_budget(
         used_cents=0,
         resets_at=None,
         is_exceeded=False,
+    )
+
+
+# ── GET /api/v1/settings/ai/embeddings/status ────────────────────────────────
+
+@router.get("/embeddings/status", response_model=EmbeddingStatusResponse)
+def get_embeddings_status(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Return the org's local-embeddings configuration status (S3).
+
+    Never raises to the caller — an unconfigured org simply gets
+    configured=False so the frontend can show a "set up embeddings" prompt
+    instead of an error.
+    """
+    from src.services.embeddings.resolver import resolve_embedding_provider
+
+    config = db.query(OrgAIConfig).filter_by(organization_id=current_org.id).first()
+    provider = config.default_provider if config else "openai"
+
+    resolved = resolve_embedding_provider(current_org.id, db)
+
+    if resolved is not None:
+        configured = True
+        dimension = resolved.dimension_hint or None
+        model = (
+            config.model_embeddings
+            if config and getattr(config, "model_embeddings", None)
+            else _default_embedding_model(provider)
+        )
+    else:
+        configured = False
+        dimension = None
+        model = None
+
+    system_templates_embedded = (
+        db.query(QueryTemplateMapping)
+        .join(QueryTemplate, QueryTemplateMapping.template_id == QueryTemplate.id)
+        .filter(
+            QueryTemplate.created_by == "system",
+            QueryTemplateMapping.embedding_provider == provider,
+        )
+        .count()
+    )
+
+    return EmbeddingStatusResponse(
+        provider=provider,
+        model=model,
+        dimension=dimension,
+        configured=configured,
+        system_templates_embedded=system_templates_embedded,
     )
