@@ -24,6 +24,24 @@ def another_crm_active(db: Session, org_id: int, exclude_provider: str) -> Optio
     both hubspot_integration.py's connect and salesforce_integration.py's
     connect-url/callback so the one-CRM-per-org collision cannot be created
     from either direction.
+
+    M1 (accepted for slice 1, DOCUMENT ONLY): this guard is application-level
+    only — a plain SELECT with no cross-table DB constraint — so two
+    near-simultaneous connect attempts for DIFFERENT CRMs on the same org
+    (e.g. HubSpot and Salesforce both racing through connect within the same
+    read window) could both pass this check and both write an active
+    integration row. This is a genuine TOCTOU (time-of-check-to-time-of-use)
+    window. It was deliberately NOT closed with a DB-level lock for slice 1:
+    the probability is low (requires two concurrent connect requests for two
+    different providers), and the outcome is non-corrupting — the
+    crm_enrichment (org_id, customer_email) uniqueness constraint still
+    holds, and whichever CRM syncs last simply wins the `provider` tag on
+    enrichment rows. Adding a lock now would also complicate the SQLite-based
+    test environment for a low-value race. v2 options if this needs
+    tightening: (a) an advisory lock (e.g. Postgres pg_advisory_xact_lock
+    keyed on org_id) around the check-then-write in both connect paths, or
+    (b) a periodic reconciliation job that detects and resolves the rare
+    case where two providers ended up active for the same org.
     """
     from src.models.hubspot_integration import HubSpotIntegration
     from src.models.salesforce_integration import SalesforceIntegration
