@@ -12,6 +12,7 @@ from src.api.routes import conversation_folders, conversations, copilot_ws, copi
 from src.api.routes import events_ws
 from src.api.routes import linear_integration, linear_webhook
 from src.api.routes import hubspot_integration as hubspot_integration_router
+from src.api.routes import salesforce_integration as salesforce_integration_router
 from src.api.routes import response_templates, response_settings, feedback_responses
 from src.api.routes import webhooks as webhooks_router
 from src.api.routes import health as health_routes
@@ -277,6 +278,8 @@ app.include_router(linear_integration.router)
 app.include_router(linear_webhook.router)
 # HubSpot CRM enrichment (hubspot-connection aspect)
 app.include_router(hubspot_integration_router.router)
+# Salesforce CRM enrichment (salesforce-connection aspect)
+app.include_router(salesforce_integration_router.router)
 app.include_router(response_templates.router)
 app.include_router(response_settings.router)
 app.include_router(feedback_responses.router)

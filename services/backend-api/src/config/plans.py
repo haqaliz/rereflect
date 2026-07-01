@@ -51,6 +51,8 @@ PLANS = {
             "custom_webhooks",
             # HubSpot CRM enrichment (hubspot-connection aspect)
             "hubspot_integration",
+            # Salesforce CRM enrichment (salesforce-connection aspect)
+            "salesforce_integration",
         ],
         "stripe_price_monthly": None,
         "stripe_price_annual": None,
@@ -99,6 +101,8 @@ PLANS = {
             "workflow_automation",
             # HubSpot CRM enrichment (hubspot-connection aspect)
             "hubspot_integration",
+            # Salesforce CRM enrichment (salesforce-connection aspect)
+            "salesforce_integration",
         ],
         "stripe_price_monthly": STRIPE_PRICE_PRO_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_PRO_ANNUAL,
@@ -161,6 +165,8 @@ PLANS = {
             "churn_accuracy_card",
             # HubSpot CRM enrichment (hubspot-connection aspect)
             "hubspot_integration",
+            # Salesforce CRM enrichment (salesforce-connection aspect)
+            "salesforce_integration",
         ],
         "stripe_price_monthly": STRIPE_PRICE_BUSINESS_MONTHLY,
         "stripe_price_annual": STRIPE_PRICE_BUSINESS_ANNUAL,
@@ -223,6 +229,8 @@ PLANS = {
             "custom_probability_bands",
             # HubSpot CRM enrichment (hubspot-connection aspect)
             "hubspot_integration",
+            # Salesforce CRM enrichment (salesforce-connection aspect)
+            "salesforce_integration",
         ],
         "stripe_price_monthly": None,  # Custom base fee negotiated per customer
         "stripe_price_annual": None,
@@ -294,6 +302,8 @@ FEATURE_PLANS = {
     "custom_probability_bands": "enterprise",
     # HubSpot CRM enrichment (hubspot-connection aspect) — free so all plans unlock
     "hubspot_integration": "free",
+    # Salesforce CRM enrichment (salesforce-connection aspect) — free so all plans unlock
+    "salesforce_integration": "free",
 }
 
 
