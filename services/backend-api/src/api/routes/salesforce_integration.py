@@ -92,10 +92,6 @@ def _login_base() -> str:
     return os.environ.get("SALESFORCE_LOGIN_BASE", "https://login.salesforce.com")
 
 
-def _api_version() -> str:
-    return os.environ.get("SALESFORCE_API_VERSION", "v60.0")
-
-
 def _frontend_url() -> str:
     return os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
