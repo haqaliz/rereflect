@@ -47,6 +47,7 @@ celery_app = Celery(
         "src.tasks.churn_calibration",
         "src.tasks.usage_metrics",
         "src.tasks.hubspot_sync",
+        "src.tasks.salesforce_sync",
     ],
 )
 
@@ -197,6 +198,12 @@ celery_app.conf.beat_schedule = {
     "sync-hubspot-daily": {
         "task": "src.tasks.hubspot_sync.sync_all_hubspot",
         "schedule": crontab(hour=3, minute=15),
+    },
+    # Sync Salesforce CRM data daily at 03:45 UTC — avoids 03:00 (global
+    # calibration) and 03:15 (hubspot sync).
+    "sync-salesforce-daily": {
+        "task": "src.tasks.salesforce_sync.sync_all_salesforce",
+        "schedule": crontab(hour=3, minute=45),
     },
 }
 
