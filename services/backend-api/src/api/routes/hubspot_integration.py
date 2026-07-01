@@ -33,6 +33,7 @@ from src.database.session import get_db
 from src.models.hubspot_integration import HubSpotIntegration
 from src.models.organization import Organization
 from src.models.user import User
+from src.services.crm_integration_common import another_crm_active, purge_crm_enrichment
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
 logger = logging.getLogger(__name__)
@@ -150,11 +151,24 @@ def hubspot_connect(
     """
     Connect or re-connect a HubSpot private-app token.
 
-    1. Validates the token against HubSpot's account-info endpoint.
-    2. Encrypts with Fernet (raises 422 if LLM_ENCRYPTION_KEY is unset — R6).
-    3. Upserts the row (second connect rotates the token).
-    4. Returns metadata (portal name, hub_id, token_hint). Never returns the token.
+    1. Blocks (409) if another CRM (Salesforce) is already active for this org.
+    2. Validates the token against HubSpot's account-info endpoint.
+    3. Encrypts with Fernet (raises 422 if LLM_ENCRYPTION_KEY is unset — R6).
+    4. Upserts the row (second connect rotates the token).
+    5. Returns metadata (portal name, hub_id, token_hint). Never returns the token.
     """
+    # Step 0: One-CRM guard — symmetric with salesforce_integration.py's
+    # connect-url/callback, so the collision cannot be created from either side.
+    other = another_crm_active(db, current_org.id, exclude_provider="hubspot")
+    if other:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Another CRM ({other}) is already connected for this organization. "
+                f"Disconnect {other} first before connecting HubSpot."
+            ),
+        )
+
     # Step 1: Validate token against HubSpot before storing anything
     portal_meta = _validate_hubspot_token(payload.access_token)
 
@@ -265,7 +279,12 @@ def hubspot_disconnect(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
-    """Deactivate (soft-delete) the HubSpot integration for this org."""
+    """
+    Deactivate (soft-delete) the HubSpot integration for this org, then purge
+    (locked decision 7): delete this org's crm_enrichment rows with
+    provider='hubspot' and recompute the affected customers' health scores,
+    so a disconnected CRM stops influencing scores.
+    """
     row = (
         db.query(HubSpotIntegration)
         .filter(HubSpotIntegration.organization_id == current_org.id)
@@ -279,6 +298,9 @@ def hubspot_disconnect(
     row.is_active = False
     row.updated_at = datetime.utcnow()
     db.commit()
+
+    purge_crm_enrichment(db, current_org.id, "hubspot")
+
     return HubSpotDisconnectResponse(
         success=True,
         message="HubSpot integration disconnected.",
