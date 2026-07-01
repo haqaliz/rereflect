@@ -448,3 +448,291 @@ class TestSyncOrgHealthRecompute:
         _run_sync_org(org.id, db, client, health_mock=health_mock)
 
         assert health_mock.update_customer_health.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# TestFanOutTask
+# ---------------------------------------------------------------------------
+
+
+class TestFanOutTask:
+    def test_fanout_enqueues_active_integrations_only(self, db):
+        active = SalesforceIntegration(
+            organization_id=1,
+            refresh_token="enc-token",
+            instance_url="https://active.my.salesforce.com",
+            is_active=True,
+            connected_at=datetime.utcnow(),
+            contacts_synced=0,
+            contacts_matched=0,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        inactive = SalesforceIntegration(
+            organization_id=2,
+            refresh_token="enc-token2",
+            instance_url="https://inactive.my.salesforce.com",
+            is_active=False,
+            connected_at=datetime.utcnow(),
+            contacts_synced=0,
+            contacts_matched=0,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(active)
+        db.add(inactive)
+        db.commit()
+        db.refresh(active)
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        with patch.object(ss, "get_db_session", _fake_db_session), \
+             patch.object(ss, "sync_salesforce_org") as mock_task:
+            mock_task.delay = MagicMock()
+            ss.sync_all_salesforce()
+
+        mock_task.delay.assert_called_once_with(active.id)
+
+    def test_fanout_one_org_raising_does_not_abort_others(self, db):
+        integ1 = SalesforceIntegration(
+            organization_id=1, refresh_token="t1", instance_url="https://a.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        integ2 = SalesforceIntegration(
+            organization_id=2, refresh_token="t2", instance_url="https://b.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        integ3 = SalesforceIntegration(
+            organization_id=3, refresh_token="t3", instance_url="https://c.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add_all([integ1, integ2, integ3])
+        db.commit()
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        call_count = 0
+
+        def _side_effect(integration_id):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("Simulated failure on second org")
+
+        with patch.object(ss, "get_db_session", _fake_db_session), \
+             patch.object(ss, "sync_salesforce_org") as mock_task:
+            mock_task.delay = MagicMock(side_effect=_side_effect)
+            ss.sync_all_salesforce()
+
+        assert mock_task.delay.call_count == 3
+
+    def test_fanout_no_active_integrations_returns_zero(self, db):
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        with patch.object(ss, "get_db_session", _fake_db_session), \
+             patch.object(ss, "sync_salesforce_org") as mock_task:
+            mock_task.delay = MagicMock()
+            result = ss.sync_all_salesforce()
+
+        assert result["status"] == "no_integrations"
+        assert result["queued"] == 0
+
+
+# ---------------------------------------------------------------------------
+# TestSyncSalesforceOrgBody (missing key / auth error / transient error)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncSalesforceOrgBody:
+    def test_sync_salesforce_org_missing_encryption_key(self, db):
+        """Task returns error dict without raising when LLM_ENCRYPTION_KEY unset."""
+        integ = SalesforceIntegration(
+            organization_id=1, refresh_token="enc", instance_url="https://acme.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        with patch.object(ss, "get_db_session", _fake_db_session), \
+             patch.object(ss, "_decrypt", side_effect=ValueError("LLM_ENCRYPTION_KEY is not set")):
+            task_self = MagicMock()
+            result = ss._sync_salesforce_org_body(task_self, integ.id)
+
+        assert result["status"] == "error"
+        assert result["reason"] == "missing_encryption_key"
+
+    def test_sync_salesforce_org_retries_on_transient_error(self, db):
+        """Task calls self.retry when SalesforceTransientError raised."""
+        from celery.exceptions import Retry
+
+        integ = SalesforceIntegration(
+            organization_id=1, refresh_token="enc", instance_url="https://acme.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = Retry()
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.list_contacts.side_effect = ss.SalesforceTransientError("rate limited")
+
+        with patch.object(ss, "get_db_session", _fake_db_session), \
+             patch.object(ss, "_decrypt", return_value="plain-refresh-token"), \
+             patch.object(ss, "SalesforceClient", return_value=mock_client_instance):
+            with pytest.raises(Retry):
+                ss._sync_salesforce_org_body(task_self, integ.id)
+
+        task_self.retry.assert_called_once()
+
+    def test_sync_salesforce_org_invalid_grant_disconnects_no_retry(self, db):
+        """invalid_grant on token refresh marks the integration inactive and does NOT retry."""
+        integ = SalesforceIntegration(
+            organization_id=1, refresh_token="enc", instance_url="https://acme.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        task_self = MagicMock()
+
+        with patch.object(ss, "get_db_session", _fake_db_session), \
+             patch.object(ss, "_decrypt", return_value="plain-refresh-token"), \
+             patch.object(ss, "SalesforceClient", side_effect=ss.SalesforceAuthError("invalid_grant")):
+            result = ss._sync_salesforce_org_body(task_self, integ.id)
+
+        assert result["status"] == "error"
+        assert result["reason"] == "invalid_grant"
+        task_self.retry.assert_not_called()
+
+        db.refresh(integ)
+        assert integ.is_active is False
+        assert integ.last_sync_status == "error"
+        assert integ.last_error is not None
+
+    def test_sync_salesforce_org_not_found(self, db):
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        task_self = MagicMock()
+        with patch.object(ss, "get_db_session", _fake_db_session):
+            result = ss._sync_salesforce_org_body(task_self, 999999)
+
+        assert result["status"] == "not_found"
+
+    def test_sync_salesforce_org_inactive_skipped(self, db):
+        integ = SalesforceIntegration(
+            organization_id=1, refresh_token="enc", instance_url="https://acme.my.salesforce.com",
+            is_active=False, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        task_self = MagicMock()
+        with patch.object(ss, "get_db_session", _fake_db_session):
+            result = ss._sync_salesforce_org_body(task_self, integ.id)
+
+        assert result["status"] == "inactive"
+
+    def test_sync_salesforce_org_success_updates_stats(self, db):
+        _make_customer(db, 1, "alice@example.com")
+
+        integ = SalesforceIntegration(
+            organization_id=1, refresh_token="enc", instance_url="https://acme.my.salesforce.com",
+            is_active=True, connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+
+        import src.tasks.salesforce_sync as ss
+        importlib.reload(ss)
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.list_contacts.return_value = [
+            {"Id": "003c1", "Email": "alice@example.com", "AccountId": None},
+        ]
+        mock_client_instance.get_account.return_value = None
+        mock_client_instance.get_open_opportunities.return_value = []
+
+        task_self = MagicMock()
+        health_mock = MagicMock()
+        sys.modules["src.services.health_score_service"] = health_mock
+
+        try:
+            with patch.object(ss, "get_db_session", _fake_db_session), \
+                 patch.object(ss, "_decrypt", return_value="plain-refresh-token"), \
+                 patch.object(ss, "SalesforceClient", return_value=mock_client_instance):
+                result = ss._sync_salesforce_org_body(task_self, integ.id)
+        finally:
+            sys.modules.pop("src.services.health_score_service", None)
+
+        assert result["status"] == "success"
+        assert result["contacts_synced"] == 1
+        assert result["contacts_matched"] == 1
+
+        db.refresh(integ)
+        assert integ.last_sync_status == "success"
+        assert integ.last_error is None
+        assert integ.contacts_synced == 1
+        assert integ.contacts_matched == 1
+        assert integ.last_synced_at is not None
+
+
+# ---------------------------------------------------------------------------
+# TestCeleryTaskRegistration
+# ---------------------------------------------------------------------------
+
+
+class TestCeleryTaskRegistration:
+    def test_sync_all_salesforce_is_registered(self):
+        import src.tasks.salesforce_sync  # noqa: F401 — ensure task registration
+        from src.celery_app import celery_app
+        assert "src.tasks.salesforce_sync.sync_all_salesforce" in celery_app.tasks
+
+    def test_sync_salesforce_org_is_registered(self):
+        import src.tasks.salesforce_sync  # noqa: F401 — ensure task registration
+        from src.celery_app import celery_app
+        assert "src.tasks.salesforce_sync.sync_salesforce_org" in celery_app.tasks
+
+    def test_beat_schedule_has_salesforce_entry(self):
+        import src.tasks.salesforce_sync  # noqa: F401 — ensure task registration
+        from src.celery_app import celery_app
+        schedule = celery_app.conf.beat_schedule
+        assert "sync-salesforce-daily" in schedule
+        entry = schedule["sync-salesforce-daily"]
+        cron = entry["schedule"]
+        assert cron.hour == {3}
+        assert cron.minute == {45}  # 03:45 — avoids 03:00 calibration / 03:15 hubspot
