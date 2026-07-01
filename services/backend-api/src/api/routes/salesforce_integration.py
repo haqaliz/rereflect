@@ -202,6 +202,57 @@ def _get_celery_app():
     return get_celery_app()
 
 
+def _exchange_code_for_token(code: str) -> dict:
+    """
+    POST the OAuth authorization code to Salesforce's token endpoint.
+
+    Raises httpx.HTTPStatusError on a non-2xx response (e.g. invalid_grant)
+    and httpx.RequestError on a network failure. Callers must handle both.
+    """
+    with httpx.Client(timeout=15.0) as http_client:
+        resp = http_client.post(
+            f"{_login_base()}/services/oauth2/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": _client_id(),
+                "client_secret": _client_secret(),
+                "redirect_uri": _redirect_uri(),
+                "code": code,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+def _refresh_access_token(refresh_token: str) -> dict:
+    """Mint a short-lived access token from a stored refresh token."""
+    with httpx.Client(timeout=15.0) as http_client:
+        resp = http_client.post(
+            f"{_login_base()}/services/oauth2/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": _client_id(),
+                "client_secret": _client_secret(),
+                "refresh_token": refresh_token,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+def _validate_access_token(instance_url: str, access_token: str) -> dict:
+    """Lightweight probe that the access token + instance_url are usable."""
+    with httpx.Client(timeout=10.0) as http_client:
+        resp = http_client.get(
+            f"{instance_url}/services/oauth2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ──────────────────────── Routes ─────────────────────────────────────────────
 
 
@@ -277,3 +328,259 @@ def salesforce_status(
         contacts_matched=row.contacts_matched,
         connected_at=row.connected_at,
     )
+
+
+@router.get("/callback")
+def salesforce_callback(
+    code: Optional[str] = Query(None),
+    state: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Handle the Salesforce OAuth redirect. Exchanges `code` for tokens,
+    validates them, encrypts + upserts the integration, and redirects back
+    to the frontend settings page (mirrors linear_integration.py's callback).
+    """
+    error_redirect_base = f"{_frontend_url()}/settings/integrations/salesforce"
+
+    if error:
+        logger.error("Salesforce OAuth error: %s", error)
+        return RedirectResponse(
+            url=f"{error_redirect_base}?oauth_error={urllib.parse.quote(error)}"
+        )
+
+    if not code or not state:
+        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=missing_params")
+
+    payload = _verify_state(state)
+    if not payload:
+        logger.error("Invalid or expired Salesforce OAuth state")
+        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=invalid_state")
+
+    org_id = payload["org_id"]
+    user_id = payload["user_id"]
+
+    # Re-check the one-CRM guard (defense-in-depth against a race between
+    # connect-url and callback).
+    other = another_crm_active(db, org_id, exclude_provider="salesforce")
+    if other:
+        logger.warning(
+            "Salesforce callback blocked for org %s: %s already active", org_id, other
+        )
+        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=another_crm_active")
+
+    try:
+        token_data = _exchange_code_for_token(code)
+    except httpx.HTTPStatusError as exc:
+        sf_error = "token_exchange_failed"
+        try:
+            sf_error = exc.response.json().get("error", sf_error)
+        except Exception:
+            pass
+        logger.error("Salesforce token exchange failed for org %s: %s", org_id, sf_error)
+        return RedirectResponse(
+            url=f"{error_redirect_base}?oauth_error={urllib.parse.quote(sf_error)}"
+        )
+    except httpx.RequestError as exc:
+        logger.error("Salesforce token exchange network error for org %s: %s", org_id, exc)
+        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=network_error")
+
+    access_token = token_data.get("access_token")
+    refresh_token = token_data.get("refresh_token")
+    instance_url = token_data.get("instance_url")
+    identity_url = token_data.get("id")
+
+    if not access_token or not refresh_token or not instance_url:
+        logger.error("Salesforce token response incomplete for org %s", org_id)
+        return RedirectResponse(
+            url=f"{error_redirect_base}?oauth_error=incomplete_token_response"
+        )
+
+    try:
+        _validate_access_token(instance_url, access_token)
+    except Exception as exc:
+        logger.error("Salesforce token validation failed for org %s: %s", org_id, exc)
+        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=validation_failed")
+
+    sf_org_id = _parse_sf_org_id(identity_url)
+
+    # R6: encrypt — catch ValueError from missing LLM_ENCRYPTION_KEY. This is
+    # an operator configuration error, so surface it directly as a 422
+    # rather than a silent redirect.
+    try:
+        encrypted = encrypt_api_key(refresh_token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Cannot store Salesforce refresh token: LLM_ENCRYPTION_KEY is not set. "
+                "Set this environment variable and restart the service to connect "
+                "a CRM integration."
+            ),
+        ) from exc
+
+    hint = get_key_hint(refresh_token)
+
+    existing = (
+        db.query(SalesforceIntegration)
+        .filter(SalesforceIntegration.organization_id == org_id)
+        .first()
+    )
+    if existing:
+        existing.refresh_token = encrypted
+        existing.instance_url = instance_url
+        existing.sf_org_id = sf_org_id
+        existing.token_hint = hint
+        existing.connected_by_user_id = user_id
+        existing.connected_at = datetime.utcnow()
+        existing.is_active = True
+        existing.updated_at = datetime.utcnow()
+    else:
+        integration = SalesforceIntegration(
+            organization_id=org_id,
+            refresh_token=encrypted,
+            instance_url=instance_url,
+            sf_org_id=sf_org_id,
+            token_hint=hint,
+            connected_by_user_id=user_id,
+            connected_at=datetime.utcnow(),
+            is_active=True,
+        )
+        db.add(integration)
+
+    db.commit()
+    logger.info("Salesforce connected for org %s (sf_org_id=%s)", org_id, sf_org_id)
+
+    return RedirectResponse(url=f"{error_redirect_base}?connected=1")
+
+
+@router.post(
+    "/test",
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_test(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Re-validate the stored Salesforce connection by refreshing an access
+    token and probing it.
+
+    Returns {"success": true/false, "message": "..."}.
+    Never raises a 500 — all errors are surfaced as {"success": false}.
+    """
+    row = _get_active_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Salesforce integration.",
+        )
+    try:
+        plain_refresh = decrypt_api_key(row.refresh_token)
+        token_data = _refresh_access_token(plain_refresh)
+        access_token = token_data.get("access_token")
+        instance_url = token_data.get("instance_url") or row.instance_url
+        if not access_token or not instance_url:
+            return {"success": False, "message": "Refresh did not return an access token."}
+        _validate_access_token(instance_url, access_token)
+        return {"success": True, "message": "Salesforce connection is healthy."}
+    except Exception as exc:
+        logger.warning("Salesforce test failed for org %s: %s", current_org.id, exc)
+        return {"success": False, "message": str(exc)}
+
+
+@router.delete(
+    "/disconnect",
+    response_model=SalesforceDisconnectResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_disconnect(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Deactivate the Salesforce integration for this org, then purge (locked
+    decision 7): delete this org's crm_enrichment rows with
+    provider='salesforce' and recompute the affected customers' health
+    scores, so a disconnected CRM stops influencing scores.
+    """
+    row = (
+        db.query(SalesforceIntegration)
+        .filter(SalesforceIntegration.organization_id == current_org.id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Salesforce integration found.",
+        )
+    row.is_active = False
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+    purge_crm_enrichment(db, current_org.id, "salesforce")
+
+    return SalesforceDisconnectResponse(
+        success=True,
+        message="Salesforce integration disconnected.",
+    )
+
+
+@router.post(
+    "/sync",
+    response_model=SalesforceSyncResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_trigger_sync(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually enqueue a Salesforce CRM sync for this org.
+
+    Requires admin or owner role and an active integration.
+    Enqueues sync_salesforce_org via Celery send_task (non-blocking, lazy
+    celery app — aspect-3 defines the task itself).
+    """
+    integ = _get_active_integration(current_org.id, db)
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Salesforce integration found.",
+        )
+
+    _get_celery_app().send_task(
+        "src.tasks.salesforce_sync.sync_salesforce_org",
+        args=[integ.id],
+    )
+    logger.info(
+        "Salesforce sync manually triggered for org %s (integration_id=%s)",
+        current_org.id,
+        integ.id,
+    )
+    return SalesforceSyncResponse(status="queued", integration_id=integ.id)
+
+
+# ──────────────────────── Exported helper for salesforce-sync ────────────────
+
+
+def get_decrypted_refresh_token(integration: SalesforceIntegration) -> str:
+    """
+    Decrypt and return the plaintext Salesforce refresh_token stored in
+    integration.
+
+    Exported for use by the salesforce-sync aspect (worker). Raises
+    cryptography.fernet.InvalidToken on corruption — callers should handle
+    this and mark last_sync_status='error'.
+    """
+    return decrypt_api_key(integration.refresh_token)
