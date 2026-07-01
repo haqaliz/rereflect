@@ -32,6 +32,8 @@ const mockSettings = {
   ai_analysis_enabled: true,
   has_custom_key: false,
   default_provider: 'openai',
+  base_url: null,
+  model_embeddings: null,
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',

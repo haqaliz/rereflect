@@ -21,6 +21,7 @@ import {
   type AIKey,
   type AIModel,
   type AIModelTestResponse,
+  type EmbeddingStatus,
 } from '@/lib/api/ai-settings';
 import {
   getProviderLogo,
@@ -32,6 +33,15 @@ const PROVIDERS = ['openai', 'anthropic', 'google'];
 
 // Providers that run locally and do not need a stored API key
 const LOCAL_PROVIDERS = new Set(['ollama', 'openai_compatible']);
+
+// Hints for the embedding-model input placeholder, per provider (S3)
+const EMBEDDING_MODEL_HINTS: Record<string, string> = {
+  openai: 'text-embedding-3-small',
+  anthropic: 'text-embedding-3-small',
+  google: 'text-embedding-3-small',
+  ollama: 'nomic-embed-text',
+  openai_compatible: 'nomic-embed-text',
+};
 
 const TASK_TYPES: Array<{ key: keyof AISettings['models']; label: string }> = [
   { key: 'categorization', label: 'Categorization' },
@@ -406,6 +416,97 @@ function LocalProviderCard({ settings, isAdminOrOwner, onUpdate }: LocalProvider
   );
 }
 
+interface EmbeddingsCardProps {
+  settings: AISettings;
+  isAdminOrOwner: boolean;
+  onUpdate: (updated: AISettings) => void;
+}
+
+function EmbeddingsCard({ settings, isAdminOrOwner, onUpdate }: EmbeddingsCardProps) {
+  const [modelInput, setModelInput] = useState(settings.model_embeddings || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<EmbeddingStatus | null>(null);
+  const [statusFailed, setStatusFailed] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+
+  useEffect(() => {
+    aiSettingsAPI.getEmbeddingStatus()
+      .then(setStatus)
+      .catch(() => setStatusFailed(true))
+      .finally(() => setLoadingStatus(false));
+  }, []);
+
+  const placeholder = EMBEDDING_MODEL_HINTS[settings.default_provider] || 'text-embedding-3-small';
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await aiSettingsAPI.update({ model_embeddings: modelInput.trim() || null });
+      onUpdate(updated);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Failed to save embedding model');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="border-b border-border">
+        <CardTitle>Embeddings</CardTitle>
+        <p className="text-sm text-muted-foreground mt-1">
+          Used by Copilot for semantic template matching. Optional — leave blank to use the
+          provider default.
+        </p>
+      </CardHeader>
+      <CardContent className="pt-4 space-y-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Embedding model</label>
+          <Input
+            type="text"
+            aria-label="Embedding model"
+            placeholder={placeholder}
+            value={modelInput}
+            onChange={(e) => setModelInput(e.target.value)}
+            disabled={!isAdminOrOwner}
+            className="font-mono text-sm"
+          />
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          {isAdminOrOwner && (
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving}
+              aria-label="Save embedding model"
+            >
+              {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+              Save
+            </Button>
+          )}
+        </div>
+
+        {!loadingStatus && (
+          status?.configured ? (
+            <p className="text-xs text-muted-foreground">
+              {status.system_templates_embedded} system templates embedded for provider{' '}
+              {status.provider}
+              {status.model ? ` (model: ${status.model})` : ''}
+            </p>
+          ) : statusFailed ? (
+            <p className="text-xs text-muted-foreground">Embedding status unavailable.</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No embedding provider configured — Copilot template matching is disabled.
+            </p>
+          )
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersProps) {
   const { user } = useAuth();
   const [keys, setKeys] = useState<AIKey[]>([]);
@@ -460,6 +561,13 @@ export function AISettingsProviders({ settings, onUpdate }: AISettingsProvidersP
     <div className="space-y-6">
       {/* Local / Offline LLM Card */}
       <LocalProviderCard
+        settings={settings}
+        isAdminOrOwner={isAdminOrOwner}
+        onUpdate={onUpdate}
+      />
+
+      {/* Embeddings Card (S3) */}
+      <EmbeddingsCard
         settings={settings}
         isAdminOrOwner={isAdminOrOwner}
         onUpdate={onUpdate}

@@ -30,6 +30,7 @@ vi.mock('@/lib/api/ai-settings', () => ({
     listModels: vi.fn(),
     testModel: vi.fn(),
     update: vi.fn(),
+    getEmbeddingStatus: vi.fn(),
   },
 }));
 
@@ -53,6 +54,7 @@ const mockSettingsCloud = {
   has_custom_key: false,
   default_provider: 'openai',
   base_url: null,
+  model_embeddings: null,
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',
@@ -97,6 +99,13 @@ describe('AISettingsProviders — Local LLM (Feature A)', () => {
     vi.mocked(aiSettingsAPI.listKeys).mockResolvedValue([]);
     vi.mocked(aiSettingsAPI.listModels).mockResolvedValue(mockModels);
     vi.mocked(aiSettingsAPI.update).mockResolvedValue(mockSettingsCloud);
+    vi.mocked(aiSettingsAPI.getEmbeddingStatus).mockResolvedValue({
+      provider: 'openai',
+      model: null,
+      dimension: null,
+      configured: false,
+      system_templates_embedded: 0,
+    });
   });
 
   describe('Local provider options visible', () => {

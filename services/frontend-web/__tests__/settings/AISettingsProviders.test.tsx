@@ -18,6 +18,7 @@ vi.mock('@/lib/api/ai-settings', () => ({
     listModels: vi.fn(),
     testModel: vi.fn(),
     update: vi.fn(),
+    getEmbeddingStatus: vi.fn(),
   },
 }));
 
@@ -40,6 +41,8 @@ const mockSettings = {
   ai_analysis_enabled: true,
   has_custom_key: false,
   default_provider: 'openai',
+  base_url: null,
+  model_embeddings: null,
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',
@@ -119,6 +122,13 @@ describe('AISettingsProviders', () => {
     vi.mocked(aiSettingsAPI.listKeys).mockResolvedValue([]);
     vi.mocked(aiSettingsAPI.listModels).mockResolvedValue(mockModels);
     vi.mocked(aiSettingsAPI.update).mockResolvedValue(mockSettings);
+    vi.mocked(aiSettingsAPI.getEmbeddingStatus).mockResolvedValue({
+      provider: 'openai',
+      model: null,
+      dimension: null,
+      configured: false,
+      system_templates_embedded: 0,
+    });
   });
 
   describe('Provider cards', () => {
@@ -204,7 +214,9 @@ describe('AISettingsProviders', () => {
         const addKeyBtn = screen.getAllByRole('button', { name: /add key/i })[0];
         fireEvent.click(addKeyBtn);
       });
-      expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+      // Exact match — the Embeddings card also has a "Save" button, but with a
+      // more specific accessible name ("Save embedding model").
+      expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
     });
 
@@ -223,7 +235,7 @@ describe('AISettingsProviders', () => {
       });
       const input = screen.getByPlaceholderText(/sk-|api key/i);
       fireEvent.change(input, { target: { value: 'sk-test-key' } });
-      const saveBtn = screen.getByRole('button', { name: /save/i });
+      const saveBtn = screen.getByRole('button', { name: 'Save' });
       fireEvent.click(saveBtn);
       await waitFor(() => {
         expect(aiSettingsAPI.addKey).toHaveBeenCalled();

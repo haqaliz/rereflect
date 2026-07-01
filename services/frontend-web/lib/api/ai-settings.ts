@@ -13,6 +13,7 @@ export interface AISettings {
   has_custom_key: boolean; // kept for backward compat
   default_provider: string;
   base_url: string | null;
+  model_embeddings: string | null;
   models: AIModels;
 }
 
@@ -21,9 +22,18 @@ export interface AISettingsUpdate {
   openai_api_key?: string; // legacy field
   default_provider?: string;
   base_url?: string | null;
+  model_embeddings?: string | null;
   model_categorization?: string;
   model_analysis?: string;
   model_insights?: string;
+}
+
+export interface EmbeddingStatus {
+  provider: string;
+  model: string | null;
+  dimension: number | null;
+  configured: boolean;
+  system_templates_embedded: number;
 }
 
 export interface AIKey {
@@ -148,6 +158,12 @@ export const aiSettingsAPI = {
 
   getUsageDaily: async (): Promise<AIUsageDaily> => {
     const response = await apiClient.get('/api/v1/settings/ai/usage/daily');
+    return response.data;
+  },
+
+  // Embeddings (S3 — local embeddings / offline Copilot)
+  getEmbeddingStatus: async (): Promise<EmbeddingStatus> => {
+    const response = await apiClient.get('/api/v1/settings/ai/embeddings/status');
     return response.data;
   },
 };
