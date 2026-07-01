@@ -364,6 +364,34 @@ class TestCallbackEndpoint:
         assert resp.status_code in (302, 307)
         assert "oauth_error" in resp.headers["location"]
 
+    def test_callback_token_exchange_failure_clears_nonce_cookie(
+        self, client, db, signed_state, oauth_cookies
+    ):
+        """M3: the one-time session-nonce cookie must be cleared on EVERY
+        failure redirect, not just success/invalid_state — otherwise a stale
+        cookie lingers in the browser after a failed OAuth attempt."""
+        import httpx
+        from src.api.routes.salesforce_integration import SF_OAUTH_NONCE_COOKIE
+
+        error_resp = MagicMock()
+        error_resp.status_code = 400
+        error_resp.json.return_value = {"error": "invalid_grant", "error_description": "expired"}
+        http_err = httpx.HTTPStatusError("400", request=MagicMock(), response=error_resp)
+        mock_client = _mock_client(post_side_effect=http_err)
+        with _salesforce_env(), patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            with patch("src.api.routes.salesforce_integration.httpx.Client", return_value=mock_client):
+                resp = client.get(
+                    "/api/v1/integrations/salesforce/callback",
+                    params={"code": "bad-code", "state": signed_state},
+                    cookies=oauth_cookies,
+                    follow_redirects=False,
+                )
+        assert resp.status_code in (302, 307)
+        set_cookie_headers = resp.headers.get_list("set-cookie")
+        nonce_cookie_headers = [h for h in set_cookie_headers if h.startswith(f"{SF_OAUTH_NONCE_COOKIE}=")]
+        assert nonce_cookie_headers, "sf_oauth_nonce cookie was not cleared on token-exchange failure"
+        assert "Max-Age=0" in nonce_cookie_headers[0] or "max-age=0" in nonce_cookie_headers[0].lower()
+
     def test_callback_blocked_when_hubspot_active(
         self, client, db, test_organization, signed_state, oauth_cookies
     ):

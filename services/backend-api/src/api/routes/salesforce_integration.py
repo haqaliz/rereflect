@@ -437,7 +437,9 @@ def salesforce_callback(
         logger.warning(
             "Salesforce callback blocked for org %s: %s already active", org_id, other
         )
-        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=another_crm_active")
+        redirect = RedirectResponse(url=f"{error_redirect_base}?oauth_error=another_crm_active")
+        redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+        return redirect
 
     try:
         token_data = _exchange_code_for_token(code)
@@ -448,12 +450,16 @@ def salesforce_callback(
         except Exception:
             pass
         logger.error("Salesforce token exchange failed for org %s: %s", org_id, sf_error)
-        return RedirectResponse(
+        redirect = RedirectResponse(
             url=f"{error_redirect_base}?oauth_error={urllib.parse.quote(sf_error)}"
         )
+        redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+        return redirect
     except httpx.RequestError as exc:
         logger.error("Salesforce token exchange network error for org %s: %s", org_id, exc)
-        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=network_error")
+        redirect = RedirectResponse(url=f"{error_redirect_base}?oauth_error=network_error")
+        redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+        return redirect
 
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")
@@ -462,15 +468,19 @@ def salesforce_callback(
 
     if not access_token or not refresh_token or not instance_url:
         logger.error("Salesforce token response incomplete for org %s", org_id)
-        return RedirectResponse(
+        redirect = RedirectResponse(
             url=f"{error_redirect_base}?oauth_error=incomplete_token_response"
         )
+        redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+        return redirect
 
     try:
         _validate_access_token(instance_url, access_token)
     except Exception as exc:
         logger.error("Salesforce token validation failed for org %s: %s", org_id, exc)
-        return RedirectResponse(url=f"{error_redirect_base}?oauth_error=validation_failed")
+        redirect = RedirectResponse(url=f"{error_redirect_base}?oauth_error=validation_failed")
+        redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+        return redirect
 
     sf_org_id = _parse_sf_org_id(identity_url)
 
