@@ -231,6 +231,20 @@ class TestConnectUrlEndpoint:
             )
         assert resp.status_code == 200
 
+    def test_connect_url_missing_client_id_returns_422_not_500(
+        self, client, owner_headers, monkeypatch
+    ):
+        """M5: an operator misconfiguration (missing SALESFORCE_CLIENT_ID) must
+        surface as a 4xx (422) — never a 500 — mirroring the R6
+        encryption-key 422 pattern in this same file."""
+        monkeypatch.delenv("SALESFORCE_CLIENT_ID", raising=False)
+        resp = client.get(
+            "/api/v1/integrations/salesforce/connect-url",
+            headers=owner_headers,
+        )
+        assert resp.status_code == 422
+        assert "SALESFORCE_CLIENT_ID" in resp.json()["detail"]
+
 
 # ──────────────────────────── status ──────────────────────────────────────────
 

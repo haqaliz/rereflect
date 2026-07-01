@@ -309,10 +309,17 @@ def salesforce_connect_url(
             ),
         )
 
-    if not _client_id():
+    # M5: a missing Connected App credential is an operator misconfiguration,
+    # not a server fault — surface it as a 422 (mirrors the R6
+    # encryption-key 422 pattern above) rather than a 500.
+    if not _client_id() or not _client_secret() or not _redirect_uri():
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Salesforce OAuth is not configured. Set SALESFORCE_CLIENT_ID environment variable.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Salesforce OAuth is not configured. Set SALESFORCE_CLIENT_ID, "
+                "SALESFORCE_CLIENT_SECRET, and SALESFORCE_REDIRECT_URI environment "
+                "variables and restart the service to connect Salesforce."
+            ),
         )
 
     # SEC-1: mint a session nonce, embed its hash in the signed state, and
