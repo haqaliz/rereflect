@@ -105,7 +105,7 @@ class CustomerProfileResponse(BaseModel):
     llm_analysis: Optional[str] = None
     is_archived: bool
     created_at: Optional[datetime] = None
-    # CRM enrichment fields (HubSpot)
+    # CRM enrichment fields (HubSpot / Salesforce)
     crm_company_name: Optional[str] = None
     crm_lifecycle_stage: Optional[str] = None
     crm_arr: Optional[float] = None
@@ -113,6 +113,7 @@ class CustomerProfileResponse(BaseModel):
     crm_deal_name: Optional[str] = None
     crm_deal_stage: Optional[str] = None
     crm_deal_amount: Optional[float] = None
+    crm_provider: Optional[str] = None
 
 
 class HealthHistoryItem(BaseModel):

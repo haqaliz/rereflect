@@ -83,7 +83,7 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
         "llm_analysis_type": llm_analysis_type,
         "llm_analyzed_at": record.llm_analyzed_at,
         "llm_analysis": record.llm_analysis,        # legacy text field
-        # ── CRM enrichment (HubSpot) ──────────────────────────────────────────
+        # ── CRM enrichment (HubSpot / Salesforce) ────────────────────────────
         **_read_crm_fields(record, db),
     }
 
@@ -127,4 +127,5 @@ def _read_crm_fields(record: CustomerHealth, db) -> dict:
         "crm_deal_name":       crm.deal_name       if crm else None,
         "crm_deal_stage":      crm.deal_stage      if crm else None,
         "crm_deal_amount":     _f(crm.deal_amount)  if crm else None,
+        "crm_provider":        crm.provider        if crm else None,
     }

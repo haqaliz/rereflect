@@ -154,3 +154,143 @@ class TestSerializerFieldsStabilityCharacterization:
         assert result["crm_deal_name"] == "Serializer Renewal Deal"
         assert result["crm_deal_stage"] == "negotiation"
         assert result["crm_deal_amount"] == pytest.approx(25000.0)
+
+
+class TestCrmProviderExposedOnSerializerAndApi:
+    """
+    Phase 4: crm_provider is surfaced on the shared serializer and both the
+    v1 and public Customer 360 profile responses, kept in parity.
+    """
+
+    EMAIL = "crm_provider_field@example.com"
+
+    @pytest.fixture(autouse=True)
+    def seed(self, db, test_organization):
+        self.org = test_organization
+        self.health = CustomerHealth(
+            organization_id=test_organization.id,
+            customer_email=self.EMAIL,
+            customer_name="CRM Provider Field Customer",
+            health_score=60,
+            risk_level="moderate",
+            feedback_count=5,
+            confidence_level="medium",
+            churn_risk_component=50,
+            sentiment_component=60,
+            resolution_component=70,
+            frequency_component=55,
+            last_feedback_at=datetime.utcnow(),
+            is_archived=False,
+        )
+        db.add(self.health)
+        db.commit()
+        db.refresh(self.health)
+
+        db.add(CrmEnrichment(
+            organization_id=test_organization.id,
+            customer_email=self.EMAIL,
+            provider="salesforce",
+            company_name="Salesforce Provider Field Co",
+            last_synced_at=datetime.utcnow(),
+        ))
+        db.commit()
+
+    def test_serializer_returns_crm_provider(self, db):
+        result = serialize_customer_profile(self.health, db)
+        assert result["crm_provider"] == "salesforce"
+
+    def test_serializer_crm_provider_none_when_no_row(self, db, test_organization):
+        health = CustomerHealth(
+            organization_id=test_organization.id,
+            customer_email="no_crm_row@example.com",
+            health_score=60,
+            risk_level="moderate",
+            feedback_count=1,
+            confidence_level="low",
+            churn_risk_component=50,
+            sentiment_component=50,
+            resolution_component=50,
+            frequency_component=50,
+            is_archived=False,
+        )
+        db.add(health)
+        db.commit()
+        db.refresh(health)
+
+        result = serialize_customer_profile(health, db)
+        assert result["crm_provider"] is None
+
+    def test_v1_profile_includes_crm_provider(self, client, db, test_organization):
+        from src.models.user import User
+        from src.api.auth import hash_password, create_access_token
+
+        user = User(
+            email="crm_provider_v1@example.com",
+            password_hash=hash_password("password123"),
+            organization_id=test_organization.id,
+            role="admin",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = create_access_token({
+            "user_id": user.id,
+            "organization_id": user.organization_id,
+            "role": user.role,
+        })
+
+        response = client.get(
+            f"/api/v1/customers/{self.EMAIL}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["crm_provider"] == "salesforce"
+
+    def test_public_profile_includes_crm_provider_in_parity_with_v1(
+        self, client, db, test_organization
+    ):
+        import hashlib
+        import secrets
+
+        from src.models.user import User
+        from src.models.api_key import ApiKey
+        from src.api.auth import hash_password, create_access_token
+
+        user = User(
+            email="crm_provider_pub@example.com",
+            password_hash=hash_password("password123"),
+            organization_id=test_organization.id,
+            role="admin",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = create_access_token({
+            "user_id": user.id,
+            "organization_id": user.organization_id,
+            "role": user.role,
+        })
+
+        raw_key = f"rrf_{secrets.token_urlsafe(24)}"
+        api_key = ApiKey(
+            organization_id=test_organization.id,
+            name="parity test key",
+            key_prefix=raw_key[:10],
+            key_hash=hashlib.sha256(raw_key.encode()).hexdigest(),
+            scopes="read",
+        )
+        db.add(api_key)
+        db.commit()
+
+        v1_resp = client.get(
+            f"/api/v1/customers/{self.EMAIL}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        pub_resp = client.get(
+            f"/api/public/v1/customers/{self.EMAIL}",
+            headers={"Authorization": f"Bearer {raw_key}"},
+        )
+        assert v1_resp.status_code == 200, v1_resp.text
+        assert pub_resp.status_code == 200, pub_resp.text
+        assert v1_resp.json()["crm_provider"] == "salesforce"
+        assert pub_resp.json()["crm_provider"] == "salesforce"
