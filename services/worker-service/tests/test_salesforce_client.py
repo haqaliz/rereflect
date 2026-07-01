@@ -366,7 +366,7 @@ class TestSalesforceClientTypedHelpers:
             200,
             {
                 "records": [
-                    {"Id": "001xx", "Name": "Acme Corp", "AnnualRevenue": 100000, "Type": "Customer"}
+                    {"Id": "001XX000003DHViQAG", "Name": "Acme Corp", "AnnualRevenue": 100000, "Type": "Customer"}
                 ],
                 "done": True,
             },
@@ -378,7 +378,7 @@ class TestSalesforceClientTypedHelpers:
             instance.get.return_value = page
 
             with SalesforceClient(**_client_kwargs()) as client:
-                account = client.get_account("001xx")
+                account = client.get_account("001XX000003DHViQAG")
 
         assert account["Name"] == "Acme Corp"
         assert account["AnnualRevenue"] == 100000
@@ -395,7 +395,7 @@ class TestSalesforceClientTypedHelpers:
             instance.get.return_value = page
 
             with SalesforceClient(**_client_kwargs()) as client:
-                account = client.get_account("missing")
+                account = client.get_account("001XX000003NOTFND1")
 
         assert account is None
 
@@ -411,9 +411,47 @@ class TestSalesforceClientTypedHelpers:
             instance.get.return_value = page
 
             with SalesforceClient(**_client_kwargs()) as client:
-                client.get_open_opportunities("001xx")
+                client.get_open_opportunities("001XX000003DHViQAG")
 
         soql = instance.get.call_args[1]["params"]["q"]
         assert "Opportunity" in soql
-        assert "001xx" in soql
+        assert "001XX000003DHViQAG" in soql
         assert "IsClosed = false" in soql
+
+    def test_get_account_rejects_malformed_id_no_http_call(self):
+        """
+        SOQL-injection defense-in-depth: a malformed id must be rejected
+        BEFORE any HTTP request is made (no query issued at all).
+        """
+        from src.clients.salesforce import SalesforceClient, SalesforceQueryError
+
+        token_resp = _make_token_resp()
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                with pytest.raises(SalesforceQueryError):
+                    client.get_account("x' OR Name!='")
+
+        instance.get.assert_not_called()
+
+    def test_get_open_opportunities_rejects_malformed_id_no_http_call(self):
+        """
+        SOQL-injection defense-in-depth: a malformed AccountId must be
+        rejected BEFORE any HTTP request is made.
+        """
+        from src.clients.salesforce import SalesforceClient, SalesforceQueryError
+
+        token_resp = _make_token_resp()
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                with pytest.raises(SalesforceQueryError):
+                    client.get_open_opportunities("x' OR Name!='")
+
+        instance.get.assert_not_called()

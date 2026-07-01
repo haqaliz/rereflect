@@ -27,12 +27,20 @@ Usage:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Salesforce record IDs are always 15 (case-sensitive) or 18
+# (case-insensitive, with a checksum suffix) alphanumeric characters.
+# Validated before interpolation into SOQL WHERE clauses — defense-in-depth
+# against SOQL injection even though these ids originate from Salesforce's
+# own API responses (Contact.AccountId), not end-user input.
+_SFID_RE = re.compile(r"^[a-zA-Z0-9]{15,18}$")
 
 
 class SalesforceTransientError(Exception):
@@ -214,6 +222,22 @@ class SalesforceClient:
 
         return results
 
+    @staticmethod
+    def _validate_sf_id(sf_id: str) -> str:
+        """
+        Validate that `sf_id` looks like a genuine Salesforce record ID
+        (15 or 18 alphanumeric characters) before it is interpolated into a
+        SOQL WHERE clause.
+
+        Raises SalesforceQueryError (no HTTP request issued) on anything
+        that doesn't match — defense-in-depth against SOQL injection.
+        """
+        if not sf_id or not _SFID_RE.match(sf_id):
+            raise SalesforceQueryError(
+                f"Refusing to interpolate malformed Salesforce id into SOQL: {sf_id!r}"
+            )
+        return sf_id
+
     def _log_limit_info(self, headers) -> bool:
         """
         Parse the `Sforce-Limit-Info` header (e.g. "api-usage=18000/20000"),
@@ -248,6 +272,7 @@ class SalesforceClient:
 
     def get_account(self, account_id: str) -> Optional[dict]:
         """Fetch a single Account by Id. Returns None if not found."""
+        account_id = self._validate_sf_id(account_id)
         soql = (
             "SELECT Id, Name, AnnualRevenue, Type FROM Account "
             f"WHERE Id = '{account_id}' LIMIT 1"
@@ -257,6 +282,7 @@ class SalesforceClient:
 
     def get_open_opportunities(self, account_id: str) -> list[dict]:
         """Return all open (not-closed) Opportunities for the given Account."""
+        account_id = self._validate_sf_id(account_id)
         soql = (
             "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed "
             f"FROM Opportunity WHERE AccountId = '{account_id}' AND IsClosed = false"
