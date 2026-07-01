@@ -20,8 +20,13 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 const mockReplace = vi.fn();
 const mockPush = vi.fn();
 
+// Mutable so individual tests can simulate `?connected=1` / `?oauth_error=...`
+// return params from the OAuth callback redirect.
+let mockSearchParams = new URLSearchParams();
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockReplace, push: mockPush }),
+  useSearchParams: () => mockSearchParams,
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -132,6 +137,7 @@ describe('SalesforceSettingsPage — component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSearchParams = new URLSearchParams();
     // @ts-expect-error - overriding window.location for the test
     delete window.location;
     // @ts-expect-error - minimal stub sufficient for href assignment checks
@@ -204,5 +210,66 @@ describe('SalesforceSettingsPage — component', () => {
     expect(screen.getByText(connectedStatus.sf_org_id)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /test/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /disconnect/i })).toBeInTheDocument();
+  });
+});
+
+// ─── OAuth callback return params ────────────────────────────────────────────
+//
+// The backend's Salesforce OAuth callback redirects the browser back to this
+// detail page with `?connected=1` (success) or `?oauth_error=<code>`
+// (failure) — see services/backend-api/src/api/routes/salesforce_integration.py
+// (error_redirect_base = .../settings/integrations/salesforce). Unlike Linear,
+// which redirects to the integrations index page, Salesforce must handle its
+// own return params here.
+
+describe('SalesforceSettingsPage — OAuth return params', () => {
+  const originalLocation = window.location;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSearchParams = new URLSearchParams();
+    // @ts-expect-error - overriding window.location for the test
+    delete window.location;
+    // @ts-expect-error - minimal stub sufficient for href assignment checks
+    window.location = { href: '' };
+  });
+
+  afterEach(() => {
+    window.location = originalLocation;
+  });
+
+  it('shows a friendly error message for ?oauth_error=another_crm_active', async () => {
+    mockSearchParams = new URLSearchParams({ oauth_error: 'another_crm_active' });
+    (useAuth as any).mockReturnValue(makeAuthContext('owner'));
+    (salesforceAPI.getStatus as any).mockResolvedValue(disconnectedStatus);
+
+    render(<SalesforceSettingsPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/another CRM integration is already active/i),
+      ).toBeInTheDocument();
+    });
+
+    // Strips the query param so a refresh doesn't re-show the banner.
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/settings/integrations/salesforce');
+    });
+  });
+
+  it('shows a success indicator for ?connected=1', async () => {
+    mockSearchParams = new URLSearchParams({ connected: '1' });
+    (useAuth as any).mockReturnValue(makeAuthContext('owner'));
+    (salesforceAPI.getStatus as any).mockResolvedValue(connectedStatus);
+
+    render(<SalesforceSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/successfully connected/i)).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/settings/integrations/salesforce');
+    });
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,9 +27,11 @@ import {
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { useAuth } from '@/contexts/AuthContext';
+import { getOauthErrorMessage } from '@/lib/oauthErrors';
 
-export default function SalesforceSettingsPage() {
+function SalesforceSettingsContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
 
   // Connection state
@@ -39,6 +41,12 @@ export default function SalesforceSettingsPage() {
   // OAuth connect state
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+
+  // OAuth return state (the backend callback redirects the browser back to
+  // this detail page with ?connected=1 or ?oauth_error=<code> — unlike
+  // Linear, which redirects to the integrations index page).
+  const [oauthError, setOauthError] = useState<string | null>(null);
+  const [justConnected, setJustConnected] = useState(false);
 
   // Test state
   const [testing, setTesting] = useState(false);
@@ -56,6 +64,21 @@ export default function SalesforceSettingsPage() {
       router.replace('/settings/preferences');
     }
   }, [user, isAdminOrOwner, router]);
+
+  // Handle the OAuth callback return params, then strip them from the URL so
+  // a refresh doesn't re-show the banner.
+  useEffect(() => {
+    const error = searchParams.get('oauth_error');
+    const connected = searchParams.get('connected');
+
+    if (error) {
+      setOauthError(getOauthErrorMessage(error));
+      router.replace('/settings/integrations/salesforce');
+    } else if (connected === '1') {
+      setJustConnected(true);
+      router.replace('/settings/integrations/salesforce');
+    }
+  }, [searchParams, router]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -161,6 +184,39 @@ export default function SalesforceSettingsPage() {
             )}
           </div>
         </div>
+
+        {/* OAuth return: success */}
+        {justConnected && (
+          <div className="p-3 rounded-lg text-sm flex items-center gap-2 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 animate-fade-in">
+            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+            Successfully connected to Salesforce.
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setJustConnected(false)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
+
+        {/* OAuth return: error */}
+        {oauthError && (
+          <Alert variant="destructive" className="animate-fade-in">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex items-center gap-2">
+              <span className="flex-1">{oauthError}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setOauthError(null)}
+              >
+                Dismiss
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Connection status / connect CTA */}
         <Card className="animate-slide-up">
@@ -354,5 +410,21 @@ export default function SalesforceSettingsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function SalesforceSettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen pattern-bg">
+        <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+          </div>
+        </main>
+      </div>
+    }>
+      <SalesforceSettingsContent />
+    </Suspense>
   );
 }

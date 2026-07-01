@@ -44,6 +44,7 @@ import Link from 'next/link';
 import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
 import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
+import { getOauthErrorMessage } from '@/lib/oauthErrors';
 
 function IntegrationsContent() {
   const router = useRouter();
@@ -88,14 +89,7 @@ function IntegrationsContent() {
     // Check for OAuth error in URL
     const error = searchParams.get('oauth_error');
     if (error) {
-      const errorMessages: Record<string, string> = {
-        'access_denied': 'You cancelled the authorization.',
-        'invalid_state': 'Session expired. Please try again.',
-        'missing_params': 'Missing OAuth parameters. Please try again.',
-        'network_error': 'Network error during authorization. Please try again.',
-        'unexpected_error': 'An unexpected error occurred. Please try again.',
-      };
-      setOauthError(errorMessages[error] || `OAuth error: ${error}`);
+      setOauthError(getOauthErrorMessage(error));
       // Clean up URL
       router.replace('/settings/integrations', { scroll: false });
     }
