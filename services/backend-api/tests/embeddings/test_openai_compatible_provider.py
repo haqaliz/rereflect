@@ -162,3 +162,32 @@ class TestOpenAICompatibleEmbeddingProvider:
             result = provider.embed("text")
 
         assert len(result) == 768
+
+    def test_client_fails_fast_no_retries_bounded_timeout(self):
+        """
+        Fail-fast on unreachable local endpoints.
+
+        Startup seeding embeds ~15 system templates on boot; if the local
+        endpoint is down, the SDK's default max_retries=2 + exponential backoff
+        makes each embed slow and boot crawls (per PRD R3: "seeding must not
+        block boot"). The client must therefore be constructed with
+        max_retries=0 and a bounded timeout so a down endpoint fails immediately.
+        """
+        mock_client = MagicMock()
+        mock_client.embeddings.create.return_value = self._make_mock_response(
+            _FAKE_VECTOR_768
+        )
+
+        with patch(
+            "src.services.embeddings.providers.openai_compatible.openai.OpenAI",
+            return_value=mock_client,
+        ) as mock_openai_cls:
+            provider = OpenAICompatibleEmbeddingProvider(
+                base_url="http://localhost:11434/v1",
+                model="nomic-embed-text",
+            )
+            provider.embed("test")
+
+        kwargs = mock_openai_cls.call_args.kwargs
+        assert kwargs.get("max_retries") == 0, "local client must not retry a down endpoint"
+        assert kwargs.get("timeout") is not None, "local client must set a bounded timeout"

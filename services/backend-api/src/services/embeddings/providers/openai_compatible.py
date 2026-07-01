@@ -20,6 +20,15 @@ from src.services.embeddings.base import EmbeddingProvider
 
 _DUMMY_KEY = "ollama"  # placeholder required by the openai SDK, not validated by local endpoints
 
+# Fail fast on unreachable local endpoints. Retrying a down localhost is
+# pointless and makes startup seeding (embeds ~15 system templates on boot)
+# crawl through the SDK's default max_retries=2 + exponential backoff — a boot
+# slowdown per PRD R3 ("seeding must not block boot"). So construct the client
+# with no retries and a bounded timeout: a down endpoint fails immediately and
+# seeding degrades cleanly to the LLM path.
+_EMBED_MAX_RETRIES = 0
+_EMBED_TIMEOUT_SECONDS = 10.0
+
 
 class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
     """
@@ -70,6 +79,8 @@ class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
         client = openai.OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
+            max_retries=_EMBED_MAX_RETRIES,
+            timeout=_EMBED_TIMEOUT_SECONDS,
         )
         response = client.embeddings.create(
             model=self._model,
