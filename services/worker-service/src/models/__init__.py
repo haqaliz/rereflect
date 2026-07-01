@@ -861,6 +861,10 @@ class CrmEnrichment(Base):
     organization_id = Column(Integer, nullable=False)
     customer_email = Column(String(255), nullable=False)
 
+    # CRM source ("hubspot" or "salesforce"); server_default backfills
+    # existing rows so pre-generalization HubSpot data reads back unaffected.
+    provider = Column(String(50), nullable=False, server_default="hubspot")
+
     # Company info
     company_name = Column(String(255), nullable=True)
     lifecycle_stage = Column(String(100), nullable=True)
