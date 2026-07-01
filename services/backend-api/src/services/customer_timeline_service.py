@@ -38,6 +38,14 @@ MAX_LIMIT: int = 100
 USAGE_SCAN_WINDOW_DAYS: int = 365
 CRM_RENEWAL_WINDOW_DAYS: int = 30
 
+# Display names for crm_enrichment.provider values whose brand capitalization
+# differs from str.title() (e.g. "hubspot".title() == "Hubspot", not
+# "HubSpot"). Unknown/future providers fall back to .title().
+_CRM_PROVIDER_DISPLAY_NAMES: dict = {
+    "hubspot": "HubSpot",
+    "salesforce": "Salesforce",
+}
+
 
 # ---------------------------------------------------------------------------
 # Internal event shape
@@ -463,12 +471,15 @@ def _fetch_crm_events(
     events: List[TimelineEvent] = []
     sync_ts = _to_naive_utc(row.last_synced_at)
 
+    provider = row.provider or "hubspot"
+    provider_label = _CRM_PROVIDER_DISPLAY_NAMES.get(provider, provider.title())
+
     events.append(TimelineEvent(
         type="crm_contact_synced",
         timestamp=sync_ts,
-        description="CRM contact synced from HubSpot"
+        description=f"CRM contact synced from {provider_label}"
                     + (f" — {row.company_name}" if row.company_name else ""),
-        source="hubspot",
+        source=provider,
         source_id=row.id,
         company_name=row.company_name,
     ))
@@ -481,7 +492,7 @@ def _fetch_crm_events(
                 type="crm_renewal_upcoming",
                 timestamp=sync_ts,  # anchored at detection time, not the future date
                 description=f"Renewal upcoming on {rd.date().isoformat()}",
-                source="hubspot",
+                source=provider,
                 source_id=row.id,
                 renewal_date=rd,
                 deal_stage=row.deal_stage,

@@ -872,6 +872,57 @@ class TestTimelinePhase5:
         events, _ = build_timeline(db, org.id, "p5past@acme.com", limit=50)
         assert all(e.type != "crm_renewal_upcoming" for e in events)
 
+    def test_crm_contact_synced_salesforce_provider(self, db: Session):
+        """crm-provider-generalization: a provider='salesforce' row emits
+        source='salesforce' and a description naming Salesforce (not HubSpot)."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        sync_ts = datetime.utcnow() - timedelta(hours=3)
+        _health(db, org, "p5sf_sync@acme.com")
+        _crm(
+            db, org, "p5sf_sync@acme.com",
+            last_synced_at=sync_ts, company_name="SFCo", provider="salesforce",
+        )
+
+        events, _ = build_timeline(db, org.id, "p5sf_sync@acme.com", limit=50)
+        ev = next(e for e in events if e.type == "crm_contact_synced")
+        assert ev.source == "salesforce"
+        assert "Salesforce" in ev.description
+        assert "HubSpot" not in ev.description
+
+    def test_crm_renewal_upcoming_salesforce_provider(self, db: Session):
+        """crm_renewal_upcoming also carries source=row.provider for Salesforce rows."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        sync_ts = datetime.utcnow() - timedelta(hours=1)
+        renewal = datetime.utcnow() + timedelta(days=14)
+        _health(db, org, "p5sf_renew@acme.com")
+        _crm(
+            db, org, "p5sf_renew@acme.com",
+            last_synced_at=sync_ts, renewal_date=renewal, provider="salesforce",
+        )
+
+        events, _ = build_timeline(db, org.id, "p5sf_renew@acme.com", limit=50)
+        ev = next(e for e in events if e.type == "crm_renewal_upcoming")
+        assert ev.source == "salesforce"
+
+    def test_crm_contact_synced_hubspot_provider_still_says_hubspot(self, db: Session):
+        """A row with an explicit provider='hubspot' still says HubSpot (no
+        regression for existing/explicit HubSpot rows)."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        sync_ts = datetime.utcnow() - timedelta(hours=3)
+        _health(db, org, "p5hs_sync@acme.com")
+        _crm(
+            db, org, "p5hs_sync@acme.com",
+            last_synced_at=sync_ts, company_name="HSCo", provider="hubspot",
+        )
+
+        events, _ = build_timeline(db, org.id, "p5hs_sync@acme.com", limit=50)
+        ev = next(e for e in events if e.type == "crm_contact_synced")
+        assert ev.source == "hubspot"
+        assert "HubSpot" in ev.description
+
     def test_crm_events_interleaved_correctly(self, db: Session):
         """CRM events appear in correct reverse-chron order with feedback events."""
         from src.services.customer_timeline_service import build_timeline
