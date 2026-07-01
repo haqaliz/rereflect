@@ -54,6 +54,7 @@
 | Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
 | Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
 | Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
+| CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), one-CRM-per-org guard | Unlocked (OSS) |
 
 ---
 
@@ -175,21 +176,33 @@
 
 **Goal**: Customer profiles combine feedback + CRM + product usage data. AI has full context for predictions.
 
-#### M3.1 — HubSpot CRM Integration (3 weeks)
-- [ ] HubSpot OAuth flow (connect/disconnect)
-- [ ] Sync contacts: pull company, deal stage, ARR, contract renewal date, lifecycle stage
-- [ ] Match by email: link HubSpot contacts to Rereflect customers (by `customer_email`)
-- [ ] Customer 360 enrichment: show CRM data on customer profile (company name, deal value, renewal date)
-- [ ] Churn prediction enrichment: add CRM signals to health score (renewal coming up + declining health = critical)
-- [ ] Bi-directional sync: push health scores to HubSpot contact properties (custom fields)
-- [ ] Plan gate: Business+ feature
+#### M3.1 — HubSpot CRM Integration (3 weeks) — COMPLETE (shipped as `hubspot-crm-enrichment`)
+- [x] HubSpot connect/disconnect — **private-app access token** (BYOK, pasted by the self-hoster), not the OAuth marketplace flow (awkward for self-host)
+- [x] Sync contacts: pull company, deal stage, ARR, contract renewal date, lifecycle stage
+- [x] Match by email: link HubSpot contacts to Rereflect customers (by `customer_email`)
+- [x] Customer 360 enrichment: show CRM data on customer profile (company name, deal value, renewal date) — `CrmCompanyCard`
+- [x] Churn prediction enrichment: CRM signals in the health score via the opt-in `crm_component` (renewal date), + `crm_*` timeline events
+- [ ] Bi-directional sync: push health scores to HubSpot contact properties — **deferred (v2)**
+- [x] Plan gate: removed — all features unlocked in the open-source self-hosted edition
 
-#### M3.2 — Segment Product Usage Integration (2 weeks)
-- [ ] Segment webhook receiver: receive identify + track events
-- [ ] Usage metrics per customer: login frequency, feature usage, session duration, last active
-- [ ] Customer 360 enrichment: usage activity section on profile page
-- [ ] Health score enrichment: add usage frequency as 5th component (declining usage = warning)
-- [ ] Plan gate: Business+ feature
+#### M3.1b — Salesforce CRM Integration — COMPLETE (shipped 2026-07-01)
+> Delivered as `salesforce-crm-enrichment` (commits ~`309c37c`..`47a3733`), the 2nd CRM per `AI-TRACKING.md` line 23 ("HubSpot first, then Salesforce"). See `docs/planning/salesforce-crm-enrichment/`. Reuses the HubSpot-built consuming layer (health `crm_component`, CrmCompanyCard, timeline) via a provider-agnostic generalization.
+- [x] Salesforce **OAuth 2.0** web-server flow (connect/callback/status/disconnect/test) with CSRF-hardened, session-bound `state` (HttpOnly nonce cookie)
+- [x] `crm_enrichment` generalized with a `provider` discriminator (existing HubSpot scores byte-identical — characterization-tested); provider-driven timeline source
+- [x] Sync Account/Contact/Opportunity → company/ARR/renewal/deal (SOQL, token refresh, API-limit backoff), match by email; daily beat 03:45 UTC + manual trigger
+- [x] Health/churn signal via the shared `crm_component`; provider-tagged rows
+- [x] **One CRM connected per org at a time** — symmetric guard on both providers' connect + purge-on-disconnect
+- [ ] Bi-directional push-back + simultaneous dual-CRM — **deferred (v2)**
+- [x] Plan gate: removed — OSS self-hosted, all unlocked
+
+#### M3.2 — Product Usage Enrichment (2 weeks) — COMPLETE (shipped 2026-06-29)
+> Delivered as `product-usage-enrichment` (commits ~`c64665a`..`5d7f21c`). See `docs/planning/product-usage-enrichment/`. Ingest is a plain authenticated POST (normalized, Segment-compatible), not a Segment OAuth connection — fits the OSS self-hosted / BYOK model.
+- [x] Usage webhook receiver: `POST /api/v1/webhooks/usage` (ingest-scoped API key, `identify` + `track`, dedup on `messageId`, bounded batch/payload). Emits to Celery `process_usage_event`.
+- [x] Usage metrics per customer: `usage_event` log + `customer_usage` rollup (last_active, login/active-days 7d/30d, distinct features) → `usage_score` (recency + frequency + breadth, neutral 50 when no data)
+- [x] Customer 360 enrichment: "Usage Activity" card + UsageTimeline chart on the profile; "Last active (product)" list column
+- [x] Health score enrichment: usage as **opt-in 5th component**, `health_weight_usage` **default 0** (byte-for-byte-stable upgrade), 5-field health-weights API; daily `recompute_usage_scores` applies recency decay
+- [x] Operator setup docs (`docs/SELF_HOSTING.md`) + `settings/usage-events` panel
+- [x] Plan gate: removed — all features unlocked in the open-source self-hosted edition
 
 #### M3.3 — AI Trust: Human-in-the-Loop (2 weeks) — COMPLETE
 - [x] Feedback on AI outputs: thumbs up/down on copilot answers, health scores, categorizations
