@@ -1,85 +1,52 @@
-# Card — HubSpot CRM Enrichment (freeform)
+# Card — Salesforce CRM Enrichment (freeform)
 
-**Type:** feat
-**Slug / branch:** `feat/hubspot-crm-enrichment`
-**Worktree:** `.claude/worktrees/feat-hubspot-crm-enrichment`
-**Source:** Freeform task (no GitHub issue). Selected by `rereflect-next` as the
-single highest-leverage next feature; started via `rbf feat hubspot-crm-enrichment`.
+**Type:** feat · **Slug:** `salesforce-crm-enrichment` · **Branch:** `feat/salesforce-crm-enrichment`
+**Source:** Freeform task selected via `rereflect-next` (verified against git — genuinely unbuilt). No GitHub issue.
+**Date:** 2026-07-01
 
 ---
 
 ## Brief (from rereflect-next handoff)
 
-Build **HubSpot CRM enrichment for Customer 360 and churn** — the last open
-data-enrichment source. After product-usage enrichment (M3.2, merged `a8047d9`)
-and the unified Customer 360 timeline + public API (M3.4, merged `ca73cc9`)
-shipped, HubSpot is the one enrichment source still pending.
+Add **Salesforce** as the second CRM enrichment source, reusing the CRM infrastructure the
+HubSpot integration already shipped. This is the explicitly-planned next CRM:
+`AI-TRACKING.md:23` — "CRM enrichment | **HubSpot first, then Salesforce**" — and an M3.1
+follow-on.
 
-Scope the **first slice** around a HubSpot **private-app access token**
-(BYOK-style, pasted by the self-hoster — **not** the OAuth marketplace flow,
-which needs a public redirect URI and is awkward for a self-hosted product):
+### Reuse surface (already shipped by HubSpot, verified present)
+- `services/backend-api/src/models/crm_enrichment.py` — per-customer CRM snapshot (currently **HubSpot-shaped**: `hubspot_contact_id`/`company_id`/`deal_id`).
+- `services/backend-api/src/services/health_score_service.py` — `_compute_crm_component` (`:108`, used at `:208`); reads **semantic** fields (ARR, renewal, deal stage), so scoring is already provider-agnostic.
+- `services/frontend-web/components/customers/CrmCompanyCard.tsx` — CRM card on Customer 360 Overview.
+- `crm_*` timeline events on the unified Customer 360 timeline (source-extensible).
+- HubSpot precedent to mirror: `src/api/routes/hubspot_integration.py`, the worker HubSpot sync task, `lib/api/hubspot.ts`, HubSpot integrations tile/detail page.
 
-1. **Connect** — operator pastes a HubSpot private-app access token (stored
-   encrypted, per-org), with connect / disconnect / test.
-2. **Sync contacts by email** — pull HubSpot contacts and match them to Rereflect
-   customers by `customer_email` (the email-match machinery already exists from
-   the usage work).
-3. **Enrich Customer 360** — surface company name, ARR / deal value, contract
-   renewal date, deal stage, lifecycle stage on `/customers/[email]`.
-4. **Churn/health signal** — feed a CRM-renewal factor into the health/churn
-   signal: "renewal coming up + declining health = critical".
-5. **Timeline** — surface CRM events on the unified customer timeline. The
-   timeline event shape was deliberately left **source-extensible** for exactly
-   this; CRM events are the deferred-until-HubSpot item from `AI-TRACKING.md:204`.
+### First-slice shape (proposed — to be pressure-tested in the interview)
+1. **Generalize `crm_enrichment`** to be provider-agnostic: add a `provider` discriminator, migrate existing HubSpot rows. Storage side is HubSpot-specific today; scoring/UI consumers are not.
+2. **Salesforce connection**: Connected App OAuth 2.0 (connect/disconnect/status/test), instance URL handling, API-version pinning, refresh-token storage (encrypted). Heavier than HubSpot's private-app token.
+3. **Salesforce sync**: map Account / Opportunity / Contact → the shared CRM fields (company, ARR, renewal date, deal stage), matched by email. Health component, profile card, and timeline light up for free.
 
----
+### Fit / guardrails
+- OSS self-hosted / BYOK: operator registers their **own** Salesforce Connected App. No hosted dependency, all features unlocked, **no plan gating** (the `Business+` framing in CLAUDE.md/AI-TRACKING is pre-pivot and stale).
+- Deepens the churn → health moat (CRM signals into the health score), not just the input layer.
 
-## Why this feature (moat grounding)
+### Known caveat (carry into PRD)
+`crm_enrichment` is HubSpot-shaped today, and Salesforce OAuth (instance URLs, API-version
+pinning, refresh tokens) is heavier than HubSpot's private-app token. **Do the
+generalization migration before wiring the Salesforce adapter**, and preserve byte-for-byte
+health-score stability for existing HubSpot-enriched customers (mirror the usage-component
+weight-0 discipline: a characterization test proving existing CRM-derived scores are unchanged
+after the schema generalization).
 
-- **Next explicitly-pending milestone**, not shipped and not blocker-deferred:
-  `AI-TRACKING.md` M3.1 (lines 178–186) is entirely unchecked; `DEV-TRACKING.md`
-  M3.5 (lines 209–213) restates it.
-- **Feeds the killer feature** — "churn prediction that actually works"
-  (`AI-TRACKING.md:5`). Renewal date / ARR / deal stage are the most predictive
-  external churn signals the model currently lacks (`AI-TRACKING.md:183`).
-- **Unblocked + depth-first** — unblocks the CRM timeline events deferred in the
-  just-shipped Customer 360 timeline (`AI-TRACKING.md:204`), and follows an
-  already-proven integration pattern (Intercom / Slack: adapter + webhook
-  receiver + email-match + two-way sync, `DEV-TRACKING.md:606`).
-
-## Fit with OSS / self-hosted / BYOK
-
-- MIT, all features unlocked — **no plan gating** (the `Business+` framing in
-  `AI-TRACKING.md` M3.1 and `CLAUDE.md` is pre-pivot and stale).
-- Single-tenant: the operator connects **their own** HubSpot portal. No central
-  cross-customer dataset.
-- BYOK-style: private-app token pasted by the operator, stored encrypted (reuse
-  the existing Fernet encryption pattern used for LLM keys / webhook headers).
+### Open questions for the interview
+- Generalization strategy: `provider` discriminator on one shared table vs. per-provider columns vs. a normalized `crm_*` field set + provider tag?
+- One CRM connected at a time per org, or multiple (HubSpot + Salesforce) simultaneously? If both, how is a customer's CRM row reconciled?
+- Salesforce object → field mapping specifics (ARR from Opportunity Amount? renewal date from a custom field / Contract? deal stage from Opportunity StageName?).
+- Sync mechanism: polling (mirror HubSpot's Celery beat) vs. Salesforce streaming/Platform Events (likely out of scope for slice 1).
+- Auth: full web-server OAuth (redirect URI) vs. JWT bearer flow (server-to-server, no redirect — better fit for headless self-host)?
 
 ---
 
-## Known caveats / open questions (to resolve in deep dig + PRD interview)
-
-1. **No dedicated HubSpot PRD exists.** The feature lives only in `AI-TRACKING.md`
-   M3.1 + `DEV-TRACKING.md` M3.5 bullets + the enrichment hooks in
-   `PRD-CUSTOMER-360.md`. The PRD will be written from those during this run.
-2. **Auth method:** first slice uses a **private-app access token**, not OAuth.
-   Full OAuth marketplace app + bi-directional push-back (health scores → HubSpot
-   custom properties) are **deferred to v2**.
-3. **Sync model:** pull-only for v1 (read from HubSpot). Bi-directional push is v2.
-4. **Sync trigger:** on-demand vs scheduled (Celery beat) vs both — TBD.
-5. **Data model:** where CRM enrichment lives (new table vs columns on an existing
-   customer/profile model) — TBD in deep dig + interview.
-6. **Health-score integration:** whether CRM becomes a new weighted component or a
-   modifier/override on the existing components — TBD (interacts with the
-   configurable per-org health weights shipped in M4.2).
-
----
-
-## Reference files (in primary repo root)
-
-- `AI-TRACKING.md` — M3.1 (HubSpot), M3.4 (Customer 360, CRM events deferred)
-- `DEV-TRACKING.md` — M3.5 (HubSpot), integration backlog + Intercom pattern
-- `PRD-CUSTOMER-360.md` — Customer 360 enrichment hooks
-- `PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md` — OSS pivot context, public API
+## Reference files (primary repo root)
+- `AI-TRACKING.md` — line 23 (CRM strategy: HubSpot then Salesforce), M3.1 (HubSpot, shipped)
+- `docs/planning/hubspot-crm-enrichment/` — the HubSpot PRD + aspect specs + plans to mirror
 - `memory/rereflect-oss-pivot.md` — OSS/self-hosted/BYOK reality + stale-CLAUDE.md caveat
