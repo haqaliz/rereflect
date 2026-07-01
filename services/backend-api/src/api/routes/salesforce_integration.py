@@ -25,6 +25,16 @@ symmetrically to hubspot_integration.py's connect endpoint.
 R6 safeguard: refresh_token encryption catches ValueError from
 encrypt_api_key (raised when LLM_ENCRYPTION_KEY is unset) and returns
 HTTP 422 with an operator-actionable message — never a 500.
+
+SEC-1 safeguard: the signed `state` param is bound to the initiating
+browser via an HttpOnly session-nonce cookie (`SF_OAUTH_NONCE_COOKIE`) set
+by /connect-url and re-checked (hmac.compare_digest over the SHA-256 hash)
+by /callback before org_id/user_id are trusted. The callback is
+unauthenticated (Salesforce redirects to it; no JWT reaches it), so
+without this binding an attacker-minted signed state completed by a
+victim's browser would link the VICTIM's Salesforce refresh token into the
+ATTACKER's org (OAuth CSRF / account-linking). Kept stateless — no
+server-side store, just the cookie + a hash embedded in the signed state.
 """
 import base64
 import hashlib
@@ -39,7 +49,7 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -101,6 +111,11 @@ def _app_secret() -> str:
 STATE_TTL_SECONDS = 600  # 10 minutes
 SALESFORCE_SCOPE = "refresh_token offline_access api"
 
+# SEC-1: HttpOnly cookie binding the signed OAuth `state` to the browser
+# that initiated the flow. Scoped to the callback path only.
+SF_OAUTH_NONCE_COOKIE = "sf_oauth_nonce"
+SF_CALLBACK_PATH = "/api/v1/integrations/salesforce/callback"
+
 
 # ──────────────────────── Pydantic schemas ────────────────────────────────────
 
@@ -136,13 +151,26 @@ class SalesforceSyncResponse(BaseModel):
 # ──────────────────────── State signing (CSRF) ────────────────────────────────
 
 
-def _sign_state(org_id: int, user_id: int) -> str:
-    """Sign a stateless OAuth `state` param (HMAC-SHA256, app-secret keyed)."""
+def _hash_nonce(nonce: str) -> str:
+    """SHA-256 hex digest of a session nonce (stored in state, never the raw nonce)."""
+    return hashlib.sha256(nonce.encode()).hexdigest()
+
+
+def _sign_state(org_id: int, user_id: int, session_nonce_hash: str) -> str:
+    """
+    Sign a stateless OAuth `state` param (HMAC-SHA256, app-secret keyed).
+
+    `session_nonce_hash` (SHA-256 of the raw nonce set as an HttpOnly cookie
+    by /connect-url) binds this state to the initiating browser — see
+    SEC-1 in the module docstring. The callback must verify it via
+    hmac.compare_digest before trusting org_id/user_id.
+    """
     payload = {
         "org_id": org_id,
         "user_id": user_id,
         "ts": int(time.time()),
         "nonce": secrets.token_urlsafe(8),
+        "session_nonce_hash": session_nonce_hash,
     }
     payload_json = json.dumps(payload, separators=(",", ":")).encode()
     payload_b64 = base64.urlsafe_b64encode(payload_json).decode().rstrip("=")
@@ -265,6 +293,7 @@ def _validate_access_token(instance_url: str, access_token: str) -> dict:
     ],
 )
 def salesforce_connect_url(
+    response: Response,
     current_org: Organization = Depends(get_current_org),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -286,7 +315,22 @@ def salesforce_connect_url(
             detail="Salesforce OAuth is not configured. Set SALESFORCE_CLIENT_ID environment variable.",
         )
 
-    state = _sign_state(current_org.id, current_user.id)
+    # SEC-1: mint a session nonce, embed its hash in the signed state, and
+    # set the raw nonce as an HttpOnly/Secure cookie scoped to the callback
+    # path. /callback must see the same cookie back before it trusts the
+    # state's org_id/user_id.
+    session_nonce = secrets.token_urlsafe(32)
+    state = _sign_state(current_org.id, current_user.id, _hash_nonce(session_nonce))
+    response.set_cookie(
+        key=SF_OAUTH_NONCE_COOKIE,
+        value=session_nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path=SF_CALLBACK_PATH,
+    )
+
     params = {
         "response_type": "code",
         "client_id": _client_id(),
@@ -332,6 +376,7 @@ def salesforce_status(
 
 @router.get("/callback")
 def salesforce_callback(
+    request: Request,
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
@@ -357,6 +402,27 @@ def salesforce_callback(
     if not payload:
         logger.error("Invalid or expired Salesforce OAuth state")
         return RedirectResponse(url=f"{error_redirect_base}?oauth_error=invalid_state")
+
+    # SEC-1: the callback is unauthenticated (Salesforce calls it directly;
+    # no JWT reaches it), so a validly-signed state is not enough — it must
+    # also have been minted for THIS browser. Require the HttpOnly nonce
+    # cookie set by /connect-url to match the hash embedded in the state
+    # BEFORE trusting org_id/user_id or doing any token exchange / DB write.
+    # Without this, an attacker-minted state completed by a victim's
+    # browser would link the victim's Salesforce token into the attacker's
+    # org (OAuth CSRF / account-linking).
+    cookie_nonce = request.cookies.get(SF_OAUTH_NONCE_COOKIE)
+    expected_nonce_hash = payload.get("session_nonce_hash")
+    if not cookie_nonce or not expected_nonce_hash or not hmac.compare_digest(
+        _hash_nonce(cookie_nonce), expected_nonce_hash
+    ):
+        logger.error(
+            "Salesforce OAuth callback rejected: missing/mismatched session "
+            "nonce cookie (possible OAuth CSRF / account-linking attempt)"
+        )
+        redirect = RedirectResponse(url=f"{error_redirect_base}?oauth_error=invalid_state")
+        redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+        return redirect
 
     org_id = payload["org_id"]
     user_id = payload["user_id"]
@@ -452,7 +518,9 @@ def salesforce_callback(
     db.commit()
     logger.info("Salesforce connected for org %s (sf_org_id=%s)", org_id, sf_org_id)
 
-    return RedirectResponse(url=f"{error_redirect_base}?connected=1")
+    redirect = RedirectResponse(url=f"{error_redirect_base}?connected=1")
+    redirect.delete_cookie(SF_OAUTH_NONCE_COOKIE, path=SF_CALLBACK_PATH)
+    return redirect
 
 
 @router.post(

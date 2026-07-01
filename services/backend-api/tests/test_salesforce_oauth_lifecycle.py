@@ -153,10 +153,24 @@ def admin_headers(admin_user: User) -> dict:
 
 
 @pytest.fixture
-def signed_state(owner_user: User):
+def oauth_nonce() -> str:
+    """The raw session nonce the /connect-url endpoint would set as a cookie."""
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
+@pytest.fixture
+def oauth_cookies(oauth_nonce: str) -> dict:
+    """The cookie jar /connect-url would have set on the initiating browser."""
+    from src.api.routes.salesforce_integration import SF_OAUTH_NONCE_COOKIE
+    return {SF_OAUTH_NONCE_COOKIE: oauth_nonce}
+
+
+@pytest.fixture
+def signed_state(owner_user: User, oauth_nonce: str):
     with _salesforce_env():
-        from src.api.routes.salesforce_integration import _sign_state
-        return _sign_state(owner_user.organization_id, owner_user.id)
+        from src.api.routes.salesforce_integration import _sign_state, _hash_nonce
+        return _sign_state(owner_user.organization_id, owner_user.id, _hash_nonce(oauth_nonce))
 
 
 @pytest.fixture
@@ -186,7 +200,7 @@ def active_integration(db: Session, test_organization: Organization) -> Salesfor
 
 class TestCallbackEndpoint:
     def test_callback_persists_encrypted_refresh_token(
-        self, client, db, test_organization, signed_state
+        self, client, db, test_organization, signed_state, oauth_cookies
     ):
         mock_client = _mock_client(
             post_return=token_exchange_ok_resp(),
@@ -197,6 +211,7 @@ class TestCallbackEndpoint:
                 resp = client.get(
                     "/api/v1/integrations/salesforce/callback",
                     params={"code": "auth-code-123", "state": signed_state},
+                    cookies=oauth_cookies,
                     follow_redirects=False,
                 )
         assert resp.status_code in (302, 307)
@@ -213,7 +228,7 @@ class TestCallbackEndpoint:
             assert decrypt_api_key(row.refresh_token) == TOKEN_RESPONSE["refresh_token"]
 
     def test_callback_redirects_to_connected_on_success(
-        self, client, db, test_organization, signed_state
+        self, client, db, test_organization, signed_state, oauth_cookies
     ):
         mock_client = _mock_client(
             post_return=token_exchange_ok_resp(),
@@ -224,13 +239,14 @@ class TestCallbackEndpoint:
                 resp = client.get(
                     "/api/v1/integrations/salesforce/callback",
                     params={"code": "auth-code-123", "state": signed_state},
+                    cookies=oauth_cookies,
                     follow_redirects=False,
                 )
         location = resp.headers["location"]
         assert "connected=1" in location
 
     def test_callback_never_returns_tokens_in_body(
-        self, client, db, test_organization, signed_state
+        self, client, db, test_organization, signed_state, oauth_cookies
     ):
         mock_client = _mock_client(
             post_return=token_exchange_ok_resp(),
@@ -241,6 +257,7 @@ class TestCallbackEndpoint:
                 resp = client.get(
                     "/api/v1/integrations/salesforce/callback",
                     params={"code": "auth-code-123", "state": signed_state},
+                    cookies=oauth_cookies,
                     follow_redirects=False,
                 )
         body = resp.text
@@ -257,6 +274,66 @@ class TestCallbackEndpoint:
         assert resp.status_code in (302, 307)
         assert "oauth_error" in resp.headers["location"]
 
+    def test_callback_rejected_without_nonce_cookie(
+        self, client, db, test_organization, signed_state
+    ):
+        """SEC-1: a validly-signed state with NO matching session-nonce cookie
+        must be rejected before any token exchange or DB write — otherwise an
+        attacker-minted state completed by a victim's browser would link the
+        victim's Salesforce token into the attacker's org."""
+        mock_client = _mock_client(
+            post_return=token_exchange_ok_resp(),
+            get_return=userinfo_ok_resp(),
+        )
+        with _salesforce_env(), patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            with patch(
+                "src.api.routes.salesforce_integration.httpx.Client", return_value=mock_client
+            ) as mock_httpx_client:
+                resp = client.get(
+                    "/api/v1/integrations/salesforce/callback",
+                    params={"code": "auth-code-123", "state": signed_state},
+                    # deliberately NOT setting the sf_oauth_nonce cookie
+                    follow_redirects=False,
+                )
+        assert resp.status_code in (302, 307)
+        assert "oauth_error=invalid_state" in resp.headers["location"]
+        mock_httpx_client.assert_not_called()
+        db.expire_all()
+        row = db.query(SalesforceIntegration).filter_by(
+            organization_id=test_organization.id
+        ).first()
+        assert row is None
+
+    def test_callback_rejected_with_wrong_nonce_cookie(
+        self, client, db, test_organization, signed_state
+    ):
+        """SEC-1: a validly-signed state with a WRONG session-nonce cookie
+        (e.g. the attacker's own browser session) must be rejected."""
+        from src.api.routes.salesforce_integration import SF_OAUTH_NONCE_COOKIE
+
+        mock_client = _mock_client(
+            post_return=token_exchange_ok_resp(),
+            get_return=userinfo_ok_resp(),
+        )
+        with _salesforce_env(), patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            with patch(
+                "src.api.routes.salesforce_integration.httpx.Client", return_value=mock_client
+            ) as mock_httpx_client:
+                resp = client.get(
+                    "/api/v1/integrations/salesforce/callback",
+                    params={"code": "auth-code-123", "state": signed_state},
+                    cookies={SF_OAUTH_NONCE_COOKIE: "attacker-controlled-wrong-nonce"},
+                    follow_redirects=False,
+                )
+        assert resp.status_code in (302, 307)
+        assert "oauth_error=invalid_state" in resp.headers["location"]
+        mock_httpx_client.assert_not_called()
+        db.expire_all()
+        row = db.query(SalesforceIntegration).filter_by(
+            organization_id=test_organization.id
+        ).first()
+        assert row is None
+
     def test_callback_missing_code_redirects_with_error(self, client, signed_state):
         with _salesforce_env():
             resp = client.get(
@@ -267,7 +344,9 @@ class TestCallbackEndpoint:
         assert resp.status_code in (302, 307)
         assert "oauth_error" in resp.headers["location"]
 
-    def test_callback_invalid_grant_redirects_with_error(self, client, db, signed_state):
+    def test_callback_invalid_grant_redirects_with_error(
+        self, client, db, signed_state, oauth_cookies
+    ):
         import httpx
         error_resp = MagicMock()
         error_resp.status_code = 400
@@ -279,13 +358,14 @@ class TestCallbackEndpoint:
                 resp = client.get(
                     "/api/v1/integrations/salesforce/callback",
                     params={"code": "bad-code", "state": signed_state},
+                    cookies=oauth_cookies,
                     follow_redirects=False,
                 )
         assert resp.status_code in (302, 307)
         assert "oauth_error" in resp.headers["location"]
 
     def test_callback_blocked_when_hubspot_active(
-        self, client, db, test_organization, signed_state
+        self, client, db, test_organization, signed_state, oauth_cookies
     ):
         db.add(HubSpotIntegration(
             organization_id=test_organization.id,
@@ -303,6 +383,7 @@ class TestCallbackEndpoint:
                 resp = client.get(
                     "/api/v1/integrations/salesforce/callback",
                     params={"code": "auth-code-123", "state": signed_state},
+                    cookies=oauth_cookies,
                     follow_redirects=False,
                 )
         assert resp.status_code in (302, 307)
@@ -314,7 +395,7 @@ class TestCallbackEndpoint:
         assert row is None
 
     def test_callback_missing_encryption_key_returns_422(
-        self, client, db, test_organization, signed_state
+        self, client, db, test_organization, signed_state, oauth_cookies
     ):
         mock_client = _mock_client(
             post_return=token_exchange_ok_resp(),
@@ -331,6 +412,7 @@ class TestCallbackEndpoint:
                 resp = client.get(
                     "/api/v1/integrations/salesforce/callback",
                     params={"code": "auth-code-123", "state": signed_state},
+                    cookies=oauth_cookies,
                     follow_redirects=False,
                 )
         assert resp.status_code == 422
