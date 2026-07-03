@@ -6,6 +6,7 @@ vi.mock('@/lib/api-client', () => ({
     get: vi.fn(),
     post: vi.fn(),
     delete: vi.fn(),
+    patch: vi.fn(),
   },
 }));
 
@@ -64,5 +65,67 @@ describe('hubspotAPI', () => {
       '/api/v1/integrations/hubspot/test',
     );
     expect(result.success).toBe(true);
+  });
+
+  it('updateWriteback calls PATCH /api/v1/integrations/hubspot/writeback with enabled + field_name', async () => {
+    (apiClient.patch as any).mockResolvedValue({
+      data: {
+        writeback_enabled: true,
+        writeback_field_name: 'rereflect_health_score',
+        last_writeback_at: null,
+        last_writeback_status: null,
+        last_writeback_error: null,
+        contacts_written: 0,
+      },
+    });
+    const result = await hubspotAPI.updateWriteback({
+      enabled: true,
+      field_name: 'rereflect_health_score',
+    });
+    expect(apiClient.patch).toHaveBeenCalledWith(
+      '/api/v1/integrations/hubspot/writeback',
+      { enabled: true, field_name: 'rereflect_health_score' },
+    );
+    expect(result.writeback_enabled).toBe(true);
+  });
+
+  it('updateWriteback allows disabling with a null field_name', async () => {
+    (apiClient.patch as any).mockResolvedValue({
+      data: {
+        writeback_enabled: false,
+        writeback_field_name: null,
+        last_writeback_at: null,
+        last_writeback_status: null,
+        last_writeback_error: null,
+        contacts_written: 0,
+      },
+    });
+    const result = await hubspotAPI.updateWriteback({ enabled: false, field_name: null });
+    expect(apiClient.patch).toHaveBeenCalledWith(
+      '/api/v1/integrations/hubspot/writeback',
+      { enabled: false, field_name: null },
+    );
+    expect(result.writeback_enabled).toBe(false);
+  });
+
+  it('testWriteback calls POST /api/v1/integrations/hubspot/writeback/test with field_name', async () => {
+    (apiClient.post as any).mockResolvedValue({
+      data: { ok: true, reason: null },
+    });
+    const result = await hubspotAPI.testWriteback('rereflect_health_score');
+    expect(apiClient.post).toHaveBeenCalledWith(
+      '/api/v1/integrations/hubspot/writeback/test',
+      { field_name: 'rereflect_health_score' },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('testWriteback surfaces a failed validation reason', async () => {
+    (apiClient.post as any).mockResolvedValue({
+      data: { ok: false, reason: 'field_not_found' },
+    });
+    const result = await hubspotAPI.testWriteback('bogus_field');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('field_not_found');
   });
 });

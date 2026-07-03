@@ -14,6 +14,13 @@ export interface HubSpotConnectionStatus {
   contacts_matched: number;
   arr_property_name: string;
   connected_at: string | null;
+  // CRM writeback config/status (writeback-config-api aspect)
+  writeback_enabled: boolean;
+  writeback_field_name: string | null;
+  last_writeback_at: string | null;
+  last_writeback_status: string | null;
+  last_writeback_error: string | null;
+  contacts_written: number;
 }
 
 export interface HubSpotConnectResponse {
@@ -31,6 +38,25 @@ export interface HubSpotTestResponse {
 export interface HubSpotDisconnectResponse {
   success: boolean;
   message: string;
+}
+
+export interface HubSpotWritebackConfig {
+  enabled: boolean;
+  field_name: string | null;
+}
+
+export interface HubSpotWritebackResponse {
+  writeback_enabled: boolean;
+  writeback_field_name: string | null;
+  last_writeback_at: string | null;
+  last_writeback_status: string | null;
+  last_writeback_error: string | null;
+  contacts_written: number;
+}
+
+export interface HubSpotWritebackTestResponse {
+  ok: boolean;
+  reason: string | null;
 }
 
 // ---- API ----
@@ -62,6 +88,25 @@ export const hubspotAPI = {
   testConnection: async (): Promise<HubSpotTestResponse> => {
     const response = await apiClient.post(
       '/api/v1/integrations/hubspot/test',
+    );
+    return response.data;
+  },
+
+  updateWriteback: async ({
+    enabled,
+    field_name,
+  }: HubSpotWritebackConfig): Promise<HubSpotWritebackResponse> => {
+    const response = await apiClient.patch(
+      '/api/v1/integrations/hubspot/writeback',
+      { enabled, field_name },
+    );
+    return response.data;
+  },
+
+  testWriteback: async (fieldName: string): Promise<HubSpotWritebackTestResponse> => {
+    const response = await apiClient.post(
+      '/api/v1/integrations/hubspot/writeback/test',
+      { field_name: fieldName },
     );
     return response.data;
   },

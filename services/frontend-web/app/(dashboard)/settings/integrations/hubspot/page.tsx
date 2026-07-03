@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 import { useAuth } from '@/contexts/AuthContext';
+import { HubSpotWritebackCard } from '@/components/settings/HubSpotWritebackCard';
 
 export default function HubSpotSettingsPage() {
   const router = useRouter();
@@ -99,6 +100,12 @@ export default function HubSpotSettingsPage() {
         contacts_matched: 0,
         arr_property_name: arrPropertyName,
         connected_at: null,
+        writeback_enabled: false,
+        writeback_field_name: null,
+        last_writeback_at: null,
+        last_writeback_status: null,
+        last_writeback_error: null,
+        contacts_written: 0,
       });
       setTokenInput('');  // clear after successful connect
     } catch (err: any) {
@@ -389,6 +396,11 @@ export default function HubSpotSettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Health-score writeback (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <HubSpotWritebackCard status={status} onStatusChange={setStatus} />
+        )}
 
         {/* Help card */}
         <Card className="animate-slide-up stagger-1">
