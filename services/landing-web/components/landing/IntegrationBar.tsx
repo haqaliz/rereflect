@@ -4,6 +4,7 @@ import { EmailIcon } from '@/components/icons/EmailIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
+import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 
 export function IntegrationBar() {
   return (
@@ -48,6 +49,12 @@ export function IntegrationBar() {
             className="[&>svg]:grayscale hover:[&>svg]:grayscale-0 transition-all duration-300 cursor-default"
           >
             <HubSpotIcon size={40} />
+          </span>
+          <span
+            aria-label="Salesforce"
+            className="[&>svg]:grayscale hover:[&>svg]:grayscale-0 transition-all duration-300 cursor-default"
+          >
+            <SalesforceIcon size={40} />
           </span>
         </div>
         <p className="text-muted-foreground text-sm">

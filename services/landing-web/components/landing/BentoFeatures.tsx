@@ -93,6 +93,7 @@ const customer360Bullets = [
   '9-factor churn risk',
   'Unified activity timeline — feedback, usage & churn',
   'Automated recovery alerts',
+  'Push health scores back to your CRM (HubSpot)',
 ];
 
 const multiModelBullets = [

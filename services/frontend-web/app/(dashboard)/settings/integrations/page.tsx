@@ -26,6 +26,7 @@ import {
   Settings as SettingsIcon,
   MessageSquare,
   Users,
+  Activity,
 } from 'lucide-react';
 import {
   Dialog,
@@ -842,6 +843,29 @@ function IntegrationsContent() {
                   </div>
                 </Link>
               )}
+
+              {/* Usage Events - Available */}
+              <Link href="/settings/usage-events">
+                <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <Activity className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Usage Events</span>
+                        <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                          Available
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Ingest product usage events to enrich Customer 360 and health scores
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
+                </div>
+              </Link>
 
               {/* Discord - Coming Soon */}
               <div className="p-4 border border-border rounded-xl bg-muted/30 opacity-60 cursor-not-allowed">

@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowRight, ChevronRight, ChevronDown, Users, DollarSign, TrendingUp, BarChart3, RefreshCw, Sparkles, Rocket, MessageSquare, Settings as SettingsIcon, Github } from 'lucide-react';
-import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
+import { ArrowRight, ChevronRight, ChevronDown, Users, DollarSign, TrendingUp, BarChart3, Sparkles, Rocket, MessageSquare, Settings as SettingsIcon, Github } from 'lucide-react';
+import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { getIntegration } from '@/lib/integrations';
 
 const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
 const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
-const integration = getIntegration('hubspot');
+const integration = getIntegration('salesforce');
 
 // Icon mapping for features
 const featureIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -18,10 +18,9 @@ const featureIconMap: Record<string, React.ComponentType<{ className?: string }>
   DollarSign,
   TrendingUp,
   BarChart3,
-  RefreshCw,
 };
 
-export default function HubSpotIntegrationPage() {
+export default function SalesforceIntegrationPage() {
   const heroRef = useRef<HTMLDivElement>(null);
   const stepsRef = useRef<HTMLDivElement>(null);
   const featuresRef = useRef<HTMLDivElement>(null);
@@ -208,12 +207,12 @@ export default function HubSpotIntegrationPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-4xl mx-auto">
             <div className="hero-badge inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-8">
-              <HubSpotIcon size={16} />
-              <span className="text-sm font-semibold text-primary">HubSpot Integration</span>
+              <SalesforceIcon size={16} />
+              <span className="text-sm font-semibold text-primary">Salesforce Integration</span>
             </div>
 
             <h1 className="hero-title text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-foreground mb-6 leading-[1.1]">
-              HubSpot +{' '}
+              Salesforce +{' '}
               <span className="bg-gradient-to-r from-primary via-chart-5 to-accent bg-clip-text text-transparent">
                 Rereflect
               </span>
@@ -418,7 +417,7 @@ export default function HubSpotIntegrationPage() {
 
             <div className="relative text-center">
               <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-6">
-                Self-host and connect HubSpot.
+                Self-host and connect Salesforce.
               </h2>
               <p className="text-xl text-white/80 mb-10 max-w-2xl mx-auto">
                 Deploy Rereflect on your own infrastructure and start enriching feedback with CRM context in minutes.

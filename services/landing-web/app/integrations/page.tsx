@@ -10,6 +10,7 @@ import { EmailIcon } from '@/components/icons/EmailIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
+import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { getAvailableIntegrations, getComingSoonIntegrations } from '@/lib/integrations';
 
 const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
@@ -31,6 +32,7 @@ export default function IntegrationsPage() {
     linear: <LinearIcon size={40} />,
     zendesk: <ZendeskIcon size={40} />,
     hubspot: <HubSpotIcon size={40} />,
+    salesforce: <SalesforceIcon size={40} />,
   };
 
   useEffect(() => {

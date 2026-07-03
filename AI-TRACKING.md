@@ -54,7 +54,7 @@
 | Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
 | Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
 | Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
-| CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), one-CRM-per-org guard | Unlocked (OSS) |
+| CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events, HubSpot health-score writeback | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), HubSpot writeback toggle card, one-CRM-per-org guard | Unlocked (OSS) |
 
 ---
 
@@ -182,7 +182,7 @@
 - [x] Match by email: link HubSpot contacts to Rereflect customers (by `customer_email`)
 - [x] Customer 360 enrichment: show CRM data on customer profile (company name, deal value, renewal date) — `CrmCompanyCard`
 - [x] Churn prediction enrichment: CRM signals in the health score via the opt-in `crm_component` (renewal date), + `crm_*` timeline events
-- [ ] Bi-directional sync: push health scores to HubSpot contact properties — **deferred (v2)**
+- [x] Bi-directional sync: push health scores to HubSpot contact properties (opt-in per org, on-change trigger + backfill, soft-pause on missing write scope/field)
 - [x] Plan gate: removed — all features unlocked in the open-source self-hosted edition
 
 #### M3.1b — Salesforce CRM Integration — COMPLETE (shipped 2026-07-01)
@@ -192,7 +192,7 @@
 - [x] Sync Account/Contact/Opportunity → company/ARR/renewal/deal (SOQL, token refresh, API-limit backoff), match by email; daily beat 03:45 UTC + manual trigger
 - [x] Health/churn signal via the shared `crm_component`; provider-tagged rows
 - [x] **One CRM connected per org at a time** — symmetric guard on both providers' connect + purge-on-disconnect
-- [ ] Bi-directional push-back + simultaneous dual-CRM — **deferred (v2)**
+- [ ] Bi-directional push-back (HubSpot shipped in M3.1; Salesforce writeback) + simultaneous dual-CRM — **deferred (v2)**
 - [x] Plan gate: removed — OSS self-hosted, all unlocked
 
 #### M3.2 — Product Usage Enrichment (2 weeks) — COMPLETE (shipped 2026-06-29)

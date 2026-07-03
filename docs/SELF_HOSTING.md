@@ -11,6 +11,8 @@ default) treats every instance as fully featured.
 - [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
 - [Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
+- [Send product-usage events](#send-product-usage-events)
+- [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment)
 - [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
 - [Production notes](#production-notes)
 
@@ -182,6 +184,72 @@ Max batch size: **1 000 events per request**. Oversized requests return `413`.
 
 Full setup docs are also available in the app under
 **Settings → Usage Events** (admin/owner only).
+
+## Connecting HubSpot CRM enrichment
+
+Rereflect can sync contacts and company data from HubSpot to enrich the Customer 360
+profile (company name, lifecycle stage, ARR, renewal date, open deals). You can also
+opt in to push customer health scores back to HubSpot as a custom contact property.
+Only one CRM (HubSpot or Salesforce) can be connected per organization at a time.
+
+### 1. Create a private-app access token in HubSpot
+
+1. Log in to HubSpot and go to **Settings → Integrations → Private apps**.
+2. Click **Create app**, give it a name (e.g., "Rereflect").
+3. Under **Scopes**, enable the following (minimum required for read access):
+   - `crm.objects.contacts.read`
+   - `crm.objects.companies.read`
+   - `crm.objects.deals.read`
+4. Click **Create app**. Copy the **Access token** (it starts with `pat-`).
+
+To enable health-score writeback (optional), also grant the write scope:
+   - `crm.objects.contacts.write`
+
+### 2. Connect from the app
+
+The token is **not** set via an environment variable — it is pasted into the app and
+stored encrypted per organization. (Encryption uses `LLM_ENCRYPTION_KEY`, which must
+already be set on the backend — see [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok).)
+
+Go to **Settings → Integrations → HubSpot** (admin/owner only) and paste the access
+token in the **Access Token** field. Click **Connect**. Rereflect will immediately
+test the token and start syncing contacts and company data.
+
+### Verify
+
+- **Settings → Integrations → HubSpot** shows connection status, sync counts, and
+  the last sync time once the first sync completes (daily, or trigger manually via
+  **Test Connection**).
+- A connected customer's **Customer 360** profile shows a **HubSpot** badge on the
+  CRM / Company card.
+
+### Enable writeback (optional)
+
+To push customer health scores back to HubSpot whenever they change, follow these steps:
+
+1. **Create a custom contact property in HubSpot:**
+   - In HubSpot, go to **Settings → Data Management → Objects → Contacts**.
+   - Click **Create property**.
+   - Set **Property type** to **Number**.
+   - Set an **Internal name** (e.g., `rereflect_health_score`). Note this name — you'll
+     need it in the app.
+   - Set the **Label** to something user-friendly (e.g., "Rereflect Health Score").
+   - Click **Create**.
+
+2. **Grant the write scope:**
+   - Go back to **Settings → Integrations → Private apps** and select the Rereflect app.
+   - Under **Scopes**, enable `crm.objects.contacts.write` and click **Save**.
+
+3. **Enable writeback in Rereflect:**
+   - In Rereflect, go to **Settings → Integrations → HubSpot**.
+   - Toggle **Enable health score writeback** on.
+   - Enter the **Property name** you created in HubSpot (e.g., `rereflect_health_score`).
+   - Click **Validate** to confirm the property exists and is writable.
+
+Health scores are pushed to HubSpot whenever a customer's score changes by 2 or more
+points. When you first enable writeback, scores for all customers are backfilled to
+HubSpot. If the token is missing the `write` scope or the property is deleted in
+HubSpot, writeback will silently pause — the inbound CRM sync remains unaffected.
 
 ## Connecting Salesforce CRM enrichment
 
