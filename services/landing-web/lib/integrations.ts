@@ -49,23 +49,23 @@ export interface Integration {
 const SHARED_FAQS: IntegrationFAQ[] = [
   {
     question: 'How long does setup take?',
-    answer: 'Less than 2 minutes. Just authorize the connection and choose which channels or conversations to monitor. Rereflect starts analyzing feedback immediately.',
+    answer: 'Usually a couple of minutes. Connect the integration, choose which channels or conversations to monitor, and Rereflect starts analyzing feedback immediately.',
   },
   {
     question: 'Is my data secure?',
-    answer: 'Yes. All data is encrypted in transit and at rest. We only read the messages you authorize — we never store raw messages, only the extracted feedback insights.',
+    answer: 'Rereflect is self-hosted — it runs on your own infrastructure, so your data never leaves it. Connection credentials are encrypted at rest, and Rereflect only reads the data you authorize.',
   },
   {
     question: 'Which plan includes integrations?',
-    answer: 'Slack, Intercom, Linear, and Email integrations are available on the Pro plan ($29/month) and above. CSV import is available on all plans including Free.',
+    answer: 'All of them. Rereflect is open-source and self-hosted, so every integration is included with no plans, seats, or paywalls — you run it on your own infrastructure.',
   },
   {
     question: 'Can I use multiple integrations at once?',
-    answer: 'Absolutely. Connect as many sources as you need — Slack, Intercom, email, and CSV all feed into the same dashboard. Rereflect automatically deduplicates and categorizes everything.',
+    answer: 'Yes. Connect as many sources as you need — Slack, Intercom, email, and CSV all feed into the same dashboard, and Rereflect automatically deduplicates and categorizes everything. (Note: only one CRM, HubSpot or Salesforce, can be connected per organization at a time.)',
   },
   {
     question: 'What if I need an integration you don\'t support yet?',
-    answer: 'We\'re always adding new integrations. Email us at support@rereflect.ca with your request and we\'ll prioritize based on demand. You can also use our webhook API to connect any tool.',
+    answer: 'Because Rereflect is open-source, you can build it yourself or request it on GitHub. You can also use the webhook API to connect any tool that can send an HTTP request.',
   },
 ];
 

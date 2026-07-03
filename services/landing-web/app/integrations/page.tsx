@@ -285,7 +285,13 @@ export default function IntegrationsPage() {
             </h2>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
+          <div
+            className={`grid gap-6 mx-auto ${
+              comingSoonIntegrations.length === 1
+                ? 'max-w-md'
+                : 'md:grid-cols-2 max-w-2xl'
+            }`}
+          >
             {comingSoonIntegrations.map((integration) => (
               <a
                 key={integration.slug}
