@@ -30,6 +30,27 @@ class HubSpotTransientError(Exception):
     """Raised on 429 / 5xx — Celery task should retry on this."""
 
 
+class HubSpotScopeError(Exception):
+    """Raised on 403 — permanent error, the token lacks the required scope."""
+
+
+class HubSpotNotFoundError(Exception):
+    """Raised on 404 — permanent error, the target contact/property doesn't exist."""
+
+
+def _format_number(value) -> str:
+    """
+    Stringify a numeric value for HubSpot's number-property write API
+    (HubSpot expects string values even for number properties).
+
+    Raises ValueError on None so a missing score fails loud instead of
+    silently writing an empty/garbage value.
+    """
+    if value is None:
+        raise ValueError("_format_number: value must not be None")
+    return str(value)
+
+
 class HubSpotClient:
     """Thin httpx wrapper for the HubSpot CRM v3 API."""
 
@@ -261,3 +282,96 @@ class HubSpotClient:
             d for d in all_deals
             if d.get("properties", {}).get("dealstage") not in closed_stages
         ]
+
+    # ------------------------------------------------------------------
+    # Writeback (contact property updates)
+    # ------------------------------------------------------------------
+
+    def update_contact_property(
+        self, contact_id: str, property_name: str, value
+    ) -> None:
+        """
+        PATCH a single contact property (e.g. a churn/health score).
+
+        HubSpot number properties must be sent as strings, so `value` is
+        passed through `_format_number` before being placed in the body.
+
+        Raises:
+            HubSpotTransientError: on 429 or 5xx (caller/task should retry).
+            HubSpotScopeError: on 403 (token lacks the required scope).
+            HubSpotNotFoundError: on 404 (contact not found).
+        """
+        body = {"properties": {property_name: _format_number(value)}}
+        resp = self._client.patch(
+            f"/crm/v3/objects/contacts/{contact_id}", json=body
+        )
+
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "10"))
+            logger.warning(
+                "hubspot_client: 429 rate limited updating contact %s; sleeping %ss",
+                contact_id,
+                retry_after,
+            )
+            time.sleep(retry_after)
+            raise HubSpotTransientError(
+                f"HubSpot rate limited updating contact {contact_id}, "
+                f"retry after {retry_after}s"
+            )
+
+        if resp.status_code >= 500:
+            raise HubSpotTransientError(
+                f"HubSpot server error {resp.status_code} updating contact {contact_id}"
+            )
+
+        if resp.status_code == 403:
+            raise HubSpotScopeError(
+                f"HubSpot scope error updating contact {contact_id} property {property_name}"
+            )
+
+        if resp.status_code == 404:
+            raise HubSpotNotFoundError(
+                f"HubSpot contact {contact_id} not found"
+            )
+
+    def get_contact_property_def(self, name: str) -> Optional[dict]:
+        """
+        Fetch the definition of a contact property, to validate its type
+        and writability before a writeback attempt.
+
+        Returns the parsed def dict (including `type`, `fieldType`,
+        `calculated`, `readOnlyValue`) on 200; returns None on 404.
+
+        Raises:
+            HubSpotTransientError: on 429 or 5xx.
+            HubSpotScopeError: on 403.
+        """
+        resp = self._client.get(f"/crm/v3/properties/contacts/{name}")
+
+        if resp.status_code == 404:
+            return None
+
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "10"))
+            logger.warning(
+                "hubspot_client: 429 rate limited fetching property def %s; sleeping %ss",
+                name,
+                retry_after,
+            )
+            time.sleep(retry_after)
+            raise HubSpotTransientError(
+                f"HubSpot rate limited fetching property def {name}, "
+                f"retry after {retry_after}s"
+            )
+
+        if resp.status_code >= 500:
+            raise HubSpotTransientError(
+                f"HubSpot server error {resp.status_code} fetching property def {name}"
+            )
+
+        if resp.status_code == 403:
+            raise HubSpotScopeError(
+                f"HubSpot scope error fetching property def {name}"
+            )
+
+        return resp.json()
