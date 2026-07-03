@@ -47,6 +47,7 @@ celery_app = Celery(
         "src.tasks.churn_calibration",
         "src.tasks.usage_metrics",
         "src.tasks.hubspot_sync",
+        "src.tasks.hubspot_writeback",
         "src.tasks.salesforce_sync",
     ],
 )

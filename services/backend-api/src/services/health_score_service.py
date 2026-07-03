@@ -275,6 +275,57 @@ def compute_health_score(org_id: int, customer_email: str, db: Session) -> dict:
     }
 
 
+def _maybe_enqueue_writeback(
+    org_id: int,
+    customer_email: str,
+    old_score: int,
+    new_score: int,
+    db: Session,
+) -> None:
+    """
+    Enqueue a HubSpot health-score writeback push when the score changes
+    meaningfully (>= 2 pts) and the org has an active, writeback-enabled
+    HubSpot integration.
+
+    This function must NEVER raise: `update_customer_health` runs both in the
+    backend (in-request, e.g. the CRM disconnect recompute path) and in the
+    worker (analysis/sync tasks), where the backend's Celery client may not be
+    importable. `get_celery_app` is imported lazily inside the try block so an
+    ImportError is swallowed the same as any other enqueue failure — logged,
+    never propagated.
+    """
+    try:
+        if abs(new_score - old_score) < 2:
+            return
+
+        from src.models.hubspot_integration import HubSpotIntegration
+
+        integ = (
+            db.query(HubSpotIntegration)
+            .filter(
+                HubSpotIntegration.organization_id == org_id,
+                HubSpotIntegration.is_active.is_(True),
+                HubSpotIntegration.writeback_enabled.is_(True),
+            )
+            .first()
+        )
+        if not integ:
+            return
+
+        from src.background.celery_client import get_celery_app
+
+        get_celery_app().send_task(
+            "src.tasks.hubspot_writeback.push_health_to_hubspot",
+            args=[org_id, customer_email],
+        )
+    except Exception as exc:
+        logger.warning(
+            "health_score_service: failed to enqueue HubSpot writeback for "
+            "org=%s email=%s: %s",
+            org_id, customer_email, exc,
+        )
+
+
 def update_customer_health(org_id: int, customer_email: str, db: Session) -> None:
     """Compute and upsert customer health score, recording history on significant changes."""
     from src.models.customer_health import CustomerHealth
@@ -346,6 +397,17 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
                 "resolution": result["resolution_component"],
                 "frequency": result["frequency_component"],
             },
+            db=db,
+        )
+
+        # CRM writeback (writeback-task-trigger aspect): enqueue a push to
+        # HubSpot when the score changes meaningfully and the org has opted
+        # in. Never raises — see _maybe_enqueue_writeback docstring.
+        _maybe_enqueue_writeback(
+            org_id=org_id,
+            customer_email=customer_email,
+            old_score=old_score,
+            new_score=new_score,
             db=db,
         )
 

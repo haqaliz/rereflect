@@ -11,7 +11,7 @@ RBAC/multi-tenancy patterns mirror tests/test_hubspot_routes.py.
 """
 import os
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
 from sqlalchemy.orm import Session
@@ -19,9 +19,11 @@ from sqlalchemy.orm import Session
 from src.models.organization import Organization
 from src.models.user import User
 from src.models.hubspot_integration import HubSpotIntegration
+from src.models.crm_enrichment import CrmEnrichment
 from src.api.auth import hash_password, create_access_token
 
 VALIDATE_TARGET = "src.api.routes.hubspot_integration.validate_writeback_field"
+GET_CELERY_TARGET = "src.api.routes.hubspot_integration._get_celery_app"
 
 # Valid 32-byte Fernet key for tests only (mirrors test_hubspot_routes.py).
 TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -294,6 +296,130 @@ class TestStatusIncludesWriteback:
 
 
 # ──────────────────────────── POST /writeback/test ────────────────────────────
+
+class TestBackfillOnEnable:
+    """Phase 3 (writeback-task-trigger, S2): enabling writeback enqueues a
+    bounded backfill push for every matched crm_enrichment row."""
+
+    def _make_enrichment(self, db, org_id, email, hubspot_contact_id="contact-x"):
+        now = datetime.utcnow()
+        row = CrmEnrichment(
+            organization_id=org_id,
+            customer_email=email,
+            hubspot_contact_id=hubspot_contact_id,
+            last_synced_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    def test_enable_enqueues_push_per_matched_customer(
+        self, client, db, test_organization, connected_integration, owner_headers
+    ):
+        for i in range(3):
+            self._make_enrichment(db, test_organization.id, f"cust{i}@example.com", f"contact-{i}")
+
+        with patch(VALIDATE_TARGET, return_value=(True, None)), \
+             patch(GET_CELERY_TARGET) as mock_get_celery:
+            mock_celery = MagicMock()
+            mock_get_celery.return_value = mock_celery
+
+            resp = client.patch(
+                "/api/v1/integrations/hubspot/writeback",
+                json={"enabled": True, "field_name": "rereflect_health_score"},
+                headers=owner_headers,
+            )
+
+        assert resp.status_code == 200
+        calls = mock_celery.send_task.call_args_list
+        assert len(calls) == 3
+        task_names = {c.args[0] for c in calls}
+        assert task_names == {"src.tasks.hubspot_writeback.push_health_to_hubspot"}
+        emails = {c.kwargs["args"][1] for c in calls}
+        assert emails == {"cust0@example.com", "cust1@example.com", "cust2@example.com"}
+
+    def test_enable_skips_rows_without_hubspot_contact_id(
+        self, client, db, test_organization, connected_integration, owner_headers
+    ):
+        self._make_enrichment(db, test_organization.id, "matched@example.com", "contact-1")
+        self._make_enrichment(db, test_organization.id, "unmatched@example.com", hubspot_contact_id=None)
+
+        with patch(VALIDATE_TARGET, return_value=(True, None)), \
+             patch(GET_CELERY_TARGET) as mock_get_celery:
+            mock_celery = MagicMock()
+            mock_get_celery.return_value = mock_celery
+
+            client.patch(
+                "/api/v1/integrations/hubspot/writeback",
+                json={"enabled": True, "field_name": "rereflect_health_score"},
+                headers=owner_headers,
+            )
+
+        calls = mock_celery.send_task.call_args_list
+        assert len(calls) == 1
+        assert calls[0].kwargs["args"][1] == "matched@example.com"
+
+    def test_disable_does_not_enqueue_backfill(
+        self, client, db, test_organization, connected_integration, owner_headers
+    ):
+        connected_integration.writeback_enabled = True
+        connected_integration.writeback_field_name = "rereflect_health_score"
+        db.commit()
+        self._make_enrichment(db, test_organization.id, "cust@example.com")
+
+        with patch(GET_CELERY_TARGET) as mock_get_celery:
+            mock_celery = MagicMock()
+            mock_get_celery.return_value = mock_celery
+
+            resp = client.patch(
+                "/api/v1/integrations/hubspot/writeback",
+                json={"enabled": False},
+                headers=owner_headers,
+            )
+
+        assert resp.status_code == 200
+        mock_get_celery.assert_not_called()
+
+    def test_backfill_bounded_at_cap(
+        self, client, db, test_organization, connected_integration, owner_headers
+    ):
+        for i in range(3):
+            self._make_enrichment(db, test_organization.id, f"cap{i}@example.com", f"contact-cap-{i}")
+
+        with patch(VALIDATE_TARGET, return_value=(True, None)), \
+             patch(GET_CELERY_TARGET) as mock_get_celery, \
+             patch("src.api.routes.hubspot_integration.WRITEBACK_BACKFILL_CAP", 2):
+            mock_celery = MagicMock()
+            mock_get_celery.return_value = mock_celery
+
+            resp = client.patch(
+                "/api/v1/integrations/hubspot/writeback",
+                json={"enabled": True, "field_name": "rereflect_health_score"},
+                headers=owner_headers,
+            )
+
+        assert resp.status_code == 200
+        assert mock_celery.send_task.call_count == 2
+
+    def test_backfill_failure_does_not_break_response(
+        self, client, db, test_organization, connected_integration, owner_headers
+    ):
+        self._make_enrichment(db, test_organization.id, "cust@example.com")
+
+        with patch(VALIDATE_TARGET, return_value=(True, None)), \
+             patch(GET_CELERY_TARGET, side_effect=RuntimeError("broker down")):
+            resp = client.patch(
+                "/api/v1/integrations/hubspot/writeback",
+                json={"enabled": True, "field_name": "rereflect_health_score"},
+                headers=owner_headers,
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["writeback_enabled"] is True
+
 
 class TestWritebackTestEndpoint:
     def test_valid_field_returns_ok(self, client, connected_integration, owner_headers):

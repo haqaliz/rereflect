@@ -109,6 +109,11 @@ class HubSpotWritebackTestResponse(BaseModel):
     reason: Optional[str] = None
 
 
+# CRM writeback (writeback-task-trigger aspect): bound on backfill-on-enable
+# fan-out so a huge org can't enqueue an unbounded burst of pushes.
+WRITEBACK_BACKFILL_CAP = 500
+
+
 # ──────────────────────── Internal helpers ───────────────────────────────────
 
 
@@ -438,6 +443,9 @@ def hubspot_configure_writeback(
     db.commit()
     db.refresh(integration)
 
+    if payload.enabled:
+        _enqueue_backfill_writeback(current_org.id, db)
+
     return HubSpotWritebackResponse(
         writeback_enabled=integration.writeback_enabled,
         writeback_field_name=integration.writeback_field_name,
@@ -446,6 +454,62 @@ def hubspot_configure_writeback(
         last_writeback_error=integration.last_writeback_error,
         contacts_written=integration.contacts_written,
     )
+
+
+def _enqueue_backfill_writeback(org_id: int, db: Session) -> int:
+    """
+    Enqueue push_health_to_hubspot once per matched crm_enrichment row
+    (i.e. rows with a hubspot_contact_id) for this org, bounded at
+    WRITEBACK_BACKFILL_CAP. Called once, right after writeback is enabled.
+
+    Never raises — a backfill enqueue failure must not turn a successful
+    PATCH /writeback into a 500. Failures are logged and swallowed.
+    """
+    from src.models.crm_enrichment import CrmEnrichment
+
+    rows = (
+        db.query(CrmEnrichment)
+        .filter(
+            CrmEnrichment.organization_id == org_id,
+            CrmEnrichment.hubspot_contact_id.isnot(None),
+        )
+        .limit(WRITEBACK_BACKFILL_CAP + 1)
+        .all()
+    )
+
+    truncated = len(rows) > WRITEBACK_BACKFILL_CAP
+    if truncated:
+        rows = rows[:WRITEBACK_BACKFILL_CAP]
+        logger.warning(
+            "HubSpot writeback backfill truncated at %d rows for org %s",
+            WRITEBACK_BACKFILL_CAP,
+            org_id,
+        )
+
+    enqueued = 0
+    try:
+        app = _get_celery_app()
+    except Exception as exc:
+        logger.warning(
+            "HubSpot writeback backfill: failed to get Celery app for org %s: %s",
+            org_id, exc,
+        )
+        return 0
+
+    for row in rows:
+        try:
+            app.send_task(
+                "src.tasks.hubspot_writeback.push_health_to_hubspot",
+                args=[org_id, row.customer_email],
+            )
+            enqueued += 1
+        except Exception as exc:
+            logger.warning(
+                "HubSpot writeback backfill: failed to enqueue for org %s / %s: %s",
+                org_id, row.customer_email, exc,
+            )
+
+    return enqueued
 
 
 @router.post(
