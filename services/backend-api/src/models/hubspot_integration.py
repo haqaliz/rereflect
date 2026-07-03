@@ -34,6 +34,15 @@ class HubSpotIntegration(Base):
     last_error = Column(Text, nullable=True)
     contacts_synced = Column(Integer, nullable=False, default=0, server_default="0")
     contacts_matched = Column(Integer, nullable=False, default=0, server_default="0")
+
+    # CRM writeback (writeback-config-api aspect): push health scores back to HubSpot
+    writeback_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    writeback_field_name = Column(String(255), nullable=True)
+    last_writeback_at = Column(DateTime, nullable=True)
+    last_writeback_status = Column(String(50), nullable=True)
+    last_writeback_error = Column(Text, nullable=True)
+    contacts_written = Column(Integer, nullable=False, default=0, server_default="0")
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
                         onupdate=datetime.utcnow)

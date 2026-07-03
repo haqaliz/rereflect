@@ -176,6 +176,46 @@ class TestModelsAndMigration:
             f"  Backend only: {backend_cols - worker_cols}"
         )
 
+    def test_worker_and_backend_hubspot_integration_columns_match(self):
+        """Worker HubSpotIntegration mirror columns must exactly match
+        backend-api model columns (writeback-config-api aspect: extends the
+        crm_enrichment-only parity coverage to HubSpotIntegration too).
+
+        Same sys.path/sys.modules swap technique as the crm_enrichment parity
+        test above.
+        """
+        import os
+
+        # Worker mirror (available in current sys.path)
+        from src.models import HubSpotIntegration as WorkerModel
+        worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+        worktree = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        backend_src = os.path.join(worktree, "services", "backend-api")
+
+        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
+        for k in saved_mods:
+            del sys.modules[k]
+
+        sys.path.insert(0, backend_src)
+        try:
+            from src.models.hubspot_integration import HubSpotIntegration as BackendModel
+            backend_cols = {c.name for c in BackendModel.__table__.columns}
+        finally:
+            sys.path.remove(backend_src)
+            for k in list(sys.modules.keys()):
+                if k == "src" or k.startswith("src."):
+                    del sys.modules[k]
+            sys.modules.update(saved_mods)
+
+        assert worker_cols == backend_cols, (
+            f"Column mismatch!\n"
+            f"  Worker only:  {worker_cols - backend_cols}\n"
+            f"  Backend only: {backend_cols - worker_cols}"
+        )
+
     def test_crm_enrichment_unique_constraint_enforced(self, db):
         """Duplicate (organization_id, customer_email) must raise IntegrityError."""
         from src.models import CrmEnrichment

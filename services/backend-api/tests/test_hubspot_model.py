@@ -66,3 +66,94 @@ class TestHubSpotIntegrationModel:
         assert row.contacts_synced == 0
         assert row.contacts_matched == 0
         assert row.is_active is True
+
+
+class TestHubSpotWritebackColumns:
+    """writeback-config-api Phase 1: writeback config/status columns."""
+
+    def test_writeback_defaults(self, db: Session, test_organization):
+        from src.models.hubspot_integration import HubSpotIntegration
+        row = HubSpotIntegration(
+            organization_id=test_organization.id,
+            access_token="encrypted_x",
+            connected_at=datetime.utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.writeback_enabled is False
+        assert row.writeback_field_name is None
+        assert row.last_writeback_at is None
+        assert row.last_writeback_status is None
+        assert row.last_writeback_error is None
+        assert row.contacts_written == 0
+
+    def test_writeback_fields_settable(self, db: Session, test_organization):
+        from src.models.hubspot_integration import HubSpotIntegration
+        row = HubSpotIntegration(
+            organization_id=test_organization.id,
+            access_token="encrypted_x",
+            connected_at=datetime.utcnow(),
+            writeback_enabled=True,
+            writeback_field_name="rereflect_health_score",
+            last_writeback_at=datetime.utcnow(),
+            last_writeback_status="ok",
+            last_writeback_error=None,
+            contacts_written=5,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.writeback_enabled is True
+        assert row.writeback_field_name == "rereflect_health_score"
+        assert row.last_writeback_status == "ok"
+        assert row.contacts_written == 5
+
+    def test_writeback_columns_on_worker_mirror(self):
+        """Worker mirror must expose the same writeback columns."""
+        from src.models.hubspot_integration import HubSpotIntegration
+        backend_cols = {c.name for c in HubSpotIntegration.__table__.columns}
+        expected = {
+            "writeback_enabled",
+            "writeback_field_name",
+            "last_writeback_at",
+            "last_writeback_status",
+            "last_writeback_error",
+            "contacts_written",
+        }
+        assert expected.issubset(backend_cols)
+
+
+class TestCrmEnrichmentWritebackColumns:
+    """writeback-config-api Phase 1: idempotency memory on crm_enrichment."""
+
+    def test_last_written_health_score_and_timestamp_nullable(
+        self, db: Session, test_organization
+    ):
+        from src.models.crm_enrichment import CrmEnrichment
+        row = CrmEnrichment(
+            organization_id=test_organization.id,
+            customer_email="writeback_columns@example.com",
+            last_synced_at=datetime.utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.last_written_health_score is None
+        assert row.last_health_written_at is None
+
+    def test_last_written_health_score_settable(self, db: Session, test_organization):
+        from src.models.crm_enrichment import CrmEnrichment
+        now = datetime.utcnow()
+        row = CrmEnrichment(
+            organization_id=test_organization.id,
+            customer_email="writeback_columns2@example.com",
+            last_synced_at=now,
+            last_written_health_score=72,
+            last_health_written_at=now,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.last_written_health_score == 72
+        assert row.last_health_written_at == now

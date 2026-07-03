@@ -34,6 +34,7 @@ from src.models.hubspot_integration import HubSpotIntegration
 from src.models.organization import Organization
 from src.models.user import User
 from src.services.crm_integration_common import another_crm_active, purge_crm_enrichment
+from src.services.hubspot_writeback_validation import validate_writeback_field
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
 logger = logging.getLogger(__name__)
@@ -70,12 +71,42 @@ class HubSpotStatusResponse(BaseModel):
     contacts_matched: int = 0
     arr_property_name: str = "annualrevenue"
     connected_at: Optional[datetime] = None
+    # CRM writeback config/status (writeback-config-api aspect)
+    writeback_enabled: bool = False
+    writeback_field_name: Optional[str] = None
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
+    contacts_written: int = 0
     # access_token is intentionally NEVER included
 
 
 class HubSpotDisconnectResponse(BaseModel):
     success: bool
     message: str
+
+
+class HubSpotWritebackRequest(BaseModel):
+    enabled: bool
+    field_name: Optional[str] = Field(default=None, min_length=1)
+
+
+class HubSpotWritebackResponse(BaseModel):
+    writeback_enabled: bool
+    writeback_field_name: Optional[str] = None
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
+    contacts_written: int = 0
+
+
+class HubSpotWritebackTestRequest(BaseModel):
+    field_name: str = Field(..., min_length=1)
+
+
+class HubSpotWritebackTestResponse(BaseModel):
+    ok: bool
+    reason: Optional[str] = None
 
 
 # ──────────────────────── Internal helpers ───────────────────────────────────
@@ -264,6 +295,12 @@ def hubspot_status(
         contacts_matched=row.contacts_matched,
         arr_property_name=row.arr_property_name,
         connected_at=row.connected_at,
+        writeback_enabled=row.writeback_enabled,
+        writeback_field_name=row.writeback_field_name,
+        last_writeback_at=row.last_writeback_at,
+        last_writeback_status=row.last_writeback_status,
+        last_writeback_error=row.last_writeback_error,
+        contacts_written=row.contacts_written,
     )
 
 
@@ -341,6 +378,104 @@ def hubspot_test(
             "HubSpot test failed for org %s: %s", current_org.id, exc
         )
         return {"success": False, "message": str(exc)}
+
+
+@router.patch(
+    "/writeback",
+    response_model=HubSpotWritebackResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_configure_writeback(
+    payload: HubSpotWritebackRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Configure per-org HubSpot writeback (push health scores back to HubSpot).
+
+    Enabling requires a `field_name`, which is validated (exists, number type,
+    writable) against HubSpot before being persisted — validation failure
+    returns 400 with a machine-readable `reason` and leaves the integration
+    disabled. Disabling never requires (or touches) the field name.
+    """
+    integration = _get_active_integration(current_org.id, db)
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active HubSpot integration found.",
+        )
+
+    if payload.enabled:
+        field_name = (payload.field_name or "").strip()
+        if not field_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="field_name is required when enabling writeback.",
+            )
+
+        plain_token = get_decrypted_token(integration)
+        ok, reason = validate_writeback_field(plain_token, field_name)
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "reason": reason,
+                    "message": f"Field '{field_name}' failed writeback validation: {reason}.",
+                },
+            )
+
+        integration.writeback_enabled = True
+        integration.writeback_field_name = field_name
+        integration.last_writeback_status = None
+        integration.last_writeback_error = None
+    else:
+        integration.writeback_enabled = False
+
+    integration.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(integration)
+
+    return HubSpotWritebackResponse(
+        writeback_enabled=integration.writeback_enabled,
+        writeback_field_name=integration.writeback_field_name,
+        last_writeback_at=integration.last_writeback_at,
+        last_writeback_status=integration.last_writeback_status,
+        last_writeback_error=integration.last_writeback_error,
+        contacts_written=integration.contacts_written,
+    )
+
+
+@router.post(
+    "/writeback/test",
+    response_model=HubSpotWritebackTestResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_writeback_test(
+    payload: HubSpotWritebackTestRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    On-demand validation of a candidate writeback field, without persisting
+    anything. Returns {"ok": true/false, "reason": "..." | null}.
+    """
+    integration = _get_active_integration(current_org.id, db)
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active HubSpot integration.",
+        )
+
+    field_name = payload.field_name.strip()
+    plain_token = get_decrypted_token(integration)
+    ok, reason = validate_writeback_field(plain_token, field_name)
+    return HubSpotWritebackTestResponse(ok=ok, reason=reason)
 
 
 # ──────────────────────── Sync trigger endpoint ──────────────────────────────

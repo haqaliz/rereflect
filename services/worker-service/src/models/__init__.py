@@ -881,6 +881,11 @@ class CrmEnrichment(Base):
     hubspot_company_id = Column(String(100), nullable=True)
     hubspot_deal_id = Column(String(100), nullable=True)
 
+    # CRM writeback (writeback-config-api aspect): idempotency memory so the
+    # writeback task doesn't re-push a health score that hasn't changed.
+    last_written_health_score = Column(Integer, nullable=True)
+    last_health_written_at = Column(DateTime, nullable=True)
+
     last_synced_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
@@ -918,6 +923,15 @@ class HubSpotIntegration(Base):
     last_error = Column(Text, nullable=True)
     contacts_synced = Column(Integer, nullable=False, default=0)
     contacts_matched = Column(Integer, nullable=False, default=0)
+
+    # CRM writeback (writeback-config-api aspect): push health scores back to HubSpot
+    writeback_enabled = Column(Boolean, nullable=False, default=False)
+    writeback_field_name = Column(String(255), nullable=True)
+    last_writeback_at = Column(DateTime, nullable=True)
+    last_writeback_status = Column(String(50), nullable=True)
+    last_writeback_error = Column(Text, nullable=True)
+    contacts_written = Column(Integer, nullable=False, default=0)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
