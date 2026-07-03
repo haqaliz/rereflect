@@ -1,46 +1,52 @@
-# Understanding — Salesforce CRM Enrichment (Phase 2 dig)
+# Understanding — feat/crm-writeback
 
-Synthesized from 3 parallel read-only dig agents (storage/health, connection/worker-sync, frontend). All `file:line` refs are in the `feat-salesforce-crm-enrichment` worktree.
+Synthesized from 4 read-only mapper agents over the worktree (backend CRM, worker sync, health recompute, frontend UI). All line refs are the worktree checkout.
 
-## What the task really is
+## What the task is really asking
 
-Add **Salesforce** as a second CRM enrichment source alongside the shipped HubSpot integration. The good news from the dig: **most of the consuming layer is already provider-neutral**, so this is mostly *additive* (a new integration + sync + UI sibling), plus a *light* generalization of the shared storage.
+Add the **outbound** half of CRM integration: push Rereflect's `health_score` for a matched
+customer back into the connected CRM (HubSpot, slice 1) as a **custom contact property**,
+opt-in per org, reusing the existing inbound (read) CRM plumbing. Today CRM data flows
+**one way** (CRM → Rereflect health `crm_component`); this adds Rereflect → CRM.
 
-## Key finding: the generalization is smaller than the card assumed
+## Affected areas (by service)
 
-- `crm_enrichment` has **7 semantic columns** (`company_name, lifecycle_stage, arr, renewal_date, deal_name, deal_stage, deal_amount`) that are already provider-neutral, + 3 HubSpot-specific ID columns (`hubspot_contact_id/company_id/deal_id`) + keys. `crm_enrichment.py:33-57`.
-- **`_compute_crm_component` reads ONLY `renewal_date`** (`health_score_service.py:108-181`, raw SQL at `:138`). So the health-score math needs **zero change** and existing HubSpot-enriched scores are trivially stable — adding a `provider` column with `server_default='hubspot'` doesn't touch the renewal read. The usage-component "weight-0 characterization" discipline still applies as a safety test, but the risk is low.
-- The serializer (`customer_profile_serializer.py::_read_crm_fields:91-130`) already returns only the 7 semantic fields to both v1 and public API — **no `hubspot_*` ID is ever exposed**. One shared serializer, one place to touch.
-- Frontend `crm_*` profile fields, `ActivityEvent` CRM types, and `eventIconMap` are **already provider-neutral** (`customers.ts:100-107,168-197`, `ActivityTimeline.tsx:45-109`).
+**backend-api**
+- `src/models/crm_enrichment.py` — per-`(org, email)` row, `provider` discriminator, `hubspot_contact_id` (the id we PATCH against). Row written by worker, read by health/profile.
+- `src/models/hubspot_integration.py` — one row/org; encrypted `access_token` + `token_hint`; **`arr_property_name` (default `annualrevenue`) is the existing precedent for a configurable HubSpot property name** → mirror it for a writeback field name. Sync-status columns (`last_synced_at`/`last_sync_status`/`last_error`) → mirror for writeback status.
+- `src/api/routes/hubspot_integration.py` — connect/status/disconnect/test/sync (prefix `/api/v1/integrations/hubspot`). Only a **GET** validation client exists here; **no PATCH/write client anywhere in backend-api**. `get_decrypted_token()` exported for the worker.
+- `src/models/org_ai_config.py` — generic per-org settings, opt-in-default-off precedent (`health_weight_crm=0`). Candidate home for the writeback flag/field-name (vs. putting it on `HubSpotIntegration`).
+- `src/services/crm_integration_common.py` — shared one-CRM guard + `purge_crm_enrichment`.
+- `src/services/health_score_service.py` — **the trigger source.** `update_customer_health()` (:278) recomputes+persists; captures `old_score`/`new_score` (:313–332) and fires `_check_health_drop_alert()` at **:335** — the natural change-detection hook. It does **not** commit (caller owns txn), and is called predominantly from the **worker**.
 
-### The only true runtime HubSpot hardcoding
-`customer_timeline_service.py::_fetch_crm_events` bakes `source="hubspot"` + "…from HubSpot" text at `:469-471,484`. This must become `provider`-driven once the discriminator exists. Everything else labeled "HubSpot" is either a comment or an intentionally provider-specific module/route/page that gets a **Salesforce sibling**, not a rename.
+**worker-service**
+- `src/tasks/hubspot_sync.py` — per-org fan-out (`sync_all_hubspot` → `sync_hubspot_org`), Fernet `_decrypt` (env `LLM_ENCRYPTION_KEY`), `HubSpotClient` context manager, retry decorator (`max_retries=3`), `HubSpotTransientError` on 429/5xx.
+- `src/clients/hubspot.py` — `HubSpotClient` (base `https://api.hubapi.com`, Bearer). **Read-only today (GET only)** — a `PATCH /crm/v3/objects/contacts/{id}` method is the new write surface.
+- `src/tasks/salesforce_sync.py` — the **invalid_grant → `is_active=False` disconnect** pattern (:372–387) to mirror if a writeback token loses scope.
+- `src/celery_app.py` — `beat_schedule` (HubSpot 03:15, Salesforce 03:45, usage-recompute 04:00 UTC) + `include=[...]` task registry. A new writeback beat/task registers here.
+- **Worker mirrors backend models (no cross-import); a CI parity test enforces column match** — any new column added to a mirrored model must be added on both sides.
 
-## Alembic
-Current head of the whole tree = **`d4e5f6a7b8c9`** (`add_model_embeddings_to_org_ai_config`). New migration chains off it. Health-weights already sum **6** components (`churn .35, sentiment .25, resolution .25, frequency .15, usage 0, crm 0`) — `categories.py:192-198`. CRM weight is `org_ai_config.health_weight_crm` (default 0). Worker mirrors every model manually; a CI test enforces `CrmEnrichment` column parity — any new column must be added to **both** `src/models/crm_enrichment.py` and `worker-service/src/models/__init__.py:856-887`.
+**frontend-web**
+- `app/(dashboard)/settings/integrations/hubspot/page.tsx` — detail page with the **ARR-property-name input + status grid + Test/Disconnect + `last_error` alert** → the exact shape to extend with a writeback toggle, field-name input, and writeback-status row.
+- `lib/api/hubspot.ts` (+ shared `lib/api-client.ts` axios w/ Bearer interceptor) — add writeback config + status calls here.
+- `components/settings/AISettingsGeneral.tsx` — clean `Switch` → PATCH persist pattern to mirror for the opt-in toggle.
 
-## Integration/connection pattern (two precedents in-repo)
-- **HubSpot** (`hubspot_integration.py`): pasted **private-app token** (`POST /connect` with `access_token`), encrypted via `src/utils/encryption.py` (`encrypt_api_key`/`decrypt_api_key`/`get_key_hint`, `LLM_ENCRYPTION_KEY`, "R6 guard" → 422 not 500). One `hubspot_integrations` row per org (`UniqueConstraint(organization_id)`). Feature gated via `require_feature("hubspot_integration")` + `plans.py` (SELF_HOSTED → always unlocked).
-- **Linear** (`linear_integration.py` + `linear.ts` + `linear/page.tsx:339-350`): **OAuth-redirect** flow (`getConnectUrl()` → `auth_url` → `window.location.href`). **This is the closer structural precedent for Salesforce's connect UX** than HubSpot's token form.
+## Design decision that must be settled (trigger model)
 
-Worker sync (`worker-service/src/tasks/hubspot_sync.py` + `clients/hubspot.py`): per-org `_sync_org` upserts `CrmEnrichment` by `(org,email)`, `_pick_renewal_deal` renewal proxy, `_call_update_health` recompute; Celery fan-out `sync_all_hubspot` + per-org `sync_hubspot_org` (retryable), beat entry `sync-hubspot-daily` at 03:15 UTC. Manual trigger `POST /integrations/hubspot/sync` → `send_task`.
+Two viable placements — the mappers split on this, so it's the #1 interview question:
+1. **Event-driven**: enqueue a writeback Celery task from `update_customer_health` right after :335 when the score changed *and* writeback is enabled. Timely; matches the brief's "push when the score recomputes". Couples health service → writeback; fires pre-commit (must enqueue, not call HubSpot inline).
+2. **Batch daily beat** (mapper-recommended for symmetry): a standalone `sync_hubspot_writeback` task on its own beat that scans `CustomerHealth` and pushes changed scores. Simplest, matches existing sync symmetry, rate-limit-friendly, decoupled; less timely (up to 24h lag).
 
-## What will NOT transfer from HubSpot (Salesforce divergences)
-1. **Auth**: HubSpot = long-lived static bearer. Salesforce = OAuth2 with a **refresh token** + short-lived access tokens that must be refreshed before each sync → needs an encrypted `refresh_token` column + a refresh step in the client. (See decision D1.)
-2. **`instance_url`** (per-org Salesforce base URL, returned at token exchange) replaces `hub_id`/`portal_name`; the client base URL is per-instance, not a fixed constant.
-3. **SOQL over REST Query API** (`/services/data/vXX.X/query?q=…`, pagination via `nextRecordsUrl`) replaces HubSpot's associations + batch/read. Simpler in one way: `Contact.AccountId` is a direct FK (no associations round-trip). Objects: Account/Contact/Opportunity ↔ Company/Contact/Deal.
-4. **Rate limiting**: Salesforce = rolling daily API quota (`Sforce-Limit-Info` header / `/limits`), not per-request `Retry-After`.
-5. **ARR**: Salesforce `Account.AnnualRevenue` is standard — the configurable `arr_property_name` knob may be unnecessary.
+## Ambiguities / open questions (for the interview)
 
-## Open decisions to resolve in the interview
-- **D1 — Salesforce auth flow.** Web-server OAuth redirect (mirrors Linear; needs the operator to set a redirect URI in their Connected App) vs. **JWT Bearer server-to-server** (headless, no redirect — better fit for self-host, but needs a cert/private-key on the Connected App) vs. a pasted session/access token (simplest, mirrors HubSpot's self-host rationale, but Salesforce tokens are short-lived). NOTE: HubSpot deliberately avoided OAuth *for self-hosting reasons* — but Linear proves redirect OAuth works in this product. **Primary decision.**
-- **D2 — Storage strategy.** (a) **Separate `salesforce_integrations` table** (mirrors HubSpot, zero constraint changes, lowest risk) vs (b) unified `crm_integrations` with `UniqueConstraint(org, provider)`. Recommend (a) for slice 1.
-- **D3 — One CRM per org, or both at once?** `crm_enrichment` is unique on `(org, email)` — if both HubSpot and Salesforce enrich the same customer they collide. Options: one-CRM-connected-at-a-time (simplest), last-writer-wins per customer, or add `provider` to the enrichment unique key + reconciliation. Interacts with D2.
-- **D4 — Salesforce field mapping.** ARR ← `Account.AnnualRevenue`; renewal_date ← ? (Opportunity `CloseDate` of the open renewal? a custom field? Contract end date?); deal_stage ← `Opportunity.StageName`; deal_amount ← `Opportunity.Amount`; renewal deal pick ← mirror `_pick_renewal_deal` (open, has close date, highest amount).
-- **D5 — Sync trigger.** Scheduled Celery beat (mirror HubSpot daily) + manual trigger; pull-only; polling (no streaming/Platform Events in slice 1). Pick an unused UTC beat slot (03:15 taken by HubSpot; 03:00 by calibration).
+- Trigger model (above): event-driven vs. daily batch for slice 1.
+- Config home: `HubSpotIntegration` (per-integration, mirrors `arr_property_name`) vs. `OrgAIConfig` (generic settings).
+- Field provisioning: auto-create the HubSpot custom property via API on enable, vs. require the operator to create it and just **detect/validate** presence (safer, less scope).
+- HubSpot object: contact property (matches the email-based read side) vs. company. Default: **contact**.
+- Idempotency: skip the PATCH when the property already equals the current score (avoid churn + rate-limit waste).
+- Failure surface: where "missing write scope / field not found / last pushed OK@T" status lives (writeback-status columns on the integration + rendered on the detail page).
+- Missing write scope handling: mirror Salesforce's invalid_grant disconnect, or a softer "writeback paused, fix scope" status that leaves the read sync intact?
 
-## Affected services
-- `backend-api`: new `salesforce_integration.py` route + model + migration (provider column on crm_enrichment + salesforce_integrations table); `_fetch_crm_events` provider fix; optional `crm_provider` on serializer/responses; `plans.py` feature id.
-- `worker-service`: new `clients/salesforce.py` + `tasks/salesforce_sync.py`; model mirrors; `celery_app.py` include + beat.
-- `frontend-web`: new `lib/api/salesforce.ts`, integrations tile, `settings/integrations/salesforce/page.tsx` (Linear-OAuth-style connect), optional `SalesforceIcon.tsx`, 2 copy fixes.
-- `analysis-engine`: unaffected.
+## No contradictions found
+
+The brief matches the code: writeback genuinely does not exist, the read-side plumbing is present and provider-generalized, and the `arr_property_name` + sync-status precedents make a symmetric write path low-risk. The only real cost centers are the new PATCH client + the trigger-model choice.
