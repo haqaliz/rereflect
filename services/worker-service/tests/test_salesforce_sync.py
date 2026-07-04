@@ -798,6 +798,54 @@ class TestSyncSalesforceOrgBody:
 
 
 # ---------------------------------------------------------------------------
+# TestModelsAndMigration (push-task-trigger: SalesforceIntegration parity)
+# ---------------------------------------------------------------------------
+
+
+class TestModelsAndMigration:
+    def test_worker_and_backend_salesforce_integration_columns_match(self):
+        """Worker SalesforceIntegration mirror columns must exactly match
+        backend-api model columns (push-task-trigger aspect: extends the
+        crm_enrichment/HubSpotIntegration parity coverage to
+        SalesforceIntegration too, now that the writeback task reads/writes
+        its writeback_* columns).
+
+        Same sys.path/sys.modules swap technique as
+        test_hubspot_sync.py::TestModelsAndMigration.
+        """
+        import os
+
+        from src.models import SalesforceIntegration as WorkerModel
+        worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+        worktree = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        backend_src = os.path.join(worktree, "services", "backend-api")
+
+        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
+        for k in saved_mods:
+            del sys.modules[k]
+
+        sys.path.insert(0, backend_src)
+        try:
+            from src.models.salesforce_integration import SalesforceIntegration as BackendModel
+            backend_cols = {c.name for c in BackendModel.__table__.columns}
+        finally:
+            sys.path.remove(backend_src)
+            for k in list(sys.modules.keys()):
+                if k == "src" or k.startswith("src."):
+                    del sys.modules[k]
+            sys.modules.update(saved_mods)
+
+        assert worker_cols == backend_cols, (
+            f"Column mismatch!\n"
+            f"  Worker only:  {worker_cols - backend_cols}\n"
+            f"  Backend only: {backend_cols - worker_cols}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # TestCeleryTaskRegistration
 # ---------------------------------------------------------------------------
 

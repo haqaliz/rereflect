@@ -964,6 +964,20 @@ class SalesforceIntegration(Base):
     last_error = Column(Text, nullable=True)
     contacts_synced = Column(Integer, nullable=False, default=0)
     contacts_matched = Column(Integer, nullable=False, default=0)
+
+    # CRM writeback (writeback-config-api / push-task-trigger aspects): push
+    # health scores back to Salesforce. Mirrors
+    # src/models/salesforce_integration.py on the backend — column parity
+    # required for the worker's push_health_to_salesforce task to read/write
+    # these fields (see docstring on CrmEnrichment above re: no shared
+    # package enforcing consistency).
+    writeback_enabled = Column(Boolean, nullable=False, default=False)
+    writeback_field_name = Column(String(255), nullable=True)
+    last_writeback_at = Column(DateTime, nullable=True)
+    last_writeback_status = Column(String(50), nullable=True)
+    last_writeback_error = Column(Text, nullable=True)
+    contacts_written = Column(Integer, nullable=False, default=0)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
