@@ -1,134 +1,103 @@
-# Understanding — feat/jira-integration
+# Understanding — feat/salesforce-crm-writeback
 
-Synthesized from 3 read-only mapper agents over the worktree checkout: (1) the shipped **Linear**
-integration blueprint, (2) the shipped **HubSpot** token-paste connection shape, (3) the
-**feedback-source + create-issue** wiring. All line refs are the worktree checkout on
-`feat/jira-integration` (branched from `origin/master`).
+Synthesized from 4 read-only mapper agents over the worktree checkout: (1) the shipped **HubSpot
+writeback** backend, (2) the shipped **Salesforce** inbound-enrichment client + connection, (3) the
+provider-generalized **CRM read layer + health trigger seam**, (4) the **frontend** writeback card +
+Salesforce settings page. All file:line citations below are verified on `feat/salesforce-crm-writeback`
+(= `origin/master` @ `c44947e`).
 
-## What the task is really asking
+---
 
-Add a **Jira Cloud** integration to Rereflect so an operator can (a) connect their Jira site with a
-pasted **Atlassian API token** (email + token, HTTP Basic auth — **not** OAuth 3LO), (b) **create a
-Jira issue from a feedback item**, and (c) have `jira` appear as a **feedback-source type**. Mirror
-the *structure* of the shipped Linear integration, but take **auth + encryption from the HubSpot
-token-paste precedent**, not from Linear's OAuth flow.
+## What the task really asks
 
-## The single most important structural insight
+Add **Salesforce health-score writeback** (push a customer's Rereflect health score into a Salesforce
+field), by **mirroring the already-shipped HubSpot writeback** and **generalizing the single hardcoded
+trigger seam**. Health-score, single-field, off-by-default, idempotent, OSS-unlocked. Everything on the
+Salesforce *read* side (OAuth, client, sync, model, one-CRM guard) already ships — this slice is the
+outbound half.
 
-The codebase has **two independent, decoupled wiring points**, and they share no code:
+## Big favorable findings (de-risk the caveats)
 
-- **(A) Feedback SOURCE type** — just enumerating `jira` so it's selectable. For a create-issue-only
-  slice, this is *type registration only* (backend `valid_types` + `/types` entry with
-  `requires_integration=False`, frontend icon/color maps + wizard branch). **Inbound Jira
-  ingestion (worker `source_events.py` matching) is NOT required** and is out of scope.
-- **(B) Create-issue flow** — feedback → Jira issue. Fully separate from (A).
+1. **No reconnect needed — the OAuth scope is already write-capable.** The Salesforce connect flow
+   requests `SALESFORCE_SCOPE = "refresh_token offline_access api"`
+   (`backend-api/src/api/routes/salesforce_integration.py:108`, used at `:341`). The `api` scope is
+   Salesforce's full REST scope and permits sObject `PATCH`. Existing connections already carry it.
+2. **Idempotency memory is already provider-agnostic.** `crm_enrichment` already has
+   `last_written_health_score` + `last_health_written_at` (`models/crm_enrichment.py:59-60`) — the same
+   columns HubSpot writeback uses. Reuse them; no new idempotency schema.
+3. **One-CRM-per-org guard is symmetric and shipped.** `another_crm_active(...)`
+   (`services/crm_integration_common.py:18-73`) is enforced on both connect paths, so at most one
+   provider is ever active. A simple provider-dispatch in the trigger is sufficient — no dual-CRM
+   reconciliation.
 
-The brief asks for both B and "add `jira` as a feedback-source type", so **A = the cheap type
-registration only** (no inbound event pipeline). This is the scope boundary to confirm in the interview.
+## The trigger seam to generalize (the crux)
 
-## Auth & encryption — take from HubSpot, NOT Linear (critical)
+`health_score_service.py:278` `_maybe_enqueue_writeback(...)` is **hardcoded to HubSpot**: it queries
+`HubSpotIntegration` (active + `writeback_enabled`) and `send_task("src.tasks.hubspot_writeback.push_health_to_hubspot", [org_id, email])`. Called from `update_customer_health` at `:406`, **existing-customer branch only** (new customers never enqueue), guarded by `abs(new-old) < 2` skip. It never raises (broad try/except-log).
 
-- **Linear stores its token in PLAINTEXT** despite a misleading "Fernet-encrypted" column comment
-  (route stores raw at `linear_integration.py:412,428`; reads raw at `:494,:627,:744`). **Do not
-  copy that.** Use `src/utils/encryption.py` → `encrypt_api_key` / `decrypt_api_key` / `get_key_hint`
-  (Fernet, env `LLM_ENCRYPTION_KEY`), exactly as HubSpot/Salesforce do.
-- Jira's one pasted credential = **two stored values**: `email` (plaintext, not secret) +
-  `api_token` (Fernet-encrypted). Plus `site_url` (e.g. `https://acme.atlassian.net`) and optionally
-  `cloud_id`/`account_id`/`display_name`.
-- Auth header: **HTTP Basic** `base64(email:api_token)` (httpx `auth=(email, token)`), against
-  `https://{site}.atlassian.net/rest/api/3/...` — vs Linear's `Bearer` + GraphQL, vs HubSpot's Bearer.
-- Validate on connect via `GET /rest/api/3/myself` (mirror HubSpot's `_validate_hubspot_token`
-  error mapping: 401/403 → 422 "invalid or lacks permissions"; other HTTP → 502; network → 502).
-  Encryption-key-unset → return **422**, never 500 (HubSpot "R6 safeguard", `hubspot_integration.py:212-222`).
+→ Generalize this to also dispatch `src.tasks.salesforce_writeback.push_health_to_salesforce` when an
+active writeback-enabled `SalesforceIntegration` exists. Must keep `test_health_writeback_enqueue.py`
+green (HubSpot path unchanged) and preserve the `<2` threshold + the existing-customer-only behavior for
+both providers.
 
-## Jira is NOT a CRM — skip the one-CRM guard
+## The 6 mirror areas (HubSpot → Salesforce), with anchors
 
-HubSpot/Salesforce share a mutual-exclusion (`crm_integration_common.another_crm_active` +
-`purge_crm_enrichment`). **Jira must NOT participate** — a Jira connection coexists with a CRM. Do
-not call `another_crm_active` from Jira connect, do not add Jira to that function. One-per-org for
-Jira itself is still enforced by a `UniqueConstraint(organization_id)` on the Jira table.
+| # | Area | Shipped HubSpot anchor | Salesforce gap to build |
+|---|---|---|---|
+| 1 | **Writeback config columns** | `models/hubspot_integration.py:38-44` (`writeback_enabled`, `writeback_field_name`, `last_writeback_at/status/error`, `contacts_written`) | `models/salesforce_integration.py` ends at `contacts_matched` (`:38`) — add the same 6 columns + Alembic migration (precedent `9f56f9a4f999_add_salesforce_integrations_table.py`) |
+| 2 | **Matched contact id + idempotency** | `crm_enrichment.py:53-55` `hubspot_contact_id`; idempotency `:59-60` (reuse) | **No `salesforce_contact_id`.** Salesforce sync throws Contact.Id away (`worker/src/tasks/salesforce_sync.py:145-161` upsert). Add a `salesforce_contact_id` column (+ worker-model mirror + migration) and populate it in `_upsert_enrichment` |
+| 3 | **Field validation service** | `services/hubspot_writeback_validation.py` — `validate_writeback_field(token, name) -> (bool, reason)`; GETs `/crm/v3/properties/contacts/{name}`; checks `type=="number"`, not calculated, not read-only | New `salesforce_writeback_validation.py` — validate via Salesforce **sObject describe** (`/services/data/vXX/sobjects/Contact/describe`): field exists, `updateable==true`, numeric type (`double`/`int`/`currency`/`percent`). Same `(bool, reason)` contract |
+| 4 | **Client PATCH + describe** | `worker/src/clients/hubspot.py:290` `update_contact_property` (`PATCH /crm/v3/objects/contacts/{id}`), `:337` `get_contact_property_def` | `worker/src/clients/salesforce.py` is query-only. Add `update_contact_field(id, field, value)` (`PATCH /services/data/{ver}/sobjects/Contact/{id}`, JSON body — **do NOT stringify** the number like HubSpot's `_format_number`) + a `describe_object`/field-def method. Reuse `_refresh`, `SalesforceTransientError`/`SalesforceAuthError`, `_validate_sf_id` |
+| 5 | **Routes** | `routes/hubspot_integration.py`: `PATCH /writeback` (`:396`), `POST /writeback/test` (`:523`), writeback fields on `GET /status` (`:303-308`), inline backfill-on-enable `_enqueue_backfill_writeback` (`:459-512`, cap 500) | Mirror under `/api/v1/integrations/salesforce`, `require_admin_or_owner` + `require_feature("salesforce_integration")` (feature gate is an unlocked no-op). 422 on enable-without-field; 400 with `{reason, message}` on validation fail (leave disabled) |
+| 6 | **Push task** | `worker/src/tasks/hubspot_writeback.py:205` `push_health_to_hubspot` (+ body `:60`): gating no-ops, skip-if-unchanged (`:105-111`), soft-pause never sets `is_active=False`, retry on transient; registered `celery_app.py:50` | New `salesforce_writeback.py` `push_health_to_salesforce` mirroring all of it; register in `worker/src/celery_app.py` include. Resolve the target Contact.Id from `crm_enrichment.salesforce_contact_id` (fall back to re-query-by-email if null, for rows synced before this slice) |
 
-## Slice 1 likely needs NO worker changes
+## Frontend (mirror, tightly scoped)
 
-Create-issue is a **synchronous** API call (the Linear `POST /issues` route calls the client inline;
-no Celery). Unlike HubSpot (daily sync beat + worker client + backend↔worker model mirror), a
-create-issue-only Jira slice does its work in-request. → **No worker task, no worker model mirror, no
-beat schedule** for slice 1. (Confirm: only add a worker mirror if we later add background Jira sync.)
+- **Create** `components/settings/SalesforceWritebackCard.tsx` mirroring
+  `components/settings/HubSpotWritebackCard.tsx` (238 lines): Switch(enable) + field Input + Validate
+  button + status grid + last-error alert; refetch-on-change (never optimistic); `null` when
+  `!status.connected`. Swap copy + default field name (`Rereflect_Health_Score__c`, SF custom-field
+  `__c` suffix).
+- **Edit** `lib/api/salesforce.ts` (66 lines): extend `SalesforceConnectionStatus` with the 6 writeback
+  fields (mirror `hubspot.ts:17-24`); add `updateWriteback` (`PATCH .../salesforce/writeback`) +
+  `testWriteback` (`POST .../salesforce/writeback/test`) + 3 interfaces.
+- **Edit** `app/(dashboard)/settings/integrations/salesforce/page.tsx` (431 lines): render
+  `<SalesforceWritebackCard status={status} onStatusChange={setStatus} />` between the connection Card
+  (~`:368`) and the Help Card (~`:371`), gated `status?.connected && isAdminOrOwner` (mirrors HubSpot
+  page `:400-403`). No integrations-index tile change (HubSpot doesn't surface writeback there either).
 
-## Affected areas (by service) — the mirror targets
+## Must-not-regress (characterization)
 
-**backend-api (CREATE)**
-- `src/models/jira_integration.py` — new. Slice-1-minimal: `JiraIntegration` (connection, one-per-org
-  `UniqueConstraint`, encrypted `api_token` + plaintext `email` + `site_url`, `token_hint`, `is_active`,
-  `connected_by_user_id`, `connected_at`, status cols `last_synced_at`/`last_sync_status`/`last_error`)
-  + `FeedbackJiraIssue` (mirror `FeedbackLinearIssue`: `feedback_id`, `organization_id`, `jira_issue_id`,
-  `jira_issue_key` e.g. "PROJ-142", `jira_issue_url`, `jira_issue_title`, `created_by_user_id`). Register
-  in `src/models/__init__.py`. **Defer** Linear's TeamMapping/StatusMapping tables unless mapping UI is in scope.
-- `src/services/jira_client.py` — new. REST (not GraphQL), Basic auth, per-site base URL. Methods:
-  `validate`(myself), `get_projects`, `get_issue_types`(per project), `create_issue`. Custom error
-  taxonomy (mirror HubSpot's transient/scope/notfound). **No** create_webhook/delete_webhook.
-- `src/api/routes/jira_integration.py` — new. Prefix `/api/v1/integrations/jira`. **POST `/connect`**
-  (accept pasted email+token+site, validate, encrypt, store; token NEVER in response),
-  `GET /status`, `DELETE /disconnect` (soft `is_active=False`), `POST /test`, proxy `GET /projects`,
-  `GET /issuetypes`, and **`POST /issues`** (verify feedback ownership, duplicate check → 200
-  `warning:"duplicate"` unless `force`, call client, store `FeedbackJiraIssue`, add timeline event
-  `jira_issue_created`) + `GET /issues`.
-- `alembic/versions/*_add_jira_integration_tables.py` — new, down_revision = current head; keep it
-  **clean** (Linear's migration has unrelated auto-gen alter_column noise — don't replicate).
-- Tests: `tests/test_jira_client.py`, `test_jira_connection.py` (token-paste, replaces oauth),
-  `test_jira_issues.py`, `test_jira_models.py` (incl. one-per-org constraint). Mock the client at the
-  route module (`patch("src.api.routes.jira_integration.JiraClient")`), `unittest.mock` — the repo pattern.
+`tests/test_crm_provider_generalization.py` — keep byte-identical:
+`compute_health_score()` → `health_score==47`, `crm_component==pytest.approx(25.0)`, `risk_level=="at_risk"`
+(`:81-95`); the 7 `crm_*` serializer values (`:147-156`). `_compute_crm_component`
+(`health_score_service.py:108-181`) reads only `renewal_date` with **no provider filter** — adding
+`salesforce_contact_id` / writeback columns must not touch it. Worker-model column parity for
+`CrmEnrichment` is asserted by a test — mirror any new column in `worker/src/models/`.
 
-**backend-api (MODIFY)**
-- `src/api/main.py` — `include_router(jira_integration.router)`.
-- `src/api/routes/feedback_sources.py` — add `"jira"` to `valid_types` (L269) + a `SourceTypeInfo`
-  in `list_source_types` (L157-203) with `requires_integration=False` (own-auth, like Linear). No
-  worker `source_events.py` change (out of scope).
-- `src/config/plans.py` — **OSS unlocked**: either omit `require_feature` on Jira routes, or add
-  `"jira_integration": "free"` (HubSpot does the latter — the feature gate becomes a no-op while
-  keeping the RBAC `require_admin_or_owner` gate). **Do NOT** map it to Pro like Linear does.
+## Contradictions / risks surfaced
 
-**frontend-web (CREATE/MODIFY)**
-- `lib/api/jira.ts` — new (mirror `linear.ts` but connect via token POST, not `getConnectUrl`).
-- `app/(dashboard)/settings/integrations/jira/page.tsx` — new detail page; **not-connected view is a
-  token-paste form** (mirror HubSpot's `settings/integrations/hubspot/page.tsx`: password Input +
-  show/hide, site + email inputs, connect error alert; connected view = status grid + Test/Disconnect).
-- `app/(dashboard)/settings/integrations/page.tsx` — add a Jira tile + status fetch in the
-  `Promise.allSettled` block.
-- `app/(dashboard)/feedbacks/[id]/create-issue/page.tsx` — **activate the existing static "JIRA –
-  Coming soon" tile (L298-312)**; add `jiraAPI.getStatus()` discovery, a Jira configure sub-form
-  (project + issue type + summary + description), submit + done branches (issue key / browse URL).
-- `components/icons/JiraIcon.tsx` — new. Optionally mirror source-wizard icon/color maps if Jira-as-source UI is in scope.
-- If Jira-as-source: mirror `linear` special-casing across the 4 `feedback-sources/*` pages.
+- **Contact-id gap (real dependency):** writeback needs a Salesforce record to PATCH. Today none is
+  persisted. Chosen approach: add `salesforce_contact_id`, populate in sync, and have the push task
+  re-query by email when it's null (so the feature works before a full re-sync, and backfill-on-enable
+  can enqueue rows too). This is the one net-new piece beyond a pure HubSpot mirror.
+- **Field-type semantics differ:** HubSpot's `type=="number"` check does not map to Salesforce. SF uses
+  the describe API's `updateable` flag + numeric `type` set. Validation logic must be SF-specific.
+- **Number formatting differs:** SF REST accepts a JSON number; do not copy HubSpot's stringification.
+- **`SalesforceIntegration` has no `writeback_enabled`** — needed for symmetric gating in the trigger.
 
-**landing-web (CREATE, optional)**
-- `lib/integrations.ts` — add a `jira` entry (copy HubSpot's token-paste setupSteps wording).
-- `app/integrations/jira/page.tsx` + `components/icons/JiraIcon.tsx`.
+## Open questions for the interview (seed)
 
-## Ambiguities / open questions (for the interview)
-
-1. **Scope of "feedback-source type"**: confirm A = type registration only (selectable in wizard),
-   NOT inbound Jira→feedback ingestion. (Recommended: registration only for slice 1.)
-2. **Mapping tables**: skip Linear-style project/status **mapping** config for slice 1 and just pick
-   project + issue type live in the create-issue wizard? (Recommended: skip, fetch live.)
-3. **AI title/description generation**: Linear offers BYOK-LLM issue content gen. Include for Jira
-   slice 1 or defer? (Leaning defer — keep slice thin; user provides summary/description.)
-4. **Site identification**: store full `site_url` the operator pastes, or resolve `cloud_id` via
-   `/oauth/token/accessible-resources` (that endpoint needs OAuth — with API-token Basic auth we just
-   use `https://{site}.atlassian.net` directly). (Recommended: store `site_url`, call it directly.)
-5. **Duplicate handling**: reuse Linear's "already linked → 200 warning unless force" pattern? (Yes.)
-6. **Plan-gate style**: omit `require_feature` entirely vs add `jira_integration` to the free plan.
-   (Either is "unlocked"; HubSpot's add-to-free keeps the pattern uniform.)
-7. **Landing page**: in scope for this feature or a follow-up? (Low-risk, optional.)
-
-## Contradiction / risk flags
-
-- **Brief vs code — encryption**: the brief says "follow Linear as the blueprint", but Linear stores
-  the token in plaintext. Following Linear *literally* would ship an insecure secret at rest. Resolved
-  by the brief's own steer ("copy structure, not auth mechanism") → use HubSpot encryption. Flagged so
-  the PRD makes it explicit.
-- **Atlassian Cloud vs Server/DC**: only Cloud (`*.atlassian.net`, REST v3, API-token Basic auth) is
-  in scope. Server/DC (different base URL, PAT/Bearer) and 3LO OAuth are **deferred v2** per the brief.
-- **No status sync without webhooks**: token-paste v1 ships no inbound webhook (HubSpot/Salesforce
-  ship none either). The created issue's live status won't auto-update in Rereflect — acceptable for
-  slice 1; note it as a known limitation.
+1. **Write target — Contact vs Account?** Read side matches by `Contact.Email`, health is per-email →
+   **Contact** field is the natural, consistent target. Confirm (Account would need aggregation).
+2. **Config home** — mirror HubSpot by adding `writeback_*` columns to `SalesforceIntegration`
+   (symmetric, no cross-provider schema) vs a shared generalized writeback-config table. Recommend
+   **mirror on the model** (matches slice-1 precedent; slice-3 CRMs stay cheap by copying the pattern).
+3. **Contact-id resolution** — persist `salesforce_contact_id` (populate in sync) **with** a
+   re-query-by-email fallback in the push task (recommended), vs re-query-only (simpler, one extra SOQL
+   per push, no schema/sync change). Recommend persist+fallback.
+4. **Numeric field types accepted** — `double`/`int`/`currency`/`percent` via describe `updateable`?
+   Confirm the exact allowed set + whether text fields are rejected (mirror HubSpot's `wrong_type`).
+5. **Default field name** — `Rereflect_Health_Score__c` (SF custom-field convention). Confirm.
+6. **Backfill on enable** — mirror HubSpot's inline enqueue over `crm_enrichment` rows with
+   `provider='salesforce'` (cap 500), skipping rows with no resolvable contact id. Confirm cap reuse.
