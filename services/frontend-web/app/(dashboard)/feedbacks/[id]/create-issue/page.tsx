@@ -40,8 +40,22 @@ import {
   LinearIssue,
   LINEAR_PRIORITY_LABELS,
 } from '@/lib/api/linear';
+import {
+  jiraAPI,
+  JiraConnectionStatus,
+  JiraProject,
+  JiraIssueType,
+  JiraLinkedIssue,
+  CreateJiraIssueResponse,
+} from '@/lib/api/jira';
+import {
+  isDuplicateJiraResponse,
+  getJiraCreateIssueErrorMessage,
+  isStaleJiraTokenStatus,
+} from '@/lib/jiraIssueWizard';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { useAuth } from '@/contexts/AuthContext';
+import { JiraIcon } from '@/components/icons/JiraIcon';
 
 type Step = 'select-integration' | 'configure' | 'done';
 
@@ -76,6 +90,15 @@ interface FormState {
   labelIds: string[];
 }
 
+interface JiraFormState {
+  projectId: string;
+  issueTypeId: string;
+  summary: string;
+  description: string;
+}
+
+type SelectedIntegration = 'linear' | 'jira' | null;
+
 function CreateIssueContent() {
   const router = useRouter();
   const params = useParams();
@@ -83,6 +106,7 @@ function CreateIssueContent() {
   const feedbackId = Number(params.id);
 
   const [currentStep, setCurrentStep] = useState<Step>('select-integration');
+  const [selectedIntegration, setSelectedIntegration] = useState<SelectedIntegration>(null);
   const [feedback, setFeedback] = useState<FeedbackItem | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<LinearConnectionStatus | null>(null);
   const [statusLoaded, setStatusLoaded] = useState(false);
@@ -103,7 +127,26 @@ function CreateIssueContent() {
     labelIds: [],
   });
 
+  // Jira state
+  const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null);
+  const [jiraStatusLoaded, setJiraStatusLoaded] = useState(false);
+  const [jiraProjects, setJiraProjects] = useState<JiraProject[]>([]);
+  const [jiraIssueTypes, setJiraIssueTypes] = useState<JiraIssueType[]>([]);
+  const [jiraExistingIssues, setJiraExistingIssues] = useState<JiraLinkedIssue[]>([]);
+  const [jiraDuplicateExisting, setJiraDuplicateExisting] = useState<
+    NonNullable<CreateJiraIssueResponse['existing_issues']> | null
+  >(null);
+  const [jiraReconnectNeeded, setJiraReconnectNeeded] = useState(false);
+  const [jiraCreatedIssue, setJiraCreatedIssue] = useState<CreateJiraIssueResponse | null>(null);
+  const [jiraForm, setJiraForm] = useState<JiraFormState>({
+    projectId: '',
+    issueTypeId: '',
+    summary: '',
+    description: '',
+  });
+
   const isConnected = connectionStatus?.connected && connectionStatus?.is_active;
+  const isJiraConnected = jiraStatus?.connected && jiraStatus?.is_active;
 
   useEffect(() => {
     feedbackAPI.get(feedbackId)
@@ -112,6 +155,11 @@ function CreateIssueContent() {
         setForm(prev => ({
           ...prev,
           title: fb.extracted_issue || '',
+          description: fb.text || '',
+        }));
+        setJiraForm(prev => ({
+          ...prev,
+          summary: fb.extracted_issue || '',
           description: fb.text || '',
         }));
       })
@@ -123,6 +171,13 @@ function CreateIssueContent() {
       .then(setConnectionStatus)
       .catch(() => {})
       .finally(() => setStatusLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    jiraAPI.getStatus()
+      .then(setJiraStatus)
+      .catch(() => {})
+      .finally(() => setJiraStatusLoaded(true));
   }, []);
 
   const loadFormData = useCallback(async () => {
@@ -141,10 +196,10 @@ function CreateIssueContent() {
   }, [feedbackId]);
 
   useEffect(() => {
-    if (currentStep === 'configure' && isConnected) {
+    if (currentStep === 'configure' && selectedIntegration === 'linear' && isConnected) {
       loadFormData();
     }
-  }, [currentStep, isConnected, loadFormData]);
+  }, [currentStep, selectedIntegration, isConnected, loadFormData]);
 
   useEffect(() => {
     if (!form.teamId) {
@@ -156,8 +211,75 @@ function CreateIssueContent() {
       .catch(() => {});
   }, [form.teamId]);
 
+  const loadJiraFormData = useCallback(async () => {
+    try {
+      const [p, linked] = await Promise.all([
+        jiraAPI.getProjects(),
+        jiraAPI.getLinkedIssues(feedbackId),
+      ]);
+      setJiraProjects(p);
+      setJiraExistingIssues(linked);
+    } catch {
+      // ignore
+    }
+  }, [feedbackId]);
+
+  useEffect(() => {
+    if (currentStep === 'configure' && selectedIntegration === 'jira' && isJiraConnected) {
+      loadJiraFormData();
+    }
+  }, [currentStep, selectedIntegration, isJiraConnected, loadJiraFormData]);
+
+  useEffect(() => {
+    if (!jiraForm.projectId) {
+      setJiraIssueTypes([]);
+      return;
+    }
+    jiraAPI.getIssueTypes(jiraForm.projectId)
+      .then(setJiraIssueTypes)
+      .catch(() => {});
+  }, [jiraForm.projectId]);
+
   const handleSelectLinear = () => {
+    setSelectedIntegration('linear');
     setCurrentStep('configure');
+  };
+
+  const handleSelectJira = () => {
+    setSelectedIntegration('jira');
+    setCurrentStep('configure');
+  };
+
+  const handleJiraSubmit = async (force = false) => {
+    setSubmitting(true);
+    setCreateError('');
+    setJiraReconnectNeeded(false);
+    if (!force) {
+      setJiraDuplicateExisting(null);
+    }
+    try {
+      const response = await jiraAPI.createIssue({
+        feedback_id: feedbackId,
+        project_id: jiraForm.projectId,
+        issue_type_id: jiraForm.issueTypeId,
+        summary: jiraForm.summary,
+        description: jiraForm.description || undefined,
+        force,
+      });
+      if (isDuplicateJiraResponse(response)) {
+        setJiraDuplicateExisting(response.existing_issues || []);
+        return;
+      }
+      setJiraCreatedIssue(response);
+      setCurrentStep('done');
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      setCreateError(getJiraCreateIssueErrorMessage(status, detail));
+      setJiraReconnectNeeded(isStaleJiraTokenStatus(status));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -252,13 +374,13 @@ function CreateIssueContent() {
               <CardDescription>Choose where to create the issue</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {!statusLoaded && (
+              {!(statusLoaded && jiraStatusLoaded) && (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </div>
               )}
 
-              {statusLoaded && (
+              {statusLoaded && jiraStatusLoaded && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Linear */}
                   {isConnected ? (
@@ -295,21 +417,40 @@ function CreateIssueContent() {
                     </div>
                   )}
 
-                  {/* JIRA */}
-                  <div className="p-4 rounded-lg border-2 border-border bg-muted/30 opacity-60 cursor-not-allowed">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-secondary rounded-lg">
-                        <ExternalLink className="w-6 h-6 text-blue-500" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-foreground">JIRA</span>
-                          <Badge variant="secondary" className="text-xs">Coming soon</Badge>
+                  {/* Jira */}
+                  {isJiraConnected ? (
+                    <button
+                      onClick={handleSelectJira}
+                      className="p-4 rounded-lg border-2 border-border hover:border-primary/50 text-left transition-all"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-secondary rounded-lg">
+                          <JiraIcon className="w-6 h-6 text-[#0052CC]" />
                         </div>
-                        <p className="text-sm text-muted-foreground mt-1">Atlassian JIRA integration</p>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground">Jira</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">Connected to {jiraStatus?.site_url}</p>
+                        </div>
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="p-4 rounded-lg border-2 border-border bg-muted/30 opacity-60 cursor-not-allowed">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-secondary rounded-lg">
+                          <JiraIcon className="w-6 h-6 text-[#0052CC]" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground">Jira</span>
+                            <Badge variant="secondary" className="text-xs">Not connected</Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">Connect in Settings &rarr; Integrations</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Asana */}
                   <div className="p-4 rounded-lg border-2 border-border bg-muted/30 opacity-60 cursor-not-allowed">
@@ -360,7 +501,7 @@ function CreateIssueContent() {
         )}
 
         {/* Step 2: Configure (Linear form) */}
-        {currentStep === 'configure' && (
+        {currentStep === 'configure' && selectedIntegration === 'linear' && (
           <Card className="animate-slide-up">
             <CardHeader>
               <CardTitle>Configure Linear Issue</CardTitle>
@@ -492,6 +633,168 @@ function CreateIssueContent() {
           </Card>
         )}
 
+        {/* Step 2: Configure (Jira form) */}
+        {currentStep === 'configure' && selectedIntegration === 'jira' && (
+          <Card className="animate-slide-up">
+            <CardHeader>
+              <CardTitle>Configure Jira Issue</CardTitle>
+              <CardDescription>Fill in the issue details to create in Jira</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Existing links info */}
+              {jiraExistingIssues.length > 0 && !jiraDuplicateExisting && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    This feedback is already linked to{' '}
+                    {jiraExistingIssues.map(issue => (
+                      <a
+                        key={issue.id}
+                        href={issue.jira_issue_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono font-semibold text-primary hover:underline"
+                      >
+                        {issue.jira_issue_key}
+                      </a>
+                    ))}.
+                    {' '}Creating another issue will link it too.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Duplicate warning from submit attempt */}
+              {jiraDuplicateExisting && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="space-y-2">
+                    <p>
+                      This feedback is already linked to{' '}
+                      {jiraDuplicateExisting.map(issue => (
+                        <a
+                          key={issue.id}
+                          href={issue.jira_issue_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono font-semibold underline"
+                        >
+                          {issue.jira_issue_key}
+                        </a>
+                      ))}.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleJiraSubmit(true)}
+                      disabled={submitting}
+                    >
+                      {submitting ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : null}
+                      Create anyway
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Summary */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Summary</label>
+                <Input
+                  value={jiraForm.summary}
+                  onChange={e => setJiraForm(prev => ({ ...prev, summary: e.target.value }))}
+                  placeholder="Issue summary"
+                />
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Description</label>
+                <Textarea
+                  value={jiraForm.description}
+                  onChange={e => setJiraForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Issue description (plain text)"
+                  rows={5}
+                />
+              </div>
+
+              {/* Project + Issue type row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Project</label>
+                  <Select
+                    value={jiraForm.projectId}
+                    onValueChange={val => setJiraForm(prev => ({ ...prev, projectId: val, issueTypeId: '' }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select project..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {jiraProjects.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name || p.key || p.id}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Issue Type</label>
+                  <Select
+                    value={jiraForm.issueTypeId}
+                    onValueChange={val => setJiraForm(prev => ({ ...prev, issueTypeId: val }))}
+                    disabled={!jiraForm.projectId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={jiraForm.projectId ? 'Select issue type...' : 'Select a project first'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {jiraIssueTypes.map(t => (
+                        <SelectItem key={t.id} value={t.id}>{t.name || t.id}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Error */}
+              {createError && (
+                <div className="p-4 bg-destructive/10 text-destructive rounded-lg space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    {createError}
+                  </div>
+                  {jiraReconnectNeeded && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => router.push('/settings/integrations/jira')}
+                    >
+                      Reconnect Jira
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Navigation */}
+              <div className="flex justify-between pt-4 border-t border-border">
+                <Button variant="outline" onClick={() => setCurrentStep('select-integration')}>
+                  Back
+                </Button>
+                <Button
+                  onClick={() => handleJiraSubmit(false)}
+                  disabled={submitting || !jiraForm.summary || !jiraForm.projectId || !jiraForm.issueTypeId}
+                >
+                  {submitting ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating...</>
+                  ) : (
+                    'Create Issue'
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Step 3: Done */}
         {currentStep === 'done' && (
           <Card className="animate-slide-up">
@@ -500,7 +803,46 @@ function CreateIssueContent() {
               <CardDescription>Your issue has been created and linked to this feedback</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {createdIssue ? (
+              {selectedIntegration === 'jira' && jiraCreatedIssue ? (
+                <>
+                  <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
+                    <div className="p-2 bg-green-100 dark:bg-green-950 rounded-full">
+                      <CheckCircle className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-green-800 dark:text-green-200">
+                        {jiraCreatedIssue.jira_issue_key}
+                      </p>
+                      <p className="text-sm text-muted-foreground">{jiraCreatedIssue.jira_issue_title}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Key:</span>
+                      <span className="text-foreground font-mono ml-2">{jiraCreatedIssue.jira_issue_key}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Title:</span>
+                      <span className="text-foreground ml-2">{jiraCreatedIssue.jira_issue_title}</span>
+                    </div>
+                    {jiraCreatedIssue.jira_issue_url && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Link:</span>
+                        <a
+                          href={jiraCreatedIssue.jira_issue_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline ml-2 inline-flex items-center gap-1"
+                        >
+                          Open in Jira
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : createdIssue ? (
                 <>
                   <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
                     <div className="p-2 bg-green-100 dark:bg-green-950 rounded-full">

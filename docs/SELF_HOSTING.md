@@ -14,6 +14,7 @@ default) treats every instance as fully featured.
 - [Send product-usage events](#send-product-usage-events)
 - [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment)
 - [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
+- [Connecting Jira](#connecting-jira)
 - [Production notes](#production-notes)
 
 ## Prerequisites
@@ -305,6 +306,58 @@ approve the requested scopes, then redirected back to Rereflect connected.
 > backend are on different origins, your reverse proxy / CORS config must
 > send `Access-Control-Allow-Credentials: true` with a specific (non-`*`)
 > allowed origin, or the callback will fail to verify.
+
+## Connecting Jira
+
+Rereflect can create Jira issues directly from feedback items, with sentiment and
+customer context included automatically. Jira is **not** a CRM — it doesn't enrich
+the Customer 360 profile, and connecting it has no effect on HubSpot/Salesforce.
+
+**Jira Cloud only in this release.** Jira Server, Data Center, and native OAuth
+(3LO) app installation are not supported yet; the connection uses a personal
+Atlassian API token over Basic auth against the Jira Cloud REST API.
+
+### 1. Mint an Atlassian API token
+
+1. Log in to [id.atlassian.com](https://id.atlassian.com) and go to
+   **Security → Create and manage API tokens**.
+2. Click **Create API token**, give it a label (e.g., "Rereflect"), and confirm.
+3. Copy the token immediately — Atlassian only shows it once.
+
+### 2. Connect from the app
+
+The token is **not** set via an environment variable — it is pasted into the app
+and stored encrypted per organization. (Encryption uses `LLM_ENCRYPTION_KEY`,
+which must already be set on the backend — see
+[Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok).)
+
+Go to **Settings → Integrations → Jira** (admin/owner only) and fill in:
+
+| Field | Format |
+|-------|--------|
+| Site URL | `https://{your-site}.atlassian.net` (also accepts the bare site name, e.g. `your-site`) |
+| Account email | The email address of the Atlassian account that owns the API token |
+| API token | The token you created in step 1 |
+
+Click **Connect**. Rereflect resolves and validates the site URL (rejecting
+anything that isn't a `*.atlassian.net` host, including private/loopback
+addresses, as an SSRF safeguard), verifies the token against `GET /myself`,
+and encrypts it at rest. The API token is never returned in any API response
+or shown again in the UI.
+
+### Verify
+
+- **Settings → Integrations → Jira** shows connection status, the connected
+  account, and a **Test Connection** action to re-validate the stored token.
+- Any feedback item can create a linked Jira issue via **Create Jira Issue** —
+  pick a project and issue type, and Rereflect creates the issue and keeps a
+  link back to the originating feedback.
+
+### All features unlocked
+
+Because Rereflect is self-hosted and open-source, Jira issue creation has no
+plan gate, seat limit, or usage cap — it's available to every organization
+running the app.
 
 ## Production notes
 

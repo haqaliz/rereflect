@@ -55,11 +55,20 @@ vi.mock('@/lib/api/salesforce', () => ({
   },
 }));
 
+vi.mock('@/lib/api/jira', () => ({
+  jiraAPI: {
+    getStatus: vi.fn(),
+    disconnect: vi.fn(),
+    testConnection: vi.fn(),
+  },
+}));
+
 import { useAuth } from '@/contexts/AuthContext';
 import { integrationsAPI } from '@/lib/api/integrations';
 import { linearAPI } from '@/lib/api/linear';
 import { hubspotAPI } from '@/lib/api/hubspot';
 import { salesforceAPI } from '@/lib/api/salesforce';
+import { jiraAPI } from '@/lib/api/jira';
 import IntegrationsPage from '../page';
 
 function makeAuthContext(role: string) {
@@ -78,6 +87,7 @@ describe('IntegrationsPage — Salesforce tile', () => {
     (useAuth as any).mockReturnValue(makeAuthContext('owner'));
     (integrationsAPI.list as any).mockResolvedValue({ integrations: [], total: 0 });
     (linearAPI.getStatus as any).mockResolvedValue({ connected: false });
+    (jiraAPI.getStatus as any).mockResolvedValue({ connected: false });
   });
 
   it('shows an Available Salesforce tile linking to the detail page when disconnected', async () => {

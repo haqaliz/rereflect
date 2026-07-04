@@ -40,6 +40,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
+import { JiraIcon } from '@/components/icons/JiraIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -49,6 +50,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   discord: MessageCircle,
   email: Mail,
   linear: LinearIcon,
+  jira: JiraIcon,
 };
 
 function PendingFeedbackContent() {

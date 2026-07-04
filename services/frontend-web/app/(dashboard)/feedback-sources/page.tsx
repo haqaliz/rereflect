@@ -39,6 +39,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
+import { JiraIcon } from '@/components/icons/JiraIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -48,6 +49,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   discord: MessageCircle,
   email: Mail,
   linear: LinearIcon,
+  jira: JiraIcon,
 };
 
 // Source type colors
@@ -58,6 +60,7 @@ const SOURCE_COLORS: Record<string, string> = {
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
   linear: 'text-[#5E6AD2]',
+  jira: 'text-[#0052CC]',
 };
 
 function FeedbackSourcesContent() {
@@ -433,7 +436,7 @@ function FeedbackSourcesContent() {
                           {!type.available && (
                             <Badge variant="outline" className="text-xs">Coming Soon</Badge>
                           )}
-                          {(type.requires_integration || type.type === 'linear') && type.available && (
+                          {(type.requires_integration || type.type === 'linear' || type.type === 'jira') && type.available && (
                             <Badge variant="secondary" className="text-xs">Requires OAuth</Badge>
                           )}
                         </div>

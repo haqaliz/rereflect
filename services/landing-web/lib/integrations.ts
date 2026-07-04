@@ -69,6 +69,14 @@ const SHARED_FAQS: IntegrationFAQ[] = [
   },
 ];
 
+const JIRA_FAQS: IntegrationFAQ[] = [
+  ...SHARED_FAQS,
+  {
+    question: 'Does this support Jira Server, Data Center, or OAuth?',
+    answer: 'This release supports Jira Cloud only — any *.atlassian.net site, connected with a personal Atlassian API token. Jira Server, Data Center, and native OAuth (3LO) app installation are planned for a future release.',
+  },
+];
+
 export const integrations: Integration[] = [
   {
     slug: 'slack',
@@ -220,6 +228,42 @@ export const integrations: Integration[] = [
       { step: 3, title: 'Configure team mappings', description: 'Map your Linear teams to Rereflect categories so feedback is automatically organized.' },
       { step: 4, title: 'Set up a feedback source', description: 'Create a Linear feedback source and configure which labels or keywords to monitor.' },
       { step: 5, title: 'Start analyzing issues', description: 'Issue comments flow in automatically. View insights on your dashboard within minutes.' },
+    ],
+  },
+  {
+    slug: 'jira',
+    name: 'Jira',
+    tagline: 'Push feedback straight into Jira issues your team already tracks',
+    description: 'Connect Jira Cloud and create issues directly from feedback items — with sentiment, customer context, and a link back to the original feedback included automatically.',
+    status: 'available',
+    color: 'chart-2',
+    gradient: 'from-[#0052CC] to-[#2684FF]',
+    hoverShadow: 'hover:shadow-[#0052CC]/10',
+    hoverBorder: 'hover:border-[#0052CC]/30',
+    heroMessage: 'Stop copy-pasting customer feedback into Jira by hand. Rereflect connects to Jira Cloud with a personal API token and lets you create fully-linked issues — with sentiment and customer context attached — straight from any feedback item.',
+    howItWorks: [
+      { step: '1', title: 'Connect Jira', description: 'Paste your Jira site URL, account email, and a personal API token to authorize Rereflect — no OAuth redirect required.' },
+      { step: '2', title: 'Create Issues from Feedback', description: 'Pick a project and issue type, then create a Jira issue directly from any feedback item — pre-filled with the feedback content and AI context.' },
+      { step: '3', title: 'Track the Link', description: 'Rereflect keeps a link between the feedback item and the Jira issue, so your team can jump straight to the ticket that came from a customer.' },
+    ],
+    features: [
+      { title: 'Token-Based Connection', description: 'Connect with a personal Atlassian API token — no OAuth app to register, no admin approval workflow required.', icon: 'KeyRound' },
+      { title: 'One-Click Issue Creation', description: 'Turn any feedback item into a Jira issue in a couple of clicks, pre-filled with title, description, and customer context.', icon: 'FileText' },
+      { title: 'Project & Issue-Type Picker', description: 'Choose which Jira project and issue type (Bug, Task, Story) each issue is created in — no hardcoded defaults.', icon: 'Tags' },
+      { title: 'Feedback-to-Issue Linking', description: 'Every created issue is linked back to the originating feedback item, so context is never lost.', icon: 'RefreshCw' },
+      { title: 'Cloud-Native', description: 'Built for Jira Cloud (*.atlassian.net) using the official REST API v3 with Basic auth.', icon: 'Zap' },
+    ],
+    useCases: [
+      { persona: 'Product Manager', role: 'B2B SaaS, Jira-based roadmap', quote: 'We used to manually re-type customer complaints into Jira tickets. Now I create the issue right from the feedback card and the customer context comes with it.', icon: 'Layers' },
+      { persona: 'Engineering Lead', role: 'Platform team', quote: 'Every bug report that turns into a Jira ticket keeps a link back to the original feedback, so nobody has to ask "wait, who reported this?"', icon: 'Rocket' },
+    ],
+    faqs: JIRA_FAQS,
+    setupSteps: [
+      { step: 1, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
+      { step: 2, title: 'Mint an Atlassian API token', description: 'Go to id.atlassian.com → Security → API tokens, and create a new API token for your Atlassian account.' },
+      { step: 3, title: 'Paste your credentials into Rereflect', description: 'In Rereflect, go to Settings → Integrations → Jira and paste your Jira site URL (e.g. your-company.atlassian.net), your Atlassian account email, and the API token you just created.' },
+      { step: 4, title: 'Rereflect validates the connection', description: 'Rereflect verifies the token against your Jira site and encrypts it at rest. You\'ll see a connected status once it succeeds.' },
+      { step: 5, title: 'Create your first issue', description: 'Open any feedback item, choose "Create Jira Issue," pick a project and issue type, and Rereflect creates a linked Jira issue for you.' },
     ],
   },
   {

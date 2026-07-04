@@ -1,71 +1,89 @@
-# Card — feat/crm-writeback (freeform)
+# Card: feat/jira-integration (freeform)
 
-**Type:** feat · **Slug:** `crm-writeback` · **Branch:** `feat/crm-writeback`
-**Source:** Freeform task from `rereflect-next` recommendation (verified against git — genuinely unbuilt). No GitHub issue.
-**Date:** 2026-07-03
+**Type:** feat · **Slug:** `jira-integration` · **Branch:** `feat/jira-integration`
+**Source:** Freeform task from the `rereflect-next` recommendation handoff (verified against git — genuinely unbuilt). No GitHub issue.
+**Date:** 2026-07-04
 
 ---
 
-## Brief (from rereflect-next handoff)
+## Brief (verbatim from handoff)
 
-Build **bi-directional CRM writeback** — the v2 push-back slice deferred on both CRM integrations:
-- HubSpot: "Bi-directional sync: push health scores to HubSpot contact properties — **deferred (v2)**" (`AI-TRACKING.md:185`)
-- Salesforce: "Bi-directional push-back + simultaneous dual-CRM — **deferred (v2)**" (`AI-TRACKING.md:195`)
+Build a Jira integration for Rereflect, following the already-shipped **Linear** integration
+as the structural blueprint (`linear_client.py`, `linear_integration` model + migration,
+`linear_webhook.py`, `lib/api/linear.ts`, the `create-issue` wizard, and the Linear test
+suite).
 
-Push Rereflect's AI signals (start with `health_score`) back into the connected CRM as a
-contact/account property when the health score recomputes, behind an **opt-in per-org
-toggle**, reusing the existing provider-agnostic `crm_enrichment` connection + token-refresh layer.
+**Slice 1:** connect Jira **Cloud via an Atlassian API token (email + token, Basic auth)** —
+NOT the 3LO marketplace OAuth, which is awkward to self-host (HubSpot's private-app token is
+the precedent to follow); then create a Jira issue from a feedback item and add `jira` as a
+feedback-source type.
+
+All features unlocked (OSS self-hosted — do **not** re-add the Pro+ plan gating Linear carries).
+Defer Jira Server/Data Center and OAuth 3LO to v2, and flag that caveat in the plan so the dig
+isn't surprised by it.
+
+## Provenance / roadmap references
+
+- `DEV-TRACKING.md:189` — "M3.2 — JIRA Integration (2-3 weeks)", fully unchecked (`- [ ]`).
+- `DEV-TRACKING.md:183` — JIRA listed as pending in the integration backlog; Linear shipped.
+- `AI-TRACKING.md` strategic decisions — integrations are part of the moat (product breadth +
+  integrated workflow + developer surface).
+- Guardrail: OSS self-hosted, MIT, BYOK — all features unlocked, **no plan gating** (the
+  `Pro+`/`Business+` framing in CLAUDE.md / AI-TRACKING is pre-pivot and stale).
 
 ## Scope (slice 1)
 
-- **One field** (`health_score`), **one provider** (HubSpot), **opt-in** per org.
-- Push on health-score recompute.
-- Graceful handling when the operator has **not** created the custom field or granted write
-  scope — surface a clear "grant write scope / create field X" status; do **not** crash the sync.
+- **Connect** one Jira Cloud site per org via Atlassian **API token (email + token, Basic auth)**
+  — BYOK, pasted by the self-hoster; mirror HubSpot's private-app-token connection shape.
+- **Create a Jira issue** from a feedback item (project + issue type selection), mirroring the
+  Linear `create-issue` wizard.
+- **`jira` feedback-source type** so Jira can be picked as a source (mirror Linear's
+  `requires_integration=false` own-auth pattern — Jira uses its own token, not the generic
+  Integration OAuth model).
 
-## Explicitly deferred (later slices)
+## Explicitly deferred (later slices / v2)
 
-- Salesforce writeback.
-- Multi-field mapping (churn probability, top risk drivers).
-- Real-time (vs. batched) push.
-- Simultaneous dual-CRM.
+- Jira **Server / Data Center** (only Cloud in slice 1 — different base URL + auth).
+- Atlassian **OAuth 2.0 (3LO)** marketplace flow.
+- Inbound **webhook** receiver (pull Jira comments/status back as feedback context).
+- Team/project/status field **mappings** UI beyond the minimum needed to create an issue.
+- Two-way status sync / issue back-linking beyond storing the created issue key+URL.
 
 ## Why (moat / fit)
 
-- Depth-first follow-on of the newest shipped work (HubSpot M3.1, Salesforce M3.1b, shipped 2026-07-01).
-- Deepens the "workflow integration" moat pillar; improves as churn/health accuracy improves.
-- Fits OSS/self-hosted/BYOK: writes go to the operator's own CRM with their own token —
-  no hosted service, no cross-tenant data, all features unlocked (the `Business+` framing in
-  CLAUDE.md/AI-TRACKING is pre-pivot and stale).
+- The named next integration in the backlog (`DEV-TRACKING.md:189`, unchecked) and genuinely
+  unbuilt (grep of `services/` → only build artifacts + a generic `create-issue` page).
+- A proven, tested in-repo blueprint exists (Linear shipped end-to-end) → depth-first, low-risk.
+- Deepens the integrations + developer-surface moat pillar; fits OSS/self-hosted/BYOK — the
+  operator connects their own Jira with their own token, all features unlocked.
 
 ## Known caveat (carry into PRD)
 
-Writeback needs **write scope + operator-provisioned custom fields** (HubSpot private-app write
-scopes; Salesforce field-level security / a custom field per pushed metric), plus write-side
-rate-limit backoff and last-writer conflict handling. Keep slice 1 to one field / one provider /
-opt-in so scope-and-field provisioning failures degrade to a clear status, not a broken sync.
+Atlassian's OAuth 2.0 (3LO) marketplace flow is awkward for self-hosting (callback registration,
+per-tenant app). Slice 1 uses **Jira Cloud + an Atlassian API token (email + token, Basic auth
+against `https://{site}.atlassian.net`)**, mirroring HubSpot's private-app-token BYOK precedent.
+Defer Jira Server/Data Center and 3LO OAuth to v2. **Copy Linear's *structure*, not its OAuth
+auth mechanism** — the connection model differs (token paste, not an OAuth redirect).
 
-## Reuse surface (verified present on master in the main-thread dig)
+## In-repo blueprint (Linear — shipped, tested; verified present on master)
 
-- `services/backend-api/src/models/crm_enrichment.py` — provider-tagged CRM snapshot (`provider` discriminator already shipped for Salesforce).
-- HubSpot connection: private-app access token (BYOK) — `src/api/routes/hubspot_integration.py` (or similar).
-- Salesforce connection: OAuth 2.0 web-server flow + refresh — `salesforce_integrations` model + routes.
-- Sync tasks: daily beat + manual trigger; REST/SOQL clients with token refresh (worker service).
-- Health recompute path emits/updates health scores and shares a `crm_component`.
-- **No writeback code exists yet** (`grep -riE 'writeback|push.*crm|update_contact_propert' src` → 0 hits).
+- `services/backend-api/src/services/linear_client.py`
+- `services/backend-api/src/models/linear_integration.py`
+- `services/backend-api/src/api/routes/linear_webhook.py`
+- `services/backend-api/alembic/versions/5ee1b2567a02_add_linear_integration_tables.py`
+- `services/backend-api/tests/test_linear_{client,oauth,webhook,issues,models,config,plan_gating}.py`
+- `services/frontend-web/lib/api/linear.ts`
+- `services/frontend-web/app/(dashboard)/feedbacks/[id]/create-issue/page.tsx`
+- `services/landing-web/app/integrations/linear/page.tsx`
+- HubSpot connection (token-paste BYOK precedent for the *auth* shape):
+  `services/backend-api/src/api/routes/hubspot_integration.py`, `src/models/hubspot_integration.py`
 
-## Open questions for the interview
+## Open questions for the interview (seed)
 
-- Push trigger: on every health recompute, or debounced/threshold-gated (only when score changes by ≥N)?
-- Field-provisioning UX: auto-create the HubSpot custom property via API on connect, or require the operator to create it and just detect/validate presence?
-- Which HubSpot object: contact property (per email match) vs. company property? (Slice-1 default: contact, matching the read-side email match.)
-- Failure surface: where does "missing write scope / missing field" status live — integration detail page, a new writeback status panel, or per-customer sync log?
-- Idempotency/no-op: skip the API call when the CRM property already equals the current score?
-
----
-
-## Reference files (primary repo root)
-- `AI-TRACKING.md` — lines 185 (HubSpot writeback deferred), 195 (Salesforce writeback deferred), 57 (CRM enrichment shipped state).
-- `docs/planning/hubspot-crm-enrichment/` — HubSpot PRD + aspect specs + plans (the read-side precedent to mirror the write-side against).
-- `docs/planning/salesforce-crm-enrichment/` — provider generalization precedent.
-- `memory/rereflect-oss-pivot.md` — OSS/self-hosted/BYOK reality + stale-CLAUDE.md caveat.
+- Connection storage: new `jira_integrations` table (mirror `linear_integrations`) vs. the generic
+  `integrations` model — Linear chose its own tables; likely mirror that.
+- One Jira site per org, or many? (Slice-1 default: one, like HubSpot's one-CRM guard.)
+- Create-issue field set: project + issue type + summary + description only, or also priority/labels/assignee?
+- Where does the connect UI live: `settings/integrations/jira` detail page (mirror HubSpot) + a tile on the integrations index.
+- Do we validate the token on connect (a `myself`/`serverInfo` GET), like HubSpot's Test?
+- Field for the created issue back-reference: store `{issue_key, issue_url}` on the feedback or in a mapping table?

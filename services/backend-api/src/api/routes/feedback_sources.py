@@ -187,6 +187,13 @@ def list_source_types():
             available=True,
         ),
         SourceTypeInfo(
+            type="jira",
+            name="Jira",
+            description="Create feedback from Jira issue comments",
+            requires_integration=False,
+            available=True,
+        ),
+        SourceTypeInfo(
             type="discord",
             name="Discord",
             description="Receive messages from Discord servers",
@@ -266,7 +273,7 @@ def create_feedback_source(
     from src.config.plans import has_feature, get_plan_for_feature
 
     # Validate source type
-    valid_types = ["slack", "intercom", "webhook", "discord", "email", "linear"]
+    valid_types = ["slack", "intercom", "webhook", "discord", "email", "linear", "jira"]
     if data.source_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid source type. Must be one of: {valid_types}")
 
