@@ -56,6 +56,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
+import { JiraIcon } from '@/components/icons/JiraIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -65,6 +66,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   discord: MessageCircle,
   email: Mail,
   linear: LinearIcon,
+  jira: JiraIcon,
 };
 
 // Source type colors
@@ -75,6 +77,7 @@ const SOURCE_COLORS: Record<string, string> = {
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
   linear: 'text-[#5E6AD2]',
+  jira: 'text-[#0052CC]',
 };
 
 function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {

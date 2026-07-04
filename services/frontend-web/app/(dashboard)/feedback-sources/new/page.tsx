@@ -30,6 +30,7 @@ import {
 } from '@/lib/api/feedback-sources';
 import { integrationsAPI, Integration } from '@/lib/api/integrations';
 import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
+import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
 import {
   Webhook,
   MessageCircle,
@@ -48,6 +49,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
+import { JiraIcon } from '@/components/icons/JiraIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -57,6 +59,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   discord: MessageCircle,
   email: Mail,
   linear: LinearIcon,
+  jira: JiraIcon,
 };
 
 // Source type colors
@@ -67,6 +70,7 @@ const SOURCE_COLORS: Record<string, string> = {
   discord: 'text-[#5865F2]',
   email: 'text-amber-600',
   linear: 'text-[#5E6AD2]',
+  jira: 'text-[#0052CC]',
 };
 
 type Step = 'type' | 'integration' | 'triggers' | 'mapping' | 'confirm' | 'email-setup';
@@ -79,8 +83,8 @@ function NewSourceContent() {
   // Determine initial step based on type
   const getInitialStep = (): Step => {
     if (!initialType) return 'type';
-    // Linear uses its own OAuth — check connection in integration step
-    if (initialType === 'linear') return 'integration';
+    // Linear and Jira use their own connection — check status in integration step
+    if (initialType === 'linear' || initialType === 'jira') return 'integration';
     // Types that don't require integration go to triggers
     if (initialType === 'webhook' || initialType === 'discord' || initialType === 'email') return 'triggers';
     // OAuth types (slack, intercom) require integration selection
@@ -97,6 +101,7 @@ function NewSourceContent() {
   const [sourceTypes, setSourceTypes] = useState<SourceTypeInfo[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [linearStatus, setLinearStatus] = useState<LinearConnectionStatus | null>(null);
+  const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   // Form state
@@ -125,14 +130,16 @@ function NewSourceContent() {
     const fetchData = async () => {
       try {
         setLoadingData(true);
-        const [typesRes, integrationsRes, linearStatusRes] = await Promise.allSettled([
+        const [typesRes, integrationsRes, linearStatusRes, jiraStatusRes] = await Promise.allSettled([
           feedbackSourcesAPI.getTypes(),
           integrationsAPI.list(),
           linearAPI.getStatus(),
+          jiraAPI.getStatus(),
         ]);
         if (typesRes.status === 'fulfilled') setSourceTypes(typesRes.value);
         if (integrationsRes.status === 'fulfilled') setIntegrations(integrationsRes.value.integrations);
         if (linearStatusRes.status === 'fulfilled') setLinearStatus(linearStatusRes.value);
+        if (jiraStatusRes.status === 'fulfilled') setJiraStatus(jiraStatusRes.value);
       } catch (err) {
         console.error('Failed to load data:', err);
       } finally {
@@ -153,6 +160,13 @@ function NewSourceContent() {
     if (type === 'linear') {
       // Linear uses its own OAuth — show integration check step
       if (linearStatus?.connected && linearStatus?.is_active) {
+        setStep('triggers');
+      } else {
+        setStep('integration');
+      }
+    } else if (type === 'jira') {
+      // Jira uses its own token-paste connection — show integration check step
+      if (jiraStatus?.connected && jiraStatus?.is_active) {
         setStep('triggers');
       } else {
         setStep('integration');
@@ -323,8 +337,8 @@ function NewSourceContent() {
       { key: 'type', label: 'Source Type' },
     ];
 
-    if (currentTypeInfo?.requires_integration || selectedType === 'linear') {
-      steps.push({ key: 'integration', label: selectedType === 'linear' ? 'Connection' : 'Integration' });
+    if (currentTypeInfo?.requires_integration || selectedType === 'linear' || selectedType === 'jira') {
+      steps.push({ key: 'integration', label: selectedType === 'linear' || selectedType === 'jira' ? 'Connection' : 'Integration' });
     }
 
     steps.push(
@@ -446,7 +460,7 @@ function NewSourceContent() {
                             {!type.available && (
                               <Badge variant="outline" className="text-xs">Coming Soon</Badge>
                             )}
-                            {(type.requires_integration || type.type === 'linear') && type.available && (
+                            {(type.requires_integration || type.type === 'linear' || type.type === 'jira') && type.available && (
                               <Badge variant="secondary" className="text-xs">Requires OAuth</Badge>
                             )}
                           </div>
@@ -517,6 +531,65 @@ function NewSourceContent() {
                         <Button>
                           <Plus className="w-4 h-4 mr-2" />
                           Connect Linear
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          }
+
+          // Jira uses its own token-paste connection system
+          if (selectedType === 'jira') {
+            const isJiraConnected = jiraStatus?.connected && jiraStatus?.is_active;
+            return (
+              <Card className="animate-slide-up">
+                <CardHeader>
+                  <CardTitle>Jira Connection</CardTitle>
+                  <CardDescription>
+                    {isJiraConnected
+                      ? `Connected to ${jiraStatus?.site_url}`
+                      : 'Connect your Jira Cloud site to receive feedback from issue comments'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isJiraConnected ? (
+                    <>
+                      <div className="p-4 rounded-lg border-2 border-primary bg-primary/5">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-[#0052CC]/10 rounded-lg">
+                            <JiraIcon className="w-5 h-5 text-[#0052CC]" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-foreground">{jiraStatus?.site_url}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Connected as {jiraStatus?.email}
+                            </div>
+                          </div>
+                          <Check className="w-5 h-5 text-primary ml-auto" />
+                        </div>
+                      </div>
+                      <div className="flex justify-between pt-4">
+                        <Button variant="outline" onClick={() => setStep('type')}>
+                          Back
+                        </Button>
+                        <Button onClick={() => setStep('triggers')}>
+                          Continue
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <JiraIcon className="w-12 h-12 mx-auto text-[#0052CC]/50 mb-4" />
+                      <h3 className="font-semibold text-foreground mb-2">Jira not connected</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        You need to connect Jira first in Settings &gt; Integrations
+                      </p>
+                      <Link href="/settings/integrations/jira">
+                        <Button>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Connect Jira
                         </Button>
                       </Link>
                     </div>
@@ -622,7 +695,7 @@ function NewSourceContent() {
                 <Label htmlFor="name">Source Name (optional)</Label>
                 <Input
                   id="name"
-                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'linear' ? 'Linear Issue Comments' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
+                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'linear' ? 'Linear Issue Comments' : selectedType === 'jira' ? 'Jira Issue Comments' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
                   value={form.name}
                   onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                 />
@@ -795,7 +868,7 @@ function NewSourceContent() {
               <div className="flex justify-between pt-4 border-t border-border">
                 <Button
                   variant="outline"
-                  onClick={() => setStep(currentTypeInfo?.requires_integration || selectedType === 'linear' ? 'integration' : 'type')}
+                  onClick={() => setStep(currentTypeInfo?.requires_integration || selectedType === 'linear' || selectedType === 'jira' ? 'integration' : 'type')}
                 >
                   Back
                 </Button>

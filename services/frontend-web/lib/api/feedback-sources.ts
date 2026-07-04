@@ -269,6 +269,11 @@ export const TRIGGER_OPTIONS: Record<string, { key: string; label: string; descr
     { key: 'labels', label: 'Issue Labels', description: 'Only issues with specific labels', hasValues: true },
     { key: 'keywords', label: 'Keywords', description: 'Comments containing keywords', hasValues: true },
   ],
+  jira: [
+    { key: 'all_messages', label: 'All Issue Comments', description: 'Capture every comment on issues' },
+    { key: 'labels', label: 'Issue Labels', description: 'Only issues with specific labels', hasValues: true },
+    { key: 'keywords', label: 'Keywords', description: 'Comments containing keywords', hasValues: true },
+  ],
 };
 
 // ============ Default Field Mapping ============
