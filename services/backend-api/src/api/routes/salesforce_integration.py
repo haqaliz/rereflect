@@ -694,6 +694,174 @@ def salesforce_trigger_sync(
     return SalesforceSyncResponse(status="queued", integration_id=integ.id)
 
 
+@router.patch(
+    "/writeback",
+    response_model=SalesforceWritebackResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_configure_writeback(
+    payload: SalesforceWritebackRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Configure per-org Salesforce writeback (push health scores back to
+    Salesforce Contact records).
+
+    Enabling requires a `field_name`, which is validated (exists, writable,
+    numeric type) against Salesforce before being persisted — validation
+    failure returns 400 with a machine-readable `reason` and leaves the
+    integration disabled. Disabling never requires (or touches) the field
+    name.
+    """
+    integration = _get_active_integration(current_org.id, db)
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Salesforce integration found.",
+        )
+
+    if payload.enabled:
+        field_name = (payload.field_name or "").strip()
+        if not field_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="field_name is required when enabling writeback.",
+            )
+
+        plain_refresh = get_decrypted_refresh_token(integration)
+        ok, reason = validate_writeback_field(
+            plain_refresh, integration.instance_url, field_name
+        )
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "reason": reason,
+                    "message": f"Field '{field_name}' failed writeback validation: {reason}.",
+                },
+            )
+
+        integration.writeback_enabled = True
+        integration.writeback_field_name = field_name
+        integration.last_writeback_status = None
+        integration.last_writeback_error = None
+    else:
+        integration.writeback_enabled = False
+
+    integration.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(integration)
+
+    if payload.enabled:
+        _enqueue_backfill_writeback(current_org.id, db)
+
+    return SalesforceWritebackResponse(
+        writeback_enabled=integration.writeback_enabled,
+        writeback_field_name=integration.writeback_field_name,
+        last_writeback_at=integration.last_writeback_at,
+        last_writeback_status=integration.last_writeback_status,
+        last_writeback_error=integration.last_writeback_error,
+        contacts_written=integration.contacts_written,
+    )
+
+
+def _enqueue_backfill_writeback(org_id: int, db: Session) -> int:
+    """
+    Enqueue push_health_to_salesforce once per crm_enrichment row
+    (provider='salesforce') for this org, bounded at
+    WRITEBACK_BACKFILL_CAP. Called once, right after writeback is enabled.
+
+    Rows with no resolvable Salesforce contact are not filtered out here —
+    the push task itself falls back to an id lookup by email. This mirrors
+    the HubSpot backfill helper's shape but scopes by provider instead of a
+    matched-contact-id column (see spec: skip is left to the task).
+
+    Never raises — a backfill enqueue failure must not turn a successful
+    PATCH /writeback into a 500. Failures are logged and swallowed.
+    """
+    from src.models.crm_enrichment import CrmEnrichment
+
+    rows = (
+        db.query(CrmEnrichment)
+        .filter(
+            CrmEnrichment.organization_id == org_id,
+            CrmEnrichment.provider == "salesforce",
+        )
+        .limit(WRITEBACK_BACKFILL_CAP + 1)
+        .all()
+    )
+
+    truncated = len(rows) > WRITEBACK_BACKFILL_CAP
+    if truncated:
+        rows = rows[:WRITEBACK_BACKFILL_CAP]
+        logger.warning(
+            "Salesforce writeback backfill truncated at %d rows for org %s",
+            WRITEBACK_BACKFILL_CAP,
+            org_id,
+        )
+
+    enqueued = 0
+    try:
+        app = _get_celery_app()
+    except Exception as exc:
+        logger.warning(
+            "Salesforce writeback backfill: failed to get Celery app for org %s: %s",
+            org_id, exc,
+        )
+        return 0
+
+    for row in rows:
+        try:
+            app.send_task(
+                "src.tasks.salesforce_writeback.push_health_to_salesforce",
+                args=[org_id, row.customer_email],
+            )
+            enqueued += 1
+        except Exception as exc:
+            logger.warning(
+                "Salesforce writeback backfill: failed to enqueue for org %s / %s: %s",
+                org_id, row.customer_email, exc,
+            )
+
+    return enqueued
+
+
+@router.post(
+    "/writeback/test",
+    response_model=SalesforceWritebackTestResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_writeback_test(
+    payload: SalesforceWritebackTestRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    On-demand validation of a candidate writeback field, without persisting
+    anything. Returns {"ok": true/false, "reason": "..." | null}.
+    """
+    integration = _get_active_integration(current_org.id, db)
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Salesforce integration.",
+        )
+
+    field_name = payload.field_name.strip()
+    plain_refresh = get_decrypted_refresh_token(integration)
+    ok, reason = validate_writeback_field(
+        plain_refresh, integration.instance_url, field_name
+    )
+    return SalesforceWritebackTestResponse(ok=ok, reason=reason)
+
+
 # ──────────────────────── Exported helper for salesforce-sync ────────────────
 
 
