@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.services.jira_client import JiraClient
+
 
 SITE_URL = "https://acme.atlassian.net"
 EMAIL = "operator@acme.com"
@@ -201,3 +203,32 @@ class TestJiraClientErrorTaxonomy:
         assert issubclass(JiraAuthError, JiraError)
         assert issubclass(JiraTransientError, JiraError)
         assert issubclass(JiraNotFoundError, JiraError)
+
+
+class TestJiraClientSSRFGuard:
+    """Defense-in-depth SSRF guard on the target host (MEDIUM finding)."""
+
+    @pytest.mark.parametrize(
+        "bad_url",
+        [
+            "http://acme.atlassian.net",          # non-https scheme
+            "https://acme.example.com",           # non-atlassian host
+            "https://acme.atlassian.net.evil.com",  # suffix-trick host
+            "https://169.254.169.254",            # raw metadata IP (no .atlassian.net)
+            "ftp://acme.atlassian.net",           # non-https scheme
+        ],
+    )
+    def test_rejects_disallowed_site_url(self, bad_url):
+        with pytest.raises(ValueError):
+            JiraClient(bad_url, EMAIL, API_TOKEN)
+
+    def test_allows_valid_atlassian_https_host(self):
+        with patch("httpx.Client"):
+            # Should not raise.
+            JiraClient(SITE_URL, EMAIL, API_TOKEN)
+
+    def test_client_disables_redirect_following(self):
+        with patch("httpx.Client") as MockHTTP:
+            JiraClient(SITE_URL, EMAIL, API_TOKEN)
+            _, kwargs = MockHTTP.call_args
+            assert kwargs.get("follow_redirects") is False
