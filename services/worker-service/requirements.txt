@@ -35,3 +35,6 @@ flower==2.0.1
 
 # Error tracking (Sentry free tier — 5K errors/mo)
 sentry-sdk[celery]==2.22.0   # Sentry SDK with Celery integration
+
+# Testing (matches backend-api pin; required to run tests/ in CI)
+pytest==7.4.3
