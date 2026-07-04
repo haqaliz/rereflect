@@ -881,6 +881,10 @@ class CrmEnrichment(Base):
     hubspot_company_id = Column(String(100), nullable=True)
     hubspot_deal_id = Column(String(100), nullable=True)
 
+    # Salesforce object ID (model-migrations aspect): matched Contact target
+    # for CRM writeback.
+    salesforce_contact_id = Column(String(100), nullable=True)
+
     # CRM writeback (writeback-config-api aspect): idempotency memory so the
     # writeback task doesn't re-push a health score that hasn't changed.
     last_written_health_score = Column(Integer, nullable=True)

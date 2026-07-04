@@ -67,3 +67,76 @@ class TestSalesforceIntegrationModel:
         assert row.contacts_synced == 0
         assert row.contacts_matched == 0
         assert row.is_active is True
+
+
+class TestSalesforceWritebackColumns:
+    """model-migrations Phase 1: writeback config/status columns, mirroring
+    HubSpot's TestHubSpotWritebackColumns in tests/test_hubspot_model.py."""
+
+    def test_writeback_defaults(self, db: Session, test_organization):
+        from src.models.salesforce_integration import SalesforceIntegration
+        row = SalesforceIntegration(
+            organization_id=test_organization.id,
+            refresh_token="encrypted_x",
+            connected_at=datetime.utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.writeback_enabled is False
+        assert row.writeback_field_name is None
+        assert row.last_writeback_at is None
+        assert row.last_writeback_status is None
+        assert row.last_writeback_error is None
+        assert row.contacts_written == 0
+
+    def test_writeback_fields_settable(self, db: Session, test_organization):
+        from src.models.salesforce_integration import SalesforceIntegration
+        row = SalesforceIntegration(
+            organization_id=test_organization.id,
+            refresh_token="encrypted_x",
+            connected_at=datetime.utcnow(),
+            writeback_enabled=True,
+            writeback_field_name="Rereflect_Health_Score__c",
+            last_writeback_at=datetime.utcnow(),
+            last_writeback_status="ok",
+            last_writeback_error=None,
+            contacts_written=5,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.writeback_enabled is True
+        assert row.writeback_field_name == "Rereflect_Health_Score__c"
+        assert row.last_writeback_status == "ok"
+        assert row.contacts_written == 5
+
+
+class TestCrmEnrichmentSalesforceContactId:
+    """model-migrations Phase 1: salesforce_contact_id round-trips and
+    defaults null, mirroring hubspot_contact_id."""
+
+    def test_salesforce_contact_id_defaults_none(self, db: Session, test_organization):
+        from src.models.crm_enrichment import CrmEnrichment
+        row = CrmEnrichment(
+            organization_id=test_organization.id,
+            customer_email="sf_contact_id_default@example.com",
+            last_synced_at=datetime.utcnow(),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.salesforce_contact_id is None
+
+    def test_salesforce_contact_id_settable_and_roundtrips(self, db: Session, test_organization):
+        from src.models.crm_enrichment import CrmEnrichment
+        row = CrmEnrichment(
+            organization_id=test_organization.id,
+            customer_email="sf_contact_id_set@example.com",
+            last_synced_at=datetime.utcnow(),
+            salesforce_contact_id="003xx000004TmiQAAS",
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        assert row.salesforce_contact_id == "003xx000004TmiQAAS"
