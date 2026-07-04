@@ -51,7 +51,7 @@ from typing import Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import (
@@ -65,6 +65,7 @@ from src.models.organization import Organization
 from src.models.salesforce_integration import SalesforceIntegration
 from src.models.user import User
 from src.services.crm_integration_common import another_crm_active, purge_crm_enrichment
+from src.services.salesforce_writeback_validation import validate_writeback_field
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,13 @@ class SalesforceStatusResponse(BaseModel):
     contacts_synced: int = 0
     contacts_matched: int = 0
     connected_at: Optional[datetime] = None
+    # CRM writeback config/status (writeback-config-api aspect)
+    writeback_enabled: bool = False
+    writeback_field_name: Optional[str] = None
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
+    contacts_written: int = 0
     # refresh_token / access_token are intentionally NEVER included
 
 
@@ -142,6 +150,34 @@ class SalesforceDisconnectResponse(BaseModel):
 class SalesforceSyncResponse(BaseModel):
     status: str
     integration_id: int
+
+
+class SalesforceWritebackRequest(BaseModel):
+    enabled: bool
+    field_name: Optional[str] = Field(default=None, min_length=1)
+
+
+class SalesforceWritebackResponse(BaseModel):
+    writeback_enabled: bool
+    writeback_field_name: Optional[str] = None
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
+    contacts_written: int = 0
+
+
+class SalesforceWritebackTestRequest(BaseModel):
+    field_name: str = Field(..., min_length=1)
+
+
+class SalesforceWritebackTestResponse(BaseModel):
+    ok: bool
+    reason: Optional[str] = None
+
+
+# CRM writeback (writeback-task-trigger aspect): bound on backfill-on-enable
+# fan-out so a huge org can't enqueue an unbounded burst of pushes.
+WRITEBACK_BACKFILL_CAP = 500
 
 
 # ──────────────────────── State signing (CSRF) ────────────────────────────────
@@ -374,6 +410,12 @@ def salesforce_status(
         contacts_synced=row.contacts_synced,
         contacts_matched=row.contacts_matched,
         connected_at=row.connected_at,
+        writeback_enabled=row.writeback_enabled,
+        writeback_field_name=row.writeback_field_name,
+        last_writeback_at=row.last_writeback_at,
+        last_writeback_status=row.last_writeback_status,
+        last_writeback_error=row.last_writeback_error,
+        contacts_written=row.contacts_written,
     )
 
 
