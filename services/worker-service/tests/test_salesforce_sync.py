@@ -229,6 +229,52 @@ class TestSyncOrgUpsert:
 
 
 # ---------------------------------------------------------------------------
+# TestSalesforceContactIdPersistence (push-task-trigger Phase 1)
+# ---------------------------------------------------------------------------
+
+
+class TestSalesforceContactIdPersistence:
+    def test_salesforce_contact_id_persisted_after_match(self, db):
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+
+        client = _make_mock_client(
+            contacts=[
+                {"Id": "003c1AAAA", "Email": "alice@example.com", "AccountId": None}
+            ],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        assert row.salesforce_contact_id == "003c1AAAA"
+
+    def test_duplicate_email_picks_lowest_id_deterministically(self, db):
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+
+        # Two Contacts share the same email; "003c1AAAA" < "003c2BBBB"
+        # lexicographically — the lower Id must win deterministically.
+        client = _make_mock_client(
+            contacts=[
+                {"Id": "003c2BBBB", "Email": "alice@example.com", "AccountId": None},
+                {"Id": "003c1AAAA", "Email": "alice@example.com", "AccountId": None},
+            ],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        rows = db.query(CrmEnrichment).all()
+        assert len(rows) == 1
+        assert rows[0].salesforce_contact_id == "003c1AAAA"
+        assert result["contacts_matched"] == 1
+
+
+# ---------------------------------------------------------------------------
 # TestSyncOrgAccountMemoization (M2)
 # ---------------------------------------------------------------------------
 

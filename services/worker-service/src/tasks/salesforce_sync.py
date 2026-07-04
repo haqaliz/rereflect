@@ -157,6 +157,11 @@ def _upsert_enrichment(
     row.deal_name = fields.get("deal_name")
     row.deal_stage = fields.get("deal_stage")
     row.deal_amount = fields.get("deal_amount")
+    # M5a (push-task-trigger): persist the matched Salesforce Contact Id so
+    # the writeback push task has a target. Deterministic dup-email
+    # resolution (lowest Id) happens in _sync_org before this is called.
+    if "salesforce_contact_id" in fields:
+        row.salesforce_contact_id = fields.get("salesforce_contact_id")
     row.last_synced_at = now
     row.updated_at = now
 
@@ -222,8 +227,23 @@ def _sync_org(org_id: int, db, client: SalesforceClient) -> dict:
 
     contacts = client.list_contacts()
     contacts_synced = len(contacts)
-    contacts_matched = 0
     now = datetime.utcnow()
+
+    # M5a (push-task-trigger): dedupe matched contacts by email BEFORE doing
+    # any enrichment work. When two Contacts share the same customer email,
+    # pick deterministically — the lowest Id — so the sync is stable across
+    # runs regardless of the API's return order.
+    matched_by_email: dict[str, dict] = {}
+    for contact in contacts:
+        raw_email = contact.get("Email") or ""
+        email_lower = raw_email.lower()
+        if email_lower not in known_emails:
+            continue
+        current = matched_by_email.get(email_lower)
+        if current is None or str(contact.get("Id")) < str(current.get("Id")):
+            matched_by_email[email_lower] = contact
+
+    contacts_matched = len(matched_by_email)
 
     # M2: memoize Account + open-Opportunities fetches per sync run so
     # multiple matched contacts sharing one AccountId don't each re-fetch
@@ -231,14 +251,7 @@ def _sync_org(org_id: int, db, client: SalesforceClient) -> dict:
     account_cache: dict[str, Optional[dict]] = {}
     opportunities_cache: dict[str, list[dict]] = {}
 
-    for contact in contacts:
-        raw_email = contact.get("Email") or ""
-        email_lower = raw_email.lower()
-
-        if email_lower not in known_emails:
-            continue
-
-        contacts_matched += 1
+    for email_lower, contact in matched_by_email.items():
         account_id = contact.get("AccountId")
 
         # Resolve Account via the direct Contact.AccountId FK.
@@ -300,6 +313,7 @@ def _sync_org(org_id: int, db, client: SalesforceClient) -> dict:
             "deal_name": deal_name,
             "deal_stage": deal_stage,
             "deal_amount": deal_amount,
+            "salesforce_contact_id": contact.get("Id"),
         }
 
         _upsert_enrichment(db, org_id, email_lower, fields, now, provider="salesforce")
