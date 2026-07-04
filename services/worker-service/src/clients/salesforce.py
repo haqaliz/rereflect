@@ -60,6 +60,18 @@ class SalesforceQueryError(Exception):
     """Raised on a non-transient SOQL query failure (e.g. malformed query)."""
 
 
+class SalesforceScopeError(Exception):
+    """
+    Raised on 403 for a write/describe call — permanent error, the
+    connected app/user lacks the required object/field access (mirrors
+    HubSpotScopeError).
+    """
+
+
+class SalesforceNotFoundError(Exception):
+    """Raised on 404 for a write call — permanent error, the target record doesn't exist."""
+
+
 class SalesforceClient:
     """Thin httpx wrapper for the Salesforce REST/SOQL API."""
 
@@ -288,3 +300,114 @@ class SalesforceClient:
             f"FROM Opportunity WHERE AccountId = '{account_id}' AND IsClosed = false"
         )
         return self.query(soql)
+
+    # ------------------------------------------------------------------
+    # Writeback (Contact field updates)
+    # ------------------------------------------------------------------
+
+    def update_contact_field(self, contact_id: str, field_name: str, value) -> None:
+        """
+        PATCH a single Contact field (e.g. a churn/health score).
+
+        Unlike HubSpot (which requires stringified numbers), Salesforce's
+        REST API expects the raw JSON number — `value` is placed directly
+        in the body with NO stringification.
+
+        Raises:
+            SalesforceQueryError: if `contact_id` fails `_validate_sf_id`
+                (no HTTP call is made — SOQL/URL-injection defense-in-depth).
+            SalesforceTransientError: on 429 or 5xx (caller/task should retry).
+            SalesforceScopeError: on 403 (connected app/user lacks object/field access).
+            SalesforceNotFoundError: on 404 (contact not found).
+            SalesforceAuthError: on 401 that persists after one refresh+retry.
+        """
+        contact_id = self._validate_sf_id(contact_id)
+        url = (
+            f"{self._instance_url}/services/data/{self._api_version}"
+            f"/sobjects/Contact/{contact_id}"
+        )
+        body = {field_name: value}
+
+        def _patch():
+            headers = {"Authorization": f"Bearer {self._access_token}"}
+            return self._client.patch(url, json=body, headers=headers)
+
+        resp = _patch()
+
+        if resp.status_code == 401:
+            logger.info(
+                "salesforce_client: 401 updating contact %s — "
+                "refreshing token and retrying once",
+                contact_id,
+            )
+            self._refresh()
+            resp = _patch()
+            if resp.status_code == 401:
+                raise SalesforceAuthError(
+                    f"Salesforce auth error updating contact {contact_id} "
+                    "(persisted after refresh retry)"
+                )
+
+        if resp.status_code == 429 or resp.status_code >= 500:
+            raise SalesforceTransientError(
+                f"Salesforce transient error {resp.status_code} updating contact {contact_id}"
+            )
+
+        if resp.status_code == 403:
+            raise SalesforceScopeError(
+                f"Salesforce scope error updating contact {contact_id} field {field_name}"
+            )
+
+        if resp.status_code == 404:
+            raise SalesforceNotFoundError(f"Salesforce contact {contact_id} not found")
+
+        if 200 <= resp.status_code < 300:
+            return None
+
+        raise SalesforceQueryError(
+            f"Salesforce update failed with status {resp.status_code} for contact {contact_id}"
+        )
+
+    def describe_object(self, sobject: str = "Contact") -> dict:
+        """
+        GET the sObject describe metadata (field list, types, `updateable`
+        flags) for `sobject`, used to validate a writeback field before
+        enabling scoring writeback.
+
+        Raises:
+            SalesforceTransientError: on 429 or 5xx.
+            SalesforceScopeError: on 403 (no object access).
+            SalesforceAuthError: on 401 that persists after one refresh+retry.
+            SalesforceQueryError: on any other non-2xx response.
+        """
+        url = f"{self._instance_url}/services/data/{self._api_version}/sobjects/{sobject}/describe"
+
+        def _get():
+            headers = {"Authorization": f"Bearer {self._access_token}"}
+            return self._client.get(url, headers=headers)
+
+        resp = _get()
+
+        if resp.status_code == 401:
+            self._refresh()
+            resp = _get()
+            if resp.status_code == 401:
+                raise SalesforceAuthError(
+                    f"Salesforce auth error describing {sobject} "
+                    "(persisted after refresh retry)"
+                )
+
+        if resp.status_code == 429 or resp.status_code >= 500:
+            raise SalesforceTransientError(
+                f"Salesforce transient error {resp.status_code} describing {sobject}"
+            )
+
+        if resp.status_code == 403:
+            raise SalesforceScopeError(f"Salesforce scope error describing {sobject}")
+
+        if resp.status_code != 200:
+            raise SalesforceQueryError(
+                f"Salesforce describe failed with status {resp.status_code} for {sobject}"
+            )
+
+        return resp.json()
