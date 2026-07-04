@@ -283,47 +283,92 @@ def _maybe_enqueue_writeback(
     db: Session,
 ) -> None:
     """
-    Enqueue a HubSpot health-score writeback push when the score changes
-    meaningfully (>= 2 pts) and the org has an active, writeback-enabled
-    HubSpot integration.
+    Enqueue a CRM health-score writeback push when the score changes
+    meaningfully (>= 2 pts) and the org has an active, writeback-enabled CRM
+    integration.
+
+    push-task-trigger (Phase 3): generalized to also dispatch a Salesforce
+    push, in parallel with the (unchanged) HubSpot dispatch below. The
+    one-CRM guard means an org only ever has one active integration in
+    practice, so at most one of the two blocks below actually enqueues
+    anything for a given org.
 
     This function must NEVER raise: `update_customer_health` runs both in the
     backend (in-request, e.g. the CRM disconnect recompute path) and in the
     worker (analysis/sync tasks), where the backend's Celery client may not be
-    importable. `get_celery_app` is imported lazily inside the try block so an
-    ImportError is swallowed the same as any other enqueue failure — logged,
-    never propagated.
+    importable. `get_celery_app` is imported lazily inside each try block so
+    an ImportError is swallowed the same as any other enqueue failure —
+    logged, never propagated.
     """
-    try:
-        if abs(new_score - old_score) < 2:
-            return
+    if abs(new_score - old_score) < 2:
+        return
 
-        from src.models.hubspot_integration import HubSpotIntegration
+    # --- HubSpot dispatch (unchanged) ---------------------------------------
+    # Wrapped in its own nested function so a bare `return` (used to skip
+    # when no/inactive/disabled integration is found) only exits this
+    # provider's check, never the Salesforce check below it.
+    def _dispatch_hubspot() -> None:
+        try:
+            from src.models.hubspot_integration import HubSpotIntegration
 
-        integ = (
-            db.query(HubSpotIntegration)
-            .filter(
-                HubSpotIntegration.organization_id == org_id,
-                HubSpotIntegration.is_active.is_(True),
-                HubSpotIntegration.writeback_enabled.is_(True),
+            integ = (
+                db.query(HubSpotIntegration)
+                .filter(
+                    HubSpotIntegration.organization_id == org_id,
+                    HubSpotIntegration.is_active.is_(True),
+                    HubSpotIntegration.writeback_enabled.is_(True),
+                )
+                .first()
             )
-            .first()
-        )
-        if not integ:
-            return
+            if not integ:
+                return
 
-        from src.background.celery_client import get_celery_app
+            from src.background.celery_client import get_celery_app
 
-        get_celery_app().send_task(
-            "src.tasks.hubspot_writeback.push_health_to_hubspot",
-            args=[org_id, customer_email],
-        )
-    except Exception as exc:
-        logger.warning(
-            "health_score_service: failed to enqueue HubSpot writeback for "
-            "org=%s email=%s: %s",
-            org_id, customer_email, exc,
-        )
+            get_celery_app().send_task(
+                "src.tasks.hubspot_writeback.push_health_to_hubspot",
+                args=[org_id, customer_email],
+            )
+        except Exception as exc:
+            logger.warning(
+                "health_score_service: failed to enqueue HubSpot writeback for "
+                "org=%s email=%s: %s",
+                org_id, customer_email, exc,
+            )
+
+    _dispatch_hubspot()
+
+    # --- Salesforce dispatch (parallel check, push-task-trigger Phase 3) ---
+    def _dispatch_salesforce() -> None:
+        try:
+            from src.models.salesforce_integration import SalesforceIntegration
+
+            sf_integ = (
+                db.query(SalesforceIntegration)
+                .filter(
+                    SalesforceIntegration.organization_id == org_id,
+                    SalesforceIntegration.is_active.is_(True),
+                    SalesforceIntegration.writeback_enabled.is_(True),
+                )
+                .first()
+            )
+            if not sf_integ:
+                return
+
+            from src.background.celery_client import get_celery_app
+
+            get_celery_app().send_task(
+                "src.tasks.salesforce_writeback.push_health_to_salesforce",
+                args=[org_id, customer_email],
+            )
+        except Exception as exc:
+            logger.warning(
+                "health_score_service: failed to enqueue Salesforce writeback for "
+                "org=%s email=%s: %s",
+                org_id, customer_email, exc,
+            )
+
+    _dispatch_salesforce()
 
 
 def update_customer_health(org_id: int, customer_email: str, db: Session) -> None:
