@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
+import { SalesforceWritebackCard } from '@/components/settings/SalesforceWritebackCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { getOauthErrorMessage } from '@/lib/oauthErrors';
 
@@ -366,6 +367,11 @@ function SalesforceSettingsContent() {
             )}
           </CardContent>
         </Card>
+
+        {/* Health-score writeback (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <SalesforceWritebackCard status={status} onStatusChange={setStatus} />
+        )}
 
         {/* Help card */}
         <Card className="animate-slide-up stagger-1">

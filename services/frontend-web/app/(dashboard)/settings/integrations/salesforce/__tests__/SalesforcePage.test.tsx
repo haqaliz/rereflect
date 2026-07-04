@@ -85,6 +85,12 @@ const connectedStatus = {
   contacts_synced: 42,
   contacts_matched: 30,
   connected_at: '2026-06-01T00:00:00Z',
+  writeback_enabled: false,
+  writeback_field_name: null,
+  last_writeback_at: null,
+  last_writeback_status: null,
+  last_writeback_error: null,
+  contacts_written: 0,
 };
 
 // ─── API contract tests ─────────────────────────────────────────────────────
