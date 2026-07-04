@@ -55,6 +55,7 @@
 | Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
 | Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
 | CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events, HubSpot health-score writeback | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), HubSpot writeback toggle card, one-CRM-per-org guard | Unlocked (OSS) |
+| Jira Cloud Integration (slice 1) — connect via Atlassian API token (Basic auth, encrypted), create issue from feedback (project/issue-type, ADF, duplicate guard), `jira` selectable source type; SSRF-hardened | Yes | Settings > Integrations (Jira token-paste page + tile), create-issue wizard Jira branch, landing page + `SELF_HOSTING.md`; OAuth 3LO / Server-DC / status-sync deferred v2 | Unlocked (OSS) |
 
 ---
 

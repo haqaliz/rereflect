@@ -180,19 +180,21 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [ ] Dedicated support
 
 ### Workflow Automation
-- [ ] JIRA integration
+- [x] JIRA integration (Cloud, slice 1)
 - [x] Linear integration
 - [ ] Asana integration
 - [x] Custom webhooks (trigger on events)
 - [x] Auto-routing rules
 
-### M3.2 — JIRA Integration (2-3 weeks)
-- [ ] JIRA OAuth flow (connect/disconnect via Atlassian OAuth 2.0)
-- [ ] JIRA API client: projects, issue types, priorities, labels, users
-- [ ] Create issue from feedback: team/project/priority selection (reuse Create Issue page)
-- [ ] Webhook receiver: issue status sync back to Rereflect
-- [ ] Feedback source type: `jira` (pull comments from JIRA issues)
-- [ ] Plan gate: Pro+ (same as Linear)
+### M3.2 — JIRA Integration — COMPLETE (slice 1 shipped 2026-07-05, `feat/jira-integration`)
+> Delivered as `jira-integration`. **Jira Cloud + Atlassian API token (email + token, HTTP Basic auth)** — NOT the OAuth 3LO marketplace flow (awkward for self-host; HubSpot's private-token BYOK precedent). See `docs/planning/jira-integration/` (PRD + 5 aspect specs). SSRF-hardened (route DNS/private-IP gate + client scheme/host assertion). All features **unlocked** (OSS self-hosted).
+- [x] Connect via Atlassian API token (connect/status/disconnect/test), one Jira site per org, encrypted at rest (`encrypt_api_key`)
+- [x] JIRA API client (REST v3, Basic auth): validate (`/myself`), projects, issue types, create issue
+- [x] Create issue from feedback: project + issue-type selection, ADF description, duplicate guard, stale-token 4xx (activated the create-issue wizard's Jira card)
+- [x] Feedback source type: `jira` (registered as a selectable own-auth source, `requires_integration=false`)
+- [x] Frontend: token-paste settings page + integrations tile; landing page + `SELF_HOSTING.md` token-setup docs
+- [x] Plan gate: **removed** — all unlocked in the open-source self-hosted edition (not Pro+)
+- [ ] **Deferred (v2):** OAuth 3LO, Jira Server/Data Center, inbound webhook / status sync back to Rereflect, AI-drafted issue content, project/status mapping config, multiple sites per org
 
 ### M3.3 — Asana Integration (2 weeks)
 - [ ] Asana OAuth flow
