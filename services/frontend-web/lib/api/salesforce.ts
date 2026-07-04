@@ -13,6 +13,13 @@ export interface SalesforceConnectionStatus {
   contacts_synced: number;
   contacts_matched: number;
   connected_at: string | null;
+  // CRM writeback config/status (writeback-config-api aspect)
+  writeback_enabled: boolean;
+  writeback_field_name: string | null;
+  last_writeback_at: string | null;
+  last_writeback_status: string | null;
+  last_writeback_error: string | null;
+  contacts_written: number;
 }
 
 export interface SalesforceConnectUrlResponse {
@@ -27,6 +34,25 @@ export interface SalesforceDisconnectResponse {
 export interface SalesforceTestResponse {
   success: boolean;
   message: string;
+}
+
+export interface SalesforceWritebackConfig {
+  enabled: boolean;
+  field_name: string | null;
+}
+
+export interface SalesforceWritebackResponse {
+  writeback_enabled: boolean;
+  writeback_field_name: string | null;
+  last_writeback_at: string | null;
+  last_writeback_status: string | null;
+  last_writeback_error: string | null;
+  contacts_written: number;
+}
+
+export interface SalesforceWritebackTestResponse {
+  ok: boolean;
+  reason: string | null;
 }
 
 // ---- API ----
@@ -61,6 +87,25 @@ export const salesforceAPI = {
 
   test: async (): Promise<SalesforceTestResponse> => {
     const response = await apiClient.post('/api/v1/integrations/salesforce/test');
+    return response.data;
+  },
+
+  updateWriteback: async ({
+    enabled,
+    field_name,
+  }: SalesforceWritebackConfig): Promise<SalesforceWritebackResponse> => {
+    const response = await apiClient.patch(
+      '/api/v1/integrations/salesforce/writeback',
+      { enabled, field_name },
+    );
+    return response.data;
+  },
+
+  testWriteback: async (fieldName: string): Promise<SalesforceWritebackTestResponse> => {
+    const response = await apiClient.post(
+      '/api/v1/integrations/salesforce/writeback/test',
+      { field_name: fieldName },
+    );
     return response.data;
   },
 };
