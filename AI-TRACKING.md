@@ -54,7 +54,7 @@
 | Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
 | Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
 | Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
-| CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events, HubSpot health-score writeback | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), HubSpot writeback toggle card, one-CRM-per-org guard | Unlocked (OSS) |
+| CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events, health-score writeback to **both** HubSpot (contact property) and Salesforce (Contact field) | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), HubSpot + Salesforce writeback toggle cards, one-CRM-per-org guard | Unlocked (OSS) |
 | Jira Cloud Integration (slice 1) — connect via Atlassian API token (Basic auth, encrypted), create issue from feedback (project/issue-type, ADF, duplicate guard), `jira` selectable source type; SSRF-hardened | Yes | Settings > Integrations (Jira token-paste page + tile), create-issue wizard Jira branch, landing page + `SELF_HOSTING.md`; OAuth 3LO / Server-DC / status-sync deferred v2 | Unlocked (OSS) |
 
 ---
@@ -193,7 +193,7 @@
 - [x] Sync Account/Contact/Opportunity → company/ARR/renewal/deal (SOQL, token refresh, API-limit backoff), match by email; daily beat 03:45 UTC + manual trigger
 - [x] Health/churn signal via the shared `crm_component`; provider-tagged rows
 - [x] **One CRM connected per org at a time** — symmetric guard on both providers' connect + purge-on-disconnect
-- [ ] Bi-directional push-back (HubSpot shipped in M3.1; Salesforce writeback) + simultaneous dual-CRM — **deferred (v2)**
+- [x] Bi-directional push-back — **Salesforce health-score writeback shipped 2026-07-05** as `salesforce-crm-writeback` (slice 2): opt-in per-org, off by default; describe-validated writable numeric Contact field (default `Rereflect_Health_Score__c`); on-change trigger (generalized `_maybe_enqueue_writeback`, HubSpot path unchanged) + backfill-on-enable (cap 500); idempotent (reuses `last_written_health_score`); soft-pause on scope/field/not-found/daily-limit (never flips `is_active`); persists `salesforce_contact_id` (deterministic on dup email) with re-query-by-email fallback. See `docs/planning/salesforce-crm-writeback/`. **Still deferred (v2):** multi-field push, Account-object target, simultaneous dual-CRM writeback + reconciliation, real-time/streaming push.
 - [x] Plan gate: removed — OSS self-hosted, all unlocked
 
 #### M3.2 — Product Usage Enrichment (2 weeks) — COMPLETE (shipped 2026-06-29)
