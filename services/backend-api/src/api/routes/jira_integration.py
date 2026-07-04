@@ -27,22 +27,26 @@ import ipaddress
 import logging
 import socket
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_org, get_current_user, require_admin_or_owner
 from src.database.session import get_db
-from src.models.jira_integration import JiraIntegration
+from src.models.feedback import FeedbackItem
+from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+from src.models.jira_integration import FeedbackJiraIssue, JiraIntegration
 from src.models.organization import Organization
 from src.models.user import User
 from src.services.jira_client import (
     JiraAuthError,
     JiraClient,
     JiraTransientError,
+    text_to_adf,
 )
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
@@ -93,6 +97,46 @@ class JiraDisconnectResponse(BaseModel):
 class JiraTestResponse(BaseModel):
     success: bool
     message: Optional[str] = None
+
+
+class JiraProjectResponse(BaseModel):
+    id: str
+    key: Optional[str] = None
+    name: Optional[str] = None
+
+
+class JiraIssueTypeResponse(BaseModel):
+    id: str
+    name: Optional[str] = None
+
+
+class JiraCreateIssueRequest(BaseModel):
+    feedback_id: int
+    project_id: str = Field(..., min_length=1)
+    issue_type_id: str = Field(..., min_length=1)
+    summary: str
+    description: Optional[str] = None
+    force: bool = False
+
+
+class JiraCreateIssueResponse(BaseModel):
+    jira_issue_id: str
+    jira_issue_key: str
+    jira_issue_url: str
+    jira_issue_title: str
+
+
+class JiraLinkedIssueResponse(BaseModel):
+    id: int
+    feedback_id: int
+    jira_issue_id: str
+    jira_issue_key: str
+    jira_issue_url: str
+    jira_issue_title: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ──────────────────────── Internal helpers ───────────────────────────────────
@@ -209,6 +253,26 @@ def _close_client(jira_client: JiraClient) -> None:
         jira_client.close()
     except Exception:  # noqa: BLE001 — best-effort cleanup only
         pass
+
+
+def _add_timeline_entry(
+    db: Session,
+    feedback_id: int,
+    org_id: int,
+    event_type: str,
+    actor_id: Optional[int],
+    metadata: dict,
+) -> None:
+    """Add a workflow event timeline entry for a feedback item (mirrors Linear's helper)."""
+    event = FeedbackWorkflowEvent(
+        feedback_id=feedback_id,
+        organization_id=org_id,
+        actor_id=actor_id,
+        event_type=event_type,
+        metadata_=metadata,
+    )
+    db.add(event)
+    db.commit()
 
 
 # ──────────────────────── Routes ─────────────────────────────────────────────
@@ -414,3 +478,244 @@ def jira_test(
     except Exception as exc:  # noqa: BLE001 — must never surface as a 500
         logger.warning("Jira test failed for org %s: %s", current_org.id, exc)
         return JiraTestResponse(success=False, message=str(exc))
+
+
+# ──────────────────────────── Create-issue aspect ─────────────────────────────
+# GET /projects, GET /issuetypes, POST /issues, GET /issues
+# (backend-create-issue aspect — mirrors Linear's create_linear_issue route)
+
+
+@router.get(
+    "/projects",
+    response_model=List[JiraProjectResponse],
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_get_projects(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Proxy `JiraClient.get_projects()` for the connected Jira site."""
+    row = _get_active_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Jira integration. Connect Jira first via /integrations/jira/connect.",
+        )
+    plain_token = get_decrypted_token(row)
+    jira_client = JiraClient(row.site_url, row.email, plain_token)
+    try:
+        return jira_client.get_projects()
+    except JiraAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Jira token is invalid or lacks required permissions. Reconnect Jira.",
+        ) from exc
+    except JiraTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Jira API returned a transient error: {exc}",
+        ) from exc
+    finally:
+        _close_client(jira_client)
+
+
+@router.get(
+    "/issuetypes",
+    response_model=List[JiraIssueTypeResponse],
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_get_issue_types(
+    project_id: str = Query(..., description="Jira project id"),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Proxy `JiraClient.get_issue_types(project_id)` for the connected Jira site."""
+    row = _get_active_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Jira integration. Connect Jira first via /integrations/jira/connect.",
+        )
+    plain_token = get_decrypted_token(row)
+    jira_client = JiraClient(row.site_url, row.email, plain_token)
+    try:
+        return jira_client.get_issue_types(project_id)
+    except JiraAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Jira token is invalid or lacks required permissions. Reconnect Jira.",
+        ) from exc
+    except JiraTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Jira API returned a transient error: {exc}",
+        ) from exc
+    finally:
+        _close_client(jira_client)
+
+
+@router.post(
+    "/issues",
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_create_issue(
+    payload: JiraCreateIssueRequest,
+    current_org: Organization = Depends(get_current_org),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a Jira issue from a feedback item.
+
+    1. verify the feedback belongs to the caller's org (404 if not);
+    2. duplicate check — if a FeedbackJiraIssue already links this feedback
+       and `force` is not set, return 200 with `{warning: "duplicate", ...}`
+       (mirrors Linear's create_linear_issue);
+    3. validate + trim summary, build the ADF description, call
+       `create_issue(...)`;
+    4. stale-token handling: JiraAuthError -> 403 (never 500) + set
+       last_error/last_sync_status on the integration; JiraTransientError -> 502;
+    5. persist a FeedbackJiraIssue row + a jira_issue_created timeline event;
+    6. return {jira_issue_id, jira_issue_key, jira_issue_url, jira_issue_title}.
+    """
+    integration = _require_active_integration(db, current_org.id)
+
+    summary = (payload.summary or "").strip()
+    if not summary:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="summary must not be empty.",
+        )
+    summary = summary[:255]
+
+    feedback = (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.id == payload.feedback_id,
+            FeedbackItem.organization_id == current_org.id,
+        )
+        .first()
+    )
+    if not feedback:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Feedback item {payload.feedback_id} not found.",
+        )
+
+    existing_links = (
+        db.query(FeedbackJiraIssue)
+        .filter(
+            FeedbackJiraIssue.feedback_id == payload.feedback_id,
+            FeedbackJiraIssue.organization_id == current_org.id,
+        )
+        .all()
+    )
+    if existing_links and not payload.force:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "warning": "duplicate",
+                "existing_issues": [
+                    {
+                        "id": link.id,
+                        "jira_issue_key": link.jira_issue_key,
+                        "jira_issue_url": link.jira_issue_url,
+                        "jira_issue_title": link.jira_issue_title,
+                    }
+                    for link in existing_links
+                ],
+            },
+        )
+
+    description_adf = text_to_adf(payload.description)
+
+    plain_token = get_decrypted_token(integration)
+    jira_client = JiraClient(integration.site_url, integration.email, plain_token)
+    try:
+        created_issue = jira_client.create_issue({
+            "project_id": payload.project_id,
+            "issue_type_id": payload.issue_type_id,
+            "summary": summary,
+            "description_adf": description_adf,
+        })
+    except JiraAuthError as exc:
+        integration.last_sync_status = "error"
+        integration.last_error = str(exc)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Jira token is invalid or lacks required project permissions. "
+                "Reconnect Jira or check project permissions."
+            ),
+        ) from exc
+    except JiraTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Jira API returned a transient error: {exc}",
+        ) from exc
+    finally:
+        _close_client(jira_client)
+
+    link = FeedbackJiraIssue(
+        organization_id=current_org.id,
+        feedback_id=payload.feedback_id,
+        jira_issue_id=str(created_issue["id"]),
+        jira_issue_key=created_issue["key"],
+        jira_issue_url=created_issue["url"],
+        jira_issue_title=summary,
+        created_by_user_id=current_user.id,
+    )
+    db.add(link)
+    db.flush()
+
+    _add_timeline_entry(
+        db=db,
+        feedback_id=payload.feedback_id,
+        org_id=current_org.id,
+        event_type="jira_issue_created",
+        actor_id=current_user.id,
+        metadata={
+            "jira_issue_key": created_issue["key"],
+            "jira_issue_url": created_issue["url"],
+            "jira_issue_title": summary,
+            "created_by": current_user.email,
+        },
+    )
+
+    db.commit()
+    db.refresh(link)
+
+    logger.info(
+        "Created Jira issue %s for feedback %s", created_issue["key"], payload.feedback_id
+    )
+
+    return JiraCreateIssueResponse(
+        jira_issue_id=link.jira_issue_id,
+        jira_issue_key=link.jira_issue_key,
+        jira_issue_url=link.jira_issue_url,
+        jira_issue_title=link.jira_issue_title,
+    )
+
+
+@router.get(
+    "/issues",
+    response_model=List[JiraLinkedIssueResponse],
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_get_linked_issues(
+    feedback_id: int = Query(..., description="Feedback item ID"),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """List all Jira issues linked to a feedback item (for the wizard duplicate warning)."""
+    links = (
+        db.query(FeedbackJiraIssue)
+        .filter(
+            FeedbackJiraIssue.feedback_id == feedback_id,
+            FeedbackJiraIssue.organization_id == current_org.id,
+        )
+        .order_by(FeedbackJiraIssue.created_at.desc())
+        .all()
+    )
+    return links

@@ -29,6 +29,28 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def text_to_adf(text: str) -> dict:
+    """
+    Build a minimal valid Atlassian Document Format (ADF) doc from plain text.
+
+    Jira Cloud's `description` field (on `POST /issue`) requires ADF, not a
+    plain string. Empty/None text still produces a valid ADF doc — a
+    paragraph with no content — never an empty text node (Jira rejects
+    `{"type": "text", "text": ""}`).
+    """
+    content = [{"type": "text", "text": text}] if text else []
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": content,
+            }
+        ],
+    }
+
+
 class JiraError(Exception):
     """Base class for all JiraClient errors."""
 
@@ -164,4 +186,95 @@ class JiraClient:
             "account_id": data.get("accountId"),
             "display_name": data.get("displayName"),
             "email": data.get("emailAddress"),
+        }
+
+    # ------------------------------------------------------------------
+    # get_projects / get_issue_types / create_issue (backend-create-issue)
+    # ------------------------------------------------------------------
+
+    def get_projects(self) -> list[dict]:
+        """
+        Return the Jira Cloud projects visible to the connected account via
+        `GET /project/search`.
+
+        Returns:
+            list of `{id, key, name}` dicts.
+
+        Raises:
+            JiraAuthError: on 401/403.
+            JiraTransientError: on 429 or 5xx.
+        """
+        resp = self._get("/project/search")
+        data = resp.json()
+        values = data.get("values", data) if isinstance(data, dict) else data
+        return [
+            {
+                "id": project.get("id"),
+                "key": project.get("key"),
+                "name": project.get("name"),
+            }
+            for project in (values or [])
+        ]
+
+    def get_issue_types(self, project_id: str) -> list[dict]:
+        """
+        Return the issue types available for creation on `project_id`, via
+        the project-scoped create-metadata endpoint
+        `GET /issue/createmeta/{project_id}/issuetypes`.
+
+        Tolerates an empty/missing list (some Jira configs return none for a
+        given project) rather than raising.
+
+        Returns:
+            list of `{id, name}` dicts (possibly empty).
+
+        Raises:
+            JiraAuthError: on 401/403.
+            JiraTransientError: on 429 or 5xx.
+        """
+        resp = self._get(f"/issue/createmeta/{project_id}/issuetypes")
+        data = resp.json()
+        values = data.get("issueTypes", data) if isinstance(data, dict) else data
+        return [
+            {
+                "id": issue_type.get("id"),
+                "name": issue_type.get("name"),
+            }
+            for issue_type in (values or [])
+        ]
+
+    def create_issue(self, issue: dict) -> dict:
+        """
+        Create a Jira issue via `POST /issue`.
+
+        Args:
+            issue: dict with `project_id`, `issue_type_id`, `summary`
+                (caller is responsible for the 255 char cap and non-empty
+                validation) and `description_adf` (an Atlassian Document
+                Format dict, e.g. the output of `text_to_adf`).
+
+        Returns:
+            dict with `id`, `key`, and `url` (the browse URL, built as
+            `{site_url}/browse/{key}`).
+
+        Raises:
+            JiraAuthError: on 401/403 (stale/invalid token or insufficient
+                project permissions).
+            JiraTransientError: on 429 or 5xx.
+        """
+        payload = {
+            "fields": {
+                "project": {"id": issue["project_id"]},
+                "issuetype": {"id": issue["issue_type_id"]},
+                "summary": issue["summary"],
+                "description": issue["description_adf"],
+            }
+        }
+        resp = self._post("/issue", json=payload)
+        data = resp.json()
+        key = data.get("key")
+        return {
+            "id": data.get("id"),
+            "key": key,
+            "url": f"{self._site_url}/browse/{key}",
         }
