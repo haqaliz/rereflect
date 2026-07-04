@@ -53,6 +53,8 @@ PLANS = {
             "hubspot_integration",
             # Salesforce CRM enrichment (salesforce-connection aspect)
             "salesforce_integration",
+            # Jira Cloud integration (jira-integration backend-connection aspect)
+            "jira_integration",
         ],
         "stripe_price_monthly": None,
         "stripe_price_annual": None,
@@ -304,6 +306,8 @@ FEATURE_PLANS = {
     "hubspot_integration": "free",
     # Salesforce CRM enrichment (salesforce-connection aspect) — free so all plans unlock
     "salesforce_integration": "free",
+    # Jira Cloud integration (jira-integration backend-connection aspect) — free, not mapped to pro
+    "jira_integration": "free",
 }
 
 
