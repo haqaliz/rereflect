@@ -392,6 +392,16 @@ def _verify_zendesk_signature(body: bytes, timestamp: str, signature: str, secre
     return hmac.compare_digest(expected, signature)
 
 
+def _ignore(reason: str) -> dict:
+    """
+    Build the 200 no-op response body shared by every "logged, nothing
+    created" branch (missing_subdomain / unknown_subdomain / no_active_source
+    / missing_ticket_id). Callers still log a distinct message per reason
+    before calling this -- this only dedupes the return shape.
+    """
+    return {"status": "ignored", "reason": reason}
+
+
 @router.post("/zendesk/events")
 async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)):
     """
@@ -415,7 +425,7 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
     subdomain = _resolve_zendesk_subdomain(payload, request.headers)
     if not subdomain:
         logger.info("Zendesk webhook: no subdomain resolvable from payload/headers")
-        return {"status": "ignored", "reason": "missing_subdomain"}
+        return _ignore("missing_subdomain")
 
     integration = (
         db.query(ZendeskIntegration)
@@ -427,7 +437,7 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
     )
     if not integration:
         logger.info(f"Zendesk webhook: unknown/inactive subdomain '{subdomain}'")
-        return {"status": "ignored", "reason": "unknown_subdomain"}
+        return _ignore("unknown_subdomain")
 
     # Fail-closed: a matched integration with no webhook_secret has not
     # opted into the real-time webhook. This is deliberately a 401 (not the
@@ -467,13 +477,13 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
             f"Zendesk webhook: no active zendesk FeedbackSource for org {integration.organization_id} "
             f"(subdomain '{subdomain}')"
         )
-        return {"status": "ignored", "reason": "no_active_source"}
+        return _ignore("no_active_source")
 
     ticket = payload.get("ticket") or {}
     ticket_id = ticket.get("id")
     if not ticket_id:
         logger.warning(f"Zendesk webhook: missing ticket id for subdomain '{subdomain}'")
-        return {"status": "ignored", "reason": "missing_ticket_id"}
+        return _ignore("missing_ticket_id")
 
     # Quick synchronous dedup pre-check (fast-path optimization on top of,
     # not a replacement for, the ingestion-core's own FeedbackSourceEvent
