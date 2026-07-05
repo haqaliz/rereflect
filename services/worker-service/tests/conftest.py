@@ -21,6 +21,15 @@ def _fake_get_db_session():
 _mock_database.get_db_session = _fake_get_db_session
 sys.modules.setdefault("src.database", _mock_database)
 
+# Load the REAL src.celery_app into sys.modules now, before any test module
+# gets a chance to inject a mock via `sys.modules.setdefault("src.celery_app", ...)`
+# (see test_webhook_delivery.py). Task modules use `@shared_task`, so nothing else
+# imports the real app during collection; without this, whether the real app or a
+# leaked mock wins is import-order roulette, making TestCeleryTaskRegistration
+# (hubspot + salesforce) flaky. This import succeeds under the config/database
+# mocks above (same path used when a registration test file runs in isolation).
+import src.celery_app  # noqa: E402,F401
+
 import pytest
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
