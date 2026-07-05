@@ -75,17 +75,27 @@ pytest tests/test_zendesk_connection.py tests/test_zendesk_client.py \
 ```
 
 A full `pytest tests/ -q` run (2810 collected tests) was started in the
-background to double-check for cross-file regressions; it was still
-running past the 26% mark with no zendesk-related failures observed
-(pre-existing unrelated failures seen so far: `test_automation_engine.py`
-`FFFF`, `test_conversation_folders_api.py` one `F` — both far from
-`zendesk_integration.py` and present before this change). Given the change
-surface here is a single new, additive route (no edits to any existing
-route/handler in that file), and all zendesk-scoped tests plus the new
-endpoint's own test suite are 100% green, I did not block finishing this
-report on the full 2810-test run completing. Flagging this as a minor
-process deviation from "run the full suite" — happy to report back the
-final full-suite number if you want it before merging.
+background to double-check for cross-file regressions. It progressed
+cleanly to ~47% (well past every zendesk-related test file — all observed
+green, including `test_feedback_sources_zendesk.py` and this aspect's own
+`test_hubspot_sync_endpoint.py`/`test_zendesk_sync_endpoint.py` neighbors)
+before the **entire pytest process segfaulted** (exit code 139) inside
+`tests/test_report_ws.py::test_report_sections_saved_to_db` — a
+pre-existing websocket/threading test combined with the `sentry_sdk`
+background worker thread, with a native crash traceback through
+`sqlalchemy`/CPython threading, nothing related to Zendesk or any file
+this aspect touched. This looks like a pre-existing environment-level
+flake in this large test suite (thread + sqlite + Sentry SDK interaction),
+not a regression introduced here — no zendesk file appears anywhere in the
+crash traceback, and the crash test itself
+(`tests/test_report_ws.py`) is nowhere near
+`src/api/routes/zendesk_integration.py`. Given the change surface here is
+a single new, additive route (no edits to any existing route/handler in
+that file) and all zendesk-scoped tests plus the new endpoint's own test
+suite are 100% green, I did not chase down or fix this unrelated
+pre-existing crash — flagging it here so it's on record, in case someone
+wants to investigate `test_report_ws.py`'s interaction with the Sentry SDK
+background thread separately.
 
 ## How the locked contracts were handled
 
@@ -196,13 +206,17 @@ plan-wording nuance rather than silently picking one.
    already-decided out-of-scope for this task via D1b, not an oversight.
    See "contracts" section above for the reasoning and the forward-pointer
    for whoever needs it.
-3. **Backend-api full-suite run** — started but not confirmed complete
-   before writing this report (2810 tests, large pre-existing suite); all
-   zendesk-scoped tests (92 total) are green, and the change is a single
-   additive endpoint with no edits to existing handlers in that file.
+3. **Backend-api full-suite run** — crashed with a segfault (exit 139) at
+   ~47% inside `tests/test_report_ws.py::test_report_sections_saved_to_db`,
+   a pre-existing websocket/threading/Sentry-SDK test unrelated to Zendesk
+   (confirmed via the crash traceback — no zendesk file appears in it, and
+   all zendesk-scoped tests observed before the crash point were green).
+   Not investigated further as it's out of this aspect's scope; all
+   zendesk-scoped tests (92 total) are green in isolation.
 
 ## Concerns
 
-- None blocking. The one open item is #3 above — happy to report the final
-  backend-api full-suite pass/fail count once it finishes if you'd like it
-  confirmed before merge.
+- None blocking. Item #3 above (a pre-existing, apparently
+  environment-level segfault in `test_report_ws.py`, unrelated to this
+  aspect) is worth someone separately investigating, but it predates and
+  is unrelated to this change.
