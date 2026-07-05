@@ -155,7 +155,7 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [x] Intercom API (pull support conversations)
 - [x] Email forwarding (receive feedback via email)
 - [x] Linear integration (OAuth, webhooks, feedback sources, issue management)
-- [ ] Zendesk API (pull support tickets)
+- [x] Zendesk API (pull support tickets)
 - [ ] HubSpot integration (sync with CRM)
 
 ---
@@ -202,11 +202,16 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [ ] Create task from feedback: workspace/project selection
 - [ ] Plan gate: Pro+
 
-### M3.4 — Zendesk Integration (2 weeks)
-- [ ] Zendesk OAuth flow
-- [ ] Zendesk API client: tickets, comments, users
-- [ ] Feedback source type: `zendesk` (pull ticket data as feedback)
-- [ ] Plan gate: Pro+
+### M3.4 — Zendesk Integration — COMPLETE (shipped 2026-07-06, `feat/zendesk-integration`)
+> Delivered as `zendesk-integration`. **Zendesk + agent email + API token (HTTP Basic `email/token:token`)** — NOT the OAuth marketplace flow (awkward for self-host; the Jira/HubSpot BYOK precedent). Inbound feedback source: tickets → feedback, riding the existing analysis → churn → health → copilot pipeline. See `docs/planning/zendesk-integration/` (PRD + 6 aspect specs + plans). SSRF-hardened (route `*.zendesk.com` + DNS/private-IP gate on connect; client-side re-assert in the adapter's enrichment call). All features **unlocked** (OSS self-hosted).
+- [x] Connect via API token (connect/status/disconnect/test + manual `/sync`), one subdomain per org, encrypted at rest (`encrypt_api_key`), auto-provisions a default `zendesk` feedback source on connect
+- [x] `ZendeskClient` (REST v2, Basic auth): validate (`/users/me.json`), incremental ticket poller
+- [x] **Dual ingestion, shared dedup core:** (a) pull — Celery beat incremental poll (`/incremental/tickets`, new-tickets-only cursor, 429 `Retry-After` throttle); (b) optional real-time webhook (`/api/v1/webhooks/zendesk/events`, HMAC-SHA256 over raw body, fail-closed on missing secret). One feedback item per ticket, deduped by ticket ID; requester email → `customer_email`
+- [x] Feedback source type: `zendesk` (registered as a selectable own-auth source, `requires_integration=false`)
+- [x] Frontend: token-paste settings page + integrations tile + source-wizard branch; landing page flipped to "available" + `SELF_HOSTING.md` token/webhook setup docs
+- [x] Plan gate: **removed** — all unlocked in the open-source self-hosted edition (not Pro+)
+- [x] Also fixed a pre-existing `_log_event` dedup bug (was silently breaking dedup for Intercom/email adapters too)
+- [ ] **Deferred (v2):** OAuth flow, per-comment ingestion, historical backfill, status/tag/view filters, multiple subdomains per org, write-back / status sync to Zendesk
 
 ### M3.5 — HubSpot CRM Integration (3 weeks)
 - [ ] HubSpot OAuth flow
