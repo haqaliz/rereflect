@@ -447,6 +447,167 @@ class TestSyncZendeskOrgBody:
 
 
 # ---------------------------------------------------------------------------
+# Regression: terminal failure status must survive the main session's
+# rollback (observability — PRD req 9b/R6).
+#
+# Every other test in this file patches `get_db_session` with a bare
+# `yield db` fake — the SAME session object the test then inspects, so it
+# never exercises the real commit-on-success/rollback-on-exception behavior
+# implemented in src/database.py's get_db_session(). That's fine for the
+# happy/no_source/auth paths (they return normally, so the real context
+# manager would commit anyway), but it silently hides the bug in the
+# transient-exhaustion and unhandled-exception paths: those set
+# last_sync_status/last_error on `integ`, call db.flush(), and then
+# raise/task_self.retry(...) — and the real get_db_session ALWAYS rolls
+# back when an exception propagates out of its `with` block, discarding
+# that flush.
+#
+# These tests use a real SQLAlchemy session (backed by a temp on-disk
+# SQLite file, so genuinely independent connections/transactions are
+# possible — unlike the shared in-memory `db` fixture) wired up with the
+# EXACT commit/rollback semantics of src/database.py.get_db_session, then
+# verify the persisted row from a completely separate session afterward.
+# ---------------------------------------------------------------------------
+
+
+class TestTerminalStatusPersistsAcrossRollback:
+    def _real_get_db_session_factory(self, engine):
+        """Build a context-manager function with the exact semantics of
+        src/database.py's get_db_session (commit on success, rollback +
+        reraise on exception), bound to the given engine."""
+        from sqlalchemy.orm import sessionmaker as _sessionmaker
+        from contextlib import contextmanager as _contextmanager
+
+        SessionLocal = _sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        @_contextmanager
+        def real_get_db_session():
+            session = SessionLocal()
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+
+        return real_get_db_session, SessionLocal
+
+    def _make_file_backed_integration(self, tmp_path, filename, prior_status="success"):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker as _sessionmaker
+        from src.models import Base
+
+        db_path = tmp_path / filename
+        engine = create_engine(f"sqlite:///{db_path}")
+        Base.metadata.create_all(bind=engine)
+        SessionLocal = _sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        setup = SessionLocal()
+        org = Organization(name="Acme Co", plan="pro")
+        setup.add(org)
+        setup.commit()
+        setup.refresh(org)
+
+        integ = ZendeskIntegration(
+            organization_id=org.id,
+            subdomain="acmeco",
+            email="agent@acmeco.com",
+            api_token="enc:blob",
+            is_active=True,
+            connected_at=datetime.utcnow(),
+            last_sync_status=prior_status,
+        )
+        setup.add(integ)
+        setup.commit()
+        integ_id = integ.id
+        setup.close()
+
+        return engine, integ_id
+
+    def test_unhandled_exception_persists_error_status_despite_rollback(self, tmp_path):
+        import src.tasks.zendesk_sync as zs
+        importlib.reload(zs)
+
+        engine, integ_id = self._make_file_backed_integration(
+            tmp_path, "zendesk_rollback_error.db", prior_status="success",
+        )
+        real_get_db_session, SessionLocal = self._real_get_db_session_factory(engine)
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.incremental_tickets.side_effect = RuntimeError("boom")
+
+        with patch.object(zs, "get_db_session", real_get_db_session), \
+             patch.object(zs, "_decrypt", return_value="plain-token"), \
+             patch.object(zs, "ZendeskClient", return_value=mock_client_instance):
+            task_self = MagicMock()
+            with pytest.raises(RuntimeError):
+                zs._sync_zendesk_org_body(task_self, integ_id)
+
+        # Fresh session/query, distinct from anything the task body touched —
+        # proves the write survived the main session's rollback rather than
+        # being an in-memory artifact of a shared session object.
+        verify = SessionLocal()
+        try:
+            row = (
+                verify.query(ZendeskIntegration)
+                .filter(ZendeskIntegration.id == integ_id)
+                .first()
+            )
+            assert row.last_sync_status == "error"
+            assert row.last_error is not None
+            assert "boom" in row.last_error
+        finally:
+            verify.close()
+
+    def test_transient_exhaustion_persists_retrying_status_despite_rollback(self, tmp_path):
+        from celery.exceptions import Retry
+        import src.tasks.zendesk_sync as zs
+        importlib.reload(zs)
+
+        engine, integ_id = self._make_file_backed_integration(
+            tmp_path, "zendesk_rollback_retrying.db", prior_status="success",
+        )
+        real_get_db_session, SessionLocal = self._real_get_db_session_factory(engine)
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.incremental_tickets.side_effect = zs.ZendeskTransientError(
+            "rate limited"
+        )
+
+        # Simulates Celery's self.retry() on the final exhausted attempt —
+        # whether it raises Retry (mid-retry) or MaxRetriesExceededError
+        # (exhausted), both propagate out of the `with get_db_session()`
+        # block the same way, so this covers the exhaustion case too.
+        task_self = MagicMock()
+        task_self.retry.side_effect = Retry()
+
+        with patch.object(zs, "get_db_session", real_get_db_session), \
+             patch.object(zs, "_decrypt", return_value="plain-token"), \
+             patch.object(zs, "ZendeskClient", return_value=mock_client_instance):
+            with pytest.raises(Retry):
+                zs._sync_zendesk_org_body(task_self, integ_id)
+
+        verify = SessionLocal()
+        try:
+            row = (
+                verify.query(ZendeskIntegration)
+                .filter(ZendeskIntegration.id == integ_id)
+                .first()
+            )
+            assert row.last_sync_status == "retrying"
+            assert row.last_error is not None
+            assert "rate limited" in row.last_error
+        finally:
+            verify.close()
+
+
+# ---------------------------------------------------------------------------
 # Phase 4b: TestFanOutTask
 # ---------------------------------------------------------------------------
 

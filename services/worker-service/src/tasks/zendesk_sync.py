@@ -94,6 +94,45 @@ def _to_unix_ts(dt: datetime) -> int:
     return int(dt.timestamp())
 
 
+def _persist_terminal_status(integration_id: int, status: str, error: str) -> None:
+    """
+    Persist last_sync_status/last_error in a FRESH session that commits
+    independently of the caller's session.
+
+    _sync_zendesk_org_body's main `with get_db_session() as db:` block
+    rolls back automatically whenever an exception propagates out of it
+    (see get_db_session in src/database.py) — so writes made to `integ`
+    immediately before `raise` / `raise task_self.retry(...)` are always
+    discarded, and a sync that exhausts all retries (or hits an unhandled
+    exception) silently leaves last_sync_status at whatever it was before
+    (e.g. "success") instead of reflecting the failure (PRD 9b/R6).
+
+    Call this from inside the transient-exhaustion and unhandled-exception
+    except blocks, before re-raising, so the terminal failure status
+    survives that rollback.
+    """
+    from src.models import ZendeskIntegration
+
+    try:
+        with get_db_session() as fresh_db:
+            row = (
+                fresh_db.query(ZendeskIntegration)
+                .filter(ZendeskIntegration.id == integration_id)
+                .first()
+            )
+            if row is not None:
+                row.last_sync_status = status
+                row.last_error = error
+    except Exception:
+        logger.error(
+            "zendesk_sync: failed to persist terminal status=%s for "
+            "integration_id=%s",
+            status,
+            integration_id,
+            exc_info=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Core sync logic (Celery-free — tested directly)
 # ---------------------------------------------------------------------------
@@ -263,7 +302,15 @@ def _sync_zendesk_org_body(task_self, integration_id: int) -> Dict[str, Any]:
             )
             integ.last_sync_status = "retrying"
             integ.last_error = str(exc)
-            db.flush()
+            # NOTE: deliberately NOT db.flush()'d here — this session's
+            # transaction rolls back on the `raise` below regardless (see
+            # get_db_session), and flushing would additionally take a row
+            # lock that would self-deadlock against the fresh session
+            # _persist_terminal_status opens next (same row, same process,
+            # waiting on its own uncommitted UPDATE). _persist_terminal_status
+            # is the sole durable write for this branch — see its docstring.
+            # Covers the final, exhausted retry attempt too.
+            _persist_terminal_status(integration_id, "retrying", str(exc))
             raise task_self.retry(exc=exc)
 
         except Exception as exc:
@@ -276,7 +323,11 @@ def _sync_zendesk_org_body(task_self, integration_id: int) -> Dict[str, Any]:
             )
             integ.last_sync_status = "error"
             integ.last_error = str(exc)[:500]
-            db.flush()
+            # NOTE: deliberately NOT db.flush()'d — see the identical note in
+            # the ZendeskTransientError branch above (self-deadlock risk
+            # against _persist_terminal_status's fresh session on the same
+            # row). _persist_terminal_status is the sole durable write here.
+            _persist_terminal_status(integration_id, "error", str(exc)[:500])
             raise
 
 

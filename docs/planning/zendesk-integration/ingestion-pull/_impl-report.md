@@ -220,3 +220,127 @@ plan-wording nuance rather than silently picking one.
   environment-level segfault in `test_report_ws.py`, unrelated to this
   aspect) is worth someone separately investigating, but it predates and
   is unrelated to this change.
+
+## Fix — terminal sync status lost to rollback (observability, PRD req 9b/R6)
+
+**Date:** 2026-07-05 · **Commit:** `fix(zendesk): persist terminal sync status across rollback on failure`
+
+**Defect:** In `_sync_zendesk_org_body`'s `ZendeskTransientError` and generic
+`Exception` branches, the code set `integ.last_sync_status`/`last_error`,
+called `db.flush()`, then `raise` / `raise task_self.retry(exc=exc)`. But
+the main `with get_db_session() as db:` block's context manager
+(`src/database.py`) calls `session.rollback()` on any exception that
+propagates out of it — which discards that flush. Net effect: a sync that
+exhausted all retries, or hit an unhandled exception, left
+`last_sync_status` at whatever it was before (e.g. `"success"`) instead of
+reflecting the failure, violating PRD req 9b/R6 (failures must be visible
+via `last_sync_status`/`last_error`).
+
+**Precedent check:** Read `hubspot_sync.py` and `salesforce_sync.py`
+(`_sync_hubspot_org_body` / `_sync_salesforce_org_body`) — both have the
+**exact same gap**: identical `set attrs → db.flush() → raise` pattern
+inside the same `get_db_session()` block, for both their transient-retry
+and generic-exception branches. Neither has an `on_failure` hook, a fresh
+session, or a commit-before-raise. Per the task instructions, since the
+precedent has the same gap rather than an established pattern to mirror,
+I used the most robust minimal fix directly in `zendesk_sync.py` (scope:
+worker-service/zendesk only — hubspot_sync.py/salesforce_sync.py were
+**not** modified, since fixing their identical, pre-existing gap was
+outside this task's scope).
+
+**Fix:** Added `_persist_terminal_status(integration_id, status, error)` —
+opens a **fresh** `get_db_session()` (independent connection/transaction),
+re-queries the `ZendeskIntegration` row by id, sets
+`last_sync_status`/`last_error`, and lets that context manager commit on
+its own before returning. Called from both the `ZendeskTransientError` and
+generic `Exception` except blocks, immediately before `raise` /
+`raise task_self.retry(exc=exc)`, so the terminal status survives
+regardless of what the outer session does afterward.
+
+**Self-deadlock caught during GREEN:** The first fix attempt kept the
+original `db.flush()` call before invoking `_persist_terminal_status`. That
+flush sends the UPDATE on the *original* session's still-open transaction
+(taking a row lock), and then the fresh session's UPDATE on the same row
+blocked waiting for that lock to release — which only happens when the
+original session's rollback runs, i.e. *after* `_persist_terminal_status`
+already returned. This is a real self-deadlock (surfaced immediately as
+`sqlite3.OperationalError: database is locked` in the test; would hang/
+block indefinitely on Postgres). Fix: removed the now-redundant
+`db.flush()` calls in both branches (the flush achieved nothing anyway,
+since that session's transaction always rolls back on the following
+`raise`) — `_persist_terminal_status`'s fresh session is now the sole
+durable write for these two branches.
+
+**TDD:**
+- RED: added `TestTerminalStatusPersistsAcrossRollback` (2 tests) in
+  `tests/test_zendesk_sync.py`. Unlike every other test in the file (which
+  patches `get_db_session` with a bare `yield db` fake — the same session
+  object the test later inspects, never exercising real commit/rollback),
+  these tests wire `get_db_session` to a real context manager with the
+  *exact* commit-on-success/rollback-on-exception semantics of
+  `src/database.py`, bound to a temp on-disk SQLite file (so a genuinely
+  independent second connection/transaction is possible, unlike the shared
+  in-memory `db` fixture). Verification queries use a brand-new session,
+  proving persistence survived the rollback rather than reading a shared
+  in-memory object.
+  - `test_unhandled_exception_persists_error_status_despite_rollback` —
+    `ZendeskClient.incremental_tickets` raises `RuntimeError("boom")`;
+    asserts the row's `last_sync_status == "error"` and `last_error`
+    contains `"boom"` after the exception propagates.
+  - `test_transient_exhaustion_persists_retrying_status_despite_rollback` —
+    raises `ZendeskTransientError("rate limited")`, `task_self.retry`
+    configured to raise `celery.exceptions.Retry` (mirroring the existing
+    `test_transient_error_retries` mock pattern); asserts
+    `last_sync_status == "retrying"` and `last_error` contains
+    `"rate limited"` after the `Retry` propagates.
+  - Confirmed RED against pre-fix code: both failed with
+    `AssertionError: assert 'success' == 'error'` /
+    `assert 'success' == 'retrying'` — proving the persisted row was
+    never updated.
+- GREEN: implemented `_persist_terminal_status` + wired it into both except
+  branches + removed the redundant, lock-contending `db.flush()` calls (see
+  self-deadlock note above). Both new tests pass; all 20 pre-existing
+  `test_zendesk_sync.py` tests remain green (they don't assert on
+  `last_sync_status` for these two branches via the fake session, so the
+  `db.flush()` removal doesn't affect them).
+
+**Validation:**
+
+```
+cd services/worker-service && source venv/bin/activate
+pytest tests/test_zendesk_sync.py -v   → 22 passed (20 pre-existing + 2 new)
+pytest tests/ -q                        → 647 passed, 23 failed
+```
+
+- Baseline before this fix: 645 passed, 23 failed.
+- After this fix: 647 passed (+2, the new regression tests), 23 failed —
+  byte-for-byte the same 23 failing test names as baseline
+  (`test_anomaly_integration.py::TestDispatchAnomalyAlerts::*`,
+  `test_churn_calibration_tasks.py::*`,
+  `test_insights_task.py::TestWeeklyDigestWithInsights::*`,
+  `test_sentry.py::TestCeleryAppSentryFlag::*`,
+  `test_weekly_digest.py::TestSendWeeklyDigests::*`) — all pre-existing,
+  unrelated to zendesk. **Zero regressions.**
+
+**Files touched:**
+- `services/worker-service/src/tasks/zendesk_sync.py` — added
+  `_persist_terminal_status`; wired into `ZendeskTransientError` and
+  generic `Exception` branches; removed the two now-redundant
+  (lock-contending) `db.flush()` calls in those branches.
+- `services/worker-service/tests/test_zendesk_sync.py` — added
+  `TestTerminalStatusPersistsAcrossRollback` (2 tests).
+
+**Concerns:**
+- `hubspot_sync.py` and `salesforce_sync.py` have the identical
+  pre-existing gap (confirmed during precedent check) and were left
+  untouched per this task's scope (worker-service/zendesk only) — flagging
+  for a follow-up fix so HubSpot/Salesforce syncs also correctly surface
+  `last_sync_status="error"`/`"retrying"` after retry-exhaustion or
+  unhandled exceptions.
+- `_persist_terminal_status` swallows its own failures (logs and returns)
+  rather than raising, so if the fresh session's write itself fails (e.g.
+  DB unreachable), the original exception is still the one that propagates
+  to Celery — this is intentional (observability best-effort must never
+  mask or replace the real failure that triggered it) but means a
+  double-failure (original error + failed status write) is only visible in
+  logs, not in `last_sync_status`.
