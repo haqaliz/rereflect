@@ -26,12 +26,15 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_org, get_current_user, require_admin_or_owner
 from src.database.session import get_db
-from src.models.asana_integration import AsanaIntegration
+from src.models.asana_integration import AsanaIntegration, FeedbackAsanaTask
+from src.models.feedback import FeedbackItem
+from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.organization import Organization
 from src.models.user import User
 from src.services.asana_client import (
@@ -40,6 +43,9 @@ from src.services.asana_client import (
     AsanaTransientError,
 )
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
+
+# Asana enforces a 255-character max on task `name` (matches Jira's summary cap).
+ASANA_TASK_NAME_MAX_LEN = 255
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +100,35 @@ class AsanaProjectResponse(BaseModel):
     name: Optional[str] = None
 
 
+class AsanaCreateTaskRequest(BaseModel):
+    feedback_id: int
+    workspace_gid: str = Field(..., min_length=1)
+    project_gid: str = Field(..., min_length=1)
+    name: str
+    notes: Optional[str] = None
+    force: bool = False
+
+
+class AsanaCreateTaskResponse(BaseModel):
+    asana_task_gid: Optional[str] = None
+    asana_task_url: Optional[str] = None
+    asana_task_name: Optional[str] = None
+    warning: Optional[str] = None
+    existing_tasks: Optional[List[dict]] = None
+
+
+class AsanaLinkedTaskResponse(BaseModel):
+    id: int
+    feedback_id: int
+    asana_task_gid: str
+    asana_task_url: str
+    asana_task_name: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ──────────────────────── Internal helpers ───────────────────────────────────
 
 
@@ -142,6 +177,26 @@ def _close_client(asana_client: AsanaClient) -> None:
         asana_client.close()
     except Exception:  # noqa: BLE001 — best-effort cleanup only
         pass
+
+
+def _add_timeline_entry(
+    db: Session,
+    feedback_id: int,
+    org_id: int,
+    event_type: str,
+    actor_id: Optional[int],
+    metadata: dict,
+) -> None:
+    """Add a workflow event timeline entry for a feedback item (mirrors Jira's helper)."""
+    event = FeedbackWorkflowEvent(
+        feedback_id=feedback_id,
+        organization_id=org_id,
+        actor_id=actor_id,
+        event_type=event_type,
+        metadata_=metadata,
+    )
+    db.add(event)
+    db.commit()
 
 
 # ──────────────────────── Routes ─────────────────────────────────────────────
@@ -397,3 +452,171 @@ def asana_get_projects(
         ) from exc
     finally:
         _close_client(asana_client)
+
+
+# ──────────────────────────── Create-task aspect ─────────────────────────────
+# POST /tasks, GET /tasks
+# (backend-create-task aspect — mirrors Jira's create_issue route)
+
+
+@router.post(
+    "/tasks",
+    response_model=AsanaCreateTaskResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def asana_create_task(
+    payload: AsanaCreateTaskRequest,
+    current_org: Organization = Depends(get_current_org),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Create an Asana task from a feedback item.
+
+    1. verify the feedback belongs to the caller's org (404 if not);
+    2. duplicate check — if a FeedbackAsanaTask already links this feedback
+       and `force` is not set, return 200 with `{warning: "duplicate", ...}`
+       (mirrors Jira's create_issue) with NO second Asana call;
+    3. trim `name` to Asana's max length, call `create_task(...)`;
+    4. stale-token handling: AsanaAuthError -> 403 (never 500) + set
+       last_error/last_sync_status on the integration; AsanaTransientError -> 502;
+    5. persist a FeedbackAsanaTask row + an asana_task_created timeline event;
+    6. return {asana_task_gid, asana_task_url, asana_task_name}.
+    """
+    integration = _require_active_integration(db, current_org.id)
+
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="name must not be empty.",
+        )
+    name = name[:ASANA_TASK_NAME_MAX_LEN]
+
+    feedback = (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.id == payload.feedback_id,
+            FeedbackItem.organization_id == current_org.id,
+        )
+        .first()
+    )
+    if not feedback:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Feedback item {payload.feedback_id} not found.",
+        )
+
+    existing_links = (
+        db.query(FeedbackAsanaTask)
+        .filter(
+            FeedbackAsanaTask.feedback_id == payload.feedback_id,
+            FeedbackAsanaTask.organization_id == current_org.id,
+        )
+        .all()
+    )
+    if existing_links and not payload.force:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "warning": "duplicate",
+                "existing_tasks": [
+                    {
+                        "id": link.id,
+                        "asana_task_gid": link.asana_task_gid,
+                        "asana_task_url": link.asana_task_url,
+                        "asana_task_name": link.asana_task_name,
+                    }
+                    for link in existing_links
+                ],
+            },
+        )
+
+    plain_token = get_decrypted_token(integration)
+    asana_client = AsanaClient(plain_token)
+    try:
+        created_task = asana_client.create_task({
+            "name": name,
+            "notes": payload.notes or "",
+            "project_gid": payload.project_gid,
+            "workspace_gid": payload.workspace_gid,
+        })
+    except AsanaAuthError as exc:
+        integration.last_sync_status = "error"
+        integration.last_error = str(exc)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Asana token is invalid or lacks required project permissions. "
+                "Reconnect Asana or check project permissions."
+            ),
+        ) from exc
+    except AsanaTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Asana API returned a transient error: {exc}",
+        ) from exc
+    finally:
+        _close_client(asana_client)
+
+    link = FeedbackAsanaTask(
+        organization_id=current_org.id,
+        feedback_id=payload.feedback_id,
+        asana_task_gid=str(created_task["gid"]),
+        asana_task_url=created_task["url"],
+        asana_task_name=name,
+        created_by_user_id=current_user.id,
+    )
+    db.add(link)
+    db.flush()
+
+    _add_timeline_entry(
+        db=db,
+        feedback_id=payload.feedback_id,
+        org_id=current_org.id,
+        event_type="asana_task_created",
+        actor_id=current_user.id,
+        metadata={
+            "asana_task_gid": link.asana_task_gid,
+            "asana_task_url": link.asana_task_url,
+            "asana_task_name": name,
+            "created_by": current_user.email,
+        },
+    )
+
+    db.commit()
+    db.refresh(link)
+
+    logger.info(
+        "Created Asana task %s for feedback %s", link.asana_task_gid, payload.feedback_id
+    )
+
+    return AsanaCreateTaskResponse(
+        asana_task_gid=link.asana_task_gid,
+        asana_task_url=link.asana_task_url,
+        asana_task_name=link.asana_task_name,
+    )
+
+
+@router.get(
+    "/tasks",
+    response_model=List[AsanaLinkedTaskResponse],
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def asana_get_linked_tasks(
+    feedback_id: int = Query(..., description="Feedback item ID"),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """List all Asana tasks linked to a feedback item (for the wizard duplicate warning)."""
+    links = (
+        db.query(FeedbackAsanaTask)
+        .filter(
+            FeedbackAsanaTask.feedback_id == feedback_id,
+            FeedbackAsanaTask.organization_id == current_org.id,
+        )
+        .order_by(FeedbackAsanaTask.created_at.desc())
+        .all()
+    )
+    return links
