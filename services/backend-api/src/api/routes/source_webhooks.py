@@ -3,6 +3,7 @@ Webhook endpoints for receiving events from external sources (Slack, Intercom, g
 These endpoints handle signature verification and queue events for async processing.
 """
 
+import base64
 import hashlib
 import hmac
 import json
@@ -10,13 +11,16 @@ import logging
 import os
 import time
 import uuid
-from typing import Optional
+from typing import Mapping, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from src.database.session import get_db
 from src.models import FeedbackSource, FeedbackSourceEvent
+from src.models.zendesk_integration import ZendeskIntegration
+from src.utils.encryption import decrypt_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -321,3 +325,68 @@ async def handle_intercom_webhook(request: Request):
     except Exception as e:
         logger.error(f"Failed to queue Intercom event: {e}")
         raise HTTPException(status_code=500, detail="Failed to process event")
+
+
+# ============================================================================
+# Zendesk Webhook
+# ============================================================================
+
+
+def _resolve_zendesk_subdomain(payload: dict, headers: Mapping) -> Optional[str]:
+    """
+    Resolve the Zendesk account subdomain for an inbound webhook payload.
+
+    Resolution order (first match wins):
+    1. Top-level `subdomain` field in the payload (simplest for the operator
+       to hardcode literally in the Zendesk trigger's JSON body).
+    2. The host label parsed from `payload["ticket"]["url"]`
+       (`https://{subdomain}.zendesk.com/...`).
+    3. The `X-Zendesk-Subdomain` request header.
+
+    Returns the normalized (lower-cased) subdomain, or None if none of the
+    three are resolvable.
+    """
+    subdomain = payload.get("subdomain")
+    if subdomain:
+        return str(subdomain).lower()
+
+    ticket = payload.get("ticket") or {}
+    url = ticket.get("url")
+    if url:
+        try:
+            host = urlparse(url).hostname
+        except (ValueError, AttributeError):
+            host = None
+        if host and host.endswith(".zendesk.com"):
+            label = host[: -len(".zendesk.com")]
+            if label:
+                return label.lower()
+
+    header_subdomain = headers.get("X-Zendesk-Subdomain")
+    if header_subdomain:
+        return str(header_subdomain).lower()
+
+    return None
+
+
+def _verify_zendesk_signature(body: bytes, timestamp: str, signature: str, secret: Optional[str]) -> bool:
+    """
+    Verify a Zendesk webhook HMAC-SHA256 signature.
+
+    `X-Zendesk-Webhook-Signature` = base64(HMAC-SHA256(webhook_secret,
+    `X-Zendesk-Webhook-Signature-Timestamp` + raw_body)), verified over the
+    raw request body.
+
+    Fails closed: an empty/None secret returns False (Zendesk's per-org
+    webhook_secret is a required value once the webhook path is opted into,
+    not an optional global env var like Intercom's INTERCOM_CLIENT_SECRET).
+    """
+    if not secret:
+        return False
+    if not signature or not timestamp:
+        return False
+
+    expected = base64.b64encode(
+        hmac.new(secret.encode(), timestamp.encode() + body, hashlib.sha256).digest()
+    ).decode()
+    return hmac.compare_digest(expected, signature)
