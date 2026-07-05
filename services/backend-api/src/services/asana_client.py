@@ -205,3 +205,47 @@ class AsanaClient:
             {"gid": project.get("gid"), "name": project.get("name")}
             for project in (data or [])
         ]
+
+    # ------------------------------------------------------------------
+    # create_task (backend-create-task aspect)
+    # ------------------------------------------------------------------
+
+    def create_task(self, task: dict) -> dict:
+        """
+        Create an Asana task via `POST /tasks?opt_fields=permalink_url,name,gid`.
+
+        Args:
+            task: dict with `name`, `notes` (plain text, no ADF), `project_gid`,
+                `workspace_gid`.
+
+        Returns:
+            dict with `gid` and `url` (the task's `permalink_url`).
+
+        `opt_fields` is required — Asana omits `permalink_url` from the
+        create response by default. If it is still absent (defensive), this
+        falls back to `GET /tasks/{gid}?opt_fields=permalink_url` so the
+        returned `url` is always populated.
+
+        Raises:
+            AsanaAuthError: on 401/403 (invalid/expired token or insufficient
+                project permissions).
+            AsanaTransientError: on 429 or 5xx.
+        """
+        payload = {
+            "data": {
+                "name": task["name"],
+                "notes": task.get("notes") or "",
+                "projects": [task["project_gid"]],
+                "workspace": task["workspace_gid"],
+            }
+        }
+        resp = self._post("/tasks?opt_fields=permalink_url,name,gid", json=payload)
+        data = resp.json().get("data", {})
+        gid = data.get("gid")
+        url = data.get("permalink_url")
+
+        if not url and gid:
+            fallback = self._get(f"/tasks/{gid}", params={"opt_fields": "permalink_url"})
+            url = fallback.json().get("data", {}).get("permalink_url")
+
+        return {"gid": gid, "url": url}

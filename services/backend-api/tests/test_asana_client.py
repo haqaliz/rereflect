@@ -245,6 +245,115 @@ class TestAsanaClientErrorTaxonomy:
         assert issubclass(AsanaNotFoundError, AsanaError)
 
 
+CREATE_TASK_RESPONSE = {
+    "data": {
+        "gid": "1300000000001",
+        "name": "Customer reports login is broken",
+        "permalink_url": "https://app.asana.com/0/1200000000001/1300000000001",
+    }
+}
+
+CREATE_TASK_RESPONSE_NO_PERMALINK = {
+    "data": {
+        "gid": "1300000000001",
+        "name": "Customer reports login is broken",
+    }
+}
+
+GET_TASK_RESPONSE = {
+    "data": {
+        "gid": "1300000000001",
+        "permalink_url": "https://app.asana.com/0/1200000000001/1300000000001",
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# create_task() — backend-create-task aspect
+# ---------------------------------------------------------------------------
+class TestAsanaClientCreateTask:
+    def test_create_task_posts_expected_body_and_opt_fields(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(200, CREATE_TASK_RESPONSE)
+
+            client = AsanaClient(API_TOKEN)
+            result = client.create_task({
+                "name": "Customer reports login is broken",
+                "notes": "Users cannot log in after the latest release.",
+                "project_gid": "1200000000001",
+                "workspace_gid": "1100000000001",
+            })
+
+        instance.post.assert_called_once_with(
+            "/tasks?opt_fields=permalink_url,name,gid",
+            json={
+                "data": {
+                    "name": "Customer reports login is broken",
+                    "notes": "Users cannot log in after the latest release.",
+                    "projects": ["1200000000001"],
+                    "workspace": "1100000000001",
+                }
+            },
+        )
+        assert result["gid"] == "1300000000001"
+        assert result["url"] == "https://app.asana.com/0/1200000000001/1300000000001"
+        assert result["url"] is not None
+
+    def test_create_task_falls_back_to_get_when_permalink_missing(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(200, CREATE_TASK_RESPONSE_NO_PERMALINK)
+            instance.get.return_value = _make_resp(200, GET_TASK_RESPONSE)
+
+            client = AsanaClient(API_TOKEN)
+            result = client.create_task({
+                "name": "Customer reports login is broken",
+                "notes": "Users cannot log in after the latest release.",
+                "project_gid": "1200000000001",
+                "workspace_gid": "1100000000001",
+            })
+
+        instance.get.assert_called_once_with(
+            "/tasks/1300000000001", params={"opt_fields": "permalink_url"}
+        )
+        assert result["gid"] == "1300000000001"
+        assert result["url"] == "https://app.asana.com/0/1200000000001/1300000000001"
+        assert result["url"] is not None
+
+    def test_create_task_auth_error_raises_asana_auth_error(self):
+        from src.services.asana_client import AsanaAuthError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(401, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaAuthError):
+                client.create_task({
+                    "name": "x",
+                    "notes": "",
+                    "project_gid": "1200000000001",
+                    "workspace_gid": "1100000000001",
+                })
+
+    def test_create_task_transient_error_raises_asana_transient_error(self):
+        from src.services.asana_client import AsanaTransientError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(503, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaTransientError):
+                client.create_task({
+                    "name": "x",
+                    "notes": "",
+                    "project_gid": "1200000000001",
+                    "workspace_gid": "1100000000001",
+                })
+
+
 class TestAsanaClientConstantHostAssertion:
     """Defense-in-depth constant scheme/host assert — Asana has a fixed host,
     so there's no per-org SSRF surface to gate (unlike Jira/Zendesk), but the
