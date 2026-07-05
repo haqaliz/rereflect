@@ -450,4 +450,57 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
     if not signature or not timestamp or not _verify_zendesk_signature(body, timestamp, signature, secret):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    return {"status": "ignored", "reason": "not_yet_implemented"}
+    source = (
+        db.query(FeedbackSource)
+        .filter(
+            FeedbackSource.organization_id == integration.organization_id,
+            FeedbackSource.source_type == "zendesk",
+            FeedbackSource.is_active.is_(True),
+        )
+        .first()
+    )
+    if not source:
+        # Should not normally happen -- backend-connection auto-provisions
+        # the source on connect. Its absence here means the source was
+        # later deactivated or the auto-provision step regressed.
+        logger.warning(
+            f"Zendesk webhook: no active zendesk FeedbackSource for org {integration.organization_id} "
+            f"(subdomain '{subdomain}')"
+        )
+        return {"status": "ignored", "reason": "no_active_source"}
+
+    ticket = payload.get("ticket") or {}
+    ticket_id = ticket.get("id")
+    if not ticket_id:
+        logger.warning(f"Zendesk webhook: missing ticket id for subdomain '{subdomain}'")
+        return {"status": "ignored", "reason": "missing_ticket_id"}
+
+    # Quick synchronous dedup pre-check (fast-path optimization on top of,
+    # not a replacement for, the ingestion-core's own FeedbackSourceEvent
+    # dedup -- the authoritative dedup lives downstream via the unique
+    # constraint uq_source_event(source_id, external_event_id)).
+    existing = (
+        db.query(FeedbackSourceEvent)
+        .filter(
+            FeedbackSourceEvent.source_id == source.id,
+            FeedbackSourceEvent.external_event_id == str(ticket_id),
+        )
+        .first()
+    )
+    if existing:
+        logger.info(f"Duplicate Zendesk ticket {ticket_id} for subdomain '{subdomain}'")
+        return {"status": "duplicate"}
+
+    provider_context = {"subdomain": subdomain}
+    try:
+        task_id = queue_source_event(
+            source_type="zendesk",
+            external_event_id=str(ticket_id),
+            event_type="ticket.created",
+            event_data={"ticket": ticket, "subdomain": subdomain},
+            provider_context=provider_context,
+        )
+        return {"status": "queued", "task_id": task_id}
+    except Exception as e:
+        logger.error(f"Failed to queue Zendesk event: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process event")
