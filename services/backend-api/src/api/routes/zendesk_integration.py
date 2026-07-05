@@ -495,6 +495,70 @@ def zendesk_disconnect(
     )
 
 
+def _get_celery_app():
+    """Lazy accessor for the Celery client app — injectable in tests (mirrors
+    hubspot_integration.py's _get_celery_app)."""
+    from src.background.celery_client import get_celery_app
+    return get_celery_app()
+
+
+class ZendeskSyncResponse(BaseModel):
+    status: str
+    integration_id: int
+
+
+@router.post(
+    "/sync",
+    response_model=ZendeskSyncResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def zendesk_trigger_sync(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually enqueue a Zendesk ticket-pull sync for this org (should-have,
+    ingestion-pull Phase 6).
+
+    Unlike hubspot_integration.py's /sync, this has NO require_feature
+    dependency — per plan D7, Zendesk is OSS/BYOK with all features
+    unlocked (only require_admin_or_owner applies).
+
+    Enqueues sync_zendesk_org via Celery send_task (non-blocking). Never
+    surfaces a 500 — a broker/dispatch failure is reported as a clean 502.
+    """
+    integ = _get_active_integration(db, current_org.id)
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Zendesk integration found.",
+        )
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.zendesk_sync.sync_zendesk_org",
+            args=[integ.id],
+        )
+    except Exception as exc:  # noqa: BLE001 — must never surface as a 500
+        logger.error(
+            "Zendesk sync could not be enqueued for org %s (integration_id=%s): %s",
+            current_org.id,
+            integ.id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Zendesk sync could not be enqueued. Please try again shortly.",
+        ) from exc
+
+    logger.info(
+        "Zendesk sync manually triggered for org %s (integration_id=%s)",
+        current_org.id,
+        integ.id,
+    )
+    return ZendeskSyncResponse(status="queued", integration_id=integ.id)
+
+
 @router.post(
     "/test",
     response_model=ZendeskTestResponse,
