@@ -513,3 +513,99 @@ class TestCeleryTaskRegistration:
         assert "sync-zendesk-every-15-min" in schedule
         entry = schedule["sync-zendesk-every-15-min"]
         assert entry["schedule"] == 900.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: full-run acceptance sweep
+#
+# One consolidated end-to-end regression harness replaying the spec's
+# acceptance criteria list (ingestion-pull/spec.md) against the finished
+# module — not new behavior, a final cross-check that Phases 1-6 compose
+# correctly.
+# ---------------------------------------------------------------------------
+
+
+class TestFullRunAcceptanceSweep:
+    def test_end_to_end_multi_page_dedup_cursor_and_first_run_fallback(
+        self, db, monkeypatch
+    ):
+        import src.tasks.zendesk_sync as zs
+        import src.tasks.analysis as analysis_mod
+        from datetime import timezone
+
+        monkeypatch.setattr(analysis_mod.analyze_single_feedback, "delay", MagicMock())
+
+        org = _make_org(db)
+        connected_at = datetime(2026, 6, 1, 0, 0, 0)
+        # D1: freshly-connected integration, no prior last_synced_at.
+        integ = _make_zendesk_integration(
+            db, org.id, subdomain="acmeco", last_synced_at=None, connected_at=connected_at,
+        )
+        _make_zendesk_source(db, org.id)
+
+        # Multi-page response: page 1 has a next_page (client already
+        # resolved pagination internally — _sync_org only sees the final
+        # merged result), page 2 is end_of_stream.
+        tickets = [
+            _make_ticket(101, requester_email="alice@customer.com"),
+            _make_ticket(102, requester_email="bob@customer.com"),
+        ]
+        client = _make_fake_client(tickets=tickets, end_time=1700005000)
+
+        # --- First run: acceptance criterion "first run ingests only
+        # tickets at/after connection time" -> assert connected_at (not
+        # epoch/None) was the effective starting cursor.
+        result1 = zs._sync_org(org.id, db, client, integ)
+
+        expected_start = int(connected_at.replace(tzinfo=timezone.utc).timestamp())
+        call = client.incremental_tickets.call_args
+        start_time = call.kwargs.get("start_time") if call.kwargs else call.args[0]
+        assert start_time == expected_start
+
+        items = db.query(FeedbackItem).all()
+        assert len(items) == 2
+        assert {i.source_external_id for i in items} == {"101", "102"}
+        assert result1["tickets_ingested"] == 2
+
+        # Cursor persisted to the response's end_time.
+        assert integ.last_synced_at == datetime.utcfromtimestamp(1700005000)
+
+        # --- Immediate re-run with the SAME cursor/tickets (simulating a
+        # pull-cursor overlap): no duplicates via FeedbackSourceEvent dedup.
+        result2 = zs._sync_org(org.id, db, client, integ)
+
+        items_after_rerun = db.query(FeedbackItem).all()
+        assert len(items_after_rerun) == 2  # unchanged
+        assert result2["tickets_ingested"] == 0  # both deduped
+
+        processed_events = db.query(FeedbackSourceEvent).filter(
+            FeedbackSourceEvent.status == "processed"
+        ).all()
+        assert len(processed_events) == 2
+        assert {e.external_message_id for e in processed_events} == {"101", "102"}
+
+        # Final last_sync_status/last_error state via the task-wrapper body.
+        from contextlib import contextmanager
+
+        @contextmanager
+        def fake_get_db():
+            yield db
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.incremental_tickets.return_value = {
+            "tickets": [],
+            "end_time": 1700005000,
+        }
+
+        with patch.object(zs, "get_db_session", fake_get_db), \
+             patch.object(zs, "_decrypt", return_value="plain-token"), \
+             patch.object(zs, "ZendeskClient", return_value=mock_client_instance):
+            task_self = MagicMock()
+            body_result = zs._sync_zendesk_org_body(task_self, integ.id)
+
+        assert body_result["status"] == "success"
+        db.refresh(integ)
+        assert integ.last_sync_status == "success"
+        assert integ.last_error is None
