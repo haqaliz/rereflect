@@ -31,8 +31,28 @@ class ZendeskAdapter(BaseSourceAdapter):
         event_data: Dict[str, Any],
         triggers: Dict[str, Any],
     ) -> Optional[str]:
-        # Filled in Phase 3.
-        raise NotImplementedError
+        # 1. New ticket trigger
+        if triggers.get("new_ticket") and event_type == self.TICKET_CREATED:
+            return "new_ticket"
+
+        # 2. Keyword trigger
+        keywords = triggers.get("keywords", [])
+        if keywords:
+            body = self._get_body_text(event_data)
+            if body:
+                body_lower = body.lower()
+                for keyword in keywords:
+                    if keyword.lower() in body_lower:
+                        return f"keyword:{keyword}"
+
+        return None
+
+    def _get_body_text(self, event_data: Dict[str, Any]) -> str:
+        """Extract raw subject+description text for keyword matching."""
+        ticket = event_data.get("ticket", {})
+        subject = strip_html(ticket.get("subject") or "")
+        description = strip_html(ticket.get("description") or "")
+        return f"{subject} {description}".strip()
 
     def extract_content(
         self,
