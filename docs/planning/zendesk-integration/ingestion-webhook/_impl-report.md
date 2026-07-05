@@ -248,3 +248,45 @@ green both before Phase 1 and after Phase 5).
   as the plan assumed (R1 — no fix needed).
 - `event_type="ticket.created"` literal confirmed unchanged against
   `ZendeskAdapter.check_triggers` — no adjustment needed (R2).
+
+## Fix — 500 on valid-but-non-dict JSON body (2026-07-05)
+
+**Defect:** `payload = json.loads(body)` (route L421) never checked that
+the parsed result was a dict. Valid-but-non-object JSON bodies — `[]`,
+`123`, `"x"`, `true`, `null` — pass `json.loads` cleanly, then
+`_resolve_zendesk_subdomain(payload, ...)` calls `payload.get("subdomain")`
+(L349) on a `list`/`int`/`str`/`bool`/`NoneType`, raising an unhandled
+`AttributeError` → HTTP 500. This violated the route's own "never 500 on
+hostile input" invariant (documented above in the response-class table and
+the `TestZendeskWebhookNever500s` sweep), which had only exercised
+malformed/non-JSON bodies, not valid-but-wrong-shape JSON.
+
+**TDD:**
+- RED: added `TestZendeskWebhookNever500s.test_valid_non_dict_json_returns_400_not_500`,
+  parametrized over `b"[]"`, `b"123"`, `b'"x"'`, `b"true"`, `b"null"`, each
+  asserting `response.status_code == 400`. Confirmed failing first:
+  `pytest tests/test_zendesk_webhook.py -v -k valid_non_dict_json` →
+  **5 failed** (`AttributeError: 'list'/'int'/'str'/'bool'/'NoneType' object
+  has no attribute 'get'`), matching the reported defect exactly.
+- GREEN: added, immediately after the existing `JSONDecodeError` handler in
+  `handle_zendesk_webhook`:
+  ```python
+  if not isinstance(payload, dict):
+      raise HTTPException(status_code=400, detail="Invalid JSON")
+  ```
+  placed before `_resolve_zendesk_subdomain(payload, request.headers)` is
+  ever called, reusing the same 400 status/detail shape as the existing
+  `JSONDecodeError` branch.
+
+**Validation:**
+```
+cd services/backend-api && source venv/bin/activate
+LLM_ENCRYPTION_KEY=<test key> pytest tests/test_zendesk_webhook.py -v
+```
+→ **41 passed, 0 failed** (36 pre-existing + 5 new). No regressions to the
+existing 401 signature paths, 200 no-op/dedup paths, or the 500
+broker-failure path (`queue_source_event` raising is unaffected — that
+occurs after this new dict check, on a different call path).
+
+Full 2810-test backend-api suite intentionally **not** run per task
+instructions (pre-existing segfault in `test_report_ws.py`).

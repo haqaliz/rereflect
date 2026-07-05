@@ -601,6 +601,27 @@ class TestZendeskWebhookNever500s:
         )
         assert response.status_code in (200, 400, 401)
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            b"[]",
+            b"123",
+            b'"x"',
+            b"true",
+            b"null",
+        ],
+    )
+    def test_valid_non_dict_json_returns_400_not_500(self, client: TestClient, body):
+        """Valid JSON that isn't an object (list/number/string/bool/null) must be
+        rejected with 400, not crash with a 500 when `_resolve_zendesk_subdomain`
+        calls `.get(...)` on a non-dict payload."""
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 400
+
     def test_response_never_leaks_secret_or_signature(
         self, client: TestClient, zendesk_integration, zendesk_source
     ):

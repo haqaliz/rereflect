@@ -422,6 +422,9 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
     subdomain = _resolve_zendesk_subdomain(payload, request.headers)
     if not subdomain:
         logger.info("Zendesk webhook: no subdomain resolvable from payload/headers")
