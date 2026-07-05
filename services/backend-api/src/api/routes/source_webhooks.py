@@ -390,3 +390,43 @@ def _verify_zendesk_signature(body: bytes, timestamp: str, signature: str, secre
         hmac.new(secret.encode(), timestamp.encode() + body, hashlib.sha256).digest()
     ).decode()
     return hmac.compare_digest(expected, signature)
+
+
+@router.post("/zendesk/events")
+async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Handle incoming Zendesk webhook events (new-ticket trigger).
+
+    Flow: read raw body -> parse JSON -> resolve subdomain -> look up the
+    org's ZendeskIntegration by subdomain (secret lookup happens per-org, not
+    via a global env var) -> verify HMAC signature -> look up the org's
+    active zendesk FeedbackSource -> quick dedup pre-check -> queue.
+    """
+    # Read raw body FIRST -- both JSON parsing and signature verification
+    # must operate on the exact same bytes Zendesk sent (re-serializing the
+    # parsed dict is not guaranteed to round-trip byte-for-byte).
+    body = await request.body()
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    subdomain = _resolve_zendesk_subdomain(payload, request.headers)
+    if not subdomain:
+        logger.info("Zendesk webhook: no subdomain resolvable from payload/headers")
+        return {"status": "ignored", "reason": "missing_subdomain"}
+
+    integration = (
+        db.query(ZendeskIntegration)
+        .filter(
+            ZendeskIntegration.subdomain == subdomain,
+            ZendeskIntegration.is_active.is_(True),
+        )
+        .first()
+    )
+    if not integration:
+        logger.info(f"Zendesk webhook: unknown/inactive subdomain '{subdomain}'")
+        return {"status": "ignored", "reason": "unknown_subdomain"}
+
+    return {"status": "ignored", "reason": "not_yet_implemented"}
