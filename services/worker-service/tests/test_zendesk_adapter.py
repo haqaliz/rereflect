@@ -239,7 +239,7 @@ class TestFetchContext:
 
         event_data = {"ticket": {"id": 4521}, "subdomain": "acmeco"}
         result = adapter.fetch_context(event_data, "agent@acmeco.com:apitoken123", {})
-        assert isinstance(result, dict)
+        assert result == {}
 
     @pytest.mark.parametrize(
         "malicious_subdomain",
@@ -418,6 +418,37 @@ class TestFindMatchingSources:
         _make_zendesk_source(db, org.id, is_active=False)
 
         result = _find_matching_sources(db, "zendesk", {"subdomain": "acmeco"})
+
+        assert result == []
+
+    def test_missing_subdomain_returns_empty_not_cross_tenant_fanout(self, db):
+        """A missing/empty subdomain in provider_context must never fall through
+        to `return query.all()`, which would fan every org's active zendesk
+        FeedbackSource back to the caller — a cross-tenant leak."""
+        from src.tasks.source_events import _find_matching_sources
+
+        org_a = _make_org(db, name="Org A")
+        org_b = _make_org(db, name="Org B")
+        _make_zendesk_integration(db, org_a.id, subdomain="orga")
+        _make_zendesk_integration(db, org_b.id, subdomain="orgb")
+        _make_zendesk_source(db, org_a.id)
+        _make_zendesk_source(db, org_b.id)
+
+        result = _find_matching_sources(db, "zendesk", {})
+
+        assert result == []
+
+    def test_empty_string_subdomain_returns_empty_not_cross_tenant_fanout(self, db):
+        from src.tasks.source_events import _find_matching_sources
+
+        org_a = _make_org(db, name="Org A")
+        org_b = _make_org(db, name="Org B")
+        _make_zendesk_integration(db, org_a.id, subdomain="orga")
+        _make_zendesk_integration(db, org_b.id, subdomain="orgb")
+        _make_zendesk_source(db, org_a.id)
+        _make_zendesk_source(db, org_b.id)
+
+        result = _find_matching_sources(db, "zendesk", {"subdomain": ""})
 
         assert result == []
 

@@ -30,8 +30,6 @@ def _is_safe_subdomain(subdomain: Optional[str]) -> bool:
     """True only if subdomain is a single, valid DNS label."""
     if not subdomain:
         return False
-    if subdomain != subdomain.strip():
-        return False
     return bool(_SUBDOMAIN_LABEL_RE.match(subdomain))
 
 

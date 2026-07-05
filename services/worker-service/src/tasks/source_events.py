@@ -178,17 +178,19 @@ def _find_matching_sources(
     # is matched to the org whose ZendeskIntegration.subdomain matches, full stop.
     elif source_type == "zendesk":
         subdomain = provider_context.get("subdomain")
-        if subdomain:
-            integrations = db.query(ZendeskIntegration).filter(
-                ZendeskIntegration.subdomain == subdomain,
-                ZendeskIntegration.is_active == True,
-            ).all()
+        if not subdomain:
+            return []
 
-            matching_org_ids = [i.organization_id for i in integrations]
-            if matching_org_ids:
-                query = query.filter(FeedbackSource.organization_id.in_(matching_org_ids))
-            else:
-                return []
+        integrations = db.query(ZendeskIntegration).filter(
+            ZendeskIntegration.subdomain == subdomain,
+            ZendeskIntegration.is_active == True,
+        ).all()
+
+        matching_org_ids = [i.organization_id for i in integrations]
+        if matching_org_ids:
+            query = query.filter(FeedbackSource.organization_id.in_(matching_org_ids))
+        else:
+            return []
 
     # Check channel match for Slack (if event has channel info)
     event_channel = provider_context.get("channel_id")
