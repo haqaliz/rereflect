@@ -85,6 +85,14 @@ const ZENDESK_FAQS: IntegrationFAQ[] = [
   },
 ];
 
+const ASANA_FAQS: IntegrationFAQ[] = [
+  ...SHARED_FAQS,
+  {
+    question: 'Does this sync tasks back into Rereflect, or use OAuth?',
+    answer: 'This is one-way, outbound task creation — Rereflect creates Asana tasks from feedback, it doesn\'t pull task status or comments back in. Connection uses a personal Asana access token, not OAuth. The workspace/project picker is flat, so team-only projects that aren\'t visible at the workspace level may not appear; a team-scoped picker is planned for a future release.',
+  },
+];
+
 export const integrations: Integration[] = [
   {
     slug: 'slack',
@@ -311,6 +319,42 @@ export const integrations: Integration[] = [
       { step: 4, title: 'Rereflect validates & starts ingesting', description: 'Rereflect verifies the token, encrypts it at rest, and creates a Zendesk feedback source so new tickets flow in. The token is never shown again.' },
       { step: 5, title: 'Optional: turn on real-time', description: 'Copy the webhook URL and signing secret from Rereflect, then create a Zendesk webhook and a "Ticket is created" trigger pointing at it. Otherwise Rereflect polls automatically.' },
       { step: 6, title: 'Watch tickets become feedback', description: 'New tickets appear within minutes — analyzed for sentiment and mapped to the requester in Customer 360.' },
+    ],
+  },
+  {
+    slug: 'asana',
+    name: 'Asana',
+    tagline: 'Turn feedback into Asana tasks your team already works from',
+    description: 'Connect Asana with a personal access token and create tasks directly from feedback items — with sentiment, customer context, and a link back to the original feedback included automatically.',
+    status: 'available',
+    color: 'chart-1',
+    gradient: 'from-[#F06A6A] to-[#FF9C9C]',
+    hoverShadow: 'hover:shadow-[#F06A6A]/10',
+    hoverBorder: 'hover:border-[#F06A6A]/30',
+    heroMessage: 'Stop copy-pasting customer feedback into Asana by hand. Rereflect connects to Asana with a personal access token and lets you create tasks — with sentiment and customer context attached — straight from any feedback item.',
+    howItWorks: [
+      { step: '1', title: 'Connect Asana', description: 'Paste a personal access token to authorize Rereflect — no OAuth redirect required.' },
+      { step: '2', title: 'Create Tasks from Feedback', description: 'Pick a workspace and project, then create an Asana task directly from any feedback item — pre-filled with the feedback content and AI context.' },
+      { step: '3', title: 'Track the Link', description: 'Rereflect keeps a link between the feedback item and the Asana task, so your team can jump straight to the task that came from a customer.' },
+    ],
+    features: [
+      { title: 'Token-Based Connection', description: 'Connect with a personal Asana access token — no OAuth app to register, no admin approval workflow required.', icon: 'KeyRound' },
+      { title: 'One-Click Task Creation', description: 'Turn any feedback item into an Asana task in a couple of clicks, pre-filled with name, notes, and customer context.', icon: 'FileText' },
+      { title: 'Workspace & Project Picker', description: 'Choose which Asana workspace and project each task is created in — no hardcoded defaults.', icon: 'Tags' },
+      { title: 'Feedback-to-Task Linking', description: 'Every created task is linked back to the originating feedback item, so context is never lost.', icon: 'RefreshCw' },
+      { title: 'Duplicate-Safe', description: 'Creating a task twice from the same feedback item surfaces the existing linked task instead of silently duplicating it.', icon: 'Shield' },
+    ],
+    useCases: [
+      { persona: 'Product Manager', role: 'B2B SaaS, Asana-based roadmap', quote: 'We used to manually re-type customer complaints into Asana tasks. Now I create the task right from the feedback card and the customer context comes with it.', icon: 'Layers' },
+      { persona: 'Customer Success Manager', role: 'Mid-market SaaS', quote: 'Every escalation that turns into an Asana task keeps a link back to the original feedback, so nobody has to ask "wait, who reported this?"', icon: 'Heart' },
+    ],
+    faqs: ASANA_FAQS,
+    setupSteps: [
+      { step: 1, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
+      { step: 2, title: 'Mint an Asana Personal Access Token', description: 'In Asana, go to your profile settings → Apps → Manage Developer Apps → Create new token, and copy it.' },
+      { step: 3, title: 'Paste your token into Rereflect', description: 'In Rereflect, go to Settings → Integrations → Asana and paste the personal access token you just created.' },
+      { step: 4, title: 'Rereflect validates the connection', description: 'Rereflect verifies the token against your Asana account and encrypts it at rest. You\'ll see a connected status once it succeeds.' },
+      { step: 5, title: 'Create your first task', description: 'Open any feedback item, choose "Create Asana Task," pick a workspace and project, and Rereflect creates a linked Asana task for you.' },
     ],
   },
   {
