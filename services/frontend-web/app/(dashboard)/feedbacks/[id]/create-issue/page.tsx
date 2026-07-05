@@ -53,9 +53,23 @@ import {
   getJiraCreateIssueErrorMessage,
   isStaleJiraTokenStatus,
 } from '@/lib/jiraIssueWizard';
+import {
+  asanaAPI,
+  AsanaConnectionStatus,
+  AsanaWorkspace,
+  AsanaProject,
+  AsanaLinkedTask,
+  CreateAsanaTaskResponse,
+} from '@/lib/api/asana';
+import {
+  isDuplicateAsanaResponse,
+  getAsanaCreateTaskErrorMessage,
+  isStaleAsanaTokenStatus,
+} from '@/lib/asanaIssueWizard';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
 import { useAuth } from '@/contexts/AuthContext';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { AsanaIcon } from '@/components/icons/AsanaIcon';
 
 type Step = 'select-integration' | 'configure' | 'done';
 
@@ -97,7 +111,14 @@ interface JiraFormState {
   description: string;
 }
 
-type SelectedIntegration = 'linear' | 'jira' | null;
+interface AsanaFormState {
+  workspaceGid: string;
+  projectGid: string;
+  name: string;
+  notes: string;
+}
+
+type SelectedIntegration = 'linear' | 'jira' | 'asana' | null;
 
 function CreateIssueContent() {
   const router = useRouter();
@@ -145,8 +166,27 @@ function CreateIssueContent() {
     description: '',
   });
 
+  // Asana state
+  const [asanaStatus, setAsanaStatus] = useState<AsanaConnectionStatus | null>(null);
+  const [asanaStatusLoaded, setAsanaStatusLoaded] = useState(false);
+  const [asanaWorkspaces, setAsanaWorkspaces] = useState<AsanaWorkspace[]>([]);
+  const [asanaProjects, setAsanaProjects] = useState<AsanaProject[]>([]);
+  const [asanaExistingTasks, setAsanaExistingTasks] = useState<AsanaLinkedTask[]>([]);
+  const [asanaDuplicateExisting, setAsanaDuplicateExisting] = useState<
+    NonNullable<CreateAsanaTaskResponse['existing_tasks']> | null
+  >(null);
+  const [asanaReconnectNeeded, setAsanaReconnectNeeded] = useState(false);
+  const [asanaCreatedTask, setAsanaCreatedTask] = useState<CreateAsanaTaskResponse | null>(null);
+  const [asanaForm, setAsanaForm] = useState<AsanaFormState>({
+    workspaceGid: '',
+    projectGid: '',
+    name: '',
+    notes: '',
+  });
+
   const isConnected = connectionStatus?.connected && connectionStatus?.is_active;
   const isJiraConnected = jiraStatus?.connected && jiraStatus?.is_active;
+  const isAsanaConnected = asanaStatus?.connected && asanaStatus?.is_active;
 
   useEffect(() => {
     feedbackAPI.get(feedbackId)
@@ -161,6 +201,11 @@ function CreateIssueContent() {
           ...prev,
           summary: fb.extracted_issue || '',
           description: fb.text || '',
+        }));
+        setAsanaForm(prev => ({
+          ...prev,
+          name: fb.extracted_issue || '',
+          notes: fb.text || '',
         }));
       })
       .catch(() => {});
@@ -178,6 +223,13 @@ function CreateIssueContent() {
       .then(setJiraStatus)
       .catch(() => {})
       .finally(() => setJiraStatusLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    asanaAPI.getStatus()
+      .then(setAsanaStatus)
+      .catch(() => {})
+      .finally(() => setAsanaStatusLoaded(true));
   }, []);
 
   const loadFormData = useCallback(async () => {
@@ -240,6 +292,51 @@ function CreateIssueContent() {
       .catch(() => {});
   }, [jiraForm.projectId]);
 
+  const loadAsanaFormData = useCallback(async () => {
+    setCreateError('');
+    setAsanaReconnectNeeded(false);
+    try {
+      const [w, linked] = await Promise.all([
+        asanaAPI.getWorkspaces(),
+        asanaAPI.getLinkedTasks(feedbackId),
+      ]);
+      setAsanaWorkspaces(w);
+      setAsanaExistingTasks(linked);
+    } catch (err: any) {
+      // A revoked/stale PAT during getWorkspaces()/getLinkedTasks() (401/403)
+      // shows the same "Reconnect Asana" affordance, not a raw error.
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      if (isStaleAsanaTokenStatus(status)) {
+        setCreateError(getAsanaCreateTaskErrorMessage(status, detail));
+        setAsanaReconnectNeeded(true);
+      }
+    }
+  }, [feedbackId]);
+
+  useEffect(() => {
+    if (currentStep === 'configure' && selectedIntegration === 'asana' && isAsanaConnected) {
+      loadAsanaFormData();
+    }
+  }, [currentStep, selectedIntegration, isAsanaConnected, loadAsanaFormData]);
+
+  useEffect(() => {
+    if (!asanaForm.workspaceGid) {
+      setAsanaProjects([]);
+      return;
+    }
+    asanaAPI.getProjects(asanaForm.workspaceGid)
+      .then(setAsanaProjects)
+      .catch((err: any) => {
+        const status = err?.response?.status;
+        const detail = err?.response?.data?.detail;
+        if (isStaleAsanaTokenStatus(status)) {
+          setCreateError(getAsanaCreateTaskErrorMessage(status, detail));
+          setAsanaReconnectNeeded(true);
+        }
+      });
+  }, [asanaForm.workspaceGid]);
+
   const handleSelectLinear = () => {
     setSelectedIntegration('linear');
     setCurrentStep('configure');
@@ -247,6 +344,11 @@ function CreateIssueContent() {
 
   const handleSelectJira = () => {
     setSelectedIntegration('jira');
+    setCurrentStep('configure');
+  };
+
+  const handleSelectAsana = () => {
+    setSelectedIntegration('asana');
     setCurrentStep('configure');
   };
 
@@ -277,6 +379,38 @@ function CreateIssueContent() {
       const detail = err?.response?.data?.detail;
       setCreateError(getJiraCreateIssueErrorMessage(status, detail));
       setJiraReconnectNeeded(isStaleJiraTokenStatus(status));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAsanaSubmit = async (force = false) => {
+    setSubmitting(true);
+    setCreateError('');
+    setAsanaReconnectNeeded(false);
+    if (!force) {
+      setAsanaDuplicateExisting(null);
+    }
+    try {
+      const response = await asanaAPI.createTask({
+        feedback_id: feedbackId,
+        workspace_gid: asanaForm.workspaceGid,
+        project_gid: asanaForm.projectGid,
+        name: asanaForm.name,
+        notes: asanaForm.notes || undefined,
+        force,
+      });
+      if (isDuplicateAsanaResponse(response)) {
+        setAsanaDuplicateExisting(response.existing_tasks || []);
+        return;
+      }
+      setAsanaCreatedTask(response);
+      setCurrentStep('done');
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      setCreateError(getAsanaCreateTaskErrorMessage(status, detail));
+      setAsanaReconnectNeeded(isStaleAsanaTokenStatus(status));
     } finally {
       setSubmitting(false);
     }
@@ -374,13 +508,13 @@ function CreateIssueContent() {
               <CardDescription>Choose where to create the issue</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {!(statusLoaded && jiraStatusLoaded) && (
+              {!(statusLoaded && jiraStatusLoaded && asanaStatusLoaded) && (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </div>
               )}
 
-              {statusLoaded && jiraStatusLoaded && (
+              {statusLoaded && jiraStatusLoaded && asanaStatusLoaded && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Linear */}
                   {isConnected ? (
@@ -453,20 +587,39 @@ function CreateIssueContent() {
                   )}
 
                   {/* Asana */}
-                  <div className="p-4 rounded-lg border-2 border-border bg-muted/30 opacity-60 cursor-not-allowed">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2 bg-secondary rounded-lg">
-                        <ExternalLink className="w-6 h-6 text-pink-500" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-foreground">Asana</span>
-                          <Badge variant="secondary" className="text-xs">Coming soon</Badge>
+                  {isAsanaConnected ? (
+                    <button
+                      onClick={handleSelectAsana}
+                      className="p-4 rounded-lg border-2 border-border hover:border-primary/50 text-left transition-all"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-secondary rounded-lg">
+                          <AsanaIcon className="w-6 h-6 text-[#F06A6A]" />
                         </div>
-                        <p className="text-sm text-muted-foreground mt-1">Asana project management</p>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground">Asana</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">Connected as {asanaStatus?.display_name}</p>
+                        </div>
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="p-4 rounded-lg border-2 border-border bg-muted/30 opacity-60 cursor-not-allowed">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-secondary rounded-lg">
+                          <AsanaIcon className="w-6 h-6 text-[#F06A6A]" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground">Asana</span>
+                            <Badge variant="secondary" className="text-xs">Not connected</Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">Connect in Settings &rarr; Integrations</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* GitHub Issues */}
                   <div className="p-4 rounded-lg border-2 border-border bg-muted/30 opacity-60 cursor-not-allowed">
@@ -795,6 +948,168 @@ function CreateIssueContent() {
           </Card>
         )}
 
+        {/* Step 2: Configure (Asana form) */}
+        {currentStep === 'configure' && selectedIntegration === 'asana' && (
+          <Card className="animate-slide-up">
+            <CardHeader>
+              <CardTitle>Configure Asana Task</CardTitle>
+              <CardDescription>Fill in the task details to create in Asana</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Existing links info */}
+              {asanaExistingTasks.length > 0 && !asanaDuplicateExisting && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    This feedback is already linked to{' '}
+                    {asanaExistingTasks.map(task => (
+                      <a
+                        key={task.id}
+                        href={task.asana_task_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono font-semibold text-primary hover:underline"
+                      >
+                        {task.asana_task_name}
+                      </a>
+                    ))}.
+                    {' '}Creating another task will link it too.
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Duplicate warning from submit attempt */}
+              {asanaDuplicateExisting && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="space-y-2">
+                    <p>
+                      This feedback is already linked to{' '}
+                      {asanaDuplicateExisting.map(task => (
+                        <a
+                          key={task.id}
+                          href={task.asana_task_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono font-semibold underline"
+                        >
+                          {task.asana_task_name}
+                        </a>
+                      ))}.
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleAsanaSubmit(true)}
+                      disabled={submitting}
+                    >
+                      {submitting ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : null}
+                      Create anyway
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {/* Name */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Name</label>
+                <Input
+                  value={asanaForm.name}
+                  onChange={e => setAsanaForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Task name"
+                />
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Notes</label>
+                <Textarea
+                  value={asanaForm.notes}
+                  onChange={e => setAsanaForm(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Task notes (plain text)"
+                  rows={5}
+                />
+              </div>
+
+              {/* Workspace + Project row */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Workspace</label>
+                  <Select
+                    value={asanaForm.workspaceGid}
+                    onValueChange={val => setAsanaForm(prev => ({ ...prev, workspaceGid: val, projectGid: '' }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select workspace..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {asanaWorkspaces.map(w => (
+                        <SelectItem key={w.gid ?? ''} value={w.gid ?? ''}>{w.name || w.gid}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Project</label>
+                  <Select
+                    value={asanaForm.projectGid}
+                    onValueChange={val => setAsanaForm(prev => ({ ...prev, projectGid: val }))}
+                    disabled={!asanaForm.workspaceGid}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={asanaForm.workspaceGid ? 'Select project...' : 'Select a workspace first'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {asanaProjects.map(p => (
+                        <SelectItem key={p.gid ?? ''} value={p.gid ?? ''}>{p.name || p.gid}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Error */}
+              {createError && (
+                <div className="p-4 bg-destructive/10 text-destructive rounded-lg space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    {createError}
+                  </div>
+                  {asanaReconnectNeeded && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => router.push('/settings/integrations/asana')}
+                    >
+                      Reconnect Asana
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Navigation */}
+              <div className="flex justify-between pt-4 border-t border-border">
+                <Button variant="outline" onClick={() => setCurrentStep('select-integration')}>
+                  Back
+                </Button>
+                <Button
+                  onClick={() => handleAsanaSubmit(false)}
+                  disabled={submitting || !asanaForm.name || !asanaForm.workspaceGid || !asanaForm.projectGid}
+                >
+                  {submitting ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Creating...</>
+                  ) : (
+                    'Create Task'
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Step 3: Done */}
         {currentStep === 'done' && (
           <Card className="animate-slide-up">
@@ -836,6 +1151,41 @@ function CreateIssueContent() {
                           className="text-primary hover:underline ml-2 inline-flex items-center gap-1"
                         >
                           Open in Jira
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : selectedIntegration === 'asana' && asanaCreatedTask ? (
+                <>
+                  <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
+                    <div className="p-2 bg-green-100 dark:bg-green-950 rounded-full">
+                      <CheckCircle className="w-6 h-6 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-green-800 dark:text-green-200">
+                        {asanaCreatedTask.asana_task_name}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Created in Asana</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Name:</span>
+                      <span className="text-foreground ml-2">{asanaCreatedTask.asana_task_name}</span>
+                    </div>
+                    {asanaCreatedTask.asana_task_url && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Link:</span>
+                        <a
+                          href={asanaCreatedTask.asana_task_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary hover:underline ml-2 inline-flex items-center gap-1"
+                        >
+                          Open in Asana
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
