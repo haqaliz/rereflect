@@ -1,6 +1,7 @@
 """Tests for Zendesk adapter (ingestion-core aspect)."""
 
 import pytest
+from unittest.mock import patch, MagicMock
 
 from src.adapters.zendesk import ZendeskAdapter
 
@@ -161,6 +162,79 @@ class TestExtractContent:
         }
         result = adapter.extract_content(event_data, {})
         assert result["metadata"]["tags"] == []
+
+
+class TestFetchContext:
+    def test_returns_empty_without_access_token(self, adapter):
+        event_data = {"ticket": {"id": 4521}, "subdomain": "acmeco"}
+        result = adapter.fetch_context(event_data, None, {})
+        assert result == {}
+
+    def test_returns_empty_on_malformed_access_token(self, adapter):
+        event_data = {"ticket": {"id": 4521}, "subdomain": "acmeco"}
+        result = adapter.fetch_context(event_data, "no-colon-here", {})
+        assert result == {}
+
+    @patch("src.adapters.zendesk.httpx.Client")
+    def test_fetches_ticket_and_requester_details(self, mock_client_cls, adapter):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        ticket_response = MagicMock()
+        ticket_response.json.return_value = {"ticket": {"id": 4521, "requester_id": 999}}
+
+        user_response = MagicMock()
+        user_response.json.return_value = {
+            "user": {"id": 999, "name": "Jane Doe", "email": "jane@example.com"}
+        }
+
+        mock_client.get.side_effect = [ticket_response, user_response]
+
+        event_data = {"ticket": {"id": 4521}, "subdomain": "acmeco"}
+        result = adapter.fetch_context(event_data, "agent@acmeco.com:apitoken123", {})
+
+        first_call = mock_client.get.call_args_list[0]
+        second_call = mock_client.get.call_args_list[1]
+        assert first_call.args[0] == "https://acmeco.zendesk.com/api/v2/tickets/4521"
+        assert second_call.args[0] == "https://acmeco.zendesk.com/api/v2/users/999"
+
+        mock_client_cls.assert_called_once_with(
+            timeout=10, auth=("agent@acmeco.com/token", "apitoken123")
+        )
+
+        assert result["requester_name"] == "Jane Doe"
+        assert result["requester_email"] == "jane@example.com"
+        assert result["ticket_url"] == "https://acmeco.zendesk.com/agent/tickets/4521"
+
+    @patch("src.adapters.zendesk.httpx.Client")
+    def test_skips_requester_fetch_when_no_requester_id(self, mock_client_cls, adapter):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        ticket_response = MagicMock()
+        ticket_response.json.return_value = {"ticket": {"id": 4521}}
+        mock_client.get.side_effect = [ticket_response]
+
+        event_data = {"ticket": {"id": 4521}, "subdomain": "acmeco"}
+        result = adapter.fetch_context(event_data, "agent@acmeco.com:apitoken123", {})
+
+        assert mock_client.get.call_count == 1
+        assert result["ticket_url"] == "https://acmeco.zendesk.com/agent/tickets/4521"
+        assert "requester_name" not in result
+        assert "requester_email" not in result
+
+    @patch("src.adapters.zendesk.httpx.Client")
+    def test_handles_api_error_gracefully(self, mock_client_cls, adapter):
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+        mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_client.get.side_effect = Exception("API error")
+
+        event_data = {"ticket": {"id": 4521}, "subdomain": "acmeco"}
+        result = adapter.fetch_context(event_data, "agent@acmeco.com:apitoken123", {})
+        assert isinstance(result, dict)
 
 
 class TestAdapterRegistry:

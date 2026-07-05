@@ -9,6 +9,8 @@ for the locked contracts this adapter implements.
 import logging
 from typing import Optional, Dict, Any, Tuple
 
+import httpx
+
 from .base import BaseSourceAdapter
 from .intercom import strip_html
 
@@ -91,5 +93,28 @@ class ZendeskAdapter(BaseSourceAdapter):
         access_token: Optional[str],
         field_mapping: Dict[str, Any],
     ) -> Dict[str, Any]:
-        # Filled in Phase 4.
-        return {}
+        if not access_token or ":" not in access_token:
+            return {}
+
+        email, api_token = access_token.split(":", 1)
+        ticket = event_data.get("ticket", {})
+        subdomain = event_data.get("subdomain")
+        ticket_id = ticket.get("id")
+
+        context = {}
+        try:
+            with httpx.Client(timeout=10, auth=(f"{email}/token", api_token)) as client:
+                resp = client.get(f"https://{subdomain}.zendesk.com/api/v2/tickets/{ticket_id}")
+                ticket_data = resp.json().get("ticket", {})
+                context["ticket_url"] = f"https://{subdomain}.zendesk.com/agent/tickets/{ticket_id}"
+
+                requester_id = ticket_data.get("requester_id")
+                if requester_id:
+                    resp2 = client.get(f"https://{subdomain}.zendesk.com/api/v2/users/{requester_id}")
+                    user_data = resp2.json().get("user", {})
+                    context["requester_name"] = user_data.get("name")
+                    context["requester_email"] = user_data.get("email")
+        except Exception as e:
+            logger.error(f"Failed to fetch Zendesk context: {e}")
+
+        return context
