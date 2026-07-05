@@ -15,6 +15,7 @@ default) treats every instance as fully featured.
 - [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment)
 - [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
 - [Connecting Jira](#connecting-jira)
+- [Connecting Zendesk](#connecting-zendesk)
 - [Production notes](#production-notes)
 
 ## Prerequisites
@@ -387,6 +388,99 @@ or shown again in the UI.
 Because Rereflect is self-hosted and open-source, Jira issue creation has no
 plan gate, seat limit, or usage cap — it's available to every organization
 running the app.
+
+## Connecting Zendesk
+
+Unlike Jira (which Rereflect writes *out* to), Zendesk is an **inbound feedback
+source**: new support tickets become feedback items, analyzed like any other
+source, and enriched into Customer 360 by the requester's email address.
+
+**Shipped scope for this release:**
+
+- **New tickets only** — tickets created from the moment you connect. There is no
+  historical backfill.
+- **One feedback item per ticket** — the ticket subject and description become the
+  feedback text. Per-comment / conversation-thread ingestion is not included.
+- **Exactly-once** — tickets are de-duplicated by ticket ID across both polling and
+  webhooks, so the same ticket never produces duplicate feedback.
+- **Pull by default, webhook optional** — Rereflect polls for new tickets on a
+  schedule out of the box; a Zendesk trigger/webhook adds real-time delivery.
+- **Basic auth (agent email + API token)** against the Zendesk REST API v2 — there
+  is no OAuth flow, tag/view filtering, or custom-field mapping in this release.
+
+### 1. Create a Zendesk API token
+
+1. In Zendesk, open **Admin Center → Apps and integrations → APIs → Zendesk API**.
+2. Enable **Token access**, then click **Add API token**.
+3. Optionally give it a description (e.g., "Rereflect"), then **copy the token
+   immediately** — Zendesk only shows it once.
+
+### 2. Connect from the app
+
+Like the Jira token, the Zendesk API token is **not** set via an environment
+variable — it is pasted into the app and stored encrypted per organization.
+(Encryption uses `LLM_ENCRYPTION_KEY`, which must already be set on the backend —
+see [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok). A missing key
+returns a validation error, never a 500.)
+
+Go to **Settings → Integrations → Zendesk** (admin/owner only) and fill in:
+
+| Field | Format |
+|-------|--------|
+| Subdomain | The `{subdomain}` in `{subdomain}.zendesk.com` (e.g. `acme` for `acme.zendesk.com`) |
+| Agent email | The email address of the Zendesk agent that owns the API token |
+| API token | The token you created in step 1 |
+
+Click **Connect**. Rereflect normalizes and validates the subdomain (rejecting
+anything that doesn't resolve to a public `*.zendesk.com` host, including
+loopback/private addresses, as an SSRF safeguard), verifies the credentials against
+`GET /api/v2/users/me.json`, and encrypts the token at rest. The API token is never
+returned in any API response or shown again in the UI.
+
+Connecting also **auto-provisions a Zendesk feedback source** for the org, so new
+tickets start flowing in without a second setup step. Rereflect displays a
+**webhook URL** and a **signing secret** on connect — copy them now if you plan to
+enable real-time delivery in step 3 (the secret is shown once).
+
+### 3. Optional: real-time via webhook
+
+Without a webhook, Rereflect polls Zendesk for new tickets automatically. To get
+tickets delivered the moment they're created, wire a Zendesk webhook:
+
+1. Copy the **webhook URL** (`POST <your-api-base>/api/v1/webhooks/zendesk/events`)
+   and the **signing secret** shown when you connected.
+2. In Zendesk, open **Admin Center → Apps and integrations → Webhooks** and create
+   a webhook pointing at that URL. Use the signing secret so Rereflect can verify
+   deliveries.
+3. Add a **Trigger** on **"Ticket is created"** that notifies the webhook, so each
+   new ticket is posted to Rereflect.
+
+Rereflect verifies every delivery over the **raw request body**. The signature
+scheme is:
+
+```
+X-Zendesk-Webhook-Signature           = base64(HMAC-SHA256(signing_secret, timestamp + raw_body))
+X-Zendesk-Webhook-Signature-Timestamp = timestamp used in the HMAC
+```
+
+Deliveries that fail verification are rejected. Both the pull loop and the webhook
+funnel through the same ingestion path, so exactly-once de-duplication by ticket ID
+holds no matter how a ticket arrives.
+
+### Verify
+
+- **Settings → Integrations → Zendesk** shows connection status, the connected
+  agent account, and a **Test Connection** action to re-validate the stored token.
+- New tickets appear as feedback items — analyzed for sentiment and mapped to the
+  requester by email — within minutes. Tickets with no requester email are still
+  ingested (just without a `customer_email`); an unmatched subdomain or missing
+  source is logged rather than silently dropped.
+
+### All features unlocked
+
+Because Rereflect is self-hosted and open-source, the Zendesk integration has no
+plan gate, seat limit, or usage cap — polling, webhooks, and Customer 360
+enrichment are available to every organization running the app.
 
 ## Production notes
 
