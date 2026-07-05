@@ -12,6 +12,7 @@ import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { AsanaIcon } from '@/components/icons/AsanaIcon';
 import { getAvailableIntegrations, getComingSoonIntegrations } from '@/lib/integrations';
 
 const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
@@ -35,6 +36,7 @@ export default function IntegrationsPage() {
     hubspot: <HubSpotIcon size={40} />,
     salesforce: <SalesforceIcon size={40} />,
     jira: <JiraIcon size={40} />,
+    asana: <AsanaIcon size={40} />,
   };
 
   useEffect(() => {
