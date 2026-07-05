@@ -272,54 +272,56 @@ export default function IntegrationsPage() {
         </div>
       </section>
 
-      <section ref={comingSoonRef} className="relative z-10 py-24 md:py-32 border-t border-border bg-card/30">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
-              <Clock className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">Coming Soon</span>
+      {comingSoonIntegrations.length > 0 && (
+        <section ref={comingSoonRef} className="relative z-10 py-24 md:py-32 border-t border-border bg-card/30">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="text-center mb-16">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
+                <Clock className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold text-primary">Coming Soon</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
+                More integrations
+                <span className="block mt-2 bg-gradient-to-r from-primary via-chart-5 to-accent bg-clip-text text-transparent">
+                  on the way
+                </span>
+              </h2>
             </div>
-            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold text-foreground mb-6">
-              More integrations
-              <span className="block mt-2 bg-gradient-to-r from-primary via-chart-5 to-accent bg-clip-text text-transparent">
-                on the way
-              </span>
-            </h2>
-          </div>
 
-          <div
-            className={`grid gap-6 mx-auto ${
-              comingSoonIntegrations.length === 1
-                ? 'max-w-md'
-                : 'md:grid-cols-2 max-w-2xl'
-            }`}
-          >
-            {comingSoonIntegrations.map((integration) => (
-              <a
-                key={integration.slug}
-                href={GITHUB_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="coming-soon-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-300 hover:shadow-lg"
-              >
-                <div className="relative">
-                  <div className="mb-6 group-hover:scale-110 transition-transform duration-300">
-                    {iconMap[integration.slug]}
+            <div
+              className={`grid gap-6 mx-auto ${
+                comingSoonIntegrations.length === 1
+                  ? 'max-w-md'
+                  : 'md:grid-cols-2 max-w-2xl'
+              }`}
+            >
+              {comingSoonIntegrations.map((integration) => (
+                <a
+                  key={integration.slug}
+                  href={GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="coming-soon-card group relative bg-card rounded-3xl border border-border p-8 transition-all duration-300 hover:shadow-lg"
+                >
+                  <div className="relative">
+                    <div className="mb-6 group-hover:scale-110 transition-transform duration-300">
+                      {iconMap[integration.slug]}
+                    </div>
+                    <h3 className="text-xl font-bold text-foreground mb-3">{integration.name}</h3>
+                    <p className="text-muted-foreground leading-relaxed mb-6">
+                      {integration.tagline}
+                    </p>
+                    <div className="flex items-center gap-2 text-primary font-semibold group-hover:gap-3 transition-all">
+                      View on GitHub
+                      <ArrowRight className="w-4 h-4" />
+                    </div>
                   </div>
-                  <h3 className="text-xl font-bold text-foreground mb-3">{integration.name}</h3>
-                  <p className="text-muted-foreground leading-relaxed mb-6">
-                    {integration.tagline}
-                  </p>
-                  <div className="flex items-center gap-2 text-primary font-semibold group-hover:gap-3 transition-all">
-                    View on GitHub
-                    <ArrowRight className="w-4 h-4" />
-                  </div>
-                </div>
-              </a>
-            ))}
+                </a>
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <section ref={ctaRef} className="relative z-10 py-24 md:py-32">
         <div className="max-w-7xl mx-auto px-6">

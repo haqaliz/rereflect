@@ -77,6 +77,14 @@ const JIRA_FAQS: IntegrationFAQ[] = [
   },
 ];
 
+const ZENDESK_FAQS: IntegrationFAQ[] = [
+  ...SHARED_FAQS,
+  {
+    question: 'Does this pull historical tickets, ticket comments, or use OAuth?',
+    answer: 'New tickets only, from the moment you connect — one feedback item per ticket (subject + description), de-duplicated by ticket ID across both polling and webhooks. Historical backfill, per-comment ingestion, tag/view filters, and OAuth are planned for a future release. Real-time delivery is optional via a Zendesk trigger/webhook; otherwise Rereflect polls for new tickets on a schedule.',
+  },
+];
+
 export const integrations: Integration[] = [
   {
     slug: 'slack',
@@ -269,28 +277,41 @@ export const integrations: Integration[] = [
   {
     slug: 'zendesk',
     name: 'Zendesk',
-    tagline: 'Pull support tickets and discover feedback patterns at scale',
-    description: 'Connect Zendesk to automatically analyze support tickets, discover recurring issues, and surface the most impactful feedback — powered by AI.',
-    status: 'coming_soon',
+    tagline: 'Turn new support tickets into analyzed feedback automatically',
+    description: 'Connect Zendesk and let Rereflect analyze every new support ticket — subject and description — for sentiment, pain points, and churn risk, mapping each one to the requester in Customer 360.',
+    status: 'available',
     color: 'chart-3',
     gradient: 'from-[#03363D] to-[#17494D]',
     hoverShadow: 'hover:shadow-[#03363D]/10',
     hoverBorder: 'hover:border-[#03363D]/30',
-    heroMessage: 'Zendesk integration is coming soon. Connect your helpdesk and let AI find the patterns hidden in thousands of support tickets.',
+    heroMessage: 'Your Zendesk tickets are the richest, highest-intent customer feedback you have. Rereflect connects with a subdomain, agent email, and API token — then analyzes every new ticket for sentiment, pain points, and churn risk, and maps it to the requester in Customer 360. No manual CSV exports.',
     howItWorks: [
-      { step: '1', title: 'Connect Zendesk', description: 'Authorize Rereflect to access your Zendesk account via API.' },
-      { step: '2', title: 'Tickets Sync Automatically', description: 'New and updated tickets flow into Rereflect in real-time.' },
-      { step: '3', title: 'AI Finds Patterns', description: 'Discover recurring issues, trending topics, and customer sentiment across all tickets.' },
+      { step: '1', title: 'Connect Zendesk', description: 'Paste your Zendesk subdomain, agent email, and an API token to authorize Rereflect — no OAuth redirect required.' },
+      { step: '2', title: 'Tickets Flow In', description: 'Rereflect polls for new tickets automatically from the moment you connect. Want real-time? Wire an optional Zendesk trigger/webhook.' },
+      { step: '3', title: 'AI Extracts Insights', description: 'Every ticket is analyzed for sentiment, categorized, flagged for churn risk, and mapped to the requester in Customer 360.' },
     ],
     features: [
-      { title: 'Ticket Analysis', description: 'Every support ticket is analyzed for sentiment, category, and urgency — automatically.', icon: 'FileText' },
-      { title: 'Trend Detection', description: 'Spot emerging issues before they become ticket storms. AI detects unusual patterns in real-time.', icon: 'TrendingUp' },
-      { title: 'Priority Scoring', description: 'AI scores tickets by impact and urgency, helping your team focus on what matters most.', icon: 'Target' },
-      { title: 'Custom Fields', description: 'Map Zendesk custom fields to Rereflect categories for seamless data flow.', icon: 'Settings' },
+      { title: 'Ticket Analysis', description: 'Each ticket\'s subject and description are analyzed for sentiment, pain points, and feature requests — automatically.', icon: 'FileText' },
+      { title: 'Automatic Sync', description: 'New tickets are pulled in on a schedule from the moment you connect. No manual CSV exports, no batch jobs.', icon: 'RefreshCw' },
+      { title: 'Real-Time Webhooks', description: 'Wire an optional Zendesk trigger/webhook for instant delivery — HMAC-signed and verified over the raw request body.', icon: 'Zap' },
+      { title: 'Requester Mapping', description: 'Every ticket is mapped to its requester by email, feeding Customer 360, health scores, and churn signals like any other source.', icon: 'Users' },
+      { title: 'Churn Risk Detection', description: 'AI flags frustrated customers from ticket tone and content before they cancel — so you can step in early.', icon: 'AlertTriangle' },
+      { title: 'Exactly-Once Ingestion', description: 'Tickets are de-duplicated by ticket ID across polling and webhooks, so you never get duplicate feedback for the same ticket.', icon: 'Shield' },
     ],
-    useCases: [],
-    faqs: SHARED_FAQS,
-    setupSteps: [],
+    useCases: [
+      { persona: 'Head of Support', role: 'SaaS company, 100+ tickets/day', quote: 'We had thousands of Zendesk tickets and no way to see the big picture. Rereflect surfaced our top 3 recurring issues within a week — we fixed them and ticket volume dropped.', icon: 'Headphones' },
+      { persona: 'Product Manager', role: 'B2B platform, Series B', quote: 'Feature requests were buried in support tickets nobody re-read. Now Rereflect surfaces them automatically, with sentiment context, straight from Zendesk.', icon: 'Layers' },
+      { persona: 'Customer Success Manager', role: 'Enterprise SaaS', quote: 'The churn detection caught a key account\'s frustration from the tone of their tickets before it ever reached me. We jumped on it and saved the renewal.', icon: 'Heart' },
+    ],
+    faqs: ZENDESK_FAQS,
+    setupSteps: [
+      { step: 1, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
+      { step: 2, title: 'Create a Zendesk API token', description: 'In Zendesk Admin Center → Apps and integrations → APIs → Zendesk API, enable token access and add an API token. Copy it — Zendesk shows it once.' },
+      { step: 3, title: 'Paste your credentials into Rereflect', description: 'Enter your subdomain (the {subdomain} in {subdomain}.zendesk.com), the agent email that owns the token, and the API token.' },
+      { step: 4, title: 'Rereflect validates & starts ingesting', description: 'Rereflect verifies the token, encrypts it at rest, and creates a Zendesk feedback source so new tickets flow in. The token is never shown again.' },
+      { step: 5, title: 'Optional: turn on real-time', description: 'Copy the webhook URL and signing secret from Rereflect, then create a Zendesk webhook and a "Ticket is created" trigger pointing at it. Otherwise Rereflect polls automatically.' },
+      { step: 6, title: 'Watch tickets become feedback', description: 'New tickets appear within minutes — analyzed for sentiment and mapped to the requester in Customer 360.' },
+    ],
   },
   {
     slug: 'hubspot',
