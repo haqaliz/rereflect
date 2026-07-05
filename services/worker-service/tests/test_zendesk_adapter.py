@@ -1,11 +1,14 @@
 """Tests for Zendesk adapter (ingestion-core aspect)."""
 
 import sys
+from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
 from unittest.mock import patch, MagicMock
 
 from src.adapters.zendesk import ZendeskAdapter
+from src.models import Organization, FeedbackSource, ZendeskIntegration
 
 
 @pytest.fixture
@@ -315,3 +318,198 @@ class TestModelsAndMigration:
             f"  Worker only:  {worker_cols - backend_cols}\n"
             f"  Backend only: {backend_cols - worker_cols}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestFindMatchingSources — zendesk subdomain matching branch
+# ---------------------------------------------------------------------------
+
+
+def _make_org(db, name="Acme Co") -> Organization:
+    org = Organization(name=name, plan="pro")
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+def _make_zendesk_integration(db, org_id, subdomain="acmeco", is_active=True) -> ZendeskIntegration:
+    integ = ZendeskIntegration(
+        organization_id=org_id,
+        subdomain=subdomain,
+        email="agent@acmeco.com",
+        api_token="enc:blob",
+        is_active=is_active,
+        connected_at=datetime.utcnow(),
+    )
+    db.add(integ)
+    db.commit()
+    db.refresh(integ)
+    return integ
+
+
+def _make_zendesk_source(db, org_id, is_active=True) -> FeedbackSource:
+    source = FeedbackSource(
+        organization_id=org_id,
+        source_type="zendesk",
+        is_active=is_active,
+        auto_import=True,
+        triggers={"new_ticket": True},
+        field_mapping={},
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+class TestFindMatchingSources:
+    def test_matches_active_integration_and_active_source(self, db):
+        from src.tasks.source_events import _find_matching_sources
+
+        org = _make_org(db)
+        _make_zendesk_integration(db, org.id, subdomain="acmeco")
+        source = _make_zendesk_source(db, org.id)
+
+        result = _find_matching_sources(db, "zendesk", {"subdomain": "acmeco"})
+
+        assert [s.id for s in result] == [source.id]
+
+    def test_inactive_integration_yields_no_match(self, db):
+        from src.tasks.source_events import _find_matching_sources
+
+        org = _make_org(db)
+        _make_zendesk_integration(db, org.id, subdomain="acmeco", is_active=False)
+        _make_zendesk_source(db, org.id)
+
+        result = _find_matching_sources(db, "zendesk", {"subdomain": "acmeco"})
+
+        assert result == []
+
+    def test_no_integration_row_yields_no_match_no_exception(self, db):
+        from src.tasks.source_events import _find_matching_sources
+
+        org = _make_org(db)
+        _make_zendesk_source(db, org.id)
+
+        result = _find_matching_sources(db, "zendesk", {"subdomain": "unknown-subdomain"})
+
+        assert result == []
+
+    def test_only_matching_org_returned_when_two_orgs_exist(self, db):
+        from src.tasks.source_events import _find_matching_sources
+
+        org_a = _make_org(db, name="Org A")
+        org_b = _make_org(db, name="Org B")
+        _make_zendesk_integration(db, org_a.id, subdomain="orga")
+        _make_zendesk_integration(db, org_b.id, subdomain="orgb")
+        source_a = _make_zendesk_source(db, org_a.id)
+        _make_zendesk_source(db, org_b.id)
+
+        result = _find_matching_sources(db, "zendesk", {"subdomain": "orga"})
+
+        assert [s.id for s in result] == [source_a.id]
+
+    def test_inactive_feedback_source_still_excluded(self, db):
+        from src.tasks.source_events import _find_matching_sources
+
+        org = _make_org(db)
+        _make_zendesk_integration(db, org.id, subdomain="acmeco")
+        _make_zendesk_source(db, org.id, is_active=False)
+
+        result = _find_matching_sources(db, "zendesk", {"subdomain": "acmeco"})
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# TestIngestionCoreIntegration — end-to-end process_source_event
+# ---------------------------------------------------------------------------
+
+
+def _patch_db_session(monkeypatch, db):
+    """Patch get_db_session in the source_events task module to yield the test db."""
+    import src.tasks.source_events as task_mod
+
+    @contextmanager
+    def fake_get_db():
+        yield db
+
+    monkeypatch.setattr(task_mod, "get_db_session", fake_get_db)
+
+
+@pytest.fixture
+def _no_op_side_effects(monkeypatch):
+    """Neutralize the Celery/Redis side effects process_source_event triggers
+    on the auto_import=True path so tests can run without a broker."""
+    import src.tasks.analysis as analysis_mod
+    import src.cache as cache_mod
+
+    monkeypatch.setattr(analysis_mod.analyze_single_feedback, "delay", MagicMock())
+    monkeypatch.setattr(cache_mod, "cache_invalidate", MagicMock())
+
+
+class TestIngestionCoreIntegration:
+    def test_creates_exactly_one_feedback_item_and_sets_customer_email(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from src.tasks.source_events import process_source_event
+        from src.models import FeedbackItem
+
+        org = _make_org(db)
+        _make_zendesk_integration(db, org.id, subdomain="acmeco")
+        _make_zendesk_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        process_source_event(
+            source_type="zendesk",
+            external_event_id="evt-555-a",
+            event_type="ticket.created",
+            event_data={
+                "ticket": {
+                    "id": 555,
+                    "subject": "Cannot login",
+                    "description": "<p>Getting a 500 error</p>",
+                    "status": "open",
+                    "tags": ["auth"],
+                    "requester_email": "sam@customer.com",
+                },
+                "subdomain": "acmeco",
+            },
+            provider_context={"subdomain": "acmeco"},
+        )
+
+        items = db.query(FeedbackItem).all()
+        assert len(items) == 1
+        item = items[0]
+        assert item.source == "zendesk"
+        assert item.source_external_id == "555"
+        assert item.customer_email == "sam@customer.com"
+        assert item.text == "Cannot login\n\nGetting a 500 error"
+        assert item.source_metadata["ticket_id"] == 555
+        assert item.source_metadata["tags"] == ["auth"]
+
+    def test_no_matching_source_is_a_logged_no_op_not_a_crash(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from src.tasks.source_events import process_source_event
+        from src.models import FeedbackItem
+
+        org = _make_org(db)
+        _make_zendesk_integration(db, org.id, subdomain="acmeco")
+        _make_zendesk_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        result = process_source_event(
+            source_type="zendesk",
+            external_event_id="evt-999-a",
+            event_type="ticket.created",
+            event_data={
+                "ticket": {"id": 999, "subject": "Hi"},
+                "subdomain": "unknown-subdomain",
+            },
+            provider_context={"subdomain": "unknown-subdomain"},
+        )
+
+        assert result["status"] == "no_sources"
+        assert db.query(FeedbackItem).count() == 0

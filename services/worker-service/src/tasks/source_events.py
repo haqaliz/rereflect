@@ -107,7 +107,7 @@ def _find_matching_sources(
     provider_context: Dict[str, Any],
 ) -> List:
     """Find FeedbackSource configurations that match the event."""
-    from src.models import FeedbackSource, Integration
+    from src.models import FeedbackSource, Integration, ZendeskIntegration
 
     query = db.query(FeedbackSource).filter(
         FeedbackSource.source_type == source_type,
@@ -171,6 +171,24 @@ def _find_matching_sources(
         source_id = provider_context.get("source_id")
         if source_id:
             query = query.filter(FeedbackSource.id == source_id)
+
+    # For Zendesk events, match by subdomain via the dedicated ZendeskIntegration
+    # table (one row per org, BYOK-style — not a row in the generic `integrations`
+    # table, so there's no Integration.config to key off). A zendesk FeedbackSource
+    # is matched to the org whose ZendeskIntegration.subdomain matches, full stop.
+    elif source_type == "zendesk":
+        subdomain = provider_context.get("subdomain")
+        if subdomain:
+            integrations = db.query(ZendeskIntegration).filter(
+                ZendeskIntegration.subdomain == subdomain,
+                ZendeskIntegration.is_active == True,
+            ).all()
+
+            matching_org_ids = [i.organization_id for i in integrations]
+            if matching_org_ids:
+                query = query.filter(FeedbackSource.organization_id.in_(matching_org_ids))
+            else:
+                return []
 
     # Check channel match for Slack (if event has channel info)
     event_channel = provider_context.get("channel_id")
@@ -268,6 +286,7 @@ def _process_event_for_source(
             source_id=source_id,
             source_external_id=message_id,
             source_metadata=content.get("metadata"),
+            customer_email=content.get("customer_email"),
         )
         db.add(feedback)
         db.flush()  # Get feedback.id
