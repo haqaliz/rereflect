@@ -16,6 +16,7 @@ default) treats every instance as fully featured.
 - [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
 - [Connecting Jira](#connecting-jira)
 - [Connecting Zendesk](#connecting-zendesk)
+- [Connecting Asana](#connecting-asana)
 - [Production notes](#production-notes)
 
 ## Prerequisites
@@ -490,6 +491,59 @@ redelivery and repeated syncs are always de-duplicated by ticket ID.
 Because Rereflect is self-hosted and open-source, the Zendesk integration has no
 plan gate, seat limit, or usage cap — polling, webhooks, and Customer 360
 enrichment are available to every organization running the app.
+
+## Connecting Asana
+
+Like Jira, Rereflect writes *out* to Asana — it creates tasks directly from
+feedback items, with sentiment and customer context included automatically.
+Asana is **not** a CRM and does not enrich the Customer 360 profile. This is
+**one-way, outbound task creation**: Rereflect does not sync task status,
+assignees, or comments back in from Asana.
+
+### 1. Mint a Personal Access Token
+
+1. In Asana, open your profile settings (click your avatar) and go to
+   **Apps → Manage Developer Apps**.
+2. Click **Create new token**, give it a name (e.g., "Rereflect"), and confirm.
+3. Copy the token immediately — Asana only shows it once.
+
+### 2. Connect from the app
+
+The token is **not** set via an environment variable — it is pasted into the
+app and stored encrypted per organization. (Encryption uses
+`LLM_ENCRYPTION_KEY`, which must already be set on the backend — see
+[Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok).)
+
+Go to **Settings → Integrations → Asana** (admin/owner only) and paste the
+personal access token you just created, then click **Connect**. Rereflect
+verifies the token against your Asana account and encrypts it at rest. The
+token is never returned in any API response or shown again in the UI.
+
+### Verify
+
+- **Settings → Integrations → Asana** shows connection status, the connected
+  account, and a **Test Connection** action to re-validate the stored token.
+- Any feedback item can create a linked Asana task via **Create Asana Task** —
+  pick a workspace and project, and Rereflect creates the task and keeps a
+  link back to the originating feedback. Creating a task twice from the same
+  feedback item surfaces the existing linked task instead of duplicating it.
+
+### Known limitation: team-scoped projects
+
+Rereflect lists projects with a **flat workspace → project picker**
+(`GET /api/v1/integrations/asana/projects?workspace_gid=...`). Asana projects
+that are scoped to a specific **team** and not visible at the workspace level
+may not appear in that list, depending on your Asana workspace's permission
+model. If a project you expect is missing, check whether it's team-only in
+Asana. A team-aware project selector (choose a team first, then its
+projects) is planned as a v2 follow-up — for now, only workspace-visible
+projects can be selected.
+
+### All features unlocked
+
+Because Rereflect is self-hosted and open-source, Asana task creation has no
+plan gate, seat limit, or usage cap — it's available to every organization
+running the app.
 
 ## Production notes
 
