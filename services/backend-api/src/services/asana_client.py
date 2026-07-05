@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 import httpx
 
@@ -55,12 +56,31 @@ class AsanaClient:
 
     BASE_URL = "https://app.asana.com/api/1.0"
 
+    @staticmethod
+    def _assert_safe_host(base_url: str) -> None:
+        """
+        Defense-in-depth constant scheme/host assert (mirrors
+        JiraClient._assert_safe_site_url). Unlike Jira/Zendesk there is no
+        per-org site_url to canonicalize/gate — the host is a compile-time
+        constant — but this still asserts the invariant the client depends
+        on, so an AsanaClient can never be pointed at a non-https or
+        non-app.asana.com host, even if BASE_URL is ever changed or
+        monkeypatched from another code path.
+        """
+        parsed = urlparse(base_url)
+        if parsed.scheme != "https":
+            raise ValueError("BASE_URL must use https")
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if host != "app.asana.com":
+            raise ValueError("BASE_URL must be the app.asana.com host")
+
     def __init__(self, api_token: str) -> None:
         """
         Args:
             api_token: the Asana Personal Access Token used for Bearer auth.
                 Stored privately and never logged/repr'd.
         """
+        self._assert_safe_host(self.BASE_URL)
         # Token stored but NEVER logged / exposed via repr or str.
         self._api_token = api_token
         self._client = httpx.Client(

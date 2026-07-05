@@ -248,7 +248,23 @@ class TestAsanaClientErrorTaxonomy:
 class TestAsanaClientConstantHostAssertion:
     """Defense-in-depth constant scheme/host assert — Asana has a fixed host,
     so there's no per-org SSRF surface to gate (unlike Jira/Zendesk), but the
-    client still asserts its own BASE_URL invariant."""
+    client still asserts its own BASE_URL invariant (mirrors
+    TestJiraClientSSRFGuard's behavioral structure)."""
 
-    def test_base_url_constant_is_https_app_asana_com(self):
-        assert AsanaClient.BASE_URL == "https://app.asana.com/api/1.0"
+    @pytest.mark.parametrize(
+        "bad_base_url",
+        [
+            "http://app.asana.com/api/1.0",     # non-https scheme
+            "https://evil.example.com/api/1.0",  # non-asana host
+            "https://app.asana.com.evil.com/api/1.0",  # suffix-trick host
+        ],
+    )
+    def test_rejects_unsafe_base_url(self, bad_base_url, monkeypatch):
+        monkeypatch.setattr(AsanaClient, "BASE_URL", bad_base_url)
+        with patch("httpx.Client"), pytest.raises(ValueError):
+            AsanaClient(API_TOKEN)
+
+    def test_allows_valid_constant_base_url(self):
+        with patch("httpx.Client"):
+            # Should not raise.
+            AsanaClient(API_TOKEN)
