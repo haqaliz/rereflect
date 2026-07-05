@@ -57,6 +57,7 @@ import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -67,6 +68,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   email: Mail,
   linear: LinearIcon,
   jira: JiraIcon,
+  zendesk: ZendeskIcon,
 };
 
 // Source type colors
@@ -78,6 +80,7 @@ const SOURCE_COLORS: Record<string, string> = {
   email: 'text-amber-600',
   linear: 'text-[#5E6AD2]',
   jira: 'text-[#0052CC]',
+  zendesk: 'text-[#03363D]',
 };
 
 function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
@@ -212,6 +215,11 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
           ...triggers.mentions,
           bot: !triggers.mentions?.bot,
         };
+      } else if (key === 'new_ticket') {
+        // Zendesk-only trigger key (see TRIGGER_OPTIONS.zendesk in
+        // lib/api/feedback-sources.ts) — mirrors ZendeskAdapter's actual
+        // "new_ticket" flag, not "all_messages".
+        triggers.new_ticket = !triggers.new_ticket;
       }
       return { ...prev, triggers };
     });
@@ -583,6 +591,8 @@ requests.post(
                 ? form.triggers.all_messages
                 : trigger.key === 'mentions.bot'
                 ? form.triggers.mentions?.bot
+                : trigger.key === 'new_ticket'
+                ? form.triggers.new_ticket
                 : false;
 
               return (

@@ -31,6 +31,7 @@ import {
 import { integrationsAPI, Integration } from '@/lib/api/integrations';
 import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
 import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
+import { zendeskAPI, ZendeskConnectionStatus } from '@/lib/api/zendesk';
 import {
   Webhook,
   MessageCircle,
@@ -50,6 +51,7 @@ import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -60,6 +62,7 @@ const SOURCE_ICONS: Record<string, React.ElementType> = {
   email: Mail,
   linear: LinearIcon,
   jira: JiraIcon,
+  zendesk: ZendeskIcon,
 };
 
 // Source type colors
@@ -71,6 +74,7 @@ const SOURCE_COLORS: Record<string, string> = {
   email: 'text-amber-600',
   linear: 'text-[#5E6AD2]',
   jira: 'text-[#0052CC]',
+  zendesk: 'text-[#03363D]',
 };
 
 type Step = 'type' | 'integration' | 'triggers' | 'mapping' | 'confirm' | 'email-setup';
@@ -83,8 +87,8 @@ function NewSourceContent() {
   // Determine initial step based on type
   const getInitialStep = (): Step => {
     if (!initialType) return 'type';
-    // Linear and Jira use their own connection — check status in integration step
-    if (initialType === 'linear' || initialType === 'jira') return 'integration';
+    // Linear, Jira, and Zendesk use their own connection — check status in integration step
+    if (initialType === 'linear' || initialType === 'jira' || initialType === 'zendesk') return 'integration';
     // Types that don't require integration go to triggers
     if (initialType === 'webhook' || initialType === 'discord' || initialType === 'email') return 'triggers';
     // OAuth types (slack, intercom) require integration selection
@@ -102,6 +106,7 @@ function NewSourceContent() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [linearStatus, setLinearStatus] = useState<LinearConnectionStatus | null>(null);
   const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null);
+  const [zendeskStatus, setZendeskStatus] = useState<ZendeskConnectionStatus | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   // Form state
@@ -130,16 +135,18 @@ function NewSourceContent() {
     const fetchData = async () => {
       try {
         setLoadingData(true);
-        const [typesRes, integrationsRes, linearStatusRes, jiraStatusRes] = await Promise.allSettled([
+        const [typesRes, integrationsRes, linearStatusRes, jiraStatusRes, zendeskStatusRes] = await Promise.allSettled([
           feedbackSourcesAPI.getTypes(),
           integrationsAPI.list(),
           linearAPI.getStatus(),
           jiraAPI.getStatus(),
+          zendeskAPI.getStatus(),
         ]);
         if (typesRes.status === 'fulfilled') setSourceTypes(typesRes.value);
         if (integrationsRes.status === 'fulfilled') setIntegrations(integrationsRes.value.integrations);
         if (linearStatusRes.status === 'fulfilled') setLinearStatus(linearStatusRes.value);
         if (jiraStatusRes.status === 'fulfilled') setJiraStatus(jiraStatusRes.value);
+        if (zendeskStatusRes.status === 'fulfilled') setZendeskStatus(zendeskStatusRes.value);
       } catch (err) {
         console.error('Failed to load data:', err);
       } finally {
@@ -171,6 +178,15 @@ function NewSourceContent() {
       } else {
         setStep('integration');
       }
+    } else if (type === 'zendesk') {
+      // Zendesk uses its own token-paste connection, like Jira — BUT unlike
+      // Jira/Linear, connecting Zendesk auto-provisions a `zendesk`
+      // FeedbackSource for the org (see backend-connection/_impl-report.md).
+      // Always show the integration step first (never jump straight to
+      // 'triggers') so it can check has_feedback_source and steer the
+      // operator away from creating a duplicate source — see the Zendesk
+      // branch of the integration step below for the actual guard.
+      setStep('integration');
     } else if (typeInfo?.requires_integration) {
       setStep('integration');
     } else {
@@ -193,6 +209,11 @@ function NewSourceContent() {
           ...triggers.mentions,
           bot: !triggers.mentions?.bot,
         };
+      } else if (key === 'new_ticket') {
+        // Zendesk-only trigger key (see TRIGGER_OPTIONS.zendesk in
+        // lib/api/feedback-sources.ts) — mirrors ZendeskAdapter's actual
+        // "new_ticket" flag, not "all_messages".
+        triggers.new_ticket = !triggers.new_ticket;
       }
       return { ...prev, triggers };
     });
@@ -337,8 +358,8 @@ function NewSourceContent() {
       { key: 'type', label: 'Source Type' },
     ];
 
-    if (currentTypeInfo?.requires_integration || selectedType === 'linear' || selectedType === 'jira') {
-      steps.push({ key: 'integration', label: selectedType === 'linear' || selectedType === 'jira' ? 'Connection' : 'Integration' });
+    if (currentTypeInfo?.requires_integration || selectedType === 'linear' || selectedType === 'jira' || selectedType === 'zendesk') {
+      steps.push({ key: 'integration', label: selectedType === 'linear' || selectedType === 'jira' || selectedType === 'zendesk' ? 'Connection' : 'Integration' });
     }
 
     steps.push(
@@ -460,7 +481,7 @@ function NewSourceContent() {
                             {!type.available && (
                               <Badge variant="outline" className="text-xs">Coming Soon</Badge>
                             )}
-                            {(type.requires_integration || type.type === 'linear' || type.type === 'jira') && type.available && (
+                            {(type.requires_integration || type.type === 'linear' || type.type === 'jira' || type.type === 'zendesk') && type.available && (
                               <Badge variant="secondary" className="text-xs">Requires OAuth</Badge>
                             )}
                           </div>
@@ -599,6 +620,99 @@ function NewSourceContent() {
             );
           }
 
+          // Zendesk uses its own token-paste connection system, like Jira.
+          // NEW (no Jira/Linear equivalent): connecting Zendesk auto-provisions
+          // a `zendesk` FeedbackSource for the org (backend-connection
+          // PRD 9a), so — unlike Jira/Linear, where "Continue" always creates
+          // a brand-new source — we must guard against creating a *second*
+          // one when `has_feedback_source` is already true.
+          if (selectedType === 'zendesk') {
+            const isZendeskConnected = zendeskStatus?.connected && zendeskStatus?.is_active;
+            const zendeskSourceAlreadyExists = Boolean(zendeskStatus?.has_feedback_source);
+            return (
+              <Card className="animate-slide-up">
+                <CardHeader>
+                  <CardTitle>Zendesk Connection</CardTitle>
+                  <CardDescription>
+                    {isZendeskConnected
+                      ? `Connected to ${zendeskStatus?.subdomain}.zendesk.com`
+                      : 'Connect your Zendesk account to receive feedback from support tickets'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isZendeskConnected ? (
+                    <>
+                      <div className="p-4 rounded-lg border-2 border-primary bg-primary/5">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-[#03363D]/10 rounded-lg">
+                            <ZendeskIcon className="w-5 h-5 text-[#03363D]" />
+                          </div>
+                          <div>
+                            <div className="font-semibold text-foreground">{zendeskStatus?.subdomain}.zendesk.com</div>
+                            <div className="text-sm text-muted-foreground">
+                              Connected as {zendeskStatus?.email}
+                            </div>
+                          </div>
+                          <Check className="w-5 h-5 text-primary ml-auto" />
+                        </div>
+                      </div>
+
+                      {zendeskSourceAlreadyExists ? (
+                        /* Duplicate-avoidance guard: connect already
+                           auto-provisioned a zendesk source for this org —
+                           route to it instead of re-running handleSubmit,
+                           which would create a second FeedbackSource row. */
+                        <div className="p-4 rounded-lg border border-border bg-secondary/30 flex items-start gap-3">
+                          <Info className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm text-foreground font-medium">
+                              A Zendesk feedback source already exists
+                            </p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Connecting Zendesk automatically created one for this organization —
+                              no need to create another.
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="flex justify-between pt-4">
+                        <Button variant="outline" onClick={() => setStep('type')}>
+                          Back
+                        </Button>
+                        {zendeskSourceAlreadyExists ? (
+                          <Link href="/feedback-sources">
+                            <Button>
+                              View Feedback Sources
+                            </Button>
+                          </Link>
+                        ) : (
+                          <Button onClick={() => setStep('triggers')}>
+                            Continue
+                          </Button>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      <ZendeskIcon className="w-12 h-12 mx-auto text-[#03363D]/50 mb-4" />
+                      <h3 className="font-semibold text-foreground mb-2">Zendesk not connected</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        You need to connect Zendesk first in Settings &gt; Integrations
+                      </p>
+                      <Link href="/settings/integrations/zendesk">
+                        <Button>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Connect Zendesk
+                        </Button>
+                      </Link>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          }
+
           return (
             <Card className="animate-slide-up">
               <CardHeader>
@@ -695,7 +809,7 @@ function NewSourceContent() {
                 <Label htmlFor="name">Source Name (optional)</Label>
                 <Input
                   id="name"
-                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'linear' ? 'Linear Issue Comments' : selectedType === 'jira' ? 'Jira Issue Comments' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
+                  placeholder={`e.g., ${selectedType === 'slack' ? '#feedback-channel' : selectedType === 'intercom' ? 'Support Conversations' : selectedType === 'linear' ? 'Linear Issue Comments' : selectedType === 'jira' ? 'Jira Issue Comments' : selectedType === 'zendesk' ? 'Zendesk Support Tickets' : selectedType === 'email' ? 'Support Inbox Forwarding' : 'Product Feedback Webhook'}`}
                   value={form.name}
                   onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                 />
@@ -710,6 +824,8 @@ function NewSourceContent() {
                     ? form.triggers.all_messages
                     : trigger.key === 'mentions.bot'
                     ? form.triggers.mentions?.bot
+                    : trigger.key === 'new_ticket'
+                    ? form.triggers.new_ticket
                     : false;
 
                   return (
@@ -868,7 +984,7 @@ function NewSourceContent() {
               <div className="flex justify-between pt-4 border-t border-border">
                 <Button
                   variant="outline"
-                  onClick={() => setStep(currentTypeInfo?.requires_integration || selectedType === 'linear' || selectedType === 'jira' ? 'integration' : 'type')}
+                  onClick={() => setStep(currentTypeInfo?.requires_integration || selectedType === 'linear' || selectedType === 'jira' || selectedType === 'zendesk' ? 'integration' : 'type')}
                 >
                   Back
                 </Button>

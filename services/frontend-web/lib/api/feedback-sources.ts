@@ -9,6 +9,10 @@ export interface TriggerConfig {
   keywords?: string[];
   labels?: string[];
   custom_rules?: any[];
+  // Zendesk-only: capture every new ticket (mirrors ZendeskAdapter.check_triggers
+  // in worker-service/src/adapters/zendesk.py, which reads triggers["new_ticket"]
+  // — NOT "all_messages", unlike every other source type).
+  new_ticket?: boolean;
 }
 
 export interface FieldMappingConfig {
@@ -24,7 +28,7 @@ export interface FeedbackSource {
   id: number;
   organization_id: number;
   integration_id: number | null;
-  source_type: 'slack' | 'intercom' | 'webhook' | 'discord' | 'email' | 'linear';
+  source_type: 'slack' | 'intercom' | 'webhook' | 'discord' | 'email' | 'linear' | 'zendesk';
   name: string | null;
   provider_config: Record<string, any>;
   triggers: TriggerConfig;
@@ -274,6 +278,15 @@ export const TRIGGER_OPTIONS: Record<string, { key: string; label: string; descr
     { key: 'labels', label: 'Issue Labels', description: 'Only issues with specific labels', hasValues: true },
     { key: 'keywords', label: 'Keywords', description: 'Comments containing keywords', hasValues: true },
   ],
+  // NOTE: the key here is "new_ticket", NOT "all_messages" — this mirrors
+  // the actual vocabulary ZendeskAdapter.check_triggers supports
+  // (worker-service/src/adapters/zendesk.py), which is narrower than
+  // Jira/Linear's per PRD scope (one feedback item per ticket, no
+  // per-comment/label filtering).
+  zendesk: [
+    { key: 'new_ticket', label: 'New Tickets', description: 'Capture every new support ticket' },
+    { key: 'keywords', label: 'Keywords', description: 'Only tickets containing keywords', hasValues: true },
+  ],
 };
 
 // ============ Default Field Mapping ============
@@ -296,4 +309,5 @@ export const DEFAULT_TRIGGERS: TriggerConfig = {
   keywords: [],
   labels: [],
   custom_rules: [],
+  new_ticket: false,
 };
