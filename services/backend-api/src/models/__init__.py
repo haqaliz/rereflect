@@ -54,6 +54,7 @@ from .hubspot_integration import HubSpotIntegration
 from .crm_enrichment import CrmEnrichment
 from .salesforce_integration import SalesforceIntegration
 from .jira_integration import JiraIntegration, FeedbackJiraIssue
+from .zendesk_integration import ZendeskIntegration
 
 __all__ = [
     "Base",
@@ -119,4 +120,5 @@ __all__ = [
     "SalesforceIntegration",
     "JiraIntegration",
     "FeedbackJiraIssue",
+    "ZendeskIntegration",
 ]
