@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 
 from .base import BaseSourceAdapter
+from .intercom import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,24 @@ class ZendeskAdapter(BaseSourceAdapter):
         event_data: Dict[str, Any],
         field_mapping: Dict[str, Any],
     ) -> Dict[str, Any]:
-        # Filled in Phase 2.
-        raise NotImplementedError
+        ticket = event_data.get("ticket", {})
+        subdomain = event_data.get("subdomain")
+        subject = strip_html(ticket.get("subject") or "")
+        description = strip_html(ticket.get("description") or "")
+        text = f"{subject}\n\n{description}" if description else subject
+        requester_email = ticket.get("requester_email")
+
+        return {
+            "text": text,
+            "metadata": {
+                "subdomain": subdomain,
+                "ticket_id": ticket.get("id"),
+                "status": ticket.get("status"),
+                "requester_email": requester_email,
+                "tags": ticket.get("tags") or [],
+            },
+            "customer_email": requester_email,
+        }
 
     def get_external_ids(
         self,
