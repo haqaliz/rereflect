@@ -429,4 +429,25 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
         logger.info(f"Zendesk webhook: unknown/inactive subdomain '{subdomain}'")
         return {"status": "ignored", "reason": "unknown_subdomain"}
 
+    # Fail-closed: a matched integration with no webhook_secret has not
+    # opted into the real-time webhook. This is deliberately a 401 (not the
+    # 200 "unknown_subdomain"/"no_active_source" no-op shape) -- silently
+    # accepting unsigned payloads for an org that never configured a secret
+    # would let anyone who guesses/enumerates a subdomain inject fake
+    # tickets.
+    if not integration.webhook_secret:
+        logger.warning(f"Zendesk webhook: no webhook_secret configured for subdomain '{subdomain}'")
+        raise HTTPException(status_code=401, detail="Webhook not configured for this account")
+
+    try:
+        secret = decrypt_api_key(integration.webhook_secret)
+    except Exception:
+        logger.error(f"Zendesk webhook: failed to decrypt webhook_secret for subdomain '{subdomain}'")
+        raise HTTPException(status_code=401, detail="Invalid webhook configuration")
+
+    timestamp = request.headers.get("X-Zendesk-Webhook-Signature-Timestamp", "")
+    signature = request.headers.get("X-Zendesk-Webhook-Signature", "")
+    if not signature or not timestamp or not _verify_zendesk_signature(body, timestamp, signature, secret):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
     return {"status": "ignored", "reason": "not_yet_implemented"}
