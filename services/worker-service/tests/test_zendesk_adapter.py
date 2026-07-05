@@ -238,6 +238,36 @@ class TestFetchContext:
         result = adapter.fetch_context(event_data, "agent@acmeco.com:apitoken123", {})
         assert isinstance(result, dict)
 
+    @pytest.mark.parametrize(
+        "malicious_subdomain",
+        [
+            "evil.com#",
+            "evil.com/",
+            "a.b",
+            "foo@bar",
+            "",
+            "foo_bar",
+            "-lead",
+            "trail-",
+            "a" * 64,
+        ],
+    )
+    @patch("src.adapters.zendesk.httpx.Client")
+    def test_rejects_malicious_subdomain_without_sending_request(
+        self, mock_client_cls, adapter, malicious_subdomain
+    ):
+        """SSRF guard: fetch_context must re-validate subdomain as a bare DNS
+        label before ever constructing a URL/httpx.Client — mirrors
+        ZendeskClient._assert_safe_subdomain in backend-api. A crafted
+        subdomain containing '@', '#', '/', '.', or an oversized label must
+        not reach the network layer (would otherwise let an attacker redirect
+        the request host and exfiltrate the stored API token via auth=).
+        """
+        event_data = {"ticket": {"id": 4521}, "subdomain": malicious_subdomain}
+        result = adapter.fetch_context(event_data, "agent@acmeco.com:apitoken123", {})
+        assert result == {}
+        mock_client_cls.assert_not_called()
+
 
 class TestAdapterRegistry:
     def test_get_adapter_returns_zendesk_adapter(self):
