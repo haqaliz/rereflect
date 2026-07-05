@@ -50,6 +50,7 @@ celery_app = Celery(
         "src.tasks.hubspot_writeback",
         "src.tasks.salesforce_sync",
         "src.tasks.salesforce_writeback",
+        "src.tasks.zendesk_sync",
     ],
 )
 
@@ -206,6 +207,14 @@ celery_app.conf.beat_schedule = {
     "sync-salesforce-daily": {
         "task": "src.tasks.salesforce_sync.sync_all_salesforce",
         "schedule": crontab(hour=3, minute=45),
+    },
+    # Poll Zendesk incremental tickets every 15 minutes (ingestion-pull
+    # aspect — see docs/planning/zendesk-integration/ingestion-pull/plan_20260705.md
+    # Phase 5). Fixed-interval cadence (not a specific wall-clock crontab
+    # time), same style as process-unanalyzed-feedback's 30.0.
+    "sync-zendesk-every-15-min": {
+        "task": "src.tasks.zendesk_sync.sync_all_zendesk",
+        "schedule": 900.0,  # every 15 minutes
     },
 }
 
