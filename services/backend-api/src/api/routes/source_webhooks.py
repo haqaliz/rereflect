@@ -488,15 +488,31 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
         logger.warning(f"Zendesk webhook: missing ticket id for subdomain '{subdomain}'")
         return _ignore("missing_ticket_id")
 
-    # Quick synchronous dedup pre-check (fast-path optimization on top of,
-    # not a replacement for, the ingestion-core's own FeedbackSourceEvent
-    # dedup -- the authoritative dedup lives downstream via the unique
-    # constraint uq_source_event(source_id, external_event_id)).
+    # Quick synchronous dedup pre-check (fast-path optimization only, for
+    # repeated/redelivered webhook calls for the SAME ticket on THIS path).
+    #
+    # NOTE: this is not, and cannot be, the cross-path (pull vs. webhook)
+    # dedup guard. uq_source_event(source_id, external_event_id) does NOT
+    # provide that: the scheduled pull writes
+    # external_event_id=f"zendesk-pull-{integration_id}-{ticket_id}-{window}"
+    # while this webhook path writes external_event_id=str(ticket_id) --
+    # different values for the same ticket, so the unique constraint never
+    # fires across the two paths. The real cross-path guard lives in
+    # worker-service's `_process_event_for_source`, which matches on the
+    # adapter-derived `external_message_id` (== str(ticket_id) for both
+    # paths) filtered to status in (processed, pending) before creating a
+    # FeedbackItem. See docs/SELF_HOSTING.md (Zendesk section) for the known
+    # rare-overlap limitation this implies.
+    #
+    # Only "processed"/"pending" rows count as a duplicate here -- an
+    # "ignored" or "failed" row for this ticket must not permanently block
+    # a later legitimate redelivery, mirroring the worker's own filter.
     existing = (
         db.query(FeedbackSourceEvent)
         .filter(
             FeedbackSourceEvent.source_id == source.id,
             FeedbackSourceEvent.external_event_id == str(ticket_id),
+            FeedbackSourceEvent.status.in_(["processed", "pending"]),
         )
         .first()
     )

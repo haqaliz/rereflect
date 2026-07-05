@@ -431,6 +431,10 @@ Go to **Settings → Integrations → Zendesk** (admin/owner only) and fill in:
 | Agent email | The email address of the Zendesk agent that owns the API token |
 | API token | The token you created in step 1 |
 
+Each org connects its own Zendesk account with its own validated credentials — two
+different Rereflect orgs must not point at the same Zendesk subdomain, or tickets
+from that subdomain would be attributed to both.
+
 Click **Connect**. Rereflect normalizes and validates the subdomain (rejecting
 anything that doesn't resolve to a public `*.zendesk.com` host, including
 loopback/private addresses, as an SSRF safeguard), verifies the credentials against
@@ -466,6 +470,11 @@ X-Zendesk-Webhook-Signature-Timestamp = timestamp used in the HMAC
 Deliveries that fail verification are rejected. Both the pull loop and the webhook
 funnel through the same ingestion path, so exactly-once de-duplication by ticket ID
 holds no matter how a ticket arrives.
+
+**Known limitation:** if you enable BOTH the scheduled pull and the real-time
+webhook, a rare timing overlap (a webhook arriving while the ~15-min pull runs for
+the same brand-new ticket) can create a duplicate feedback item. Sequential
+redelivery and repeated syncs are always de-duplicated by ticket ID.
 
 ### Verify
 

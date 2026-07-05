@@ -442,6 +442,10 @@ class TestConnectEndpoint:
         assert source is not None
         assert source.provider_config["subdomain"] == SUBDOMAIN
         assert source.auto_import is True
+        # The worker adapter's check_triggers() only ingests a ticket when
+        # triggers.get("new_ticket") is truthy — an auto-provisioned source
+        # with triggers={} would silently drop every ticket (dead on arrival).
+        assert source.triggers == {"new_ticket": True}
 
     def test_connect_does_not_duplicate_feedback_source_on_reconnect(
         self, client, db, test_organization, owner_headers

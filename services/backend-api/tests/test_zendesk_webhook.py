@@ -528,6 +528,45 @@ class TestZendeskWebhookQueueing:
         ).count() == 1
 
     @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_webhook_does_not_dedupe_against_ignored_or_failed_rows(
+        self, mock_queue, client: TestClient, zendesk_integration, zendesk_source, db: Session
+    ):
+        """
+        A prior "ignored"/"failed" FeedbackSourceEvent row for the same
+        ticket_id must not permanently short-circuit a later legitimate
+        delivery of that same ticket (e.g. the first delivery was ignored
+        for an unrelated reason -- empty text, trigger mismatch -- and a
+        redelivery or re-sync should still get a chance to be processed).
+        """
+        existing = FeedbackSourceEvent(
+            source_id=zendesk_source.id,
+            organization_id=zendesk_source.organization_id,
+            external_event_id="35436",
+            event_type="ticket.created",
+            status="ignored",
+        )
+        db.add(existing)
+        db.commit()
+
+        payload = _valid_ticket_payload(ticket_id=35436)
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "queued"
+        mock_queue.assert_called_once()
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
     def test_webhook_missing_ticket_id_is_noop(
         self, mock_queue, client: TestClient, zendesk_integration, zendesk_source
     ):

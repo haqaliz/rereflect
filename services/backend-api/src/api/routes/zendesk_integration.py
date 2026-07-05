@@ -275,7 +275,13 @@ def _ensure_default_feedback_source(db: Session, org_id: int, subdomain: str) ->
         source_type="zendesk",
         name="Zendesk",
         provider_config={"subdomain": subdomain},
-        triggers={},
+        # The worker adapter's check_triggers() (services/worker-service/
+        # src/adapters/zendesk.py) only reports a match when
+        # triggers.get("new_ticket") is truthy — every pulled and
+        # webhook-delivered ticket is otherwise dropped as no-trigger-match.
+        # A freshly auto-provisioned source must ship with this seeded so
+        # the integration ingests anything out of the box.
+        triggers={"new_ticket": True},
         field_mapping={},
         auto_import=True,
     )
