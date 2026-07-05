@@ -41,12 +41,14 @@ import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
 import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
 import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
+import { zendeskAPI, ZendeskConnectionStatus } from '@/lib/api/zendesk';
 import { getOauthErrorMessage } from '@/lib/oauthErrors';
 
 function IntegrationsContent() {
@@ -62,12 +64,15 @@ function IntegrationsContent() {
   const [hubspotStatus, setHubspotStatus] = useState<HubSpotConnectionStatus | null>(null);
   const [salesforceStatus, setSalesforceStatus] = useState<SalesforceConnectionStatus | null>(null);
   const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null);
+  const [zendeskStatus, setZendeskStatus] = useState<ZendeskConnectionStatus | null>(null);
   const [linearTesting, setLinearTesting] = useState(false);
   const [linearTestResult, setLinearTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [salesforceTesting, setSalesforceTesting] = useState(false);
   const [salesforceTestResult, setSalesforceTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [jiraTesting, setJiraTesting] = useState(false);
   const [jiraTestResult, setJiraTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [zendeskTesting, setZendeskTesting] = useState(false);
+  const [zendeskTestResult, setZendeskTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState('');
 
@@ -106,12 +111,13 @@ function IntegrationsContent() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [integrationResponse, linearStatusResponse, hubspotStatusResponse, salesforceStatusResponse, jiraStatusResponse] = await Promise.allSettled([
+      const [integrationResponse, linearStatusResponse, hubspotStatusResponse, salesforceStatusResponse, jiraStatusResponse, zendeskStatusResponse] = await Promise.allSettled([
         integrationsAPI.list(),
         linearAPI.getStatus(),
         hubspotAPI.getStatus(),
         salesforceAPI.getStatus(),
         jiraAPI.getStatus(),
+        zendeskAPI.getStatus(),
       ]);
       if (integrationResponse.status === 'fulfilled') {
         setIntegrations(integrationResponse.value.integrations);
@@ -127,6 +133,9 @@ function IntegrationsContent() {
       }
       if (jiraStatusResponse.status === 'fulfilled') {
         setJiraStatus(jiraStatusResponse.value);
+      }
+      if (zendeskStatusResponse.status === 'fulfilled') {
+        setZendeskStatus(zendeskStatusResponse.value);
       }
     } catch (err) {
       console.error('Failed to load integrations:', err);
@@ -228,7 +237,7 @@ function IntegrationsContent() {
             <CardTitle>Active Integrations</CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
-            {integrations.length === 0 && !(linearStatus?.connected) && !(hubspotStatus?.connected) && !(salesforceStatus?.connected) && !(jiraStatus?.connected) ? (
+            {integrations.length === 0 && !(linearStatus?.connected) && !(hubspotStatus?.connected) && !(salesforceStatus?.connected) && !(jiraStatus?.connected) && !(zendeskStatus?.connected) ? (
               <div className="text-center py-12">
                 <Settings2 className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold text-foreground mb-2">No integrations yet</h3>
@@ -820,6 +829,131 @@ function IntegrationsContent() {
                     )}
                   </div>
                 )}
+
+                {/* Zendesk — Active Integration Card */}
+                {zendeskStatus?.connected && (
+                  <div className="p-4 border border-border rounded-xl bg-card/50 hover:bg-card/80 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <Link
+                        href="/settings/integrations/zendesk"
+                        className="flex items-center gap-3 flex-1 group"
+                      >
+                        <div className="p-2 rounded-lg bg-[#03363D]/10">
+                          <ZendeskIcon className="w-6 h-6 text-[#03363D]" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                              Zendesk
+                            </span>
+                            {zendeskStatus.is_active ? (
+                              <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950">
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground">
+                                Disconnected
+                              </Badge>
+                            )}
+                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            {zendeskStatus.subdomain && (
+                              <span>{zendeskStatus.subdomain}.zendesk.com</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            <Badge variant="secondary" className="text-xs">
+                              Support Tickets
+                            </Badge>
+                          </div>
+                        </div>
+                      </Link>
+                      {isAdminOrOwner && (
+                        <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              setZendeskTesting(true);
+                              setZendeskTestResult(null);
+                              try {
+                                const result = await zendeskAPI.testConnection();
+                                setZendeskTestResult({ success: result.success, message: result.message ?? '' });
+                              } catch (err: any) {
+                                setZendeskTestResult({
+                                  success: false,
+                                  message: err.response?.data?.detail || 'Test failed',
+                                });
+                              } finally {
+                                setZendeskTesting(false);
+                              }
+                            }}
+                            disabled={zendeskTesting}
+                            title="Test connection"
+                          >
+                            {zendeskTesting ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Send className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Link href="/settings/integrations/zendesk">
+                            <Button variant="outline" size="sm" title="Configure">
+                              <Settings2 className="w-4 h-4" />
+                            </Button>
+                          </Link>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              requestConfirm(
+                                'Disconnect Zendesk? Existing feedback ingested from tickets will be preserved.',
+                                async () => {
+                                  try {
+                                    await zendeskAPI.disconnect();
+                                    await fetchData();
+                                  } catch (err) {
+                                    console.error('Failed to disconnect Zendesk:', err);
+                                  }
+                                }
+                              );
+                            }}
+                            className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                            title="Disconnect"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {zendeskStatus.connected_at && (
+                      <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground ml-11">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Connected: {new Date(zendeskStatus.connected_at).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+
+                    {zendeskTestResult && (
+                      <div
+                        className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-2 ml-11 ${
+                          zendeskTestResult.success
+                            ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300'
+                            : 'bg-destructive/10 text-destructive'
+                        }`}
+                      >
+                        {zendeskTestResult.success ? (
+                          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                        ) : (
+                          <XCircle className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        {zendeskTestResult.message}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -995,6 +1129,31 @@ function IntegrationsContent() {
                         </div>
                         <p className="text-sm text-muted-foreground">
                           Create issues directly from feedback
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    </div>
+                  </div>
+                </Link>
+              )}
+
+              {/* Zendesk - Available (only shown when not connected) */}
+              {!zendeskStatus?.connected && (
+                <Link href="/settings/integrations/zendesk">
+                  <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-[#03363D]/10 rounded-lg">
+                        <ZendeskIcon className="w-6 h-6 text-[#03363D]" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Zendesk</span>
+                          <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                            Available
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Pull support tickets as feedback
                         </p>
                       </div>
                       <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />

@@ -76,3 +76,40 @@ describe('IntegrationsPage — Salesforce data fetch contract', () => {
     expect(result.sf_org_id).toBe('00D000000000EXAMPLE');
   });
 });
+
+vi.mock('@/lib/api/zendesk', () => ({
+  zendeskAPI: {
+    getStatus: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    testConnection: vi.fn(),
+  },
+}));
+
+import { zendeskAPI } from '@/lib/api/zendesk';
+
+describe('IntegrationsPage — Zendesk data fetch contract', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('zendeskAPI.getStatus is callable', async () => {
+    (zendeskAPI.getStatus as any).mockResolvedValue({ connected: false });
+    const result = await zendeskAPI.getStatus();
+    expect(zendeskAPI.getStatus).toHaveBeenCalled();
+    expect(result.connected).toBe(false);
+  });
+
+  it('zendeskAPI.getStatus returns connected status with subdomain + has_feedback_source', async () => {
+    (zendeskAPI.getStatus as any).mockResolvedValue({
+      connected: true,
+      subdomain: 'acme',
+      email: 'operator@acme.com',
+      token_hint: '...9999',
+      is_active: true,
+      has_feedback_source: true,
+    });
+    const result = await zendeskAPI.getStatus();
+    expect(result.connected).toBe(true);
+    expect(result.subdomain).toBe('acme');
+    expect(result.has_feedback_source).toBe(true);
+  });
+});
