@@ -349,6 +349,7 @@ export const integrations: Integration[] = [
       { title: 'Opportunity Context', description: 'See deal stage, amount, and close date alongside customer feedback.', icon: 'DollarSign' },
       { title: 'ARR & Renewal Tracking', description: 'Annual revenue and a renewal-date proxy (the highest-amount open opportunity) are pulled in for every account.', icon: 'TrendingUp' },
       { title: 'Revenue Impact', description: 'Prioritize feedback from high-value accounts. Know which pain points affect your biggest customers.', icon: 'BarChart3' },
+      { title: 'Health-Score Writeback', description: 'Opt in to push Rereflect\'s calculated health score back into a numeric Contact field you choose — kept in sync automatically as scores change, so CSMs see it right in Salesforce.', icon: 'RefreshCw' },
     ],
     useCases: [
       { persona: 'Customer Success Manager', role: 'Enterprise SaaS, Salesforce CRM', quote: 'I can finally see churn-risk feedback next to the account\'s ARR and renewal date without leaving Rereflect. It changes which fires I fight first.', icon: 'Heart' },
@@ -361,6 +362,7 @@ export const integrations: Integration[] = [
       { step: 3, title: 'Approve the requested scopes', description: 'Grant Rereflect read access to accounts, contacts, and opportunities.' },
       { step: 4, title: 'Rereflect syncs accounts & opportunities', description: 'Company, ARR, renewal date, and opportunity stage/amount are pulled in automatically.' },
       { step: 5, title: 'View enriched feedback', description: 'Feedback is enriched with CRM context automatically. Segment and prioritize by account value on your dashboard.' },
+      { step: 6, title: 'Optional: enable health-score writeback', description: 'Create a numeric custom field on the Contact object in Salesforce (e.g. Rereflect_Health_Score__c), then enter its API name in Settings → Integrations → Salesforce and turn on writeback. The existing OAuth scope already allows the write — no reconnect needed.' },
     ],
   },
 ];

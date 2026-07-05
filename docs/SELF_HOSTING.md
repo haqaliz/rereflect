@@ -307,6 +307,35 @@ approve the requested scopes, then redirected back to Rereflect connected.
 > send `Access-Control-Allow-Credentials: true` with a specific (non-`*`)
 > allowed origin, or the callback will fail to verify.
 
+### Enable writeback (optional)
+
+To push customer health scores back to Salesforce whenever they change, follow these
+steps. (The `api` scope you already granted the Connected App permits field updates —
+no reconnect is needed.)
+
+1. **Create a custom field on the Contact object in Salesforce:**
+   - In Salesforce Setup, go to **Object Manager → Contact → Fields & Relationships**.
+   - Click **New**, choose a **Number** type (Number, Currency, or Percent all work),
+     and finish the wizard.
+   - Note the field's **API name** — Salesforce custom fields end in `__c`
+     (e.g., `Rereflect_Health_Score__c`). You'll need it in the app.
+   - Make sure the field is **writable** for the user whose OAuth connection Rereflect
+     uses (field-level security must not be read-only for that profile).
+
+2. **Enable writeback in Rereflect:**
+   - In Rereflect, go to **Settings → Integrations → Salesforce**.
+   - Toggle **Enable health score writeback** on.
+   - Enter the **field API name** you created (e.g., `Rereflect_Health_Score__c`).
+   - Click **Validate** to confirm the field exists, is a numeric type, and is writable.
+
+Health scores are pushed to the matched Contact (by email) whenever a customer's score
+changes by 2 or more points. When you first enable writeback, scores for all matched
+customers are backfilled. If the field is deleted, made read-only, or the token loses
+write access, writeback silently pauses (status shows the reason) — the inbound CRM sync
+and health scores are unaffected. If a customer's email maps to more than one Salesforce
+Contact, the lowest Contact Id is chosen deterministically and the status notes the
+ambiguity.
+
 ## Connecting Jira
 
 Rereflect can create Jira issues directly from feedback items, with sentiment and
