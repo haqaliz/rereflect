@@ -7,6 +7,7 @@ from .email import EmailAdapter
 from .intercom import IntercomAdapter
 from .slack import SlackAdapter
 from .webhook import WebhookAdapter
+from .zendesk import ZendeskAdapter
 
 __all__ = [
     "BaseSourceAdapter",
@@ -14,6 +15,7 @@ __all__ = [
     "IntercomAdapter",
     "SlackAdapter",
     "WebhookAdapter",
+    "ZendeskAdapter",
 ]
 
 
@@ -35,6 +37,7 @@ def get_adapter(source_type: str) -> BaseSourceAdapter:
         "intercom": IntercomAdapter,
         "slack": SlackAdapter,
         "webhook": WebhookAdapter,
+        "zendesk": ZendeskAdapter,
     }
 
     adapter_class = adapters.get(source_type)
