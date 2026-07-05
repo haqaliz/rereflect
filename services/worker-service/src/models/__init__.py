@@ -986,3 +986,37 @@ class SalesforceIntegration(Base):
                          name="uq_salesforce_integrations_org_id"),
         Index("ix_salesforce_integrations_org_id", "organization_id"),
     )
+
+
+class ZendeskIntegration(Base):
+    """Zendesk connection per org — no-FK mirror for worker read access (ingestion-core aspect).
+
+    Column set fixed by docs/planning/zendesk-integration/prd.md Data Model section; keep in
+    sync with services/backend-api/src/models/zendesk_integration.py (backend-connection
+    aspect) — parity enforced by
+    test_zendesk_adapter.py::TestModelsAndMigration::test_worker_and_backend_zendesk_integration_columns_match.
+    """
+    __tablename__ = "zendesk_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    subdomain = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False)
+    api_token = Column(Text, nullable=False)
+    token_hint = Column(String(8), nullable=True)
+    webhook_secret = Column(Text, nullable=True)
+    account_user_id = Column(String(255), nullable=True)
+    display_name = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    connected_by_user_id = Column(Integer, nullable=True)
+    connected_at = Column(DateTime, nullable=False)
+    last_synced_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String(50), nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', name='uq_zendesk_integrations_org_id'),
+        Index('ix_zendesk_integrations_org_id', 'organization_id'),
+    )
