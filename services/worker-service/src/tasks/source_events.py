@@ -272,7 +272,7 @@ def _process_event_for_source(
     if not text or len(text) < 3:
         _log_event(
             db, source_id, org_id, external_event_id, event_type,
-            event_data, "ignored", trigger_matched
+            event_data, "ignored", trigger_matched, message_id=message_id
         )
         return {"source_id": source_id, "status": "empty_text"}
 
@@ -294,7 +294,8 @@ def _process_event_for_source(
         # Log the event
         event_log = _log_event(
             db, source_id, org_id, external_event_id, event_type,
-            event_data, "processed", trigger_matched, feedback_id=feedback.id
+            event_data, "processed", trigger_matched, feedback_id=feedback.id,
+            message_id=message_id,
         )
 
         # Update source stats
@@ -316,7 +317,7 @@ def _process_event_for_source(
         # Create pending feedback for manual review
         event_log = _log_event(
             db, source_id, org_id, external_event_id, event_type,
-            event_data, "pending", trigger_matched
+            event_data, "pending", trigger_matched, message_id=message_id
         )
 
         pending = PendingFeedback(
@@ -354,27 +355,33 @@ def _log_event(
     status: str,
     trigger_matched: Optional[str],
     feedback_id: Optional[int] = None,
+    message_id: Optional[str] = None,
 ):
-    """Create an event log entry."""
+    """Create an event log entry.
+
+    `message_id` should be the value already computed by
+    `adapter.get_external_ids(event_data)` in `_process_event_for_source` —
+    passing it here keeps the *stored* `external_message_id` consistent with
+    the value the dedup query filters on. When it's not supplied (the
+    `no_trigger_match` call site, which fires before `get_external_ids` has
+    run), fall back to the legacy best-effort derivation below. That legacy
+    heuristic is Slack/webhook-shaped (`ts` / `item.ts` / `content_hash`) and
+    is wrong for every other adapter (e.g. Intercom's `data.item.id`,
+    Zendesk's `ticket.id`) — those rows just don't carry a useful
+    `external_message_id`, which is fine since "ignored" rows without a
+    trigger match aren't part of the dedup filter anyway.
+    """
     from src.models import FeedbackSourceEvent
 
-    # Get message_id for the log
-    from src.adapters import get_adapter
-    try:
-        # We need to determine source_type from the context
-        # For now, try to infer or use a default
-        source = db.query(FeedbackSourceEvent.source_id).filter(
-            FeedbackSourceEvent.source_id == source_id
-        ).first()
-    except:
-        pass
-
-    # Use a simple approach to get message_id
-    message_id = (
-        event_data.get("ts") or
-        event_data.get("item", {}).get("ts") or
-        event_data.get("content_hash")
-    )
+    if message_id is None:
+        # Legacy best-effort derivation (Slack/webhook-shaped) — only used
+        # for the no_trigger_match call site, which has no adapter-computed
+        # message_id available.
+        message_id = (
+            event_data.get("ts") or
+            event_data.get("item", {}).get("ts") or
+            event_data.get("content_hash")
+        )
 
     event_log = FeedbackSourceEvent(
         source_id=source_id,

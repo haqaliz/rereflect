@@ -489,6 +489,69 @@ class TestIngestionCoreIntegration:
         assert item.source_metadata["ticket_id"] == 555
         assert item.source_metadata["tags"] == ["auth"]
 
+    def test_duplicate_event_is_deduped_via_feedback_source_event(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """Reproduces + pins the fix for the pre-existing _log_event bug:
+        _process_event_for_source computes the correct dedup key via
+        adapter.get_external_ids() (ticket id, for Zendesk), but _log_event
+        independently re-derives external_message_id via a Slack/webhook-
+        shaped heuristic (event_data.get("ts") / .get("item", {}).get("ts")
+        / .get("content_hash")) that is always None for Zendesk's
+        {"ticket": {...}} shape. The stored external_message_id then never
+        matches the dedup query's message_id on redelivery, so a second
+        identical event (same ticket id, different external_event_id --
+        simulating a webhook redelivery or pull-cursor overlap) creates a
+        second FeedbackItem instead of being deduped.
+        """
+        from src.tasks.source_events import process_source_event
+        from src.models import FeedbackItem, FeedbackSourceEvent
+
+        org = _make_org(db)
+        _make_zendesk_integration(db, org.id, subdomain="acmeco")
+        source = _make_zendesk_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        event_data = {
+            "ticket": {
+                "id": 555,
+                "subject": "Cannot login",
+                "description": "<p>Getting a 500 error</p>",
+                "status": "open",
+                "tags": ["auth"],
+                "requester_email": "sam@customer.com",
+            },
+            "subdomain": "acmeco",
+        }
+
+        process_source_event(
+            source_type="zendesk",
+            external_event_id="evt-555-a",
+            event_type="ticket.created",
+            event_data=event_data,
+            provider_context={"subdomain": "acmeco"},
+        )
+        second_result = process_source_event(
+            source_type="zendesk",
+            external_event_id="evt-555-b",
+            event_type="ticket.created",
+            event_data=event_data,
+            provider_context={"subdomain": "acmeco"},
+        )
+
+        items = db.query(FeedbackItem).all()
+        assert len(items) == 1
+
+        processed_events = db.query(FeedbackSourceEvent).filter(
+            FeedbackSourceEvent.source_id == source.id,
+            FeedbackSourceEvent.status == "processed",
+        ).all()
+        assert len(processed_events) == 1
+        assert processed_events[0].external_message_id == "555"
+
+        assert second_result["status"] == "processed"
+        assert second_result["results"][0]["status"] == "duplicate"
+
     def test_no_matching_source_is_a_logged_no_op_not_a_crash(
         self, db, monkeypatch, _no_op_side_effects
     ):
