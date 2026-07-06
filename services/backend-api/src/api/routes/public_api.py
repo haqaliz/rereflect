@@ -24,7 +24,7 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
@@ -58,6 +58,7 @@ class PublicFeedbackItem(BaseModel):
     churn_risk_score: Optional[int] = None
     customer_email: Optional[str] = None
     workflow_status: str = "new"
+    tags: Optional[List[str]] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -307,13 +308,44 @@ class PublicFeedbackUpdate(BaseModel):
     ``workflow_status`` moves the item through the workflow (timeline event +
     webhook).  ``correction`` records a human correction of an AI-derived field
     (record-only — the stored category/sentiment column is NOT mutated).
+    ``tags`` replaces the stored tag list (``[]`` clears; omitted leaves
+    unchanged).  ``is_urgent`` sets the urgency flag (omitted leaves unchanged).
     """
+
+    model_config = {"extra": "forbid"}
 
     workflow_status: Optional[
         Literal["new", "in_review", "resolved", "closed"]
     ] = None
     resolution_note: Optional[str] = None
     correction: Optional[PublicCorrectionInput] = None
+    tags: Optional[list[str]] = None
+    is_urgent: Optional[bool] = None
+
+    @field_validator("tags", mode="after")
+    @classmethod
+    def _validate_tags(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return None
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("each tag must be a string")
+            trimmed = item.strip()
+            if not trimmed:
+                raise ValueError("tags must not be empty (after trimming)")
+            if len(trimmed) > 50:
+                raise ValueError("each tag must be at most 50 characters")
+            if trimmed not in seen:
+                seen.add(trimmed)
+                cleaned.append(trimmed)
+
+        if len(cleaned) > 20:
+            raise ValueError("at most 20 tags are allowed")
+
+        return cleaned
 
 
 def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str]]:
@@ -332,10 +364,12 @@ def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str
     dependencies=[Depends(require_scope("write"))],
     summary="Update a feedback item (public API)",
     description=(
-        "Update a feedback item's workflow status and/or record a correction of "
-        "an AI-derived field.  Requires the ``write`` scope.  Corrections are "
-        "record-only — they capture a training signal without mutating the stored "
-        "category/sentiment."
+        "Update a feedback item's workflow status, tags, and/or urgency flag, and/or "
+        "record a correction of an AI-derived field.  Requires the ``write`` scope.  "
+        "Corrections are record-only — they capture a training signal without "
+        "mutating the stored category/sentiment.  ``tags`` replaces the stored tag "
+        "list (``[]`` clears; omitted leaves unchanged).  ``is_urgent`` sets the "
+        "urgency flag (omitted leaves unchanged)."
     ),
 )
 async def public_update_feedback(
@@ -344,7 +378,7 @@ async def public_update_feedback(
     auth: ApiKeyAuth = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> PublicFeedbackItem:
-    if data.workflow_status is None and data.correction is None:
+    if not (data.model_fields_set & {"workflow_status", "correction", "tags", "is_urgent"}):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
 
     fb = (
@@ -431,6 +465,38 @@ async def public_update_feedback(
             corrected_value=data.correction.corrected_value,
             feedback_text=fb.text,
         )
+
+    # ── Tags / is_urgent (plain field mutation) ───────────────────────────────
+    fields_touched = False
+    if "is_urgent" in data.model_fields_set:
+        fb.is_urgent = bool(data.is_urgent)
+        fields_touched = True
+    if "tags" in data.model_fields_set:
+        fb.tags = list(data.tags or [])  # rebind new list — JSON columns aren't
+        fields_touched = True             # dirty-tracked on in-place mutation.
+
+    if fields_touched:
+        db.commit()
+
+        # Best-effort side effects — never fail the write.
+        try:
+            from src.services.cache_service import cache_invalidate
+
+            cache_invalidate(f"dashboard:{auth.organization_id}:*")
+            cache_invalidate(f"analytics:{auth.organization_id}:*")
+        except Exception:
+            logger.warning("cache_invalidate failed on public PATCH (fields)", exc_info=True)
+
+        try:
+            from src.services.event_emitter import emit_event
+
+            await emit_event(
+                org_id=auth.organization_id,
+                event_type="feedback:updated",
+                data={"id": fb.id},
+            )
+        except Exception:
+            logger.warning("emit_event failed on public PATCH (fields)", exc_info=True)
 
     db.refresh(fb)
     return PublicFeedbackItem.model_validate(fb)
