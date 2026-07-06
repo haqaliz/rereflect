@@ -2,7 +2,7 @@ import apiClient from '../api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type ApiKeyScope = 'read' | 'ingest';
+export type ApiKeyScope = 'read' | 'ingest' | 'write';
 
 export interface ApiKeyListItem {
   id: number;

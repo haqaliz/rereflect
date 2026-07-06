@@ -2,7 +2,7 @@
 Workflow service — auto-assignment engine and timeline event helpers.
 """
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -12,11 +12,77 @@ from src.models.assignment_rule import AssignmentRule
 from src.models.user import User
 
 
+def apply_status_change(
+    db: Session,
+    feedbacks: List[FeedbackItem],
+    new_status: str,
+    *,
+    organization_id: int,
+    actor_id: Optional[int] = None,
+    actor_label: str,
+    resolution_note: Optional[str] = None,
+) -> List[Tuple[FeedbackItem, str]]:
+    """Mutate workflow_status and emit a timeline event for each feedback item
+    whose status actually changes.
+
+    Returns a list of ``(feedback, old_status)`` tuples for the items that
+    changed (used by the caller for webhook/WS dispatch).  The caller is
+    responsible for validating ``new_status``, committing, and handling
+    cache/webhook/WS side effects.  ``actor_id`` may be ``None`` for API-key
+    writes (the FK is nullable).  ``actor_label`` is accepted for parity with
+    the webhook dispatch helper / caller ergonomics and is not persisted here.
+    """
+    changed: List[Tuple[FeedbackItem, str]] = []
+    for fb in feedbacks:
+        old_status = fb.workflow_status
+        if old_status == new_status:
+            continue
+        fb.workflow_status = new_status
+        meta = None
+        if resolution_note and new_status == "resolved":
+            meta = {"resolution_note": resolution_note}
+        create_workflow_event(
+            db, fb.id, organization_id, actor_id,
+            "status_changed", old_value=old_status, new_value=new_status,
+            metadata=meta,
+        )
+        changed.append((fb, old_status))
+    return changed
+
+
+def dispatch_status_webhooks(
+    db: Session,
+    org_id: int,
+    changed: List[Tuple[FeedbackItem, str]],
+    new_status: str,
+    changed_by_label: str,
+) -> None:
+    """Fire ``feedback.status_changed`` webhook events for each changed item.
+
+    Mirrors the loop previously inlined in the internal status-change route so
+    that both the internal and public write paths dispatch identical payloads.
+    Callers should wrap this in a best-effort try/except (fire-and-forget).
+    """
+    from src.services.webhook_dispatcher import dispatch_webhook_event
+    for fb, old_status in changed:
+        dispatch_webhook_event(
+            db=db,
+            org_id=org_id,
+            event_type="feedback.status_changed",
+            feedback=fb,
+            changes={
+                "old_status": old_status,
+                "new_status": new_status,
+                "changed_by": changed_by_label,
+            },
+        )
+
+
 def create_workflow_event(
     db: Session,
     feedback_id: int,
     organization_id: int,
-    actor_id: int,
+    actor_id: Optional[int],
     event_type: str,
     old_value: Optional[str] = None,
     new_value: Optional[str] = None,

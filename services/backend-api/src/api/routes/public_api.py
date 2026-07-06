@@ -9,6 +9,7 @@ Scopes
 ------
   read   — GET endpoints (feedback, customers, analytics, webhooks)
   ingest — POST /feedback (create + enqueue analysis)
+  write  — PATCH endpoints for mutating existing feedback
 
 Prefix: /api/public/v1
 Tag:    public
@@ -18,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -288,6 +289,151 @@ def public_ingest_feedback(
     queue_analyze_feedback(row.id)
 
     return PublicFeedbackItem.model_validate(row)
+
+
+# ─── Feedback write (PATCH) ───────────────────────────────────────────────────
+
+
+class PublicCorrectionInput(BaseModel):
+    """A single human-in-the-loop correction on an AI-derived field."""
+
+    field: Literal["pain_point", "feature_request", "sentiment"]
+    corrected_value: str = Field(..., min_length=1)
+
+
+class PublicFeedbackUpdate(BaseModel):
+    """Mutable fields on a feedback item exposed to the public write API.
+
+    ``workflow_status`` moves the item through the workflow (timeline event +
+    webhook).  ``correction`` records a human correction of an AI-derived field
+    (record-only — the stored category/sentiment column is NOT mutated).
+    """
+
+    workflow_status: Optional[
+        Literal["new", "in_review", "resolved", "closed"]
+    ] = None
+    resolution_note: Optional[str] = None
+    correction: Optional[PublicCorrectionInput] = None
+
+
+def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str]]:
+    """Map a public correction ``field`` → (correction_type, current stored value)."""
+    if field == "pain_point":
+        return "category", fb.pain_point_category
+    if field == "feature_request":
+        return "category", fb.feature_request_category
+    # field == "sentiment"
+    return "sentiment", fb.sentiment_label
+
+
+@router.patch(
+    "/feedback/{feedback_id}",
+    response_model=PublicFeedbackItem,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Update a feedback item (public API)",
+    description=(
+        "Update a feedback item's workflow status and/or record a correction of "
+        "an AI-derived field.  Requires the ``write`` scope.  Corrections are "
+        "record-only — they capture a training signal without mutating the stored "
+        "category/sentiment."
+    ),
+)
+async def public_update_feedback(
+    feedback_id: int,
+    data: PublicFeedbackUpdate,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicFeedbackItem:
+    if data.workflow_status is None and data.correction is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+
+    fb = (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.id == feedback_id,
+            FeedbackItem.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if fb is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
+
+    key_label = f"api-key:{auth.key_row.name}"
+
+    # ── Workflow status change ────────────────────────────────────────────────
+    if data.workflow_status is not None:
+        from src.services.workflow_service import (
+            apply_status_change,
+            dispatch_status_webhooks,
+        )
+
+        changed = apply_status_change(
+            db,
+            [fb],
+            data.workflow_status,
+            organization_id=auth.organization_id,
+            actor_id=None,
+            actor_label=key_label,
+            resolution_note=data.resolution_note,
+        )
+        db.commit()
+
+        if changed:
+            # Best-effort side effects — a failing webhook must not fail the PATCH.
+            try:
+                from src.services.cache_service import cache_invalidate
+
+                cache_invalidate(f"dashboard:{auth.organization_id}:*")
+                cache_invalidate(f"analytics:{auth.organization_id}:*")
+            except Exception:
+                logger.warning("cache_invalidate failed on public PATCH", exc_info=True)
+
+            try:
+                dispatch_status_webhooks(
+                    db,
+                    auth.organization_id,
+                    changed,
+                    data.workflow_status,
+                    changed_by_label=key_label,
+                )
+            except Exception:
+                logger.warning("webhook dispatch failed on public PATCH", exc_info=True)
+
+            try:
+                from src.services.event_emitter import emit_event
+
+                await emit_event(
+                    org_id=auth.organization_id,
+                    event_type="workflow:status_changed",
+                    data={"feedback_ids": [fb.id], "new_status": data.workflow_status},
+                )
+            except Exception:
+                logger.warning("emit_event failed on public PATCH", exc_info=True)
+
+    # ── Correction (record-only) ──────────────────────────────────────────────
+    # NB: the correction insert commits separately from the status change above, so a
+    # crash between the two is not atomic. AICorrection is an append-only training-signal
+    # store, so a rare duplicate on client retry is low-harm; v2 may fold both into one
+    # transaction or add a natural-key dedup.
+    if data.correction is not None:
+        from src.services.ai_correction_service import create_ai_correction
+
+        correction_type, original_value = _resolve_correction(fb, data.correction.field)
+        create_ai_correction(
+            db,
+            organization_id=auth.organization_id,
+            user_id=None,
+            correction_type=correction_type,
+            entity_type="feedback_item",
+            entity_id=fb.id,
+            signal="correction",
+            original_value=original_value,
+            corrected_value=data.correction.corrected_value,
+            feedback_text=fb.text,
+        )
+
+    db.refresh(fb)
+    return PublicFeedbackItem.model_validate(fb)
 
 
 # ─── Analytics summary ────────────────────────────────────────────────────────
@@ -607,7 +753,8 @@ def public_openapi(request: Request) -> JSONResponse:
             "description": (
                 "Public REST API for Rereflect. Authenticate every request with an API key:\n\n"
                 "`Authorization: Bearer rrf_...`\n\n"
-                "Keys carry scopes: **read** (GET endpoints) and **ingest** (POST /feedback). "
+                "Keys carry scopes: **read** (GET endpoints), **ingest** (POST /feedback), "
+                "and **write** (PATCH endpoints for mutating existing feedback). "
                 "All data is scoped to the organization that owns the key."
             ),
         },

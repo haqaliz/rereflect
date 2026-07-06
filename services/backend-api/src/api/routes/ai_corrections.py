@@ -22,6 +22,7 @@ from src.database.session import get_db
 from src.models.ai_correction import AICorrection
 from src.models.organization import Organization
 from src.models.user import User
+from src.services.ai_correction_service import create_ai_correction
 from src.api.dependencies import (
     get_current_user,
     get_current_org,
@@ -110,7 +111,8 @@ def submit_correction(
 
     Available to all authenticated users (no plan gating).
     """
-    correction = AICorrection(
+    correction = create_ai_correction(
+        db,
         organization_id=current_org.id,
         user_id=current_user.id,
         correction_type=body.correction_type,
@@ -121,9 +123,6 @@ def submit_correction(
         corrected_value=body.corrected_value,
         feedback_text=body.feedback_text,
     )
-    db.add(correction)
-    db.commit()
-    db.refresh(correction)
     logger.info(
         "AI correction submitted org=%s user=%s type=%s signal=%s",
         current_org.id,

@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from src.models.ai_correction import AICorrection
+from src.models.feedback import FeedbackItem
 from src.models.user import User
 from src.models.organization import Organization
 from src.api.auth import hash_password, create_access_token
@@ -129,6 +130,67 @@ class TestSubmitCorrection:
             "original_value": "negative",
         })
         assert response.status_code == 403
+
+
+class TestCategoryCorrectionCharacterization:
+    """POST /api/v1/ai-corrections — category correction baseline.
+
+    Locks current behavior before the create_ai_correction helper extraction:
+    a category correction is persisted with user_id=current_user.id and does
+    NOT mutate the target feedback's pain_point_category.
+    """
+
+    def test_category_correction_persists_and_does_not_mutate_feedback(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+        test_user: User,
+    ):
+        feedback = FeedbackItem(
+            organization_id=test_organization.id,
+            text="The billing page keeps timing out.",
+            source="email",
+            sentiment_label="negative",
+            sentiment_score=-0.6,
+            pain_point_category="performance",
+            is_urgent=False,
+        )
+        db.add(feedback)
+        db.commit()
+        db.refresh(feedback)
+
+        payload = {
+            "correction_type": "category",
+            "entity_type": "feedback_item",
+            "entity_id": feedback.id,
+            "signal": "correction",
+            "original_value": "performance",
+            "corrected_value": "billing",
+        }
+        response = client.post(
+            "/api/v1/ai-corrections", json=payload, headers=auth_headers
+        )
+        assert response.status_code == 201
+
+        data = response.json()
+        assert data["correction_type"] == "category"
+        assert data["entity_type"] == "feedback_item"
+        assert data["entity_id"] == feedback.id
+        assert data["signal"] == "correction"
+        assert data["original_value"] == "performance"
+        assert data["corrected_value"] == "billing"
+
+        # Persisted with user_id = current_user.id
+        row = db.query(AICorrection).filter(AICorrection.id == data["id"]).first()
+        assert row is not None
+        assert row.user_id == test_user.id
+        assert row.organization_id == test_organization.id
+
+        # Feedback's own category is NOT changed by submitting a correction
+        db.refresh(feedback)
+        assert feedback.pain_point_category == "performance"
 
 
 class TestCorrectionStats:
