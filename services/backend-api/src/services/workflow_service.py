@@ -82,7 +82,7 @@ def create_workflow_event(
     db: Session,
     feedback_id: int,
     organization_id: int,
-    actor_id: int,
+    actor_id: Optional[int],
     event_type: str,
     old_value: Optional[str] = None,
     new_value: Optional[str] = None,

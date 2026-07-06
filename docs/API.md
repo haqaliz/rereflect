@@ -74,13 +74,30 @@ and writing (updating) feedback. Authenticate with an API key (`rrf_…`, create
 Authorization: Bearer rrf_xxxxxxxx        # or:  X-API-Key: rrf_xxxxxxxx
 ```
 
-Keys carry scopes; the endpoints below require `read`. As always, data is scoped to the
-key's organization.
+Keys carry scopes; each endpoint below notes the scope it requires (the read endpoints
+require `read`). As always, data is scoped to the key's organization.
 
 - `read` — read feedback, customers, and analytics
 - `ingest` — submit new feedback for AI analysis
-- `write` — update existing feedback (status, category/sentiment corrections); see the
-  feedback-mutation section for the write endpoints
+- `write` — update existing feedback (status, category/sentiment corrections); see
+  **Feedback (write)** below
+
+### Feedback (write)
+
+```
+PATCH /api/public/v1/feedback/{id}   # Update an existing feedback item (scope: write)
+```
+
+Requires the `write` scope. The body is JSON with any combination of:
+
+- `workflow_status` — one of `new`, `in_review`, `resolved`, `closed`. Setting the item to
+  its current status is a no-op. An optional `resolution_note` is attached when the status
+  is `resolved`.
+- `correction` — record a category/sentiment correction as a training signal (the AI value
+  is **not** overwritten): `{"field": "pain_point" | "feature_request" | "sentiment", "corrected_value": "<value>"}`.
+
+An empty body returns `400`. A key without the `write` scope returns `403`. A feedback id
+outside the key's organization returns `404`. Returns the updated feedback item.
 
 ### Customer 360
 

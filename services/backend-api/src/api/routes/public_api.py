@@ -411,6 +411,10 @@ async def public_update_feedback(
                 logger.warning("emit_event failed on public PATCH", exc_info=True)
 
     # ── Correction (record-only) ──────────────────────────────────────────────
+    # NB: the correction insert commits separately from the status change above, so a
+    # crash between the two is not atomic. AICorrection is an append-only training-signal
+    # store, so a rare duplicate on client retry is low-harm; v2 may fold both into one
+    # transaction or add a natural-key dedup.
     if data.correction is not None:
         from src.services.ai_correction_service import create_ai_correction
 
