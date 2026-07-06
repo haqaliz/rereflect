@@ -210,7 +210,7 @@ const smallCards: {
     icon: Code2,
     title: 'Public REST API',
     description:
-      'API keys, read endpoints, feedback ingestion, webhooks, and OpenAPI docs. Build on top of your own feedback data.',
+      'API keys with read, ingest, and write scopes — read endpoints, feedback ingestion, updating feedback (status + corrections), webhooks, and OpenAPI docs. Build on top of your own feedback data.',
     animation: 'spin',
   },
 ];

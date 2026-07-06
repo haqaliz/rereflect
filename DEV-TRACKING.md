@@ -23,7 +23,7 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 **Open-Source Feature Batch — shipped 2026-06-22** (`PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md`):
 - ✅ **Local / Offline LLM** — Ollama / any OpenAI-compatible endpoint, keyless; VADER fallback with no model.
 - ✅ **Custom AI** — custom pain-point/feature-request/urgency taxonomies + configurable health-score weights.
-- ✅ **Public REST API** — API keys (read/ingest), reads + feedback ingestion + webhooks + OpenAPI docs.
+- ✅ **Public REST API** — API keys (read/ingest/write), reads + feedback ingestion + feedback mutation (`PATCH /feedback/{id}`: status + record-only corrections, shipped 2026-07-06) + webhooks + OpenAPI docs. See `docs/planning/public-api-write-crud/`.
 
 ---
 
