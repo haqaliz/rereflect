@@ -42,6 +42,7 @@ import { LinearIcon } from '@/components/icons/LinearIcon';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
+import { AsanaIcon } from '@/components/icons/AsanaIcon';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
@@ -49,6 +50,7 @@ import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
 import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
 import { zendeskAPI, ZendeskConnectionStatus } from '@/lib/api/zendesk';
+import { asanaAPI, AsanaConnectionStatus } from '@/lib/api/asana';
 import { getOauthErrorMessage } from '@/lib/oauthErrors';
 
 function IntegrationsContent() {
@@ -65,6 +67,7 @@ function IntegrationsContent() {
   const [salesforceStatus, setSalesforceStatus] = useState<SalesforceConnectionStatus | null>(null);
   const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null);
   const [zendeskStatus, setZendeskStatus] = useState<ZendeskConnectionStatus | null>(null);
+  const [asanaStatus, setAsanaStatus] = useState<AsanaConnectionStatus | null>(null);
   const [linearTesting, setLinearTesting] = useState(false);
   const [linearTestResult, setLinearTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [salesforceTesting, setSalesforceTesting] = useState(false);
@@ -73,6 +76,8 @@ function IntegrationsContent() {
   const [jiraTestResult, setJiraTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [zendeskTesting, setZendeskTesting] = useState(false);
   const [zendeskTestResult, setZendeskTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [asanaTesting, setAsanaTesting] = useState(false);
+  const [asanaTestResult, setAsanaTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState('');
 
@@ -111,13 +116,14 @@ function IntegrationsContent() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [integrationResponse, linearStatusResponse, hubspotStatusResponse, salesforceStatusResponse, jiraStatusResponse, zendeskStatusResponse] = await Promise.allSettled([
+      const [integrationResponse, linearStatusResponse, hubspotStatusResponse, salesforceStatusResponse, jiraStatusResponse, zendeskStatusResponse, asanaStatusResponse] = await Promise.allSettled([
         integrationsAPI.list(),
         linearAPI.getStatus(),
         hubspotAPI.getStatus(),
         salesforceAPI.getStatus(),
         jiraAPI.getStatus(),
         zendeskAPI.getStatus(),
+        asanaAPI.getStatus(),
       ]);
       if (integrationResponse.status === 'fulfilled') {
         setIntegrations(integrationResponse.value.integrations);
@@ -136,6 +142,9 @@ function IntegrationsContent() {
       }
       if (zendeskStatusResponse.status === 'fulfilled') {
         setZendeskStatus(zendeskStatusResponse.value);
+      }
+      if (asanaStatusResponse.status === 'fulfilled') {
+        setAsanaStatus(asanaStatusResponse.value);
       }
     } catch (err) {
       console.error('Failed to load integrations:', err);
@@ -237,7 +246,7 @@ function IntegrationsContent() {
             <CardTitle>Active Integrations</CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
-            {integrations.length === 0 && !(linearStatus?.connected) && !(hubspotStatus?.connected) && !(salesforceStatus?.connected) && !(jiraStatus?.connected) && !(zendeskStatus?.connected) ? (
+            {integrations.length === 0 && !(linearStatus?.connected) && !(hubspotStatus?.connected) && !(salesforceStatus?.connected) && !(jiraStatus?.connected) && !(zendeskStatus?.connected) && !(asanaStatus?.connected) ? (
               <div className="text-center py-12">
                 <Settings2 className="w-16 h-16 mx-auto text-muted-foreground/50 mb-4" />
                 <h3 className="text-lg font-semibold text-foreground mb-2">No integrations yet</h3>
@@ -954,6 +963,131 @@ function IntegrationsContent() {
                     )}
                   </div>
                 )}
+
+                {/* Asana — Active Integration Card */}
+                {asanaStatus?.connected && (
+                  <div className="p-4 border border-border rounded-xl bg-card/50 hover:bg-card/80 transition-colors">
+                    <div className="flex items-start justify-between">
+                      <Link
+                        href="/settings/integrations/asana"
+                        className="flex items-center gap-3 flex-1 group"
+                      >
+                        <div className="p-2 rounded-lg bg-[#F06A6A]/10">
+                          <AsanaIcon className="w-6 h-6 text-[#F06A6A]" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                              Asana
+                            </span>
+                            {asanaStatus.is_active ? (
+                              <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950">
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground">
+                                Disconnected
+                              </Badge>
+                            )}
+                            <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            {asanaStatus.display_name && (
+                              <span>{asanaStatus.display_name}</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            <Badge variant="secondary" className="text-xs">
+                              Task Management
+                            </Badge>
+                          </div>
+                        </div>
+                      </Link>
+                      {isAdminOrOwner && (
+                        <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              setAsanaTesting(true);
+                              setAsanaTestResult(null);
+                              try {
+                                const result = await asanaAPI.testConnection();
+                                setAsanaTestResult({ success: result.success, message: result.message ?? '' });
+                              } catch (err: any) {
+                                setAsanaTestResult({
+                                  success: false,
+                                  message: err.response?.data?.detail || 'Test failed',
+                                });
+                              } finally {
+                                setAsanaTesting(false);
+                              }
+                            }}
+                            disabled={asanaTesting}
+                            title="Test connection"
+                          >
+                            {asanaTesting ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Send className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Link href="/settings/integrations/asana">
+                            <Button variant="outline" size="sm" title="Configure">
+                              <Settings2 className="w-4 h-4" />
+                            </Button>
+                          </Link>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              requestConfirm(
+                                'Disconnect Asana? Existing linked tasks will be preserved.',
+                                async () => {
+                                  try {
+                                    await asanaAPI.disconnect();
+                                    await fetchData();
+                                  } catch (err) {
+                                    console.error('Failed to disconnect Asana:', err);
+                                  }
+                                }
+                              );
+                            }}
+                            className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                            title="Disconnect"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {asanaStatus.connected_at && (
+                      <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground ml-11">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Connected: {new Date(asanaStatus.connected_at).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+
+                    {asanaTestResult && (
+                      <div
+                        className={`mt-3 p-3 rounded-lg text-sm flex items-center gap-2 ml-11 ${
+                          asanaTestResult.success
+                            ? 'bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300'
+                            : 'bg-destructive/10 text-destructive'
+                        }`}
+                      >
+                        {asanaTestResult.success ? (
+                          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                        ) : (
+                          <XCircle className="w-4 h-4 flex-shrink-0" />
+                        )}
+                        {asanaTestResult.message}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
@@ -1154,6 +1288,31 @@ function IntegrationsContent() {
                         </div>
                         <p className="text-sm text-muted-foreground">
                           Pull support tickets as feedback
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    </div>
+                  </div>
+                </Link>
+              )}
+
+              {/* Asana - Available (only shown when not connected) */}
+              {!asanaStatus?.connected && (
+                <Link href="/settings/integrations/asana">
+                  <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-[#F06A6A]/10 rounded-lg">
+                        <AsanaIcon className="w-6 h-6 text-[#F06A6A]" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Asana</span>
+                          <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                            Available
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Create tasks directly from feedback
                         </p>
                       </div>
                       <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />

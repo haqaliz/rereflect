@@ -6,6 +6,7 @@ import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { AsanaIcon } from '@/components/icons/AsanaIcon';
 
 export function IntegrationBar() {
   return (
@@ -62,6 +63,12 @@ export function IntegrationBar() {
             className="[&>svg]:grayscale hover:[&>svg]:grayscale-0 transition-all duration-300 cursor-default"
           >
             <JiraIcon size={40} />
+          </span>
+          <span
+            aria-label="Asana"
+            className="[&>svg]:grayscale hover:[&>svg]:grayscale-0 transition-all duration-300 cursor-default"
+          >
+            <AsanaIcon size={40} />
           </span>
         </div>
         <p className="text-muted-foreground text-sm">

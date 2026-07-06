@@ -55,6 +55,7 @@ from .crm_enrichment import CrmEnrichment
 from .salesforce_integration import SalesforceIntegration
 from .jira_integration import JiraIntegration, FeedbackJiraIssue
 from .zendesk_integration import ZendeskIntegration
+from .asana_integration import AsanaIntegration, FeedbackAsanaTask
 
 __all__ = [
     "Base",
@@ -121,4 +122,6 @@ __all__ = [
     "JiraIntegration",
     "FeedbackJiraIssue",
     "ZendeskIntegration",
+    "AsanaIntegration",
+    "FeedbackAsanaTask",
 ]
