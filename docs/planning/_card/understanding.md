@@ -1,91 +1,45 @@
-# Phase 2 — Deep-dig understanding: Zendesk inbound feedback source
+# Understanding — Public API Write/CRUD Expansion
 
-Synthesized from 3 read-only dig agents (worker / backend / frontend). All paths under the worktree.
+**Slug:** `public-api-write-crud` · **Branch:** `feat/public-api-write-crud` · **Date:** 2026-07-06
+Synthesized from 3 read-only mapping agents (public-API layer, feedback-update/correction path, frontend scope UI).
 
-## What the task really is
+---
 
-Add **Zendesk** as an inbound feedback source: operator connects their Zendesk (BYOK), tickets
-flow into Rereflect as `feedback` rows, then ride the existing analysis → churn → health →
-copilot → automations pipeline. Mirror the shipped Intercom/Jira/Linear slices. OSS self-hosted,
-all unlocked.
+## What the task is really asking
 
-## The one real architectural decision: how tickets get INGESTED
+Add a **`write` scope + write endpoint(s)** to the *public* REST API (`/api/public/v1`), so a self-hosting operator can mutate existing feedback from their own systems via an API key — not just read/ingest. Slice 1 = single-entity feedback mutation. Customer/category-taxonomy CRUD and bulk writes are explicit v2.
 
-The dig surfaced that Rereflect has **two ingestion patterns**, and the shipped inbound
-integration (Intercom) uses the *push* one — there is **no productionized inbound *pull***:
+## Affected areas (all in `services/backend-api` + `services/frontend-web`)
 
-| | **Adapter / webhook-push** (canonical, tested) | **Connector / poll-pull** (stub, inert) |
+**Backend — public API layer (extend, low risk):**
+- `src/api/routes/public_api.py` — router `APIRouter(prefix="/api/public/v1")` @ :39. Add a `@router.patch("/feedback/{id}", dependencies=[Depends(require_scope("write"))])`. The org-scoped fetch-then-404 idiom already exists verbatim @ :244–253; the ingest `POST /feedback` @ :260 is the closest write template. New request model mirrors `PublicFeedbackCreate` @ :73; reuse `PublicFeedbackItem` response model @ :45.
+- `src/api/public/auth.py` — `verify_api_key` → `ApiKeyAuth(organization_id, scopes, key_row)`; `require_scope("write")` is **generic and already works** once `write` is grantable. Org comes from `auth.organization_id`.
+- `src/api/routes/api_keys.py:31` — `_VALID_SCOPES = frozenset({"read", "ingest"})` → add `"write"`. This is the ONLY create-time gate (422 on unknown). No DB migration (scopes is a free-form `String(100)` comma list, `models/api_key.py:22`).
+- Docs strings to update: `public_api.py:8–11` (module docstring scope table), `public_api.py:610–611` (OpenAPI `info.description` scope sentence). New route auto-appears in the scoped `/api/public/v1/openapi.json` + `/docs` (filtered by prefix, no wiring).
+
+**Frontend — scope picker (small):**
+- `app/(dashboard)/settings/api-keys/page.tsx` — scope checkbox list driven by inline `['read','ingest'] as const` @ :152; add `'write'`. The description ternary @ :167–171 is binary (read vs else) → convert to a 3-way lookup or `write` shows the ingest copy. `ScopeBadge` color map @ :53–65 needs a `write` entry or it falls back to gray.
+- `lib/api/api-keys.ts:5` — `export type ApiKeyScope = 'read' | 'ingest';` → add `| 'write'`. The `create()` client @ :36–40 passes scopes through (no change).
+- Docs: `docs/API.md:76–77` (scope list; :68 calls the API "read-only" — now inaccurate). `docs/SELF_HOSTING.md` ingest-key section is fine; note its HubSpot `crm.objects.contacts.write` mentions are unrelated.
+
+## ⚠️ The finding that reshapes the feature (resolve in PRD)
+
+There is **no single internal "feedback update service."** Mutation logic is inline in route handlers, and the three field groups behave very differently:
+
+| Field group | Internal precedent to delegate to | Notes |
 |---|---|---|
-| Worker | `src/tasks/source_events.py` `process_source_event` + `src/adapters/*` (`BaseSourceAdapter`) | `src/tasks/integrations.py` `sync_all_integrations` + `BaseConnector` |
-| Trigger | Inbound webhook HTTP POST → `queue_source_event` | Celery beat daily 02:00 |
-| Dedup | `FeedbackSourceEvent (source_id, external_message_id)` existence check | none |
-| Cursor | n/a (pushed) | `Integration.last_synced_at` high-water mark |
-| Status | **Intercom fully wired + tested** | **every connector (incl. `ZendeskConnector`) returns `[]`** |
+| **`workflow_status`** | `workflow.py:137 change_status` (`POST /api/v1/workflow/status`, bulk) | Clean path. Validates `VALID_STATUSES = [new, in_review, resolved, closed]`, records a timeline event via `workflow_service.create_workflow_event`, invalidates cache, dispatches the `feedback.status_changed` webhook + WS event. **Strongest, cleanest slice-1 win.** |
+| **category / sentiment override** | `ai_corrections.py:102 submit_correction` (`POST /api/v1/ai-corrections`) | The dashboard override **only records an `AICorrection` training signal — it does NOT change the stored `*_category` / `sentiment_label` column.** Those columns are only ever written by the analyzer. So a public "override" that *also* mutates the stored value would be **net-new behavior** beyond what the dashboard does. There's no service wrapper — creation is inline; slice 1 should refactor it into a shared helper both routes call. |
+| **`tags` / `is_urgent`** | **NONE** — no internal endpoint manually edits these | Only the analyzer/automations write them. Accepting a manual value = genuinely new mutation surface with no precedent. Lean toward **deferring to v2**. |
 
-- **Jira/Linear are OUTBOUND** (create issue from feedback) — they give us the **connection**
-  template but **no inbound ingestion** to copy.
-- **Intercom is the only inbound template**, and it is **webhook-push** via the adapter pattern.
+- The existing `PATCH /api/v1/feedback/{id}` (`feedback.py:592`) is a **re-analyze** (overwrites text, wipes+recomputes all AI fields) — **do NOT reuse it** for a field-level public PATCH; it destroys categorization.
 
-### Option A — Pull/poll via the pasted API token  *(brief's default; best self-host fit)*
-Operator pastes subdomain + email + token; a Celery beat task polls Zendesk
-(`GET /api/v2/incremental/tickets` or search) using the stored token, cursor = `last_synced_at`,
-creates `FeedbackItem` + `FeedbackSourceEvent` (dedup on ticket id). No public ingress needed —
-good for self-hosters behind a firewall. **Cost:** the poll loop is un-productionized; we must
-harden it (route pulled tickets through the same `FeedbackItem`/`FeedbackSourceEvent` creation +
-add a `zendesk` source-matching branch), and it's near-real-time at best (beat interval).
+## Open questions for the requirements interview (genuine product decisions)
 
-### Option B — Webhook push (mirror Intercom adapter)  *(most-tested code path)*
-Operator configures a Zendesk webhook/trigger → new `/api/v1/webhooks/zendesk/events`
-(HMAC-verified) → `ZendeskAdapter` (`BaseSourceAdapter`) → existing tested pipeline. Real-time,
-reuses the battle-tested path. **Cost:** requires the self-hosted Rereflect to be publicly
-reachable by Zendesk + operator sets up a Zendesk trigger; the pasted API token becomes
-vestigial for ingestion (only used for validate/enrichment).
+1. **Scope granularity** — single `write` scope (recommend) vs per-resource scopes?
+2. **Slice-1 field coverage** — status only (cleanest, real win) / status + assignment / + category&sentiment corrections (record-only signal, mirror dashboard) / + tags&is_urgent (net-new surface)?
+3. **Category/sentiment semantics** — record-only correction (mirror dashboard) vs also mutate the stored column (net-new)?
+4. **Idempotency shape** — PATCH with `exclude_unset`; repeated identical PATCH should converge (status set to same value = no-op or re-emit event?).
 
-> **Recommendation to pressure-test in the interview:** Option A (pull) for self-host coherence —
-> the pasted token does real work, no inbound ingress requirement — while *reusing* the adapter's
-> content-extraction + `FeedbackSourceEvent` dedup so we inherit the robust parts. Confirm with user.
-
-## Connection (settled — Jira own-auth pattern)
-
-- New `zendesk_integrations` table (one row/org): `subdomain`, `email`, `api_token`
-  (Fernet-encrypted via `src/utils/encryption.py`), `token_hint`, identity fields, `is_active`,
-  `last_synced_at`, `last_sync_status`, `last_error`, timestamps, `UniqueConstraint(organization_id)`.
-- `ZendeskClient` (mirror `jira_client.py`): Basic auth `("{email}/token", api_token)`, base
-  `https://{subdomain}.zendesk.com/api/v2`, `validate()` → `GET /users/me.json`, error taxonomy.
-- Routes `/api/v1/integrations/zendesk/{connect,status,disconnect,test}` (mirror
-  `jira_integration.py`), `require_admin_or_owner` + `get_current_org`, token never in responses.
-- **Two-layer SSRF gate**: route normalizes host to `*.zendesk.com` + `socket.getaddrinfo`
-  reject loopback/private/link-local (422); client re-asserts scheme+host suffix. Missing
-  `LLM_ENCRYPTION_KEY` → 422 not 500.
-- Register `zendesk` in `feedback_sources.py` `/types` (`requires_integration=False`, own-auth
-  like jira/linear) + `valid_types`. `Integration.type`/`FeedbackItem.source` comments already
-  list `zendesk`; no enum change.
-- **Caveat: multiple Alembic heads** — run `alembic heads` and set `down_revision` correctly (or `merge`).
-
-## Frontend (greenfield app; landing mostly done)
-
-- App has **zero** Zendesk refs. Add: `ZendeskIcon.tsx`, `lib/api/zendesk.ts`, connect page
-  `settings/integrations/zendesk/page.tsx` (mirror Jira token-paste — fields: subdomain, email,
-  token). Wire into integrations list (tile + Active block), the 4 feedback-source pages'
-  `SOURCE_ICONS`/`SOURCE_COLORS`, the `new` wizard's zendesk branch, and `TRIGGER_OPTIONS`.
-- **Landing already has** a Zendesk "coming soon" page + `integrations.ts` entry (l.269-294) +
-  IntegrationBar/FAQ/sitemap. Upgrade `status: 'coming_soon'` → `'available'`, fill
-  `setupSteps`/`useCases`, swap page to the full intercom/jira layout.
-- Zendesk is inbound-only → **no** outbound `createIssue`/`getProjects`/`CreateIssueDialog`.
-
-## Test templates (TDD mirrors)
-
-- Worker: `tests/test_intercom_adapter.py` → `test_zendesk_adapter.py` (if adapter path).
-- Backend: `test_jira_connection.py`, `test_jira_client.py`, `test_feedback_sources_jira.py`,
-  `test_jira_models.py` → zendesk analogs.
-- Frontend: `lib/api/__tests__/jira.test.ts` → `zendesk.test.ts`; integrations contract test.
-
-## Open questions for the interview
-
-1. **Ingestion mechanism: pull (A) vs webhook-push (B)?** (biggest decision)
-2. **Granularity:** one feedback per ticket (recommended) vs per ticket-comment.
-3. **Which tickets:** all / only new / by status/tag/view filter? Trigger config shape.
-4. **Slice-1 boundary:** connection + ingestion + wizard + landing upgrade in one slice, or
-   connection-only first then ingestion?
-5. Customer mapping: set `feedback.customer_email` from the ticket requester email (yes → feeds
-   Customer 360 / health). Confirm.
+## Contradiction flagged vs the original card
+The card assumed a public PATCH could "reuse the internal update + correction services" for status/category/tags/urgency uniformly. Reality: only **status** has a clean reusable path; **category/sentiment** reuse means recording a training signal (not mutating the field); **tags/urgency** have no internal precedent at all. The PRD must scope slice 1 around this, not paper over it.
