@@ -17,7 +17,11 @@ from src.models.assignment_rule import AssignmentRule
 from src.models.user import User
 from src.models.organization import Organization
 from src.api.dependencies import get_current_user, get_current_org
-from src.services.workflow_service import create_workflow_event
+from src.services.workflow_service import (
+    create_workflow_event,
+    apply_status_change,
+    dispatch_status_webhooks,
+)
 from src.services.event_emitter import emit_event
 
 router = APIRouter(prefix="/api/v1/workflow", tags=["workflow"])
@@ -153,23 +157,14 @@ async def change_status(
     if not feedbacks:
         raise HTTPException(status_code=404, detail="No matching feedback found")
 
-    updated = 0
-    status_changes: list = []  # [(feedback, old_status)] for webhook dispatch
-    for fb in feedbacks:
-        old_status = fb.workflow_status
-        if old_status == data.new_status:
-            continue
-        fb.workflow_status = data.new_status
-        meta = {}
-        if data.resolution_note and data.new_status == "resolved":
-            meta["resolution_note"] = data.resolution_note
-        create_workflow_event(
-            db, fb.id, current_org.id, current_user.id,
-            "status_changed", old_value=old_status, new_value=data.new_status,
-            metadata=meta if meta else None,
-        )
-        status_changes.append((fb, old_status))
-        updated += 1
+    status_changes = apply_status_change(
+        db, feedbacks, data.new_status,
+        organization_id=current_org.id,
+        actor_id=current_user.id,
+        actor_label=current_user.email,
+        resolution_note=data.resolution_note,
+    )
+    updated = len(status_changes)
 
     db.commit()
 
@@ -187,19 +182,10 @@ async def change_status(
 
     # Dispatch webhook events for status changes (fire-and-forget)
     try:
-        from src.services.webhook_dispatcher import dispatch_webhook_event
-        for fb, old_status in status_changes:
-            dispatch_webhook_event(
-                db=db,
-                org_id=current_org.id,
-                event_type="feedback.status_changed",
-                feedback=fb,
-                changes={
-                    "old_status": old_status,
-                    "new_status": data.new_status,
-                    "changed_by": current_user.email,
-                },
-            )
+        dispatch_status_webhooks(
+            db, current_org.id, status_changes, data.new_status,
+            changed_by_label=current_user.email,
+        )
     except Exception:
         pass
 
