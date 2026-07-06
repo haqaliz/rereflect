@@ -9,7 +9,8 @@ Scopes
 ------
   read   — GET endpoints (feedback, customers, analytics, webhooks)
   ingest — POST /feedback (create + enqueue analysis)
-  write  — PATCH endpoints for mutating existing feedback
+  write  — PATCH /feedback/{id} (workflow status, corrections, tags, is_urgent)
+           + DELETE /feedback/{id}
 
 Prefix: /api/public/v1
 Tag:    public
@@ -857,7 +858,8 @@ def public_openapi(request: Request) -> JSONResponse:
                 "Public REST API for Rereflect. Authenticate every request with an API key:\n\n"
                 "`Authorization: Bearer rrf_...`\n\n"
                 "Keys carry scopes: **read** (GET endpoints), **ingest** (POST /feedback), "
-                "and **write** (PATCH endpoints for mutating existing feedback). "
+                "and **write** (`PATCH /feedback/{id}` — workflow status, corrections, "
+                "tags replace, is_urgent — and `DELETE /feedback/{id}`). "
                 "All data is scoped to the organization that owns the key."
             ),
         },
