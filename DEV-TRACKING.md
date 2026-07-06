@@ -182,7 +182,7 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 ### Workflow Automation
 - [x] JIRA integration (Cloud, slice 1)
 - [x] Linear integration
-- [ ] Asana integration
+- [x] Asana integration (Cloud, slice 1)
 - [x] Custom webhooks (trigger on events)
 - [x] Auto-routing rules
 
@@ -196,11 +196,15 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [x] Plan gate: **removed** — all unlocked in the open-source self-hosted edition (not Pro+)
 - [ ] **Deferred (v2):** OAuth 3LO, Jira Server/Data Center, inbound webhook / status sync back to Rereflect, AI-drafted issue content, project/status mapping config, multiple sites per org
 
-### M3.3 — Asana Integration (2 weeks)
-- [ ] Asana OAuth flow
-- [ ] Asana API client: workspaces, projects, tasks
-- [ ] Create task from feedback: workspace/project selection
-- [ ] Plan gate: Pro+
+### M3.3 — Asana Integration — COMPLETE (slice 1 shipped 2026-07-06, `feat/asana-integration`)
+> Delivered as `asana-integration`. **Asana + Personal Access Token (Bearer auth)** — NOT the OAuth marketplace flow (awkward for self-host; the Jira/Zendesk/HubSpot BYOK precedent). Outbound work-management target (create tasks from feedback, like Jira/Linear), riding the existing analysis → churn → health pipeline. See `docs/planning/asana-integration/` (PRD + 5 aspect specs + plans). Fixed host `app.asana.com` (no per-org subdomain), so no SSRF DNS gate — client asserts constant scheme/host. All features **unlocked** (OSS self-hosted). 107 backend + 18 frontend Asana tests green.
+- [x] Connect via Asana **Personal Access Token** (connect/status/disconnect/test), one Asana account per org, encrypted at rest (`encrypt_api_key`)
+- [x] Asana API client (REST v1, Bearer auth): validate (`/users/me`), workspaces, projects, create task (`opt_fields=permalink_url` + `GET /tasks/{gid}` fallback)
+- [x] Create task from feedback: workspace + project selection, plain-text notes, org-scoped duplicate guard, `AsanaAuthError`→403 reconnect, `asana_task_created` timeline event (activated the create-issue wizard's Asana card)
+- [x] Feedback source type: `asana` (registered as a selectable own-auth source, `requires_integration=false`)
+- [x] Frontend: PAT token-paste settings page + integrations tile; create-task wizard Asana branch (Workspace→Project pickers, no issue-type); landing page + `SELF_HOSTING.md` token-setup docs
+- [x] Plan gate: **removed** — all unlocked in the open-source self-hosted edition (not Pro+)
+- [ ] **Deferred (v2):** OAuth 2.0, inbound status-sync back to Rereflect, AI-drafted task content, section/assignee/due-date mapping, team-scoped-project picker + search, multiple workspaces per org
 
 ### M3.4 — Zendesk Integration — COMPLETE (shipped 2026-07-06, `feat/zendesk-integration`)
 > Delivered as `zendesk-integration`. **Zendesk + agent email + API token (HTTP Basic `email/token:token`)** — NOT the OAuth marketplace flow (awkward for self-host; the Jira/HubSpot BYOK precedent). Inbound feedback source: tickets → feedback, riding the existing analysis → churn → health → copilot pipeline. See `docs/planning/zendesk-integration/` (PRD + 6 aspect specs + plans). SSRF-hardened (route `*.zendesk.com` + DNS/private-IP gate on connect; client-side re-assert in the adapter's enrichment call). All features **unlocked** (OSS self-hosted).
