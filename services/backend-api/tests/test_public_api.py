@@ -584,3 +584,9 @@ class TestPublicDocs:
         assert "/api/public/v1/customers/{customer_email}/health" in paths
         assert "/api/public/v1/churn/customers" in paths
         assert all(p.startswith("/api/public/v1/") for p in paths)
+
+    def test_openapi_description_mentions_write_scope(self, client):
+        """The `write` scope must be documented in the public OpenAPI description."""
+        resp = client.get("/api/public/v1/openapi.json")
+        assert resp.status_code == 200
+        assert "write" in resp.json()["info"]["description"]
