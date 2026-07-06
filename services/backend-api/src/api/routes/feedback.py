@@ -514,38 +514,8 @@ async def delete_feedback(
             detail="Feedback not found"
         )
 
-    customer_email = feedback.customer_email
-    org_id = current_org.id
-
-    db.delete(feedback)
-    db.commit()
-
-    # Archive trigger: if this was the last feedback for the customer, archive their health record
-    if customer_email:
-        remaining = db.query(func.count(FeedbackItem.id)).filter(
-            FeedbackItem.organization_id == org_id,
-            FeedbackItem.customer_email == customer_email,
-        ).scalar() or 0
-
-        if remaining == 0:
-            from src.models.customer_health import CustomerHealth
-            health = db.query(CustomerHealth).filter(
-                CustomerHealth.organization_id == org_id,
-                CustomerHealth.customer_email == customer_email,
-            ).first()
-            if health:
-                health.is_archived = True
-                db.commit()
-
-    from src.services.cache_service import cache_invalidate
-    cache_invalidate(f"dashboard:{current_org.id}:*")
-    cache_invalidate(f"analytics:{current_org.id}:*")
-
-    await emit_event(
-        org_id=current_org.id,
-        event_type="feedback:deleted",
-        data={"id": feedback_id},
-    )
+    from src.services.feedback_service import delete_feedback_item
+    await delete_feedback_item(db, feedback, org_id=current_org.id)
 
     return None
 
