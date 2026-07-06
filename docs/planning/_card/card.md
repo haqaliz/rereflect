@@ -1,55 +1,42 @@
-# Card — Public API Write/CRUD Expansion (freeform)
+# Card — Public API write expansion v2 (freeform)
 
-**Type:** feat · **Slug:** `public-api-write-crud` · **Branch:** `feat/public-api-write-crud`
-**Source:** Freeform task from the `rereflect-next` recommendation handoff (verified against the code — genuinely unbuilt). No GitHub issue.
-**Date:** 2026-07-06
+**Type:** feat · **Slug:** `public-api-write-v2` · **Branch:** `feat/public-api-write-v2`
+**Source:** freeform (no GitHub issue) — handed off from `rereflect-next` on 2026-07-07.
+**Builds on:** slice 1 = `public-api-write-crud`, merged 2026-07-06 (commit `20ac3ae`).
 
 ---
 
 ## Brief
 
-Add a **write scope + write/CRUD endpoints to the public REST API** (slice 1).
+Extend the public REST write surface that shipped in **slice 1** (`write` scope + `PATCH /api/public/v1/feedback/{id}` for `workflow_status` + record-only category/sentiment corrections).
 
-Today the public API is **read + feedback-ingest only**. Verified against the code:
-- `services/backend-api/src/models/api_key.py:22` — `scopes` column comment says `read,ingest`.
-- `services/backend-api/src/api/routes/api_keys.py:31` — `_VALID_SCOPES = frozenset({"read", "ingest"})` — no `write` scope exists.
-- `services/backend-api/src/api/routes/public_api.py` — every route is a GET behind `require_scope("read")` **except** the single ingest `POST /feedback` behind `require_scope("ingest")`.
+This slice adds the **deferred low-risk edits** explicitly named in the slice-1 PRD (`PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md` deferred list / `docs/planning/public-api-write-crud/prd.md:57-64`):
 
-There is **no way to mutate an existing entity** (feedback status, category, tags, urgency) via an API key. This slice closes that gap.
+- **`tags` write** on the existing `PATCH /api/public/v1/feedback/{id}`
+- **`is_urgent` write** on the same endpoint
+- **`DELETE /api/public/v1/feedback/{id}`**
 
-### Core capability (slice 1)
-- **New `write` scope** — added to `_VALID_SCOPES`, the API-key model/UI, and the OpenAPI docs. `scopes` is a comma-string column, so **no DB migration** is needed for the scope value itself.
-- **Public feedback mutation** — e.g. `PATCH /api/public/v1/feedback/{id}` to update status / category-override / tags / urgency flag, behind `require_scope("write")`, org-scoped and idempotent.
-- **Reuse the internal update + M3.3 human-in-the-loop correction services** — category/sentiment changes are already modeled as training signals (`AI-TRACKING.md:210–216`). A public `PATCH` must feed the **same** correction store, **not** a parallel path that bypasses it.
-- **Frontend:** surface the `write` scope in the API-key creation UI + docs (the AI Settings / API keys page), and the public OpenAPI docs at `/api/public/v1/docs`.
+All under the existing flat `write` scope, org-scoped (cross-org → 404), reusing slice-1 helpers (timeline event, webhook emit, cache invalidation) and needing **no new DB migration** (columns already exist on the feedback model).
 
-### Explicit non-goals / deferred to v2 (name in the plan)
-- Customer write/CRUD (`PATCH /customers/{email}`, health-weight override, CS notes) — v2.
-- Category taxonomy CRUD via public API — v2.
-- Bulk write endpoints — v2 (slice 1 is single-entity).
-- Webhook-management writes beyond what already exists — out of scope.
+## Explicitly OUT of scope (defer again — name in the PRD)
 
----
+- **Mutating the stored category/sentiment analyzer column** (`prd.md:59`). Slice 1 kept corrections *record-only* on purpose — writing the analyzer-derived column entangles the `AICorrection` signal store, health recompute, and cache-invalidation paths at once. Separate later slice.
+- Customer write/CRUD, category-taxonomy CRUD, bulk write endpoints (`prd.md:60-62`).
 
-## Key caveats (from rereflect-next dig)
+## Known caveats (from rereflect-next dig)
 
-1. **Do not bypass the correction store.** Category/sentiment writes are human-in-the-loop training signals (M3.3, `AI-TRACKING.md:212–213`). The public `PATCH` must route through the existing correction/update services so the training signal is preserved.
-2. **Scope granularity is a design decision** — single `write` scope (recommended for slice 1) vs per-resource scopes. Settle in the PRD.
-3. **Every write must be org-scoped + idempotent.** The API key resolves the org (see the `require_scope` / public auth layer in `services/backend-api/src/api/public/auth.py`); the mutated row must be filtered by that org, and repeated identical PATCHes must converge.
-4. **OSS/self-hosted/BYOK** — all features unlocked, no plan gating. The plan-gating / billing sections in `CLAUDE.md` and `AI-TRACKING.md` are stale post-pivot.
-
----
+1. **No internal-route precedent for `tags`/`is_urgent` writes** (`prd.md:58`) — analyzer-only today. Define write semantics fresh; mirror the ingest path's validation and the existing internal feedback-update route if one exists.
+2. **`DELETE` needs the same cache-invalidation + timeline/webhook discipline** as slice-1 mutations; confirm whether a delete already exists on the internal route to reuse.
+3. **Characterization-test** that existing status-change + correction behavior stays byte-identical (slice-1 refactored internal routes onto shared helpers `apply_status_change` / `create_ai_correction`).
+4. **OSS/self-hosted/BYOK** — all unlocked, no plan gating. `CLAUDE.md`/`AI-TRACKING.md` billing sections are stale post-pivot.
 
 ## Reference implementations to mirror
-- `services/backend-api/src/api/routes/public_api.py` — the existing public read endpoints + `require_scope("read")` structure and the OpenAPI/docs generation to extend.
-- `services/backend-api/src/api/public/auth.py` — the API-key auth + `require_scope` dependency + org resolution.
-- `services/backend-api/src/api/routes/api_keys.py` (`_VALID_SCOPES`, scope validation) + `src/models/api_key.py` — where the `write` scope is registered.
-- The internal feedback-update route + the M3.3 correction service (category/sentiment corrections) — the services the public PATCH must delegate to.
-- `POST /feedback` ingest endpoint (`public_api.py` + `public/auth.py`) — the closest existing write precedent (scope-gated, org-scoped) for request/response shape.
 
----
+- `services/backend-api/src/api/routes/public_api.py` — slice-1 `PATCH /feedback/{id}` + `require_scope("write")`.
+- `services/backend-api/src/api/public/auth.py` — API-key auth + `require_scope` + org resolution.
+- Slice-1 shared helpers `apply_status_change` / `create_ai_correction` (extracted in commit `7345f02`).
+- The internal feedback-update + delete routes (JWT) — the closest write/delete precedent for request/response shape + cache invalidation.
 
-## Why this was picked (moat fit)
-- Deepens the **developer-surface** moat — a named moat lever — which is currently one-directional (read/ingest only).
-- Perfect fit for OSS/self-hosted/BYOK: operators automate Rereflect (mark resolved, correct a category, tag in bulk) from their own systems.
-- Depth-first, unblocked follow-on of a `COMPLETE` capability (the public REST API, `AI-TRACKING.md:287`); internal mutation paths already exist.
+## Why picked (moat fit)
+
+Developer/self-host surface is a named moat pillar; `rereflect-next` rule 5 lists "public-API write/CRUD expansion" as a high-leverage follow-on. Freshest depth-first slice of work that landed 2026-07-06; unblocked, testable, zero business-model drag.
