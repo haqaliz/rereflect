@@ -30,8 +30,10 @@ from src.api.main import app
 from src.database.session import get_db
 from src.models.ai_correction import AICorrection
 from src.models.api_key import ApiKey
+from src.models.customer_health import CustomerHealth
 from src.models.feedback import FeedbackItem
 from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+from src.models.integration import Integration, SlackAlertLog
 from src.models.organization import Organization
 from src.models.base import Base
 
@@ -610,3 +612,149 @@ class TestPublicWriteFieldsCombined:
         assert refetched.workflow_status == "resolved"
         assert refetched.tags == ["x"]
         assert refetched.is_urgent is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# § Delete — DELETE /api/public/v1/feedback/{id}
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPublicDeleteFeedback:
+    def test_write_key_deletes_204_row_gone(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id)
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 204, resp.text
+
+        assert db.query(FeedbackItem).filter(FeedbackItem.id == fb.id).first() is None
+
+    def test_nonexistent_404(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+
+        resp = client.delete(
+            "/api/public/v1/feedback/999999",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 404, resp.text
+
+    def test_cross_org_404(self, client, db, org, org_b):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb_b = _feedback_in_org(db, org_b.id)
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb_b.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.status_code != 403
+
+        # row must still exist in org_b — no tenant leak
+        assert db.query(FeedbackItem).filter(FeedbackItem.id == fb_b.id).first() is not None
+
+    def test_read_key_forbidden(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        fb = _feedback_in_org(db, org.id)
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 403, resp.text
+
+    def test_ingest_key_forbidden(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="read,ingest")
+        fb = _feedback_in_org(db, org.id)
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 403, resp.text
+
+    def test_write_only_key_no_read_scope_can_delete(self, client, db, org):
+        """A write-only key (no read scope) must still be able to delete."""
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id)
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 204, resp.text
+
+    def test_delete_last_feedback_archives_customer_health(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id, text="last one")
+        fb.customer_email = "churner@example.com"
+        db.commit()
+
+        health = CustomerHealth(
+            organization_id=org.id,
+            customer_email="churner@example.com",
+            is_archived=False,
+        )
+        db.add(health)
+        db.commit()
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 204, resp.text
+
+        db.refresh(health)
+        assert health.is_archived is True
+
+    def test_delete_non_last_feedback_does_not_archive(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb1 = _feedback_in_org(db, org.id, text="one")
+        fb2 = _feedback_in_org(db, org.id, text="two")
+        fb1.customer_email = "loyal@example.com"
+        fb2.customer_email = "loyal@example.com"
+        db.commit()
+
+        health = CustomerHealth(
+            organization_id=org.id,
+            customer_email="loyal@example.com",
+            is_archived=False,
+        )
+        db.add(health)
+        db.commit()
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb1.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 204, resp.text
+
+        db.refresh(health)
+        assert health.is_archived is False
+
+    def test_delete_with_slack_alert_log_reference_no_fk_error(self, client, db, org):
+        """Deleting an item referenced by a SlackAlertLog must not raise an FK error
+        (mirrors the internal single-delete, which does not null the reference)."""
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id)
+
+        integration = Integration(organization_id=org.id, type="slack", name="eng")
+        db.add(integration)
+        db.commit()
+        db.refresh(integration)
+
+        alert = SlackAlertLog(
+            integration_id=integration.id,
+            feedback_id=fb.id,
+            alert_type="urgent",
+            status="sent",
+        )
+        db.add(alert)
+        db.commit()
+
+        resp = client.delete(
+            f"/api/public/v1/feedback/{fb.id}",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 204, resp.text

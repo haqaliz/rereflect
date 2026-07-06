@@ -502,6 +502,43 @@ async def public_update_feedback(
     return PublicFeedbackItem.model_validate(fb)
 
 
+# ─── Feedback delete ──────────────────────────────────────────────────────────
+
+
+@router.delete(
+    "/feedback/{feedback_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Delete a feedback item (public API)",
+    description=(
+        "Delete a feedback item.  Requires the ``write`` scope (no separate "
+        "``delete`` scope).  Mirrors the internal dashboard delete: archives "
+        "the customer's health record if this was their last feedback item, "
+        "invalidates dashboard/analytics caches, and emits ``feedback:deleted``."
+    ),
+)
+async def public_delete_feedback(
+    feedback_id: int,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+):
+    fb = (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.id == feedback_id,
+            FeedbackItem.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if fb is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
+
+    from src.services.feedback_service import delete_feedback_item
+
+    await delete_feedback_item(db, fb, org_id=auth.organization_id)
+    return None
+
+
 # ─── Analytics summary ────────────────────────────────────────────────────────
 
 
