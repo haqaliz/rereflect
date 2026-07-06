@@ -19,7 +19,7 @@ class ApiKey(Base):
     name = Column(String(100), nullable=False)
     key_prefix = Column(String(16), nullable=False, index=True)
     key_hash = Column(String(128), nullable=False, unique=True, index=True)
-    scopes = Column(String(100), default="read", nullable=False)  # comma list: read,ingest
+    scopes = Column(String(100), default="read", nullable=False)  # comma list: read,ingest,write
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     last_used_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)

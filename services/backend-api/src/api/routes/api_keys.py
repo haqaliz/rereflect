@@ -28,7 +28,7 @@ from src.models.user import User
 
 router = APIRouter(prefix="/api/v1/api-keys", tags=["api-keys"])
 
-_VALID_SCOPES = frozenset({"read", "ingest"})
+_VALID_SCOPES = frozenset({"read", "ingest", "write"})
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
