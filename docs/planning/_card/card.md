@@ -1,42 +1,53 @@
-# Card — Public API write expansion v2 (freeform)
+# Card — AI-drafted issue/task content (freeform)
 
-**Type:** feat · **Slug:** `public-api-write-v2` · **Branch:** `feat/public-api-write-v2`
+**Type:** feat · **Slug:** `ai-drafted-issue-content` · **Branch:** `feat/ai-drafted-issue-content`
 **Source:** freeform (no GitHub issue) — handed off from `rereflect-next` on 2026-07-07.
-**Builds on:** slice 1 = `public-api-write-crud`, merged 2026-07-06 (commit `20ac3ae`).
 
 ---
 
-## Brief
+## Brief (from rereflect-next handoff)
 
-Extend the public REST write surface that shipped in **slice 1** (`write` scope + `PATCH /api/public/v1/feedback/{id}` for `workflow_status` + record-only category/sentiment corrections).
+Add AI-drafted content to the "create work item from feedback" wizard for the outbound
+integrations (**Jira first, Asana as immediate follow-on** — they share the wizard). When the
+user opens the create-issue / create-task step, offer an **"AI draft"** action that calls the
+existing LLM abstraction (reuse the M2.3 response-generation / tone infra) to generate the
+issue **title + description (Jira ADF)** / task **name + notes (Asana)** from the feedback item,
+populated into the existing editable fields **for review before create — never auto-create**.
 
-This slice adds the **deferred low-risk edits** explicitly named in the slice-1 PRD (`PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md` deferred list / `docs/planning/public-api-write-crud/prd.md:57-64`):
+## Why (moat / grounding)
 
-- **`tags` write** on the existing `PATCH /api/public/v1/feedback/{id}`
-- **`is_urgent` write** on the same endpoint
-- **`DELETE /api/public/v1/feedback/{id}`**
+- Genuine **deferred-v2** item in the docs, not invented:
+  - Jira: "AI-drafted issue content" deferred — `DEV-TRACKING.md:197`
+  - Asana: "AI-drafted content" deferred v2 — `AI-TRACKING.md:60`
+- **Unblocked** — the LLM abstraction (M2.1, `AI-TRACKING.md:130`) and response-generation
+  infra with tone control (M2.3, `AI-TRACKING.md:156`) already exist to reuse.
+- Deepens the real moat: **integrated AI workflow + integration + developer surface**. Rides the
+  create-issue/create-task wizard that already has shared Jira + Asana branches
+  (`AI-TRACKING.md:58,60`).
+- **Gets better as base models improve** — fits BYOK / local-LLM positioning (rank rule 2).
 
-All under the existing flat `write` scope, org-scoped (cross-org → 404), reusing slice-1 helpers (timeline event, webhook emit, cache invalidation) and needing **no new DB migration** (columns already exist on the feedback model).
+## Caveats to respect from the start
 
-## Explicitly OUT of scope (defer again — name in the PRD)
+- **Human-in-the-loop only:** draft into the existing editable wizard fields; user edits, then
+  creates. **Never auto-create** (matches M2.3's no-auto-send precedent + honest brand).
+- **Degrade gracefully:** for keyless local-LLM / VADER-only orgs where no LLM resolves, the
+  wizard shows today's manual/blank fields — no error, no broken flow. The "AI draft" action
+  should be hidden/disabled when no LLM provider resolves.
+- Keep the existing **org-scoped duplicate guard** intact.
+- **Slice 1 = shared drafting service + Jira** (both branches share the wizard); Asana is the
+  immediate follow-on.
 
-- **Mutating the stored category/sentiment analyzer column** (`prd.md:59`). Slice 1 kept corrections *record-only* on purpose — writing the analyzer-derived column entangles the `AICorrection` signal store, health recompute, and cache-invalidation paths at once. Separate later slice.
-- Customer write/CRUD, category-taxonomy CRUD, bulk write endpoints (`prd.md:60-62`).
+## Out of scope (initial)
 
-## Known caveats (from rereflect-next dig)
+- Auto-creation / auto-send of issues or tasks.
+- Inbound status-sync / write-back from Jira/Asana (separate deferred-v2 thread).
+- New LLM providers (reuse existing abstraction only).
+- AI-drafted content for inbound sources (Zendesk/Intercom) — those are ingestion, not creation.
 
-1. **No internal-route precedent for `tags`/`is_urgent` writes** (`prd.md:58`) — analyzer-only today. Define write semantics fresh; mirror the ingest path's validation and the existing internal feedback-update route if one exists.
-2. **`DELETE` needs the same cache-invalidation + timeline/webhook discipline** as slice-1 mutations; confirm whether a delete already exists on the internal route to reuse.
-3. **Characterization-test** that existing status-change + correction behavior stays byte-identical (slice-1 refactored internal routes onto shared helpers `apply_status_change` / `create_ai_correction`).
-4. **OSS/self-hosted/BYOK** — all unlocked, no plan gating. `CLAUDE.md`/`AI-TRACKING.md` billing sections are stale post-pivot.
+## Reference implementations to mirror (confirm in Phase 2 dig)
 
-## Reference implementations to mirror
-
-- `services/backend-api/src/api/routes/public_api.py` — slice-1 `PATCH /feedback/{id}` + `require_scope("write")`.
-- `services/backend-api/src/api/public/auth.py` — API-key auth + `require_scope` + org resolution.
-- Slice-1 shared helpers `apply_status_change` / `create_ai_correction` (extracted in commit `7345f02`).
-- The internal feedback-update + delete routes (JWT) — the closest write/delete precedent for request/response shape + cache invalidation.
-
-## Why picked (moat fit)
-
-Developer/self-host surface is a named moat pillar; `rereflect-next` rule 5 lists "public-API write/CRUD expansion" as a high-leverage follow-on. Freshest depth-first slice of work that landed 2026-07-06; unblocked, testable, zero business-model drag.
+- Create-issue / create-task wizard (frontend) — the shared Jira + Asana branch UI.
+- Jira + Asana API clients + create-issue/create-task routes (backend).
+- M2.3 response generation service (tone selector, LLM call) — the closest "generate text from a
+  feedback item" precedent to reuse.
+- LLM abstraction / provider-resolution layer (M2.1) — for graceful no-LLM degradation.
