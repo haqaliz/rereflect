@@ -17,6 +17,7 @@ from src.api.routes import jira_integration as jira_integration_router
 from src.api.routes import asana_integration as asana_integration_router
 from src.api.routes import zendesk_integration as zendesk_integration_router
 from src.api.routes import response_templates, response_settings, feedback_responses
+from src.api.routes import feedback_issue_draft as feedback_issue_draft_router  # noqa: E402 — ai-drafted-issue-content
 from src.api.routes import webhooks as webhooks_router
 from src.api.routes import health as health_routes
 from src.api.routes import reports as reports_router
@@ -292,6 +293,8 @@ app.include_router(zendesk_integration_router.router)
 app.include_router(response_templates.router)
 app.include_router(response_settings.router)
 app.include_router(feedback_responses.router)
+# AI-drafted issue content (ai-drafted-issue-content)
+app.include_router(feedback_issue_draft_router.router)
 # Custom Webhooks (M3.1)
 app.include_router(webhooks_router.router)
 app.include_router(health_routes.router)
