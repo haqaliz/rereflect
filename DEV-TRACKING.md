@@ -194,7 +194,8 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [x] Feedback source type: `jira` (registered as a selectable own-auth source, `requires_integration=false`)
 - [x] Frontend: token-paste settings page + integrations tile; landing page + `SELF_HOSTING.md` token-setup docs
 - [x] Plan gate: **removed** — all unlocked in the open-source self-hosted edition (not Pro+)
-- [ ] **Deferred (v2):** OAuth 3LO, Jira Server/Data Center, inbound webhook / status sync back to Rereflect, AI-drafted issue content, project/status mapping config, multiple sites per org
+- [x] **AI-drafted issue content — shipped 2026-07-07** (`feat/ai-drafted-issue-content`): "Draft with AI" button in the Jira wizard branch drafts issue title+body from the feedback item via the org's LLM (shared `POST /api/v1/feedback/{id}/issue-draft`). See `docs/planning/ai-drafted-issue-content/`.
+- [ ] **Deferred (v2):** OAuth 3LO, Jira Server/Data Center, inbound webhook / status sync back to Rereflect, project/status mapping config, multiple sites per org
 
 ### M3.3 — Asana Integration — COMPLETE (slice 1 shipped 2026-07-06, `feat/asana-integration`)
 > Delivered as `asana-integration`. **Asana + Personal Access Token (Bearer auth)** — NOT the OAuth marketplace flow (awkward for self-host; the Jira/Zendesk/HubSpot BYOK precedent). Outbound work-management target (create tasks from feedback, like Jira/Linear), riding the existing analysis → churn → health pipeline. See `docs/planning/asana-integration/` (PRD + 5 aspect specs + plans). Fixed host `app.asana.com` (no per-org subdomain), so no SSRF DNS gate — client asserts constant scheme/host. All features **unlocked** (OSS self-hosted). 107 backend + 18 frontend Asana tests green.
@@ -204,7 +205,8 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [x] Feedback source type: `asana` (registered as a selectable own-auth source, `requires_integration=false`)
 - [x] Frontend: PAT token-paste settings page + integrations tile; create-task wizard Asana branch (Workspace→Project pickers, no issue-type); landing page + `SELF_HOSTING.md` token-setup docs
 - [x] Plan gate: **removed** — all unlocked in the open-source self-hosted edition (not Pro+)
-- [ ] **Deferred (v2):** OAuth 2.0, inbound status-sync back to Rereflect, AI-drafted task content, section/assignee/due-date mapping, team-scoped-project picker + search, multiple workspaces per org
+- [x] **AI-drafted task content — shipped 2026-07-07** (`feat/ai-drafted-issue-content`): "Draft with AI" button in the Asana wizard branch drafts task name+notes from the feedback item via the org's LLM (shared `POST /api/v1/feedback/{id}/issue-draft`). See `docs/planning/ai-drafted-issue-content/`.
+- [ ] **Deferred (v2):** OAuth 2.0, inbound status-sync back to Rereflect, section/assignee/due-date mapping, team-scoped-project picker + search, multiple workspaces per org
 
 ### M3.4 — Zendesk Integration — COMPLETE (shipped 2026-07-06, `feat/zendesk-integration`)
 > Delivered as `zendesk-integration`. **Zendesk + agent email + API token (HTTP Basic `email/token:token`)** — NOT the OAuth marketplace flow (awkward for self-host; the Jira/HubSpot BYOK precedent). Inbound feedback source: tickets → feedback, riding the existing analysis → churn → health → copilot pipeline. See `docs/planning/zendesk-integration/` (PRD + 6 aspect specs + plans). SSRF-hardened (route `*.zendesk.com` + DNS/private-IP gate on connect; client-side re-assert in the adapter's enrichment call). All features **unlocked** (OSS self-hosted).

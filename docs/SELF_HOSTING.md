@@ -117,6 +117,15 @@ a local one, bring your own key:
 There is no system/vendor key. If an organization has no key configured, AI features
 degrade gracefully back to the free VADER pipeline rather than erroring.
 
+### AI-drafted issue/task content
+
+When an LLM is configured (cloud BYOK **or** a local Ollama / OpenAI-compatible endpoint), the
+"create work item from feedback" wizard (Jira / Asana) shows a **✨ Draft with AI** button. It
+generates a cleaned-up issue/task **title + body** from the feedback item, populated into the
+editable fields for you to review and edit before creating — it never creates the work item on its
+own. When no LLM is configured the button is simply hidden and the wizard works exactly as before,
+with the feedback text seeded into the fields. Draft quality tracks whatever model you point at.
+
 ## Send product-usage events
 
 Rereflect can ingest per-customer product activity and surface it on the Customer 360

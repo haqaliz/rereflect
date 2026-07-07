@@ -32,7 +32,29 @@ GET    /api/v1/feedback/{id}         # Get one
 PUT    /api/v1/feedback/{id}         # Update
 DELETE /api/v1/feedback/{id}         # Delete
 POST   /api/v1/feedback/import       # CSV import
+POST   /api/v1/feedback/{id}/issue-draft   # AI-draft an issue/task title+body (admin/owner)
 ```
+
+### `POST /api/v1/feedback/{id}/issue-draft`
+
+Generates an AI-drafted **title + body** from a feedback item, for use as a starting point in the
+create-issue/create-task wizard (Jira / Asana). It only returns the draft — it never creates the
+work item. Requires the **admin** or **owner** role.
+
+```
+POST /api/v1/feedback/{id}/issue-draft
+Body: { "target": "jira" | "asana", "tone"?: string }
+
+200 { "title": "...", "body": "..." }
+404  feedback not found in your organization
+409  no LLM configured for the organization (configure a provider in Settings → AI, or a local LLM)
+422  invalid/unknown fields (e.g. bad `target`)
+502  the model returned an unusable draft, or the provider call failed
+```
+
+The draft uses the org's configured LLM (cloud BYOK or local Ollama / OpenAI-compatible) and the
+org's tone / brand voice. When no LLM is configured it returns `409` and the wizard hides the
+"Draft with AI" action — the wizard still works with manually-entered text.
 
 ### Pagination
 
