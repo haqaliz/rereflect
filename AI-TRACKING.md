@@ -219,7 +219,7 @@
 
 #### M3.4 — Enhanced Customer 360 (2 weeks) — PARTIAL (unified timeline + Customer 360 API shipped 2026-06-29)
 - [x] Unified customer timeline: feedback + usage + churn + health-score events in chronological order (cursor-paginated `/timeline` endpoint + shared service; the existing `/activity` widget now delegates to it). **CRM events deferred** until HubSpot (M3.1) — the event shape is source-extensible.
-- [ ] Customer segments: auto-group by behavior (power users, silent churners, happy advocates) — deferred (would be heuristic-only today; no ML segmentation)
+- [x] Customer segments: rule-based, single-assignment classification into 7 slugs (`at_risk`, `silent_churner`, `dormant`, `power_user`, `happy_advocate`, `new`, `unsegmented`) — computed on ingest + nightly recompute, exposed as `segment` on the list (with `?segment=` filter) and profile endpoints (internal + public API). Heuristic only, no ML.
 - [ ] Bulk actions: export customer list, bulk assign CS owner, trigger outreach campaign
 - [x] Customer 360 API (for external consumption): public read endpoints `GET /api/public/v1/customers/{email}` (full profile) + `/timeline` (API-key `read` scope)
 - [x] Health score API endpoint for programmatic access: `GET /api/public/v1/customers/{email}/health` (extended with component breakdown incl. usage)

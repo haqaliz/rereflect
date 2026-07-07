@@ -18,11 +18,12 @@ from src.models.organization import Organization
 from src.api.dependencies import get_current_org, get_current_user, require_feature, require_system_admin
 from src.models.user import User
 from src.config.plans import has_feature
+from src.services.segment_service import SEGMENT_SLUGS
 
 router = APIRouter(prefix="/api/v1/customers", tags=["customers"])
 
 # Valid sort fields and risk levels for query validation
-VALID_SORT_FIELDS = {"health_score", "feedback_count", "last_feedback_at", "customer_email"}
+VALID_SORT_FIELDS = {"health_score", "feedback_count", "last_feedback_at", "customer_email", "segment"}
 VALID_RISK_LEVELS = {"healthy", "moderate", "at_risk", "critical"}
 VALID_HISTORY_DAYS = {30, 60, 90}
 
@@ -48,6 +49,7 @@ class CustomerListItem(BaseModel):
     sentiment_trend: SentimentTrend
     is_archived: bool
     has_llm_analysis: bool
+    segment: Optional[str] = None
 
 
 class RiskDistribution(BaseModel):
@@ -105,6 +107,9 @@ class CustomerProfileResponse(BaseModel):
     llm_analysis: Optional[str] = None
     is_archived: bool
     created_at: Optional[datetime] = None
+    # Rule-based customer segment (customer-segments feature); nullable —
+    # None = unsegmented / not yet computed.
+    segment: Optional[str] = None
     # CRM enrichment fields (HubSpot / Salesforce)
     crm_company_name: Optional[str] = None
     crm_lifecycle_stage: Optional[str] = None
@@ -255,6 +260,7 @@ def list_customers(
     sort_by: str = Query("health_score"),
     sort_order: str = Query("asc"),
     risk_level: Optional[str] = Query(None),
+    segment: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     include_archived: bool = Query(False),
     current_org: Organization = Depends(get_current_org),
@@ -273,6 +279,12 @@ def list_customers(
             detail=f"Invalid risk_level '{risk_level}'. Must be one of: {', '.join(sorted(VALID_RISK_LEVELS))}",
         )
 
+    if segment is not None and segment not in SEGMENT_SLUGS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid segment '{segment}'. Must be one of: {', '.join(SEGMENT_SLUGS)}",
+        )
+
     query = db.query(CustomerHealth).filter(CustomerHealth.organization_id == current_org.id)
 
     if not include_archived:
@@ -280,6 +292,9 @@ def list_customers(
 
     if risk_level:
         query = query.filter(CustomerHealth.risk_level == risk_level)
+
+    if segment:
+        query = query.filter(CustomerHealth.segment == segment)
 
     if search:
         pattern = f"%{search}%"
@@ -297,6 +312,7 @@ def list_customers(
         "feedback_count": CustomerHealth.feedback_count,
         "last_feedback_at": CustomerHealth.last_feedback_at,
         "customer_email": CustomerHealth.customer_email,
+        "segment": CustomerHealth.segment,
     }
     sort_col = sort_column_map[sort_by]
     sort_fn = asc if sort_order == "asc" else desc
@@ -334,6 +350,7 @@ def list_customers(
             sentiment_trend=SentimentTrend(**trend),
             is_archived=record.is_archived or False,
             has_llm_analysis=record.llm_analysis_data is not None or record.llm_analysis is not None,
+            segment=record.segment,
         ))
 
     summary = _get_summary(current_org.id, include_archived, db)

@@ -27,7 +27,7 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
     Core
         customer_email, customer_name, health_score, risk_level,
         confidence_level, feedback_count, last_feedback_at, is_archived,
-        created_at
+        created_at, segment (rule-based, nullable — customer-segments feature)
 
     Components (5 including usage)
         churn_risk_component, sentiment_component, resolution_component,
@@ -64,6 +64,7 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
         "last_feedback_at": record.last_feedback_at,
         "is_archived": record.is_archived or False,
         "created_at": record.created_at,
+        "segment": record.segment,
         # ── Components ────────────────────────────────────────────────────────
         "churn_risk_component": record.churn_risk_component or 50,
         "sentiment_component": record.sentiment_component or 50,

@@ -134,6 +134,7 @@ def _make_health(
     llm_analysis_data: Optional[dict] = None,
     llm_analysis: Optional[str] = None,
     is_archived: bool = False,
+    segment: Optional[str] = None,
 ) -> CustomerHealth:
     h = CustomerHealth(
         organization_id=org_id,
@@ -155,6 +156,7 @@ def _make_health(
         llm_analysis_data=llm_analysis_data,
         llm_analysis=llm_analysis,
         is_archived=is_archived,
+        segment=segment,
         last_feedback_at=datetime.utcnow() - timedelta(days=2),
     )
     db.add(h)
@@ -485,6 +487,32 @@ class TestPublicCustomerProfile:
         assert abs(data["churn_probability"] - 0.1) < 0.001
         assert data["time_to_churn_bucket"] == "low"
 
+    def test_public_profile_includes_segment(self, client: TestClient, db: Session):
+        """segment-api: the public Customer 360 profile must carry the
+        persisted `segment` field (shared serializer — same source as v1)."""
+        org = _make_org(db)
+        _make_health(db, org.id, "seg@acme.com", segment="power_user")
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+
+        resp = client.get(
+            "/api/public/v1/customers/seg@acme.com",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["segment"] == "power_user"
+
+    def test_public_profile_segment_null_when_not_computed(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        _make_health(db, org.id, "noseg@acme.com", segment=None)
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+
+        resp = client.get(
+            "/api/public/v1/customers/noseg@acme.com",
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["segment"] is None
+
     def test_missing_read_scope_returns_403(self, client: TestClient, db: Session):
         org = _make_org(db)
         _make_health(db, org.id, "scope@acme.com")
@@ -562,6 +590,7 @@ class TestPublicCustomerProfile:
                 "estimated_urgency": "high",
                 "analysis_type": "full",
             },
+            segment="at_risk",
         )
 
         v1_resp = client.get(
@@ -588,6 +617,8 @@ class TestPublicCustomerProfile:
             # CRM fields (B2)
             "crm_company_name", "crm_lifecycle_stage", "crm_arr",
             "crm_renewal_date", "crm_deal_name", "crm_deal_stage", "crm_deal_amount",
+            # Segment (customer-segments / segment-api)
+            "segment",
         ]
         for field in parity_fields:
             assert field in pub, f"Field '{field}' missing from public profile"
