@@ -1,7 +1,8 @@
 'use client';
 
-import { Suspense, useState, useEffect, useCallback } from 'react';
+import { Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -30,6 +31,7 @@ import {
   ExternalLink,
   AlertCircle,
   Loader2,
+  Sparkles,
 } from 'lucide-react';
 import {
   linearAPI,
@@ -67,11 +69,18 @@ import {
   isStaleAsanaTokenStatus,
 } from '@/lib/asanaIssueWizard';
 import { feedbackAPI, FeedbackItem } from '@/lib/api/feedback';
+import { aiSettingsAPI } from '@/lib/api/ai-settings';
+import { draftIssueContent, IssueDraftApiError, IssueDraftTarget } from '@/lib/api/issueDraft';
 import { useAuth } from '@/contexts/AuthContext';
 import { JiraIcon } from '@/components/icons/JiraIcon';
 import { AsanaIcon } from '@/components/icons/AsanaIcon';
 
 type Step = 'select-integration' | 'configure' | 'done';
+
+// Providers that run locally/offline and are "configured" once a base_url is
+// set — mirrors components/settings/AISettingsProviders.tsx LOCAL_PROVIDERS
+// and src/services/copilot/llm_resolver.py's resolution rules (T2).
+const LOCAL_LLM_PROVIDERS = new Set(['ollama', 'openai_compatible']);
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'select-integration', label: 'Integration' },
@@ -184,6 +193,16 @@ function CreateIssueContent() {
     notes: '',
   });
 
+  // AI-drafted issue content (Draft with AI button)
+  const [aiConfigured, setAiConfigured] = useState(false);
+  const [draftingJira, setDraftingJira] = useState(false);
+  const [draftingAsana, setDraftingAsana] = useState(false);
+  // Auto-seeded defaults (M8): "has the user edited?" = current !== seeded.
+  const seededJiraSummary = useRef('');
+  const seededJiraDescription = useRef('');
+  const seededAsanaName = useRef('');
+  const seededAsanaNotes = useRef('');
+
   const isConnected = connectionStatus?.connected && connectionStatus?.is_active;
   const isJiraConnected = jiraStatus?.connected && jiraStatus?.is_active;
   const isAsanaConnected = asanaStatus?.connected && asanaStatus?.is_active;
@@ -197,6 +216,10 @@ function CreateIssueContent() {
           title: fb.extracted_issue || '',
           description: fb.text || '',
         }));
+        seededJiraSummary.current = fb.extracted_issue || '';
+        seededJiraDescription.current = fb.text || '';
+        seededAsanaName.current = fb.extracted_issue || '';
+        seededAsanaNotes.current = fb.text || '';
         setJiraForm(prev => ({
           ...prev,
           summary: fb.extracted_issue || '',
@@ -210,6 +233,27 @@ function CreateIssueContent() {
       })
       .catch(() => {});
   }, [feedbackId]);
+
+  // T2: read the org's LLM-configured signal on mount — hide the button
+  // entirely for keyless orgs rather than showing a dead control. Local
+  // providers (ollama/openai_compatible) count as configured via base_url;
+  // cloud providers need a stored BYOK key for the default_provider.
+  useEffect(() => {
+    aiSettingsAPI.get()
+      .then(async (settings) => {
+        if (LOCAL_LLM_PROVIDERS.has(settings.default_provider)) {
+          setAiConfigured(Boolean(settings.base_url));
+          return;
+        }
+        try {
+          const keys = await aiSettingsAPI.listKeys();
+          setAiConfigured(keys.some((k) => k.provider === settings.default_provider));
+        } catch {
+          setAiConfigured(false);
+        }
+      })
+      .catch(() => setAiConfigured(false));
+  }, []);
 
   useEffect(() => {
     linearAPI.getStatus()
@@ -413,6 +457,44 @@ function CreateIssueContent() {
       setAsanaReconnectNeeded(isStaleAsanaTokenStatus(status));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Draft with AI (never calls handleJiraSubmit/handleAsanaSubmit — the user
+  // must review and click Create Issue/Task themselves).
+  const handleDraft = async (target: IssueDraftTarget) => {
+    if (target === 'jira') setDraftingJira(true);
+    else setDraftingAsana(true);
+
+    try {
+      const draft = await draftIssueContent(feedbackId, target);
+
+      if (target === 'jira') {
+        const edited =
+          (jiraForm.summary.trim() !== '' && jiraForm.summary !== seededJiraSummary.current) ||
+          (jiraForm.description.trim() !== '' && jiraForm.description !== seededJiraDescription.current);
+        if (edited && !window.confirm('Replace your text with the AI draft?')) {
+          return;
+        }
+        setJiraForm(prev => ({ ...prev, summary: draft.title, description: draft.body }));
+      } else {
+        const edited =
+          (asanaForm.name.trim() !== '' && asanaForm.name !== seededAsanaName.current) ||
+          (asanaForm.notes.trim() !== '' && asanaForm.notes !== seededAsanaNotes.current);
+        if (edited && !window.confirm('Replace your text with the AI draft?')) {
+          return;
+        }
+        setAsanaForm(prev => ({ ...prev, name: draft.title, notes: draft.body }));
+      }
+    } catch (err) {
+      const message =
+        err instanceof IssueDraftApiError
+          ? err.message
+          : 'Failed to draft issue content. Please try again.';
+      toast.error(message);
+    } finally {
+      if (target === 'jira') setDraftingJira(false);
+      else setDraftingAsana(false);
     }
   };
 
@@ -852,7 +934,24 @@ function CreateIssueContent() {
 
               {/* Summary */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Summary</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium">Summary</label>
+                  {aiConfigured && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDraft('jira')}
+                      disabled={draftingJira || submitting}
+                    >
+                      {draftingJira ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Drafting…</>
+                      ) : (
+                        <><Sparkles className="w-4 h-4 mr-2" />Draft with AI</>
+                      )}
+                    </Button>
+                  )}
+                </div>
                 <Input
                   value={jiraForm.summary}
                   onChange={e => setJiraForm(prev => ({ ...prev, summary: e.target.value }))}
@@ -1014,7 +1113,24 @@ function CreateIssueContent() {
 
               {/* Name */}
               <div className="space-y-2">
-                <label className="text-sm font-medium">Name</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium">Name</label>
+                  {aiConfigured && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDraft('asana')}
+                      disabled={draftingAsana || submitting}
+                    >
+                      {draftingAsana ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Drafting…</>
+                      ) : (
+                        <><Sparkles className="w-4 h-4 mr-2" />Draft with AI</>
+                      )}
+                    </Button>
+                  )}
+                </div>
                 <Input
                   value={asanaForm.name}
                   onChange={e => setAsanaForm(prev => ({ ...prev, name: e.target.value }))}
