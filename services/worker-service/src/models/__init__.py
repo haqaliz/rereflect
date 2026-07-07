@@ -451,6 +451,12 @@ class CustomerHealth(Base):
     is_archived = Column(Boolean, default=False, server_default="false")
     confidence_level = Column(String(20), default="low")
 
+    # segment-engine: catch-up mirror of backend-api's segment column (see
+    # services/backend-api/src/models/customer_health.py). Rule-based
+    # classification slug: at_risk, silent_churner, dormant, power_user,
+    # happy_advocate, new, unsegmented. See src/services/segment_service.py.
+    segment = Column(String(30), nullable=True)
+
     # M4.1: Advanced Churn Prediction — calibrated probability + CI + timeline
     churn_probability = Column(Numeric(5, 4), nullable=True)           # 0.0000–1.0000
     churn_probability_low = Column(Numeric(5, 4), nullable=True)       # 90% CI lower bound
@@ -467,6 +473,7 @@ class CustomerHealth(Base):
         Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),
         Index('ix_customer_health_org_score', 'organization_id', 'health_score'),
         Index('ix_customer_health_risk', 'organization_id', 'risk_level'),
+        Index('ix_customer_health_segment', 'organization_id', 'segment'),
     )
 
 

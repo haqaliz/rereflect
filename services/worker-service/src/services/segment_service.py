@@ -1,5 +1,4 @@
-# DUPLICATED: keep in sync with the worker-service copy at
-# services/worker-service/src/services/segment_service.py. See TRACKING.md.
+# DUPLICATED: keep in sync with services/backend-api/src/services/segment_service.py. See TRACKING.md.
 """
 Customer segment classifier.
 
