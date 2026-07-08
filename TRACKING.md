@@ -30,6 +30,16 @@ If the scoring logic diverges in future, migrate to a shared internal package
 (e.g. `packages/usage-score/`) consumed by both services, or expose it via a
 lightweight RPC call so there is a single source of truth.
 
+### (b2) segment_service.py is duplicated across backend-api and worker-service
+
+`services/backend-api/src/services/segment_service.py` and
+`services/worker-service/src/services/segment_service.py` are byte-identical
+(same reasoning as (b) — the pure `classify_segment` classifier is needed by the
+backend on ingest and by the worker's nightly `recompute_segments` task). Both
+carry a `# DUPLICATED` header. Keep them in sync; same shared-package migration
+path as (b) applies. Note the worker also mirrors the `segment` column on its
+`CustomerHealth` model (`src/models/__init__.py`, "catch-up" convention).
+
 ### (c) recompute_usage_scores loads all customer_usage rows into memory
 
 `recompute_usage_scores()` calls `db.query(CustomerUsage).all()`, which loads
