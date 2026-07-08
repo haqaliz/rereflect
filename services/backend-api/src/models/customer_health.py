@@ -65,6 +65,12 @@ class CustomerHealth(Base):
     probability_computed_at = Column(DateTime, nullable=True)
     has_potential_winback = Column(Boolean, nullable=False, default=False, server_default="false")
 
+    # segment-actions: operator-managed tags (bulk tag action) + CS owner assignment
+    # (bulk assign-owner action). tags default MUST be a callable (`list`), never a
+    # shared `[]` literal, to avoid the classic SQLAlchemy/Python mutable-default trap.
+    tags = Column(JSON, nullable=True, default=list)
+    cs_owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -79,12 +85,14 @@ class CustomerHealth(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    cs_owner = relationship("User", foreign_keys=[cs_owner_user_id], lazy="selectin")
 
     __table_args__ = (
         Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),
         Index('ix_customer_health_org_score', 'organization_id', 'health_score'),
         Index('ix_customer_health_risk', 'organization_id', 'risk_level'),
         Index('ix_customer_health_segment', 'organization_id', 'segment'),
+        Index('ix_customer_health_cs_owner', 'organization_id', 'cs_owner_user_id'),
     )
 
     def __repr__(self):
