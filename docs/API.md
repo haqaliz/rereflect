@@ -183,6 +183,32 @@ GET /api/public/v1/customers/{email}/timeline?before=<next_cursor>&limit=20
 
 `limit` must be 1–100 (default 20). When `next_cursor` is `null`, there are no more events.
 
+#### Customer segments
+
+Both `GET /api/public/v1/customers/{email}` (profile) and the internal `GET /api/v1/customers/`
+(list) responses include a `segment` field — a single, rule-based classification assigned to
+each customer (see `services/backend-api/src/services/segment_service.py`). It is **not** an
+ML model; it's a top-down priority rule engine evaluated on ingest and refreshed nightly.
+
+The list endpoint (`GET /api/v1/customers/?segment=<slug>`) also accepts a `segment` query
+filter; an unrecognized slug returns `422`.
+
+Slugs (priority order — first matching rule wins):
+
+| Slug | Meaning |
+|------|---------|
+| `at_risk` | High churn risk (risk level `at_risk`/`critical`, or churn probability ≥ 0.5) |
+| `silent_churner` | Low product usage + declining sentiment + stale/no recent feedback |
+| `dormant` | No recent product activity (or, without usage data, stale feedback) |
+| `power_user` | High usage score and frequent active days in the last 30 days |
+| `happy_advocate` | High health score with stable/improving sentiment |
+| `new` | Recently created customer with little feedback history yet |
+| `unsegmented` | None of the above rules matched |
+
+`segment` is nullable — `null` means the segment hasn't been computed yet for that customer
+(pre-ingest/pre-nightly-recompute), which is distinct from the `unsegmented` slug (computed,
+but no rule matched).
+
 ## Common gotchas
 
 - **Trailing slashes** — match the route exactly; a missing/extra `/` can return 422.

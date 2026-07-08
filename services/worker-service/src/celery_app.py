@@ -46,6 +46,7 @@ celery_app = Celery(
         "src.tasks.churn_playbooks",
         "src.tasks.churn_calibration",
         "src.tasks.usage_metrics",
+        "src.tasks.segments",
         "src.tasks.hubspot_sync",
         "src.tasks.hubspot_writeback",
         "src.tasks.salesforce_sync",
@@ -195,6 +196,13 @@ celery_app.conf.beat_schedule = {
     "recompute-usage-scores-daily": {
         "task": "src.tasks.usage_metrics.recompute_usage_scores",
         "schedule": crontab(hour=4, minute=0),
+    },
+    # Recompute customer segments daily so time-based segments (dormant,
+    # silent_churner, new) flip without new activity — 04:15 UTC, after
+    # usage scores (04:00 UTC).
+    "recompute-segments-daily": {
+        "task": "src.tasks.segments.recompute_segments",
+        "schedule": crontab(hour=4, minute=15),
     },
     # Sync HubSpot CRM data daily at 03:15 UTC — between integrations (02:00) and usage (04:00)
     # (03:00 is occupied by refit-global-calibration-daily)

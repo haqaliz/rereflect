@@ -197,6 +197,32 @@ Max batch size: **1 000 events per request**. Oversized requests return `413`.
 Full setup docs are also available in the app under
 **Settings → Usage Events** (admin/owner only).
 
+## Customer segments
+
+Every customer is assigned exactly one `segment` (rule-based, **not** ML) on ingest and
+refreshed nightly. Rules are evaluated top-down; the first match wins:
+
+1. `at_risk` — high churn risk
+2. `silent_churner` — usage-dependent
+3. `dormant` — usage-dependent (falls back to a feedback-recency check when no usage data exists)
+4. `power_user` — usage-dependent
+5. `happy_advocate` — health/sentiment-based
+6. `new` — recently created, little feedback history
+7. `unsegmented` — nothing else matched
+
+**`silent_churner`, `power_user`, and the usage-based arm of `dormant` require product-usage
+events to be wired** (see [Send product-usage events](#send-product-usage-events) above). If
+you haven't sent usage events for a customer, those three rules simply can't match — the
+customer falls through to a health/sentiment-based segment (`happy_advocate`, `new`) or,
+failing that, `unsegmented`. `dormant` still works without usage data via its feedback-recency
+fallback arm.
+
+The `segment` field is nullable and distinct from the `unsegmented` slug: `null` means the
+segment hasn't been computed yet for that customer; `unsegmented` means it *has* been computed
+and no rule matched. It's exposed on the customer list (`GET /api/v1/customers/`, with a
+`?segment=` filter) and on the Customer 360 profile (internal and public API) — see
+[docs/API.md](API.md) for the full slug reference.
+
 ## Connecting HubSpot CRM enrichment
 
 Rereflect can sync contacts and company data from HubSpot to enrich the Customer 360

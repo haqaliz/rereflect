@@ -16,6 +16,7 @@ import { RunPlaybookDropdown } from '@/components/customers/RunPlaybookDropdown'
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { ChurnTimelineBadge } from '@/components/customers/ChurnTimelineBadge';
+import { SegmentBadge } from '@/components/customers/SegmentBadge';
 import { ComponentProgressBars } from '@/components/customers/ComponentProgressBars';
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
 import { UsageTimeline } from '@/components/customers/UsageTimeline';
@@ -664,6 +665,19 @@ export default function CustomerProfilePage() {
                     </Badge>
                   )}
                   <ChurnTimelineBadge bucket={profile.time_to_churn_bucket ?? null} />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help">
+                        <SegmentBadge segment={profile.segment} size="sm" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="text-xs max-w-xs">
+                        Rule-based segment computed from usage and feedback signals — not a
+                        guarantee.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
                   <span>{profile.feedback_count} feedbacks</span>
                   {profile.last_feedback_at && (
                     <span>Last active {getRelativeTime(profile.last_feedback_at)}</span>

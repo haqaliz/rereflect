@@ -22,6 +22,8 @@ export interface CustomerListItem {
   churn_probability?: number | null;
   churn_probability_low?: number | null;
   churn_probability_high?: number | null;
+  // Rule-based customer segment (nullable; null = not computed yet)
+  segment?: string | null;
 }
 
 export interface RiskDistribution {
@@ -53,6 +55,7 @@ export interface CustomerListParams {
   risk_level?: string;
   search?: string;
   include_archived?: boolean;
+  segment?: string;
 }
 
 export interface ActionItem {
@@ -108,6 +111,8 @@ export interface CustomerProfileData {
   // Which CRM populated the fields above ('hubspot' | 'salesforce'); absent
   // on older payloads or when no CRM has synced yet.
   crm_provider?: string | null;
+  // Rule-based customer segment (nullable; null = not computed yet)
+  segment?: string | null;
 }
 
 export interface UsageRollup {
@@ -236,6 +241,7 @@ export const customersAPI = {
     if (params.sort_by) query.set('sort_by', params.sort_by);
     if (params.sort_order) query.set('sort_order', params.sort_order);
     if (params.risk_level) query.set('risk_level', params.risk_level);
+    if (params.segment) query.set('segment', params.segment);
     if (params.search) query.set('search', params.search);
     if (params.include_archived !== undefined)
       query.set('include_archived', String(params.include_archived));

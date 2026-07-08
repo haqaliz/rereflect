@@ -29,6 +29,10 @@ class CustomerHealth(Base):
     last_feedback_at = Column(DateTime, nullable=True)
     risk_level = Column(String(20), default="unknown")  # healthy, moderate, at_risk, critical
 
+    # Customer segment (rule-based classification): at_risk, silent_churner, dormant,
+    # power_user, happy_advocate, new, unsegmented
+    segment = Column(String(30), nullable=True)
+
     # Confidence level based on feedback count
     confidence_level = Column(String(20), default="low")  # low (<3), medium (3-9), high (10+)
     confidence_score = Column(Integer, default=0)  # 0-100 percentage (granular numeric confidence)
@@ -80,6 +84,7 @@ class CustomerHealth(Base):
         Index('ix_customer_health_org_email', 'organization_id', 'customer_email', unique=True),
         Index('ix_customer_health_org_score', 'organization_id', 'health_score'),
         Index('ix_customer_health_risk', 'organization_id', 'risk_level'),
+        Index('ix_customer_health_segment', 'organization_id', 'segment'),
     )
 
     def __repr__(self):

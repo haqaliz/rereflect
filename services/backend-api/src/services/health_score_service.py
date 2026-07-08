@@ -371,6 +371,58 @@ def _maybe_enqueue_writeback(
     _dispatch_salesforce()
 
 
+def resolve_segment(
+    org_id: int,
+    customer_email: str,
+    db: Session,
+    *,
+    result: dict,
+    created_at: Optional[datetime],
+    churn_probability,
+) -> str:
+    """
+    Compute the customer segment slug for (org_id, customer_email).
+
+    Builds the pure ``UsageSignals`` input (or ``None`` when no
+    ``CustomerUsage`` row exists), fetches the sentiment trend direction, and
+    delegates to ``segment_service.classify_segment``. Callers are
+    responsible for wrapping this in a try/except — see
+    ``update_customer_health`` — so a failure here never breaks the health
+    upsert.
+    """
+    from src.models.customer_usage import CustomerUsage
+    from src.services.segment_service import UsageSignals, classify_segment
+
+    usage_row = db.query(CustomerUsage).filter(
+        CustomerUsage.organization_id == org_id,
+        CustomerUsage.customer_email == customer_email,
+    ).first()
+
+    usage = None
+    if usage_row is not None:
+        usage = UsageSignals(
+            last_active_at=usage_row.last_active_at,
+            active_days_30d=usage_row.active_days_30d,
+            distinct_feature_count=usage_row.distinct_feature_count,
+            usage_score=usage_row.usage_score,
+            first_seen_at=usage_row.first_seen_at,
+        )
+
+    direction = compute_sentiment_trend(org_id, customer_email, db)["direction"]
+
+    return classify_segment(
+        health_score=result["health_score"],
+        risk_level=result["risk_level"],
+        churn_probability=churn_probability,
+        feedback_count=result["feedback_count"],
+        last_feedback_at=result["last_feedback_at"],
+        created_at=created_at,
+        usage=usage,
+        sentiment_direction=direction,
+        now=datetime.utcnow(),
+    )
+
+
 def update_customer_health(org_id: int, customer_email: str, db: Session) -> None:
     """Compute and upsert customer health score, recording history on significant changes."""
     from src.models.customer_health import CustomerHealth
@@ -424,6 +476,24 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
         existing.is_archived = False  # Unarchive when new feedback arrives
         existing.updated_at = datetime.utcnow()
 
+        # Segment classification (customer-segments aspect): never break the
+        # health upsert if segment resolution fails — log and leave
+        # unchanged.
+        try:
+            existing.segment = resolve_segment(
+                org_id,
+                customer_email,
+                db,
+                result=result,
+                created_at=existing.created_at,
+                churn_probability=existing.churn_probability,
+            )
+        except Exception as _seg_exc:
+            logger.warning(
+                "Segment resolution failed for org=%s email=%s: %s",
+                org_id, customer_email, _seg_exc,
+            )
+
         # Record history if score changed by ≥ 2 points
         should_record = abs(new_score - old_score) >= 2
 
@@ -475,6 +545,28 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
                 customer_email, _ae,
             )
     else:
+        new_customer_now = datetime.utcnow()
+
+        # Segment classification (customer-segments aspect): a brand-new
+        # customer has no churn_probability yet and created_at is "now" (so
+        # the `new` rule can fire). Never break the health upsert if segment
+        # resolution fails — log and leave unset (None).
+        segment_value = None
+        try:
+            segment_value = resolve_segment(
+                org_id,
+                customer_email,
+                db,
+                result=result,
+                created_at=new_customer_now,
+                churn_probability=None,
+            )
+        except Exception as _seg_exc:
+            logger.warning(
+                "Segment resolution failed for org=%s email=%s: %s",
+                org_id, customer_email, _seg_exc,
+            )
+
         health = CustomerHealth(
             organization_id=org_id,
             customer_email=customer_email,
@@ -489,6 +581,7 @@ def update_customer_health(org_id: int, customer_email: str, db: Session) -> Non
             feedback_count=result["feedback_count"],
             last_feedback_at=result["last_feedback_at"],
             risk_level=result["risk_level"],
+            segment=segment_value,
             confidence_level=confidence_level,
             confidence_score=confidence,
             is_archived=False,

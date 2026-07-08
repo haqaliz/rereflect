@@ -18,9 +18,12 @@ import {
   Loader2,
   UserX,
   FileUp,
+  Info,
 } from 'lucide-react';
 import { customersAPI, CustomerListItem, CustomerListParams } from '@/lib/api/customers';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
+import { SegmentBadge } from '@/components/customers/SegmentBadge';
+import { SEGMENT_SLUGS, SEGMENT_LABELS } from '@/lib/constants/segments';
 import { useAuth } from '@/contexts/AuthContext';
 import { BulkMarkChurnedDialog } from '@/components/customers/BulkMarkChurnedDialog';
 import { ChurnCsvImportDialog } from '@/components/customers/ChurnCsvImportDialog';
@@ -38,6 +41,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 
 function getRelativeTime(dateStr: string | null): string {
@@ -110,6 +119,7 @@ export default function CustomersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState('');
+  const [segmentFilter, setSegmentFilter] = useState('');
   const [sortBy, setSortBy] = useState<CustomerListParams['sort_by']>('health_score');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [reanalyzing, setReanalyzing] = useState(false);
@@ -130,6 +140,7 @@ export default function CustomersPage() {
     sort_order: sortOrder,
     ...(debouncedSearch && { search: debouncedSearch }),
     ...(riskFilter && { risk_level: riskFilter }),
+    ...(segmentFilter && { segment: segmentFilter }),
   };
 
   const { data, isLoading } = useQuery({
@@ -158,6 +169,11 @@ export default function CustomersPage() {
 
   const handleRiskFilterChange = useCallback((value: string) => {
     setRiskFilter(value === 'all' ? '' : value);
+    setCurrentPage(1);
+  }, []);
+
+  const handleSegmentFilterChange = useCallback((value: string) => {
+    setSegmentFilter(value === 'all' ? '' : value);
     setCurrentPage(1);
   }, []);
 
@@ -327,10 +343,31 @@ export default function CustomersPage() {
         <TrendCell trend={row.original.sentiment_trend} isBlurred={false} />
       ),
     },
+    {
+      accessorKey: 'segment',
+      header: () => (
+        <div className="flex items-center gap-1">
+          Segment
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Info className="w-3 h-3 text-muted-foreground cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="text-xs max-w-xs">
+                Segments are rule-based heuristics computed from usage and feedback signals — not
+                a guarantee.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      ),
+      cell: ({ row }) => <SegmentBadge segment={row.original.segment} size="sm" />,
+    },
   ];
 
   // Empty state
-  const isEmpty = !isLoading && items.length === 0 && !searchQuery && !riskFilter;
+  const isEmpty =
+    !isLoading && items.length === 0 && !searchQuery && !riskFilter && !segmentFilter;
 
   if (isLoading) {
     return (
@@ -352,6 +389,7 @@ export default function CustomersPage() {
   }
 
   return (
+    <TooltipProvider>
     <div className="min-h-screen pattern-bg">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         {/* Page Header */}
@@ -465,6 +503,36 @@ export default function CustomersPage() {
               <SelectItem value="critical">Critical</SelectItem>
             </SelectContent>
           </Select>
+
+          <div className="flex items-center gap-1.5">
+            <Select
+              value={segmentFilter || 'all'}
+              onValueChange={handleSegmentFilterChange}
+            >
+              <SelectTrigger className="h-10 w-[180px]">
+                <SelectValue placeholder="All Segments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Segments</SelectItem>
+                {SEGMENT_SLUGS.map(slug => (
+                  <SelectItem key={slug} value={slug}>
+                    {SEGMENT_LABELS[slug]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help shrink-0" />
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs max-w-xs">
+                  Segments are rule-based heuristics computed from usage and feedback signals —
+                  not a guarantee.
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
 
         {/* Empty state */}
@@ -526,5 +594,6 @@ export default function CustomersPage() {
         onOpenChange={setCsvImportOpen}
       />
     </div>
+    </TooltipProvider>
   );
 }

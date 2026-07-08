@@ -181,6 +181,9 @@ class PublicCustomerProfile360(BaseModel):
     llm_analysis: Optional[str] = None
     is_archived: bool
     created_at: Optional[datetime] = None
+    # Rule-based customer segment (customer-segments feature); nullable —
+    # None = unsegmented / not yet computed.
+    segment: Optional[str] = None
     # CRM enrichment fields (HubSpot / Salesforce)
     crm_company_name: Optional[str] = None
     crm_lifecycle_stage: Optional[str] = None
