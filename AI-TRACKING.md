@@ -293,6 +293,64 @@
 
 ---
 
+## M5 — Local Model Layer (self-improving, on-device) — PLANNED
+
+> **Strategic framing.** For an OSS / self-hosted / BYOK product the moat is **not** a trained
+> foundation model, a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks
+> were dropped), or fine-tuning the operator's BYOK LLM (can't do it uniformly across providers). The
+> defensible play is a **per-org, local, self-improving model layer**: trains only on data one operator
+> has, runs locally with no cloud dependency, improves the more it's used/corrected, and stays honest
+> (small models, stated as such — as churn already is "a calibrated heuristic"). The heavy stack is
+> **already installed** (`torch`, `transformers`, `sentence-transformers`, `scikit-learn`, `bertopic`),
+> and per-org training is already live but shallow (`churn_calibrator.py` fits isotonic regression per
+> org at `MIN_LABELS=20`). The corrections flywheel data (`AICorrection`, M3.3) is collected but not yet
+> trained on (M4.2 fine-tuned classification was deferred). This milestone block closes that loop.
+>
+> **Cross-cutting principles:** CPU-only (no GPU ever required — adoption is the game); default analyzer
+> paths stay byte-stable; every model swap is A/B-gated and reversible; no central/cross-tenant data;
+> models are small and described honestly.
+
+#### M5.0 — Data & Model Readiness Assessment (no ML)
+- [ ] Instrument, per org: feedback volume, `AICorrection` counts by type (sentiment/category/urgency),
+      churn-label counts + distribution; ship an "AI training readiness" admin report/endpoint.
+- [ ] Output defines the activation thresholds that gate M5.2 (correction volume) and M5.3 (~500 churn
+      labels). **Exit:** we know per real org whether A and C are buildable now or need bootstrapping.
+- *Serves:* de-risks all tracks. Cheap, first, non-negotiable given data readiness is unknown.
+
+#### M5.1 — Analyzer model-provider layer + better local defaults (Track B + spine v1)
+- [ ] Pluggable analyzer-provider abstraction (mirror the existing LLM/embedding provider layers) so
+      sentiment/category/urgency can be backed by `{default (VADER/keyword) | shipped model | per-org
+      trained}`.
+- [ ] Ship a distilled transformer sentiment (+ optional emotion) model as an **opt-in** provider; CPU
+      inference; **download-on-first-run + cached**, default stays VADER (lean image, zero-config,
+      byte-stable); documented **air-gapped pre-bake** path (doubles as a privacy pitch).
+- [ ] **Eval harness + accuracy card** — a labeled eval set + precision/recall/F1/confusion so
+      "more accurate than a lexicon" is *proven*, not marketing.
+- *Serves:* accuracy leadership + offline/zero-cloud + credibility floor. Not data-gated → first shipped.
+      **Exit:** opt-in model provably beats VADER on the eval set, offline; default unchanged.
+
+#### M5.2 — Corrections flywheel: per-org self-improving classifiers (Track A — flagship moat)
+- [ ] Train a small per-org model (SetFit / logistic-regression-on-embeddings via the installed
+      `sentence-transformers`) on the org's feedback + `AICorrection`s, on the worker, CPU, scheduled.
+- [ ] Per-org **shadow A/B** on held-out corrections; **auto-promote only when the challenger beats the
+      incumbent** by a margin; operator sees the delta and can roll back.
+- [ ] Activates per-org once corrections ≥ the threshold from M5.0. Honesty: "your model, trained on your
+      data, promoted only when measurably better."
+- *Serves:* the self-improving data moat (flagship goal), accuracy, offline. **Exit:** ≥1 design-partner
+      org has a promoted per-org model beating the default on their own held-out data.
+
+#### M5.3 — Per-org churn ML model (Track C — data-gated)
+- [ ] Upgrade from isotonic calibration to a gradient-boosted / logistic churn classifier per org on
+      labeled churn events + features; **activates at ~500 labels** (from M5.0); calibrated heuristic
+      remains the fallback below the gate. Reuse the existing precision/recall/F1/AUC churn dashboard.
+- *Serves:* churn credibility. **Exit:** for a qualifying org, ML beats the heuristic on backtest with
+      the auto-fallback preserved.
+
+#### M5.4 — Local embedding quality (Track D) — parked / nice-to-have
+- [ ] Better local embedding model for copilot/template matching (incremental; fully offline).
+
+---
+
 ## Plan Gating Summary (Full Year)
 
 | Feature | Free | Pro | Business | Enterprise |
