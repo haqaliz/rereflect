@@ -5,6 +5,12 @@ export interface SentimentTrend {
   change_percent: number;
 }
 
+/** Compact CS-owner reference — mirrors backend `CustomerOwnerRef` (id + email only). */
+export interface CustomerOwnerRef {
+  id: number;
+  email: string;
+}
+
 export interface CustomerListItem {
   customer_email: string;
   customer_name: string | null;
@@ -24,7 +30,35 @@ export interface CustomerListItem {
   churn_probability_high?: number | null;
   // Rule-based customer segment (nullable; null = not computed yet)
   segment?: string | null;
+  // segment-actions: operator-managed tags + assigned CS owner
+  tags?: string[];
+  cs_owner?: CustomerOwnerRef | null;
 }
+
+// ─── Cohort (segment-actions bulk actions) ─────────────────────────────────
+//
+// Mirrors the backend `Cohort`/`CohortFilter` contract
+// (services/backend-api/src/schemas/cohort.py): a customer selection is
+// EXACTLY one of an explicit email list or the same filter vocabulary as
+// `GET /api/v1/customers/`. Keep key names identical to the backend.
+
+export interface CohortFilter {
+  segment?: string;
+  risk_level?: string;
+  search?: string;
+  include_archived?: boolean;
+}
+
+export type Cohort = { emails: string[] } | { filter: CohortFilter };
+
+export interface BulkActionSummary {
+  matched: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
+export type BulkTagMode = 'add' | 'remove';
 
 export interface RiskDistribution {
   healthy: number;
@@ -113,6 +147,9 @@ export interface CustomerProfileData {
   crm_provider?: string | null;
   // Rule-based customer segment (nullable; null = not computed yet)
   segment?: string | null;
+  // segment-actions: operator-managed tags + assigned CS owner
+  tags?: string[];
+  cs_owner?: CustomerOwnerRef | null;
 }
 
 export interface UsageRollup {
@@ -321,6 +358,80 @@ export const customersAPI = {
     const response = await apiClient.get(
       `/api/v1/customers/${encodeURIComponent(email)}/timeline${qs ? `?${qs}` : ''}`
     );
+    return response.data;
+  },
+
+  /**
+   * Stream `GET /api/v1/customers/export` as a CSV and trigger a browser
+   * download. Accepts the same filter/sort query params as `list` (minus
+   * pagination — the export streams every matching row).
+   */
+  exportCustomers: async (
+    params: Pick<
+      CustomerListParams,
+      'sort_by' | 'sort_order' | 'risk_level' | 'segment' | 'search' | 'include_archived'
+    > = {}
+  ): Promise<void> => {
+    const query = new URLSearchParams();
+    if (params.sort_by) query.set('sort_by', params.sort_by);
+    if (params.sort_order) query.set('sort_order', params.sort_order);
+    if (params.risk_level) query.set('risk_level', params.risk_level);
+    if (params.segment) query.set('segment', params.segment);
+    if (params.search) query.set('search', params.search);
+    if (params.include_archived !== undefined)
+      query.set('include_archived', String(params.include_archived));
+
+    const response = await apiClient.get(`/api/v1/customers/export?${query.toString()}`, {
+      responseType: 'blob',
+    });
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+
+    const disposition = response.headers['content-disposition'] as string | undefined;
+    let filename = 'customers-export.csv';
+    if (disposition) {
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      if (match) filename = match[1];
+    }
+
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  /**
+   * Add or remove `tags` across a resolved `cohort`. Admin/owner only
+   * (backend-enforced). `mode: "add"` unions, `mode: "remove"` subtracts.
+   */
+  bulkTag: async (
+    cohort: Cohort,
+    tags: string[],
+    mode: BulkTagMode
+  ): Promise<BulkActionSummary> => {
+    const response = await apiClient.post('/api/v1/customers/bulk/tags', {
+      cohort,
+      tags,
+      mode,
+    });
+    return response.data;
+  },
+
+  /**
+   * Set (or clear, with `userId: null`) the CS owner across a resolved
+   * `cohort`. Admin/owner only (backend-enforced).
+   */
+  bulkAssignOwner: async (
+    cohort: Cohort,
+    userId: number | null
+  ): Promise<BulkActionSummary> => {
+    const response = await apiClient.post('/api/v1/customers/bulk/assign-owner', {
+      cohort,
+      user_id: userId,
+    });
     return response.data;
   },
 };
