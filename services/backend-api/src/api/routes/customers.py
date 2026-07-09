@@ -235,6 +235,49 @@ def _queue_llm_analysis(org_id: int, customer_email: str) -> str:
         return str(uuid.uuid4())
 
 
+def _apply_customer_filters(
+    query,
+    org: Organization,
+    *,
+    segment: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    search: Optional[str] = None,
+    include_archived: bool = False,
+):
+    """Apply the shared customer-list filter set to a `CustomerHealth` query.
+
+    Applies (in order): org scoping, archived exclusion (unless
+    `include_archived`), `risk_level` equality, `segment` equality, and a
+    `search` ILIKE match on email/name. Callers are responsible for any
+    upstream validation of `segment`/`risk_level` values (this helper does
+    not raise — an unrecognized value simply yields zero matches).
+
+    Shared by `list_customers` (GET /api/v1/customers/) and
+    `resolve_cohort` (bulk actions / CSV export) so the two never drift.
+    """
+    query = query.filter(CustomerHealth.organization_id == org.id)
+
+    if not include_archived:
+        query = query.filter(CustomerHealth.is_archived == False)
+
+    if risk_level:
+        query = query.filter(CustomerHealth.risk_level == risk_level)
+
+    if segment:
+        query = query.filter(CustomerHealth.segment == segment)
+
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                CustomerHealth.customer_email.ilike(pattern),
+                CustomerHealth.customer_name.ilike(pattern),
+            )
+        )
+
+    return query
+
+
 def _get_summary(org_id: int, include_archived: bool, db: Session) -> CustomerListSummary:
     base_q = db.query(CustomerHealth).filter(CustomerHealth.organization_id == org_id)
     if not include_archived:
@@ -298,25 +341,14 @@ def list_customers(
             detail=f"Invalid segment '{segment}'. Must be one of: {', '.join(SEGMENT_SLUGS)}",
         )
 
-    query = db.query(CustomerHealth).filter(CustomerHealth.organization_id == current_org.id)
-
-    if not include_archived:
-        query = query.filter(CustomerHealth.is_archived == False)
-
-    if risk_level:
-        query = query.filter(CustomerHealth.risk_level == risk_level)
-
-    if segment:
-        query = query.filter(CustomerHealth.segment == segment)
-
-    if search:
-        pattern = f"%{search}%"
-        query = query.filter(
-            or_(
-                CustomerHealth.customer_email.ilike(pattern),
-                CustomerHealth.customer_name.ilike(pattern),
-            )
-        )
+    query = _apply_customer_filters(
+        db.query(CustomerHealth),
+        current_org,
+        segment=segment,
+        risk_level=risk_level,
+        search=search,
+        include_archived=include_archived,
+    )
 
     total = query.count()
 
