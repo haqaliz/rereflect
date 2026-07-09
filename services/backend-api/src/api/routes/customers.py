@@ -6,9 +6,12 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, asc, desc, or_
 from pydantic import BaseModel
+import csv
+import io
 
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
@@ -419,6 +422,183 @@ def list_customers(
         page=page,
         page_size=page_size,
         summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSV export  (segment-actions / bulk-actions-api, Phase 3)
+# ---------------------------------------------------------------------------
+
+# NOTE: Static paths (/export, /bulk/tags, /bulk/assign-owner) MUST be
+# registered BEFORE parametric paths (/{email}, /{email}/...) below, else
+# FastAPI would match e.g. "export" as an email path segment. (Same pattern
+# as src/api/routes/churn_events.py:157-159.)
+
+_EXPORT_CSV_COLUMNS = [
+    "email", "name", "health_score", "risk_level", "segment", "confidence_level",
+    "feedback_count", "last_feedback_at", "last_active_at", "churn_probability",
+    "tags", "cs_owner_email",
+]
+
+_EXPORT_BATCH_SIZE = 500
+
+
+def _export_rows(
+    db: Session,
+    current_org: Organization,
+    *,
+    segment: Optional[str],
+    risk_level: Optional[str],
+    search: Optional[str],
+    include_archived: bool,
+    sort_by: str,
+    sort_order: str,
+):
+    """Yield dict rows for CSV export, paginating in batches (no full materialize).
+
+    Deliberately does NOT compute sentiment_trend per row (that field is
+    omitted from the export — it's the per-row N+1 the list endpoint already
+    pays for on-page; not worth it for a potentially org-wide export).
+    """
+    query = _apply_customer_filters(
+        db.query(CustomerHealth),
+        current_org,
+        segment=segment,
+        risk_level=risk_level,
+        search=search,
+        include_archived=include_archived,
+    )
+
+    sort_column_map = {
+        "health_score": CustomerHealth.health_score,
+        "feedback_count": CustomerHealth.feedback_count,
+        "last_feedback_at": CustomerHealth.last_feedback_at,
+        "customer_email": CustomerHealth.customer_email,
+        "segment": CustomerHealth.segment,
+    }
+    sort_col = sort_column_map[sort_by]
+    sort_fn = asc if sort_order == "asc" else desc
+    query = query.order_by(sort_fn(sort_col), CustomerHealth.id)
+
+    offset = 0
+    while True:
+        batch = query.offset(offset).limit(_EXPORT_BATCH_SIZE).all()
+        if not batch:
+            break
+
+        # Batch-load usage rollups for this page (no N+1).
+        emails = [r.customer_email for r in batch]
+        usage_rows = (
+            db.query(CustomerUsage.customer_email, CustomerUsage.last_active_at)
+            .filter(
+                CustomerUsage.organization_id == current_org.id,
+                CustomerUsage.customer_email.in_(emails),
+            )
+            .all()
+        )
+        usage_map = {row.customer_email: row.last_active_at for row in usage_rows}
+
+        for record in batch:
+            owner_email = record.cs_owner.email if record.cs_owner else ""
+            yield {
+                "email": record.customer_email,
+                "name": record.customer_name or "",
+                "health_score": record.health_score,
+                "risk_level": record.risk_level,
+                "segment": record.segment or "",
+                "confidence_level": record.confidence_level or "",
+                "feedback_count": record.feedback_count,
+                "last_feedback_at": record.last_feedback_at.isoformat() if record.last_feedback_at else "",
+                "last_active_at": (
+                    usage_map[record.customer_email].isoformat()
+                    if usage_map.get(record.customer_email) else ""
+                ),
+                "churn_probability": (
+                    str(record.churn_probability) if record.churn_probability is not None else ""
+                ),
+                "tags": "|".join(record.tags or []),
+                "cs_owner_email": owner_email,
+            }
+
+        if len(batch) < _EXPORT_BATCH_SIZE:
+            break
+        offset += _EXPORT_BATCH_SIZE
+
+
+def _csv_stream(rows):
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_EXPORT_CSV_COLUMNS)
+
+    writer.writeheader()
+    yield buf.getvalue()
+    buf.seek(0)
+    buf.truncate(0)
+
+    for row in rows:
+        writer.writerow(row)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+
+@router.get(
+    "/export",
+    dependencies=[Depends(require_feature("customer_health_scores"))],
+)
+def export_customers(
+    sort_by: str = Query("health_score"),
+    sort_order: str = Query("asc"),
+    risk_level: Optional[str] = Query(None),
+    segment: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    include_archived: bool = Query(False),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Stream all customers matching the given filters as a CSV file.
+
+    Same query params as `GET /api/v1/customers/` (segment, risk_level,
+    search, include_archived, sort_by, sort_order). Paginates internally
+    (batches of 500) rather than materializing the whole org in memory.
+
+    Columns: email, name, health_score, risk_level, segment,
+    confidence_level, feedback_count, last_feedback_at, last_active_at,
+    churn_probability, tags (pipe-joined), cs_owner_email. `sentiment_trend`
+    is intentionally omitted (avoids a per-row N+1 query on export).
+    """
+    if sort_by not in VALID_SORT_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid sort_by value '{sort_by}'. Must be one of: {', '.join(sorted(VALID_SORT_FIELDS))}",
+        )
+
+    if risk_level is not None and risk_level not in VALID_RISK_LEVELS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid risk_level '{risk_level}'. Must be one of: {', '.join(sorted(VALID_RISK_LEVELS))}",
+        )
+
+    if segment is not None and segment not in SEGMENT_SLUGS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid segment '{segment}'. Must be one of: {', '.join(SEGMENT_SLUGS)}",
+        )
+
+    rows = _export_rows(
+        db,
+        current_org,
+        segment=segment,
+        risk_level=risk_level,
+        search=search,
+        include_archived=include_archived,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    filename = f"customers-{segment or 'all'}.csv"
+    return StreamingResponse(
+        _csv_stream(rows),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

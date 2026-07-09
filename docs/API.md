@@ -209,6 +209,68 @@ Slugs (priority order — first matching rule wins):
 (pre-ingest/pre-nightly-recompute), which is distinct from the `unsegmented` slug (computed,
 but no rule matched).
 
+### Customer bulk actions (segment-actions)
+
+Operator-triggered actions over a **cohort** of customers — either an explicit list of emails
+or the same filter vocabulary as the list endpoint. Exactly one of `emails`/`filter` must be
+set on the `cohort` object, else `422`.
+
+```json
+{ "cohort": { "emails": ["a@acme.com", "b@acme.com"] } }
+{ "cohort": { "filter": { "segment": "at_risk", "risk_level": "critical", "search": "acme", "include_archived": false } } }
+```
+
+#### `GET /api/v1/customers/export`
+
+Streams a CSV of customers matching the same query params as the list endpoint (`segment`,
+`risk_level`, `search`, `include_archived`, `sort_by`, `sort_order`). Requires the
+`customer_health_scores` feature (Pro+); any authenticated role may export. Paginates
+internally (batches of 500 rows) — never loads the whole organization into memory.
+
+```
+GET /api/v1/customers/export?segment=at_risk
+→ 200 text/csv
+  Content-Disposition: attachment; filename="customers-at_risk.csv"
+```
+
+Columns: `email, name, health_score, risk_level, segment, confidence_level, feedback_count,
+last_feedback_at, last_active_at, churn_probability, tags, cs_owner_email`. `tags` is
+pipe-joined (`"vip|expansion"`). `sentiment_trend` is intentionally **omitted** — computing it
+per row is an N+1 the list endpoint pays for one page at a time; not worth it for a
+potentially org-wide export.
+
+#### `POST /api/v1/customers/bulk/tags`
+
+Requires **admin/owner**. Adds or removes tags across a resolved cohort.
+
+```
+POST /api/v1/customers/bulk/tags
+Body: { "cohort": {...}, "tags": ["vip", "expansion"], "mode": "add" | "remove" }
+
+200 { "matched": 12, "updated": 11, "skipped": 1, "errors": [] }
+```
+
+Tags are trimmed, deduped, and empty strings dropped; each tag is capped at 50 characters.
+`add` is a set union, `remove` is a set difference, applied per customer. A customer whose tag
+count would exceed **20** after `add` is **not** silently truncated — it's left unchanged and
+reported in `errors` (and not counted in `updated`).
+
+#### `POST /api/v1/customers/bulk/assign-owner`
+
+Requires **admin/owner**. Sets (or clears, with `user_id: null`) the CS owner across a
+resolved cohort.
+
+```
+POST /api/v1/customers/bulk/assign-owner
+Body: { "cohort": {...}, "user_id": 42 }
+
+200 { "matched": 12, "updated": 12, "skipped": 0, "errors": [] }
+```
+
+`user_id` must be an **active** member of the caller's organization (role irrelevant); a
+non-member or deactivated `user_id` returns `422` before any rows are touched. `null` clears
+the owner for every customer in the cohort.
+
 ## Common gotchas
 
 - **Trailing slashes** — match the route exactly; a missing/extra `/` can return 422.
