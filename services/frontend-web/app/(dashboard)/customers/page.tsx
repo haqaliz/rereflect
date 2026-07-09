@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ColumnDef } from '@tanstack/react-table';
+import { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import Link from 'next/link';
 import {
   Users,
@@ -19,21 +19,45 @@ import {
   UserX,
   FileUp,
   Info,
+  Download,
+  Tag,
+  UserCog,
+  PlaySquare,
+  ChevronDown,
+  CheckSquare,
 } from 'lucide-react';
-import { customersAPI, CustomerListItem, CustomerListParams } from '@/lib/api/customers';
+import {
+  customersAPI,
+  CustomerListItem,
+  CustomerListParams,
+  Cohort,
+  CohortFilter,
+} from '@/lib/api/customers';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { SegmentBadge } from '@/components/customers/SegmentBadge';
+import { TagChips } from '@/components/customers/TagChips';
+import { CsOwnerBadge } from '@/components/customers/CsOwnerBadge';
 import { SEGMENT_SLUGS, SEGMENT_LABELS } from '@/lib/constants/segments';
 import { useAuth } from '@/contexts/AuthContext';
 import { BulkMarkChurnedDialog } from '@/components/customers/BulkMarkChurnedDialog';
 import { ChurnCsvImportDialog } from '@/components/customers/ChurnCsvImportDialog';
+import { BulkTagDialog } from '@/components/customers/BulkTagDialog';
+import { BulkAssignOwnerDialog } from '@/components/customers/BulkAssignOwnerDialog';
+import { BulkRunPlaybookDialog } from '@/components/customers/BulkRunPlaybookDialog';
 import { StatCard } from '@/components/StatCard';
 import { RiskDistributionBar } from '@/components/customers/RiskDistributionBar';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
 import { DataTable } from '@/components/shared/data-table';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -123,9 +147,35 @@ export default function CustomersPage() {
   const [sortBy, setSortBy] = useState<CustomerListParams['sort_by']>('health_score');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [reanalyzing, setReanalyzing] = useState(false);
-  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [bulkChurnOpen, setBulkChurnOpen] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
+
+  // Cohort mode: an explicit row selection (emails) or "every customer
+  // matching the active filter" (filter — sent as `filter`, never
+  // materialized into an email list). Any manual checkbox interaction
+  // reverts to 'emails' mode (see handleRowSelectionChange below).
+  const [cohortMode, setCohortMode] = useState<'emails' | 'filter'>('emails');
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [assignOwnerDialogOpen, setAssignOwnerDialogOpen] = useState(false);
+  const [runPlaybookDialogOpen, setRunPlaybookDialogOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // Row-selection keys are customer emails (getRowId={r => r.customer_email}),
+  // so selection state doubles as the selected-emails cohort.
+  const selectedEmails = useMemo(
+    () => Object.keys(rowSelection).filter((key) => rowSelection[key]),
+    [rowSelection]
+  );
+  const clearSelection = useCallback(() => {
+    setRowSelection({});
+    setCohortMode('emails');
+  }, []);
+
+  const handleRowSelectionChange = useCallback((selection: RowSelectionState) => {
+    setCohortMode('emails');
+    setRowSelection(selection);
+  }, []);
 
   // Debounce search
   useEffect(() => {
@@ -206,6 +256,60 @@ export default function CustomersPage() {
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize) || 1;
 
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
+
+  // Filter-mode cohort: the same filter vocabulary as GET /api/v1/customers/
+  // (key names identical to the backend CohortFilter — segment, risk_level,
+  // search, include_archived). Never materialized into an email list.
+  const activeCohortFilter: CohortFilter = useMemo(
+    () => ({
+      ...(segmentFilter && { segment: segmentFilter }),
+      ...(riskFilter && { risk_level: riskFilter }),
+      ...(debouncedSearch && { search: debouncedSearch }),
+      include_archived: false,
+    }),
+    [segmentFilter, riskFilter, debouncedSearch]
+  );
+
+  const cohort: Cohort | null = useMemo(() => {
+    if (cohortMode === 'filter') return { filter: activeCohortFilter };
+    if (selectedEmails.length > 0) return { emails: selectedEmails };
+    return null;
+  }, [cohortMode, activeCohortFilter, selectedEmails]);
+
+  const cohortCount = cohortMode === 'filter' ? total : selectedEmails.length;
+
+  // "Select all N matching this filter" — offered as a banner once every
+  // row on the current page is selected and there are more matches than
+  // are currently loaded.
+  const showSelectAllBanner =
+    cohortMode === 'emails' &&
+    items.length > 0 &&
+    selectedEmails.length === items.length &&
+    total > items.length;
+
+  const handleSelectAllMatchingFilter = useCallback(() => {
+    setCohortMode('filter');
+  }, []);
+
+  const handleExport = useCallback(async () => {
+    setExporting(true);
+    try {
+      await customersAPI.exportCustomers({
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        ...(riskFilter && { risk_level: riskFilter }),
+        ...(segmentFilter && { segment: segmentFilter }),
+        ...(debouncedSearch && { search: debouncedSearch }),
+      });
+      toast.success('Export started — your download should begin shortly.');
+    } catch {
+      toast.error('Failed to export customers. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  }, [sortBy, sortOrder, riskFilter, segmentFilter, debouncedSearch]);
+
   const atRiskPercent =
     summary && summary.total_customers > 0
       ? Math.round(
@@ -217,6 +321,28 @@ export default function CustomersPage() {
 
   // Column definitions
   const columns: ColumnDef<CustomerListItem>[] = [
+    {
+      id: 'select',
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && 'indeterminate')
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
     {
       accessorKey: 'customer_email',
       header: 'Customer',
@@ -363,6 +489,16 @@ export default function CustomersPage() {
       ),
       cell: ({ row }) => <SegmentBadge segment={row.original.segment} size="sm" />,
     },
+    {
+      accessorKey: 'tags',
+      header: 'Tags',
+      cell: ({ row }) => <TagChips tags={row.original.tags} size="sm" />,
+    },
+    {
+      accessorKey: 'cs_owner',
+      header: 'CS Owner',
+      cell: ({ row }) => <CsOwnerBadge owner={row.original.cs_owner} size="sm" />,
+    },
   ];
 
   // Empty state
@@ -407,6 +543,55 @@ export default function CustomersPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {cohort && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="flex items-center gap-2">
+                      Bulk Actions ({cohortCount})
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem
+                      onClick={handleExport}
+                      disabled={exporting}
+                      className="flex items-center gap-2"
+                    >
+                      {exporting ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                      Export CSV
+                    </DropdownMenuItem>
+                    {isAdminOrOwner && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => setTagDialogOpen(true)}
+                          className="flex items-center gap-2"
+                        >
+                          <Tag className="w-3.5 h-3.5" />
+                          Tag
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => setAssignOwnerDialogOpen(true)}
+                          className="flex items-center gap-2"
+                        >
+                          <UserCog className="w-3.5 h-3.5" />
+                          Assign owner
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    <DropdownMenuItem
+                      onClick={() => setRunPlaybookDialogOpen(true)}
+                      className="flex items-center gap-2"
+                    >
+                      <PlaySquare className="w-3.5 h-3.5" />
+                      Run playbook
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               {selectedEmails.length > 0 && (
                 <Button
                   variant="outline"
@@ -553,6 +738,40 @@ export default function CustomersPage() {
         ) : (
           /* DataTable */
           <Card className="p-6 animate-slide-up stagger-3">
+            {showSelectAllBanner && (
+              <div className="mb-4 flex items-center justify-between rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm">
+                <span className="text-foreground">
+                  All <strong>{items.length}</strong> customers on this page are selected.
+                </span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={handleSelectAllMatchingFilter}
+                  className="flex items-center gap-1.5 h-auto p-0"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  Select all {total} matching this filter
+                </Button>
+              </div>
+            )}
+            {cohortMode === 'filter' && (
+              <div
+                data-testid="cohort-filter-banner"
+                className="mb-4 flex items-center justify-between rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm"
+              >
+                <span className="text-foreground">
+                  All <strong>{total}</strong> customers matching the current filter are selected.
+                </span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={clearSelection}
+                  className="h-auto p-0"
+                >
+                  Clear selection
+                </Button>
+              </div>
+            )}
             <DataTable
               columns={columns}
               data={items}
@@ -570,6 +789,9 @@ export default function CustomersPage() {
               pageSize={pageSize}
               onPageChange={setCurrentPage}
               onPageSizeChange={handlePageSizeChange}
+              rowSelection={rowSelection}
+              onRowSelectionChange={handleRowSelectionChange}
+              getRowId={(r) => r.customer_email}
               onSortingChange={(sorting) => {
                 if (sorting.length > 0) {
                   const s = sorting[0];
@@ -586,7 +808,30 @@ export default function CustomersPage() {
         open={bulkChurnOpen}
         onOpenChange={setBulkChurnOpen}
         selectedEmails={selectedEmails}
-        onSuccess={() => setSelectedEmails([])}
+        onSuccess={clearSelection}
+      />
+
+      <BulkTagDialog
+        open={tagDialogOpen}
+        onOpenChange={setTagDialogOpen}
+        cohort={cohort}
+        cohortCount={cohortCount}
+        onSuccess={clearSelection}
+      />
+
+      <BulkAssignOwnerDialog
+        open={assignOwnerDialogOpen}
+        onOpenChange={setAssignOwnerDialogOpen}
+        cohort={cohort}
+        cohortCount={cohortCount}
+        onSuccess={clearSelection}
+      />
+
+      <BulkRunPlaybookDialog
+        open={runPlaybookDialogOpen}
+        onOpenChange={setRunPlaybookDialogOpen}
+        cohort={cohort}
+        onSuccess={clearSelection}
       />
 
       <ChurnCsvImportDialog

@@ -54,6 +54,10 @@ interface DataTableProps<TData, TValue> {
   // Controlled row selection
   rowSelection?: RowSelectionState
   onRowSelectionChange?: (selection: RowSelectionState) => void
+  // Optional stable row-id derivation (e.g. `row => row.email`). When
+  // omitted, TanStack Table falls back to its default index-based keys —
+  // fully backward-compatible for existing consumers.
+  getRowId?: (row: TData) => string
 }
 
 export function DataTable<TData, TValue>({
@@ -79,6 +83,7 @@ export function DataTable<TData, TValue>({
   onSortingChange: externalOnSortingChange,
   rowSelection: externalRowSelection,
   onRowSelectionChange: externalOnRowSelectionChange,
+  getRowId,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -111,6 +116,7 @@ export function DataTable<TData, TValue>({
   const table = useReactTable({
     data,
     columns,
+    ...(getRowId && { getRowId }),
     onSortingChange: handleSortingChange,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),

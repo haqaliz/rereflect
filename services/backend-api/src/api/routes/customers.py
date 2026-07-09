@@ -2,22 +2,33 @@
 Customer 360 API routes.
 Provides list, profile, history, feedbacks, and activity endpoints.
 """
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, asc, desc, or_
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+import csv
+import io
 
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
 from src.models.customer_analysis_action import CustomerAnalysisAction
 from src.models.customer_usage import CustomerUsage
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org, get_current_user, require_feature, require_system_admin
+from src.api.dependencies import (
+    get_current_org,
+    get_current_user,
+    require_feature,
+    require_system_admin,
+    require_admin_or_owner,
+)
 from src.models.user import User
 from src.config.plans import has_feature
+from src.schemas.cohort import Cohort, BulkActionSummary
+from src.services.cohort_service import resolve_cohort
 from src.services.segment_service import SEGMENT_SLUGS
 
 router = APIRouter(prefix="/api/v1/customers", tags=["customers"])
@@ -37,6 +48,13 @@ class SentimentTrend(BaseModel):
     change_percent: float
 
 
+class CustomerOwnerRef(BaseModel):
+    # Compact CS-owner reference (segment-actions bulk assign-owner). The User model
+    # only has `email` — there is no name/full_name field — so this is {id, email} only.
+    id: int
+    email: str
+
+
 class CustomerListItem(BaseModel):
     customer_email: str
     customer_name: Optional[str] = None
@@ -50,6 +68,9 @@ class CustomerListItem(BaseModel):
     is_archived: bool
     has_llm_analysis: bool
     segment: Optional[str] = None
+    # segment-actions: operator-managed tags + assigned CS owner
+    tags: List[str] = []
+    cs_owner: Optional[CustomerOwnerRef] = None
 
 
 class RiskDistribution(BaseModel):
@@ -119,6 +140,9 @@ class CustomerProfileResponse(BaseModel):
     crm_deal_stage: Optional[str] = None
     crm_deal_amount: Optional[float] = None
     crm_provider: Optional[str] = None
+    # segment-actions: operator-managed tags + assigned CS owner
+    tags: List[str] = []
+    cs_owner: Optional[CustomerOwnerRef] = None
 
 
 class HealthHistoryItem(BaseModel):
@@ -222,6 +246,49 @@ def _queue_llm_analysis(org_id: int, customer_email: str) -> str:
         return str(uuid.uuid4())
 
 
+def _apply_customer_filters(
+    query,
+    org: Organization,
+    *,
+    segment: Optional[str] = None,
+    risk_level: Optional[str] = None,
+    search: Optional[str] = None,
+    include_archived: bool = False,
+):
+    """Apply the shared customer-list filter set to a `CustomerHealth` query.
+
+    Applies (in order): org scoping, archived exclusion (unless
+    `include_archived`), `risk_level` equality, `segment` equality, and a
+    `search` ILIKE match on email/name. Callers are responsible for any
+    upstream validation of `segment`/`risk_level` values (this helper does
+    not raise — an unrecognized value simply yields zero matches).
+
+    Shared by `list_customers` (GET /api/v1/customers/) and
+    `resolve_cohort` (bulk actions / CSV export) so the two never drift.
+    """
+    query = query.filter(CustomerHealth.organization_id == org.id)
+
+    if not include_archived:
+        query = query.filter(CustomerHealth.is_archived == False)
+
+    if risk_level:
+        query = query.filter(CustomerHealth.risk_level == risk_level)
+
+    if segment:
+        query = query.filter(CustomerHealth.segment == segment)
+
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                CustomerHealth.customer_email.ilike(pattern),
+                CustomerHealth.customer_name.ilike(pattern),
+            )
+        )
+
+    return query
+
+
 def _get_summary(org_id: int, include_archived: bool, db: Session) -> CustomerListSummary:
     base_q = db.query(CustomerHealth).filter(CustomerHealth.organization_id == org_id)
     if not include_archived:
@@ -285,25 +352,14 @@ def list_customers(
             detail=f"Invalid segment '{segment}'. Must be one of: {', '.join(SEGMENT_SLUGS)}",
         )
 
-    query = db.query(CustomerHealth).filter(CustomerHealth.organization_id == current_org.id)
-
-    if not include_archived:
-        query = query.filter(CustomerHealth.is_archived == False)
-
-    if risk_level:
-        query = query.filter(CustomerHealth.risk_level == risk_level)
-
-    if segment:
-        query = query.filter(CustomerHealth.segment == segment)
-
-    if search:
-        pattern = f"%{search}%"
-        query = query.filter(
-            or_(
-                CustomerHealth.customer_email.ilike(pattern),
-                CustomerHealth.customer_name.ilike(pattern),
-            )
-        )
+    query = _apply_customer_filters(
+        db.query(CustomerHealth),
+        current_org,
+        segment=segment,
+        risk_level=risk_level,
+        search=search,
+        include_archived=include_archived,
+    )
 
     total = query.count()
 
@@ -335,6 +391,17 @@ def list_customers(
         )
         usage_map = {row.customer_email: row.last_active_at for row in usage_rows}
 
+    # Resolve CS owners for this page in a single query (no N+1).
+    owner_map: dict[int, CustomerOwnerRef] = {}
+    owner_ids = {r.cs_owner_user_id for r in records if r.cs_owner_user_id is not None}
+    if owner_ids:
+        owner_rows = (
+            db.query(User.id, User.email)
+            .filter(User.id.in_(owner_ids))
+            .all()
+        )
+        owner_map = {row.id: CustomerOwnerRef(id=row.id, email=row.email) for row in owner_rows}
+
     items = []
     for record in records:
         trend = _compute_sentiment_trend_for_customer(current_org.id, record.customer_email, db)
@@ -351,6 +418,8 @@ def list_customers(
             is_archived=record.is_archived or False,
             has_llm_analysis=record.llm_analysis_data is not None or record.llm_analysis is not None,
             segment=record.segment,
+            tags=record.tags or [],
+            cs_owner=owner_map.get(record.cs_owner_user_id),
         ))
 
     summary = _get_summary(current_org.id, include_archived, db)
@@ -362,6 +431,322 @@ def list_customers(
         page_size=page_size,
         summary=summary,
     )
+
+
+# ---------------------------------------------------------------------------
+# CSV export  (segment-actions / bulk-actions-api, Phase 3)
+# ---------------------------------------------------------------------------
+
+# NOTE: Static paths (/export, /bulk/tags, /bulk/assign-owner) MUST be
+# registered BEFORE parametric paths (/{email}, /{email}/...) below, else
+# FastAPI would match e.g. "export" as an email path segment. (Same pattern
+# as src/api/routes/churn_events.py:157-159.)
+
+_EXPORT_CSV_COLUMNS = [
+    "email", "name", "health_score", "risk_level", "segment", "confidence_level",
+    "feedback_count", "last_feedback_at", "last_active_at", "churn_probability",
+    "tags", "cs_owner_email",
+]
+
+_EXPORT_BATCH_SIZE = 500
+
+
+def _csv_safe(v):
+    """Neutralize CSV formula injection for a user-controllable string cell.
+
+    Strips embedded CR/LF (so a cell can't inject an extra "row" when opened
+    in a spreadsheet app) and prefixes a leading apostrophe when the value
+    starts with a character a spreadsheet app would interpret as a formula
+    trigger (=, +, -, @, tab), forcing it to be treated as inert text.
+    Non-string values pass through unchanged.
+    """
+    if not isinstance(v, str):
+        return v
+    v = v.replace("\r", " ").replace("\n", " ")
+    if v and v[0] in ("=", "+", "-", "@", "\t"):
+        return "'" + v
+    return v
+
+
+def _export_rows(
+    db: Session,
+    current_org: Organization,
+    *,
+    segment: Optional[str],
+    risk_level: Optional[str],
+    search: Optional[str],
+    include_archived: bool,
+    sort_by: str,
+    sort_order: str,
+):
+    """Yield dict rows for CSV export, paginating in batches (no full materialize).
+
+    Deliberately does NOT compute sentiment_trend per row (that field is
+    omitted from the export — it's the per-row N+1 the list endpoint already
+    pays for on-page; not worth it for a potentially org-wide export).
+    """
+    query = _apply_customer_filters(
+        db.query(CustomerHealth),
+        current_org,
+        segment=segment,
+        risk_level=risk_level,
+        search=search,
+        include_archived=include_archived,
+    )
+
+    sort_column_map = {
+        "health_score": CustomerHealth.health_score,
+        "feedback_count": CustomerHealth.feedback_count,
+        "last_feedback_at": CustomerHealth.last_feedback_at,
+        "customer_email": CustomerHealth.customer_email,
+        "segment": CustomerHealth.segment,
+    }
+    sort_col = sort_column_map[sort_by]
+    sort_fn = asc if sort_order == "asc" else desc
+    query = query.order_by(sort_fn(sort_col), CustomerHealth.id)
+
+    offset = 0
+    while True:
+        batch = query.offset(offset).limit(_EXPORT_BATCH_SIZE).all()
+        if not batch:
+            break
+
+        # Batch-load usage rollups for this page (no N+1).
+        emails = [r.customer_email for r in batch]
+        usage_rows = (
+            db.query(CustomerUsage.customer_email, CustomerUsage.last_active_at)
+            .filter(
+                CustomerUsage.organization_id == current_org.id,
+                CustomerUsage.customer_email.in_(emails),
+            )
+            .all()
+        )
+        usage_map = {row.customer_email: row.last_active_at for row in usage_rows}
+
+        for record in batch:
+            owner_email = record.cs_owner.email if record.cs_owner else ""
+            yield {
+                "email": _csv_safe(record.customer_email),
+                "name": _csv_safe(record.customer_name or ""),
+                "health_score": record.health_score,
+                "risk_level": record.risk_level,
+                "segment": _csv_safe(record.segment or ""),
+                "confidence_level": _csv_safe(record.confidence_level or ""),
+                "feedback_count": record.feedback_count,
+                "last_feedback_at": record.last_feedback_at.isoformat() if record.last_feedback_at else "",
+                "last_active_at": (
+                    usage_map[record.customer_email].isoformat()
+                    if usage_map.get(record.customer_email) else ""
+                ),
+                "churn_probability": (
+                    str(record.churn_probability) if record.churn_probability is not None else ""
+                ),
+                "tags": _csv_safe("|".join(record.tags or [])),
+                "cs_owner_email": _csv_safe(owner_email),
+            }
+
+        if len(batch) < _EXPORT_BATCH_SIZE:
+            break
+        offset += _EXPORT_BATCH_SIZE
+
+
+def _csv_stream(rows):
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_EXPORT_CSV_COLUMNS)
+
+    writer.writeheader()
+    yield buf.getvalue()
+    buf.seek(0)
+    buf.truncate(0)
+
+    for row in rows:
+        writer.writerow(row)
+        yield buf.getvalue()
+        buf.seek(0)
+        buf.truncate(0)
+
+
+@router.get(
+    "/export",
+    dependencies=[Depends(require_feature("customer_health_scores"))],
+)
+def export_customers(
+    sort_by: str = Query("health_score"),
+    sort_order: str = Query("asc"),
+    risk_level: Optional[str] = Query(None),
+    segment: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    include_archived: bool = Query(False),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Stream all customers matching the given filters as a CSV file.
+
+    Same query params as `GET /api/v1/customers/` (segment, risk_level,
+    search, include_archived, sort_by, sort_order). Paginates internally
+    (batches of 500) rather than materializing the whole org in memory.
+
+    Columns: email, name, health_score, risk_level, segment,
+    confidence_level, feedback_count, last_feedback_at, last_active_at,
+    churn_probability, tags (pipe-joined), cs_owner_email. `sentiment_trend`
+    is intentionally omitted (avoids a per-row N+1 query on export).
+    """
+    if sort_by not in VALID_SORT_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid sort_by value '{sort_by}'. Must be one of: {', '.join(sorted(VALID_SORT_FIELDS))}",
+        )
+
+    if risk_level is not None and risk_level not in VALID_RISK_LEVELS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid risk_level '{risk_level}'. Must be one of: {', '.join(sorted(VALID_RISK_LEVELS))}",
+        )
+
+    if segment is not None and segment not in SEGMENT_SLUGS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid segment '{segment}'. Must be one of: {', '.join(SEGMENT_SLUGS)}",
+        )
+
+    rows = _export_rows(
+        db,
+        current_org,
+        segment=segment,
+        risk_level=risk_level,
+        search=search,
+        include_archived=include_archived,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    filename = f"customers-{segment or 'all'}.csv"
+    return StreamingResponse(
+        _csv_stream(rows),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bulk tag + assign-owner  (segment-actions / bulk-actions-api, Phase 4)
+# ---------------------------------------------------------------------------
+
+_TAG_MAX_LENGTH = 50
+_TAG_CAP_PER_CUSTOMER = 20
+
+
+class BulkTagRequest(BaseModel):
+    cohort: Cohort
+    tags: List[str]
+    mode: Literal["add", "remove"]
+
+    @field_validator("tags")
+    @classmethod
+    def _clean_tags(cls, v: List[str]) -> List[str]:
+        """Trim, drop empties, dedupe (order-preserving), enforce max length."""
+        cleaned: List[str] = []
+        seen = set()
+        for raw in v:
+            tag = raw.strip()
+            if not tag:
+                continue
+            if len(tag) > _TAG_MAX_LENGTH:
+                raise ValueError(
+                    f"Tag '{tag[:20]}...' exceeds the {_TAG_MAX_LENGTH}-character limit"
+                )
+            if tag not in seen:
+                seen.add(tag)
+                cleaned.append(tag)
+        return cleaned
+
+
+class BulkAssignOwnerRequest(BaseModel):
+    cohort: Cohort
+    user_id: Optional[int] = None
+
+
+@router.post(
+    "/bulk/tags",
+    response_model=BulkActionSummary,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def bulk_tag_customers(
+    body: BulkTagRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Add or remove tags across a resolved cohort of customers. Admin/owner only.
+
+    `mode="add"` unions each customer's existing tags with `tags`; `mode="remove"`
+    subtracts `tags` from each customer's existing tags. `tags` are trimmed,
+    deduped, and empty entries dropped (422 if any exceeds 50 characters). If
+    applying the change would leave a customer with more than 20 tags, that
+    customer is left **unchanged** and reported in `errors` (not silently
+    truncated, and not counted toward `updated`).
+    """
+    rows, skipped = resolve_cohort(db, current_org, body.cohort)
+    change_set = set(body.tags)
+    updated = 0
+    errors: List[str] = []
+
+    for record in rows:
+        existing = set(record.tags or [])
+        new_tags = (existing | change_set) if body.mode == "add" else (existing - change_set)
+
+        if len(new_tags) > _TAG_CAP_PER_CUSTOMER:
+            errors.append(
+                f"{record.customer_email}: would exceed the {_TAG_CAP_PER_CUSTOMER}-tag "
+                f"limit ({len(new_tags)} after applying) — not updated"
+            )
+            continue
+
+        record.tags = sorted(new_tags)
+        updated += 1
+
+    db.commit()
+
+    return BulkActionSummary(matched=len(rows), updated=updated, skipped=skipped, errors=errors)
+
+
+@router.post(
+    "/bulk/assign-owner",
+    response_model=BulkActionSummary,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def bulk_assign_owner(
+    body: BulkAssignOwnerRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Set (or clear, with `user_id: null`) the CS owner across a resolved
+    cohort of customers. Admin/owner only.
+
+    `user_id` must be an active member of the caller's organization (any
+    role) — a non-member, cross-org, or deactivated `user_id` returns `422`
+    before any row is touched. `null` clears the owner for every customer in
+    the cohort.
+    """
+    if body.user_id is not None:
+        owner = db.query(User).filter(
+            User.id == body.user_id,
+            User.organization_id == current_org.id,
+            User.is_deactivated == False,
+        ).first()
+        if owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"user_id {body.user_id} is not an active member of your organization",
+            )
+
+    rows, skipped = resolve_cohort(db, current_org, body.cohort)
+    updated = 0
+    for record in rows:
+        record.cs_owner_user_id = body.user_id
+        updated += 1
+
+    db.commit()
+
+    return BulkActionSummary(matched=len(rows), updated=updated, skipped=skipped, errors=[])
 
 
 @router.get(
@@ -409,6 +794,16 @@ def get_customer_profile(
             )
             for a in action_records
         ]
+
+    # segment-actions: tags + assigned CS owner (internal profile only; the shared
+    # serializer feeds the public API too, so we add these here to avoid changing it).
+    profile_data["tags"] = record.tags or []
+    owner_ref = None
+    if record.cs_owner_user_id is not None:
+        owner = db.query(User.id, User.email).filter(User.id == record.cs_owner_user_id).first()
+        if owner:
+            owner_ref = CustomerOwnerRef(id=owner.id, email=owner.email)
+    profile_data["cs_owner"] = owner_ref
 
     return CustomerProfileResponse(
         **{k: v for k, v in profile_data.items() if k in CustomerProfileResponse.model_fields},

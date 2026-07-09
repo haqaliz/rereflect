@@ -223,6 +223,34 @@ and no rule matched. It's exposed on the customer list (`GET /api/v1/customers/`
 `?segment=` filter) and on the Customer 360 profile (internal and public API) — see
 [docs/API.md](API.md) for the full slug reference.
 
+## Customer bulk actions
+
+The **Customers** page supports selecting a *cohort* of customers — either an explicit row
+selection, or "Select all N matching this filter" (segment / risk level / search) — and running
+a bulk action against it:
+
+- **Export CSV** — streams `GET /api/v1/customers/export` (same filters as the list) as a file
+  download. No row limit; the backend paginates internally rather than materializing the whole
+  org in memory.
+- **Tag** — add or remove operator-managed tags across the cohort (`POST
+  /api/v1/customers/bulk/tags`). Admin/owner only. Tags are capped at 50 characters and 20 tags
+  per customer; a customer that would exceed the cap is left unchanged and reported back in the
+  response instead of being silently truncated.
+- **Assign owner** — set (or clear, via "Unassign") the CS owner across the cohort (`POST
+  /api/v1/customers/bulk/assign-owner`). Admin/owner only. The chosen owner must be an active
+  member of your organization.
+- **Run playbook** — queue a churn playbook across the cohort (`POST
+  /api/v1/playbooks/{id}/run-batch`). Requires the Business+ `churn_playbooks` feature. The
+  run-batch cohort only supports **segment** or an explicit **email list** (not the full
+  risk-level/search filter vocabulary) — narrow a risk-level- or search-only selection to a
+  single segment, or select customers individually, before running a playbook. The UI shows an
+  affected-count preview (`?count_only=true` — never queues anything) before you confirm, and
+  blocks the run if the resolved cohort exceeds the **500-customer batch cap** (a real run
+  returns `422` for the same reason if you bypass the UI).
+
+Tags and the assigned CS owner are visible as chips/badges on both the customer list and the
+Customer 360 profile page.
+
 ## Connecting HubSpot CRM enrichment
 
 Rereflect can sync contacts and company data from HubSpot to enrich the Customer 360

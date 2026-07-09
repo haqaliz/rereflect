@@ -293,5 +293,42 @@ describe('CustomerProfilePage - low confidence badge', () => {
   });
 });
 
+describe('CustomerProfilePage - tags + CS owner', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: vi.fn(() => 'mock-token'), setItem: vi.fn(), removeItem: vi.fn() },
+      writable: true,
+    });
+    (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
+    (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
+    (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getTimeline as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [], next_cursor: null });
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('no usage'));
+  });
+
+  it('renders tags chips and the assigned CS owner when present', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      tags: ['vip', 'renewal-q3'],
+      cs_owner: { id: 9, email: 'csm@acme.com' },
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByText('vip')).toBeInTheDocument();
+      expect(screen.getByText('renewal-q3')).toBeInTheDocument();
+      expect(screen.getByText('csm@acme.com')).toBeInTheDocument();
+    });
+  });
+
+  it('renders an "Unassigned" owner badge and no tag chips when neither is set', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(mockProfile);
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByText('Unassigned')).toBeInTheDocument();
+    });
+  });
+});
+
 // Free plan redirect is tested via a component check: when plan=free the page renders null
 // and the useEffect calls router.push('/customers'). The mockPush test is verified above.
