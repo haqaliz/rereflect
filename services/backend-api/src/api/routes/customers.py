@@ -443,6 +443,23 @@ _EXPORT_CSV_COLUMNS = [
 _EXPORT_BATCH_SIZE = 500
 
 
+def _csv_safe(v):
+    """Neutralize CSV formula injection for a user-controllable string cell.
+
+    Strips embedded CR/LF (so a cell can't inject an extra "row" when opened
+    in a spreadsheet app) and prefixes a leading apostrophe when the value
+    starts with a character a spreadsheet app would interpret as a formula
+    trigger (=, +, -, @, tab), forcing it to be treated as inert text.
+    Non-string values pass through unchanged.
+    """
+    if not isinstance(v, str):
+        return v
+    v = v.replace("\r", " ").replace("\n", " ")
+    if v and v[0] in ("=", "+", "-", "@", "\t"):
+        return "'" + v
+    return v
+
+
 def _export_rows(
     db: Session,
     current_org: Organization,
@@ -501,12 +518,12 @@ def _export_rows(
         for record in batch:
             owner_email = record.cs_owner.email if record.cs_owner else ""
             yield {
-                "email": record.customer_email,
-                "name": record.customer_name or "",
+                "email": _csv_safe(record.customer_email),
+                "name": _csv_safe(record.customer_name or ""),
                 "health_score": record.health_score,
                 "risk_level": record.risk_level,
-                "segment": record.segment or "",
-                "confidence_level": record.confidence_level or "",
+                "segment": _csv_safe(record.segment or ""),
+                "confidence_level": _csv_safe(record.confidence_level or ""),
                 "feedback_count": record.feedback_count,
                 "last_feedback_at": record.last_feedback_at.isoformat() if record.last_feedback_at else "",
                 "last_active_at": (
@@ -516,8 +533,8 @@ def _export_rows(
                 "churn_probability": (
                     str(record.churn_probability) if record.churn_probability is not None else ""
                 ),
-                "tags": "|".join(record.tags or []),
-                "cs_owner_email": owner_email,
+                "tags": _csv_safe("|".join(record.tags or [])),
+                "cs_owner_email": _csv_safe(owner_email),
             }
 
         if len(batch) < _EXPORT_BATCH_SIZE:

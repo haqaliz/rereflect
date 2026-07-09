@@ -230,6 +230,30 @@ class TestExportRowsAndColumns:
         assert rows[0]["tags"] == ""
         assert rows[0]["cs_owner_email"] == ""
 
+    def test_csv_formula_injection_is_neutralized(self, client, org, user_and_headers, db):
+        """A customer name/tag starting with =, +, -, @ must not be written as a
+        live spreadsheet formula, and embedded CR/LF must be stripped so a
+        malicious cell can't fabricate an extra CSV "row"."""
+        _, headers = user_and_headers
+        make_ch(
+            db, org, "attacker@example.com",
+            customer_name="=cmd|'/C calc'!A1",
+            tags=["@evil", "line\r\nbreak"],
+        )
+        r = client.get("/api/v1/customers/export", headers=headers)
+        assert r.status_code == 200
+        rows = _parse_csv(r.text)
+        assert len(rows) == 1
+        row = rows[0]
+        # Leading apostrophe neutralizes formula execution in spreadsheet apps.
+        assert row["name"].startswith("'=")
+        assert row["name"] == "'=cmd|'/C calc'!A1"
+        # tags: "@evil" gets a leading apostrophe; embedded CR/LF is stripped.
+        tag_parts = row["tags"].split("|")
+        assert tag_parts[0] == "'@evil"
+        assert "\r" not in row["tags"]
+        assert "\n" not in row["tags"]
+
     def test_export_paginates_across_many_rows(self, client, org, user_and_headers, db):
         """Correctness across a batch boundary (small dataset, but exercises the paging loop)."""
         _, headers = user_and_headers
