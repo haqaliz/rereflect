@@ -37,6 +37,13 @@ class SentimentTrend(BaseModel):
     change_percent: float
 
 
+class CustomerOwnerRef(BaseModel):
+    # Compact CS-owner reference (segment-actions bulk assign-owner). The User model
+    # only has `email` — there is no name/full_name field — so this is {id, email} only.
+    id: int
+    email: str
+
+
 class CustomerListItem(BaseModel):
     customer_email: str
     customer_name: Optional[str] = None
@@ -50,6 +57,9 @@ class CustomerListItem(BaseModel):
     is_archived: bool
     has_llm_analysis: bool
     segment: Optional[str] = None
+    # segment-actions: operator-managed tags + assigned CS owner
+    tags: List[str] = []
+    cs_owner: Optional[CustomerOwnerRef] = None
 
 
 class RiskDistribution(BaseModel):
@@ -119,6 +129,9 @@ class CustomerProfileResponse(BaseModel):
     crm_deal_stage: Optional[str] = None
     crm_deal_amount: Optional[float] = None
     crm_provider: Optional[str] = None
+    # segment-actions: operator-managed tags + assigned CS owner
+    tags: List[str] = []
+    cs_owner: Optional[CustomerOwnerRef] = None
 
 
 class HealthHistoryItem(BaseModel):
@@ -335,6 +348,17 @@ def list_customers(
         )
         usage_map = {row.customer_email: row.last_active_at for row in usage_rows}
 
+    # Resolve CS owners for this page in a single query (no N+1).
+    owner_map: dict[int, CustomerOwnerRef] = {}
+    owner_ids = {r.cs_owner_user_id for r in records if r.cs_owner_user_id is not None}
+    if owner_ids:
+        owner_rows = (
+            db.query(User.id, User.email)
+            .filter(User.id.in_(owner_ids))
+            .all()
+        )
+        owner_map = {row.id: CustomerOwnerRef(id=row.id, email=row.email) for row in owner_rows}
+
     items = []
     for record in records:
         trend = _compute_sentiment_trend_for_customer(current_org.id, record.customer_email, db)
@@ -351,6 +375,8 @@ def list_customers(
             is_archived=record.is_archived or False,
             has_llm_analysis=record.llm_analysis_data is not None or record.llm_analysis is not None,
             segment=record.segment,
+            tags=record.tags or [],
+            cs_owner=owner_map.get(record.cs_owner_user_id),
         ))
 
     summary = _get_summary(current_org.id, include_archived, db)
@@ -409,6 +435,16 @@ def get_customer_profile(
             )
             for a in action_records
         ]
+
+    # segment-actions: tags + assigned CS owner (internal profile only; the shared
+    # serializer feeds the public API too, so we add these here to avoid changing it).
+    profile_data["tags"] = record.tags or []
+    owner_ref = None
+    if record.cs_owner_user_id is not None:
+        owner = db.query(User.id, User.email).filter(User.id == record.cs_owner_user_id).first()
+        if owner:
+            owner_ref = CustomerOwnerRef(id=owner.id, email=owner.email)
+    profile_data["cs_owner"] = owner_ref
 
     return CustomerProfileResponse(
         **{k: v for k, v in profile_data.items() if k in CustomerProfileResponse.model_fields},
