@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { ColumnDef } from '@tanstack/react-table';
+import { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import Link from 'next/link';
 import {
   Users,
@@ -31,6 +31,7 @@ import { StatCard } from '@/components/StatCard';
 import { RiskDistributionBar } from '@/components/customers/RiskDistributionBar';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
 import { DataTable } from '@/components/shared/data-table';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -123,9 +124,17 @@ export default function CustomersPage() {
   const [sortBy, setSortBy] = useState<CustomerListParams['sort_by']>('health_score');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [reanalyzing, setReanalyzing] = useState(false);
-  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [bulkChurnOpen, setBulkChurnOpen] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
+
+  // Row-selection keys are customer emails (getRowId={r => r.customer_email}),
+  // so selection state doubles as the selected-emails cohort.
+  const selectedEmails = useMemo(
+    () => Object.keys(rowSelection).filter((key) => rowSelection[key]),
+    [rowSelection]
+  );
+  const clearSelection = useCallback(() => setRowSelection({}), []);
 
   // Debounce search
   useEffect(() => {
@@ -217,6 +226,28 @@ export default function CustomersPage() {
 
   // Column definitions
   const columns: ColumnDef<CustomerListItem>[] = [
+    {
+      id: 'select',
+      header: ({ table }) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && 'indeterminate')
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
     {
       accessorKey: 'customer_email',
       header: 'Customer',
@@ -570,6 +601,9 @@ export default function CustomersPage() {
               pageSize={pageSize}
               onPageChange={setCurrentPage}
               onPageSizeChange={handlePageSizeChange}
+              rowSelection={rowSelection}
+              onRowSelectionChange={setRowSelection}
+              getRowId={(r) => r.customer_email}
               onSortingChange={(sorting) => {
                 if (sorting.length > 0) {
                   const s = sorting[0];
@@ -586,7 +620,7 @@ export default function CustomersPage() {
         open={bulkChurnOpen}
         onOpenChange={setBulkChurnOpen}
         selectedEmails={selectedEmails}
-        onSuccess={() => setSelectedEmails([])}
+        onSuccess={clearSelection}
       />
 
       <ChurnCsvImportDialog
