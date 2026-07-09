@@ -49,6 +49,8 @@ export interface ExecutionListResponse {
 export interface BatchRunResponse {
   queued: number;
   execution_ids: number[];
+  /** Size of the resolved cohort/probability selection (backend RunBatchResponse.matched). */
+  matched: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
