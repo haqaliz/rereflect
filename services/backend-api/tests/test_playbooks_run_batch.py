@@ -323,3 +323,190 @@ class TestRunBatchCharacterization:
         body = resp.json()
         assert "queued" in body
         assert "execution_ids" in body
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — cohort-based selection (emails / segment)
+# ---------------------------------------------------------------------------
+
+class TestRunBatchCohortEmails:
+    def test_emails_queues_one_execution_per_resolved_customer(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "a@x.com", churn_probability=0.10)
+        _make_customer_health(db, org, "b@x.com", churn_probability=0.90)
+        _make_customer_health(db, org, "c@x.com", churn_probability=0.50)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"emails": ["a@x.com", "b@x.com"]}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queued"] == 2
+        rows = db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.id.in_(body["execution_ids"])
+        ).all()
+        assert {r.customer_email for r in rows} == {"a@x.com", "b@x.com"}
+
+    def test_emails_skips_unknown_email(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "known@x.com", churn_probability=0.50)
+        # In-range customer NOT in the emails list — disambiguates cohort
+        # selection from an accidental fall-through to the probability-only
+        # path (which would also match this one and wrongly queue 2).
+        _make_customer_health(db, org, "not-selected@x.com", churn_probability=0.55)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"emails": ["known@x.com", "ghost@x.com"]}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["queued"] == 1
+
+    def test_emails_are_org_scoped(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        other_org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "mine@x.com", churn_probability=0.5)
+        # In-range, same-org customer NOT in the emails list — disambiguates
+        # from an accidental fall-through to the probability-only path.
+        _make_customer_health(db, org, "not-selected@x.com", churn_probability=0.5)
+        _make_customer_health(db, other_org, "theirs@x.com", churn_probability=0.5)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"emails": ["mine@x.com", "theirs@x.com"]}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["queued"] == 1
+
+
+class TestRunBatchCohortSegment:
+    def test_segment_queues_whole_cohort_org_scoped(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        other_org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "dormant1@x.com", churn_probability=0.3, segment="dormant")
+        _make_customer_health(db, org, "dormant2@x.com", churn_probability=0.4, segment="dormant")
+        _make_customer_health(db, org, "power@x.com", churn_probability=0.5, segment="power_user")
+        _make_customer_health(db, other_org, "other-dormant@x.com", churn_probability=0.3, segment="dormant")
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"segment": "dormant"}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queued"] == 2
+        rows = db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.id.in_(body["execution_ids"])
+        ).all()
+        assert {r.customer_email for r in rows} == {"dormant1@x.com", "dormant2@x.com"}
+
+    def test_segment_plus_probability_is_and_semantics(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "match@x.com", churn_probability=0.75, segment="at_risk")
+        # Right segment, wrong probability band.
+        _make_customer_health(db, org, "wrong-prob@x.com", churn_probability=0.10, segment="at_risk")
+        # Right probability, wrong segment.
+        _make_customer_health(db, org, "wrong-segment@x.com", churn_probability=0.75, segment="dormant")
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={
+                    "filters": {
+                        "segment": "at_risk",
+                        "probability_min": 0.60,
+                        "probability_max": 0.90,
+                    }
+                },
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queued"] == 1
+        rows = db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.id.in_(body["execution_ids"])
+        ).all()
+        assert {r.customer_email for r in rows} == {"match@x.com"}
+
+    def test_invalid_segment_slug_returns_422(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org)
+
+        resp = client.post(
+            f"/api/v1/playbooks/{pb.id}/run-batch",
+            json={"filters": {"segment": "not-a-real-segment"}},
+            headers=_headers(user),
+        )
+        assert resp.status_code == 422
+
+    def test_empty_resolved_cohort_queues_zero_not_an_error(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        # In-range customer that does NOT match the segment — disambiguates
+        # from an accidental fall-through to the probability-only path
+        # (which would wrongly queue 1).
+        _make_customer_health(db, org, "wrong-segment@x.com", churn_probability=0.5, segment="power_user")
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"segment": "happy_advocate"}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["queued"] == 0
+
+
+class TestRunBatchBackCompat:
+    def test_no_new_fields_behaves_exactly_as_probability_only_path(self, client: TestClient, db: Session):
+        """A request with none of {emails, segment} must be identical to the
+        Phase-1 characterized probability-only behavior."""
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.50, prob_max=0.80)
+        _make_customer_health(db, org, "in@x.com", churn_probability=0.60)
+        _make_customer_health(db, org, "out@x.com", churn_probability=0.10)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["queued"] == 1

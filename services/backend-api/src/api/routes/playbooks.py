@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -43,6 +43,7 @@ from src.schemas.churn_playbook import (
     PlaybookRunRequest,
     PlaybookUpdate,
 )
+from src.services.segment_service import SEGMENT_SLUGS
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,11 @@ _BATCH_RUN_DAILY_LIMITS: Dict[str, Optional[int]] = {
     "business": 50,
     "enterprise": None,  # unlimited
 }
+
+# Queue-safety cap for run-batch (matches CRM-writeback backfill cap). A
+# resolved cohort larger than this is rejected outright (422) rather than
+# silently truncated — see playbook-cohort-run spec.
+RUN_BATCH_MAX_CUSTOMERS = 500
 
 
 # ---------------------------------------------------------------------------
@@ -127,27 +133,82 @@ def _get_org_playbook_or_404(pb_id: int, org_id: int, db: Session) -> ChurnPlayb
 
 def _apply_run_batch_filters(
     query,
-    org_id: int,
+    org: Organization,
     playbook: ChurnPlaybook,
     filters: Optional[Dict[str, Any]],
 ):
-    """Apply customer health filters for run-batch; always scoped to org."""
-    query = query.filter(CustomerHealth.organization_id == org_id)
+    """Apply customer health filters for run-batch; always scoped to org.
 
-    prob_min = float(playbook.probability_min)
-    prob_max = float(playbook.probability_max)
+    Two selection modes:
 
-    # Override with explicit filter if provided
-    if filters:
-        if filters.get("probability_min") is not None:
-            prob_min = float(filters["probability_min"])
-        if filters.get("probability_max") is not None:
-            prob_max = float(filters["probability_max"])
+    - **Cohort mode** (``emails`` and/or ``segment`` present in ``filters``):
+      resolves customers via the shared ``_apply_customer_filters`` (segment)
+      / email-list matching used by ``resolve_cohort`` (bulk-actions-api), so
+      cohort selection never drifts from ``GET /api/v1/customers/``. Unknown
+      emails are simply not matched (skipped). When probability fields are
+      *also* given, they are ANDed on top of the cohort (segment/emails AND
+      probability band). ``time_to_churn_bucket`` is always ANDed if given.
+    - **Probability-only mode** (no ``emails``/``segment``): unchanged
+      behavior — probability band defaults to the playbook's own
+      ``probability_min``/``probability_max``, optionally overridden by
+      explicit filter values.
+    """
+    query = query.filter(CustomerHealth.organization_id == org.id)
 
-    query = query.filter(
-        CustomerHealth.churn_probability >= prob_min,
-        CustomerHealth.churn_probability <= prob_max,
-    )
+    cohort_emails = filters.get("emails") if filters else None
+    cohort_segment = filters.get("segment") if filters else None
+    has_cohort = cohort_emails is not None or cohort_segment is not None
+
+    if has_cohort:
+        if cohort_emails is not None:
+            normalized = [e.strip().lower() for e in cohort_emails]
+            unique_emails = list(dict.fromkeys(normalized))
+            # Empty list (or all-unknown, handled by the `.in_()` itself)
+            # simply resolves to zero rows — not an error.
+            query = query.filter(CustomerHealth.customer_email.in_(unique_emails))
+        else:
+            # Deferred import: avoids a circular import between
+            # src.api.routes.customers <-> src.api.routes.playbooks.
+            from src.api.routes.customers import _apply_customer_filters
+
+            query = _apply_customer_filters(query, org, segment=cohort_segment)
+
+        # AND with the probability band ONLY when probability fields are
+        # explicitly given alongside the cohort — segment/emails alone do
+        # not implicitly constrain by probability.
+        if filters and (
+            filters.get("probability_min") is not None
+            or filters.get("probability_max") is not None
+        ):
+            prob_min = (
+                float(filters["probability_min"])
+                if filters.get("probability_min") is not None
+                else 0.0
+            )
+            prob_max = (
+                float(filters["probability_max"])
+                if filters.get("probability_max") is not None
+                else 1.0
+            )
+            query = query.filter(
+                CustomerHealth.churn_probability >= prob_min,
+                CustomerHealth.churn_probability <= prob_max,
+            )
+    else:
+        prob_min = float(playbook.probability_min)
+        prob_max = float(playbook.probability_max)
+
+        # Override with explicit filter if provided
+        if filters:
+            if filters.get("probability_min") is not None:
+                prob_min = float(filters["probability_min"])
+            if filters.get("probability_max") is not None:
+                prob_max = float(filters["probability_max"])
+
+        query = query.filter(
+            CustomerHealth.churn_probability >= prob_min,
+            CustomerHealth.churn_probability <= prob_max,
+        )
 
     if filters and filters.get("time_to_churn_bucket"):
         query = query.filter(
@@ -177,11 +238,35 @@ class PlaybookDetailResponse(PlaybookResponse):
 
 
 class RunBatchFilters(BaseModel):
-    """Optional filters for run-batch."""
+    """Optional filters for run-batch.
+
+    Two independent selection axes that can be combined:
+
+    - Probability band: ``probability_min``/``probability_max`` (defaults to
+      the playbook's own band when omitted), plus ``time_to_churn_bucket``.
+    - Cohort: ``emails`` (explicit list) OR ``segment`` (validated against
+      ``SEGMENT_SLUGS``) — resolved via the same shared logic as
+      ``GET /api/v1/customers/`` / bulk actions. When a cohort is combined
+      with probability fields, they are ANDed (customer must match both).
+
+    A request with none of ``emails``/``segment`` set behaves exactly as
+    before this extension (back-compat).
+    """
 
     probability_min: Optional[float] = Field(None, ge=0.0, le=1.0)
     probability_max: Optional[float] = Field(None, ge=0.0, le=1.0)
     time_to_churn_bucket: Optional[str] = None
+    emails: Optional[List[str]] = None
+    segment: Optional[str] = None
+
+    @field_validator("segment")
+    @classmethod
+    def validate_segment(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in SEGMENT_SLUGS:
+            raise ValueError(
+                f"Invalid segment '{v}'. Must be one of: {', '.join(SEGMENT_SLUGS)}"
+            )
+        return v
 
 
 class RunBatchRequest(BaseModel):
@@ -455,7 +540,18 @@ def run_playbook_batch(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> RunBatchResponse:
-    """Run a playbook on all customers matching the probability filters."""
+    """Run a playbook on all customers matching the filters.
+
+    Filters (``body.filters``, all optional) combine two axes:
+
+    - Probability band (``probability_min``/``probability_max``,
+      ``time_to_churn_bucket``) — defaults to the playbook's own band when
+      omitted. Unchanged from the pre-cohort behavior.
+    - Cohort (``emails`` OR ``segment``) — resolved via the same shared
+      filter logic as ``GET /api/v1/customers/``, org-scoped. When combined
+      with probability fields, both must match (AND). Invalid ``segment``
+      values are rejected with 422 at the schema level.
+    """
     plan = current_org.plan or "free"
     daily_limit = _get_batch_run_daily_limit(plan)
     if daily_limit is not None:
@@ -485,7 +581,7 @@ def run_playbook_batch(
 
     customer_query = db.query(CustomerHealth)
     customer_query = _apply_run_batch_filters(
-        customer_query, current_org.id, pb, filters_dict
+        customer_query, current_org, pb, filters_dict
     )
     customers = customer_query.all()
 
