@@ -39,6 +39,9 @@ import { SEGMENT_SLUGS, SEGMENT_LABELS } from '@/lib/constants/segments';
 import { useAuth } from '@/contexts/AuthContext';
 import { BulkMarkChurnedDialog } from '@/components/customers/BulkMarkChurnedDialog';
 import { ChurnCsvImportDialog } from '@/components/customers/ChurnCsvImportDialog';
+import { BulkTagDialog } from '@/components/customers/BulkTagDialog';
+import { BulkAssignOwnerDialog } from '@/components/customers/BulkAssignOwnerDialog';
+import { BulkRunPlaybookDialog } from '@/components/customers/BulkRunPlaybookDialog';
 import { StatCard } from '@/components/StatCard';
 import { RiskDistributionBar } from '@/components/customers/RiskDistributionBar';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
@@ -793,6 +796,29 @@ export default function CustomersPage() {
         open={bulkChurnOpen}
         onOpenChange={setBulkChurnOpen}
         selectedEmails={selectedEmails}
+        onSuccess={clearSelection}
+      />
+
+      <BulkTagDialog
+        open={tagDialogOpen}
+        onOpenChange={setTagDialogOpen}
+        cohort={cohort}
+        cohortCount={cohortCount}
+        onSuccess={clearSelection}
+      />
+
+      <BulkAssignOwnerDialog
+        open={assignOwnerDialogOpen}
+        onOpenChange={setAssignOwnerDialogOpen}
+        cohort={cohort}
+        cohortCount={cohortCount}
+        onSuccess={clearSelection}
+      />
+
+      <BulkRunPlaybookDialog
+        open={runPlaybookDialogOpen}
+        onOpenChange={setRunPlaybookDialogOpen}
+        cohort={cohort}
         onSuccess={clearSelection}
       />
 

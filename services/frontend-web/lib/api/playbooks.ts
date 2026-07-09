@@ -1,4 +1,5 @@
 import apiClient from '../api-client';
+import type { Cohort } from './customers';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,6 +105,23 @@ export interface RunBatchFilters {
   time_to_churn_bucket?: string;
   emails?: string[];
   segment?: string;
+}
+
+/**
+ * Convert a segment-actions `Cohort` (`{emails}` or `{filter}`) into the
+ * subset of `RunBatchFilters` the run-batch cohort dimension supports
+ * (`emails` OR `segment` — not the full `CohortFilter`). Returns `null`
+ * when the cohort is in filter-mode but has no `segment` set (e.g. a
+ * risk_level- or search-only filter) — that filter shape has no run-batch
+ * equivalent, so the caller should block the run rather than silently
+ * falling back to a probability-only selection.
+ */
+export function cohortToRunBatchFilters(
+  cohort: Cohort
+): Pick<RunBatchFilters, 'emails' | 'segment'> | null {
+  if ('emails' in cohort) return { emails: cohort.emails };
+  if (cohort.filter.segment) return { segment: cohort.filter.segment };
+  return null;
 }
 
 export async function runPlaybookBatch(
