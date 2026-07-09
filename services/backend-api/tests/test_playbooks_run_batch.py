@@ -510,3 +510,131 @@ class TestRunBatchBackCompat:
 
         assert resp.status_code == 200
         assert resp.json()["queued"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — queue-safety cap (500) + count_only / matched preview
+# ---------------------------------------------------------------------------
+
+class TestRunBatchCap:
+    def test_cohort_over_cap_returns_422_and_queues_nothing(self, client: TestClient, db: Session):
+        org = _make_org(db, plan="enterprise")  # no daily limit noise
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        for i in range(501):
+            _make_customer_health(db, org, f"cap{i}@x.com", churn_probability=0.5)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert "501" in detail
+        assert "500" in detail
+        # Atomic — nothing queued.
+        assert db.query(ChurnPlaybookExecution).count() == 0
+
+    def test_cohort_at_cap_exactly_500_succeeds(self, client: TestClient, db: Session):
+        org = _make_org(db, plan="enterprise")
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        for i in range(500):
+            _make_customer_health(db, org, f"ok{i}@x.com", churn_probability=0.5)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["queued"] == 500
+
+    def test_daily_limit_accounts_for_full_cohort_size_up_front(self, client: TestClient, db: Session):
+        """A cohort that alone fits under the daily allowance, but pushes
+        today's total over it, must be rejected atomically (nothing queued) —
+        not partially queued until the limit is hit mid-loop."""
+        org = _make_org(db, plan="business")  # daily limit = 50
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _seed_executions_today(db, pb, org, 48)  # 2 remaining today
+        for i in range(5):
+            _make_customer_health(db, org, f"batch{i}@x.com", churn_probability=0.5)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 429
+        # Nothing from this batch should have been queued (atomic reject).
+        assert db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.customer_email.like("batch%")
+        ).count() == 0
+
+
+class TestRunBatchCountOnly:
+    def test_count_only_returns_matched_without_queuing(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "a@x.com", churn_probability=0.5)
+        _make_customer_health(db, org, "b@x.com", churn_probability=0.6)
+
+        resp = client.post(
+            f"/api/v1/playbooks/{pb.id}/run-batch?count_only=true",
+            json={"filters": {}},
+            headers=_headers(user),
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["matched"] == 2
+        assert body["queued"] == 0
+        assert body["execution_ids"] == []
+        assert db.query(ChurnPlaybookExecution).count() == 0
+
+    def test_count_only_reflects_cohort_filter(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "dormant1@x.com", churn_probability=0.3, segment="dormant")
+        _make_customer_health(db, org, "power@x.com", churn_probability=0.5, segment="power_user")
+
+        resp = client.post(
+            f"/api/v1/playbooks/{pb.id}/run-batch?count_only=true",
+            json={"filters": {"segment": "dormant"}},
+            headers=_headers(user),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["matched"] == 1
+
+    def test_normal_run_batch_response_includes_matched(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(db, org, "a@x.com", churn_probability=0.5)
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["matched"] == 1
+        assert body["queued"] == 1

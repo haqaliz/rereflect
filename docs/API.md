@@ -271,6 +271,58 @@ Body: { "cohort": {...}, "user_id": 42 }
 non-member or deactivated `user_id` returns `422` before any rows are touched. `null` clears
 the owner for every customer in the cohort.
 
+### Churn playbook cohort run (segment-actions)
+
+`POST /api/v1/playbooks/{id}/run-batch` runs a churn playbook against a set of customers,
+gated by `churn_playbooks` (Business+). Requires `filters` in the body; two independent,
+combinable selection axes:
+
+- **Probability band** — `probability_min`/`probability_max` (defaults to the playbook's own
+  band when omitted) and `time_to_churn_bucket`. This is the original targeting mode.
+- **Cohort** — `emails: list[str]` OR `segment: str` (validated against the same
+  [segment slugs](#customer-segments); an unrecognized value returns `422`). Resolved via the
+  same shared filter logic as `GET /api/v1/customers/` — never a second implementation.
+
+When a cohort (`emails`/`segment`) is combined with a probability band, they **AND** —
+customers must match both. A request with neither `emails` nor `segment` behaves exactly as
+before this extension (probability-only, back-compat).
+
+```
+POST /api/v1/playbooks/42/run-batch
+Body: { "filters": { "segment": "at_risk", "probability_min": 0.60 } }
+
+200 { "queued": 7, "execution_ids": [101, 102, ...], "matched": 7 }
+```
+
+**Queue-safety cap.** The resolved cohort size (`matched`) is computed up front. If it exceeds
+`RUN_BATCH_MAX_CUSTOMERS` (500), the request is rejected atomically:
+
+```
+422 "cohort of 812 exceeds batch cap of 500; narrow the filter"
+```
+
+Nothing is queued when the cap is hit — no partial batches. The plan's daily execution limit
+(`_BATCH_RUN_DAILY_LIMITS`, e.g. 50/day on Business) is also checked against the **full**
+resolved cohort size up front (`today_count + matched`), not incrementally while queuing, so a
+large cohort can't partially queue before the daily allowance is exhausted.
+
+**Affected-count preview.** Pass `?count_only=true` to resolve and return `{matched}` without
+queuing anything — no cap or daily-limit checks apply, it's a pure dry-run for a UI
+"N customers will be affected" confirmation step:
+
+```
+POST /api/v1/playbooks/42/run-batch?count_only=true
+Body: { "filters": { "segment": "dormant" } }
+
+200 { "queued": 0, "execution_ids": [], "matched": 34 }
+```
+
+Every normal (non-`count_only`) run-batch response also includes `matched`, so the caller can
+show "queued N of N" without a separate request.
+
+Unknown emails in the `emails` cohort are simply not matched (skipped, not an error) — same
+semantics as `resolve_cohort`.
+
 ## Common gotchas
 
 - **Trailing slashes** — match the route exactly; a missing/extra `/` can return 422.

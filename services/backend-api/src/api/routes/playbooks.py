@@ -276,10 +276,17 @@ class RunBatchRequest(BaseModel):
 
 
 class RunBatchResponse(BaseModel):
-    """Response from run-batch."""
+    """Response from run-batch.
+
+    ``matched`` is the size of the resolved cohort/probability selection,
+    computed up front (before the queue-safety cap and daily-limit checks).
+    For a ``count_only=true`` dry-run, ``matched`` is populated and
+    ``queued``/``execution_ids`` are empty — nothing is queued.
+    """
 
     queued: int
     execution_ids: List[int]
+    matched: int = 0
 
 
 class ExecutionListResponse(BaseModel):
@@ -536,6 +543,14 @@ def run_playbook(
 def run_playbook_batch(
     playbook_id: int,
     body: RunBatchRequest,
+    count_only: bool = Query(
+        False,
+        description=(
+            "If true, resolve and return the matched-customer count only — "
+            "no executions are queued. Use for the UI affected-count preview "
+            "before confirming a run."
+        ),
+    ),
     current_org: Organization = Depends(get_current_org),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -551,20 +566,25 @@ def run_playbook_batch(
       filter logic as ``GET /api/v1/customers/``, org-scoped. When combined
       with probability fields, both must match (AND). Invalid ``segment``
       values are rejected with 422 at the schema level.
-    """
-    plan = current_org.plan or "free"
-    daily_limit = _get_batch_run_daily_limit(plan)
-    if daily_limit is not None:
-        today_count = _count_executions_today(current_org.id, db)
-        if today_count >= daily_limit:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"Daily batch run limit reached. Plan '{plan}' allows "
-                    f"{daily_limit} executions per day."
-                ),
-            )
 
+    Query params:
+
+    - ``count_only=true``: resolve and return ``{matched}`` without queuing
+      anything. Does not apply the cap or daily-limit checks — it is a pure
+      preview so the UI can show "N customers will be affected" before the
+      operator confirms.
+
+    Safety:
+
+    - The resolved cohort size (``matched``) is computed up front. If it
+      exceeds ``RUN_BATCH_MAX_CUSTOMERS`` (500), the request is rejected
+      with 422 (``"cohort of N exceeds batch cap of 500; narrow the
+      filter"``) and **nothing is queued** — atomic, no partial batches.
+    - The daily execution limit is checked against ``today_count +
+      matched`` (the full resolved cohort size), not incrementally inside
+      the queuing loop, so a large cohort cannot partially queue before
+      hitting the plan's daily allowance.
+    """
     pb = (
         db.query(ChurnPlaybook)
         .filter(
@@ -583,6 +603,37 @@ def run_playbook_batch(
     customer_query = _apply_run_batch_filters(
         customer_query, current_org, pb, filters_dict
     )
+    matched_count = customer_query.count()
+
+    if count_only:
+        return RunBatchResponse(queued=0, execution_ids=[], matched=matched_count)
+
+    if matched_count > RUN_BATCH_MAX_CUSTOMERS:
+        logger.info(
+            f"run-batch cap exceeded: org={current_org.id} playbook={pb.id} "
+            f"matched={matched_count} cap={RUN_BATCH_MAX_CUSTOMERS}"
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"cohort of {matched_count} exceeds batch cap of "
+                f"{RUN_BATCH_MAX_CUSTOMERS}; narrow the filter"
+            ),
+        )
+
+    plan = current_org.plan or "free"
+    daily_limit = _get_batch_run_daily_limit(plan)
+    if daily_limit is not None:
+        today_count = _count_executions_today(current_org.id, db)
+        if today_count + matched_count > daily_limit:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Daily batch run limit reached. Plan '{plan}' allows "
+                    f"{daily_limit} executions per day."
+                ),
+            )
+
     customers = customer_query.all()
 
     execution_ids: List[int] = []
@@ -608,4 +659,6 @@ def run_playbook_batch(
         except Exception as exc:
             logger.warning(f"Celery dispatch failed for execution {ex_id}: {exc}")
 
-    return RunBatchResponse(queued=len(execution_ids), execution_ids=execution_ids)
+    return RunBatchResponse(
+        queued=len(execution_ids), execution_ids=execution_ids, matched=matched_count
+    )
