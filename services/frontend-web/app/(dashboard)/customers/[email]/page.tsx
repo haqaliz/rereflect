@@ -17,6 +17,8 @@ import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { ChurnTimelineBadge } from '@/components/customers/ChurnTimelineBadge';
 import { SegmentBadge } from '@/components/customers/SegmentBadge';
+import { TagChips } from '@/components/customers/TagChips';
+import { CsOwnerBadge } from '@/components/customers/CsOwnerBadge';
 import { ComponentProgressBars } from '@/components/customers/ComponentProgressBars';
 import { HealthTimeline } from '@/components/customers/HealthTimeline';
 import { UsageTimeline } from '@/components/customers/UsageTimeline';
@@ -678,11 +680,18 @@ export default function CustomerProfilePage() {
                       </p>
                     </TooltipContent>
                   </Tooltip>
+                  <CsOwnerBadge owner={profile.cs_owner} size="sm" />
                   <span>{profile.feedback_count} feedbacks</span>
                   {profile.last_feedback_at && (
                     <span>Last active {getRelativeTime(profile.last_feedback_at)}</span>
                   )}
                 </div>
+
+                {(profile.tags?.length ?? 0) > 0 && (
+                  <div className="mt-2">
+                    <TagChips tags={profile.tags} size="sm" maxVisible={8} />
+                  </div>
+                )}
 
                 {showConfidenceBadge && (
                   <div className="mt-2">

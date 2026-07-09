@@ -54,6 +54,8 @@ const mockListResponse = {
       last_feedback_at: '2026-02-18T14:30:00Z',
       sentiment_trend: { direction: 'declining', change_percent: -12.5 },
       is_archived: false,
+      tags: ['vip', 'renewal-q3'],
+      cs_owner: { id: 9, email: 'csm@acme.com' },
     },
     {
       customer_email: 'jane@corp.io',
@@ -202,5 +204,18 @@ describe('CustomersPage — cohort mode + bulk-actions toolbar', () => {
         expect.objectContaining({ sort_by: 'health_score', sort_order: 'asc' })
       );
     });
+  });
+
+  it('renders tags chips and the assigned CS owner on the list', async () => {
+    renderWithQueryClient(<CustomersPage />);
+    await waitFor(() => {
+      expect(screen.getByText('john@acme.com')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('vip')).toBeInTheDocument();
+    expect(screen.getByText('renewal-q3')).toBeInTheDocument();
+    expect(screen.getByText('csm@acme.com')).toBeInTheDocument();
+    // jane@corp.io has no tags/owner in the fixture — renders cleanly, no crash
+    expect(screen.getByText('Unassigned')).toBeInTheDocument();
   });
 });

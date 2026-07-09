@@ -35,6 +35,8 @@ import {
 } from '@/lib/api/customers';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { SegmentBadge } from '@/components/customers/SegmentBadge';
+import { TagChips } from '@/components/customers/TagChips';
+import { CsOwnerBadge } from '@/components/customers/CsOwnerBadge';
 import { SEGMENT_SLUGS, SEGMENT_LABELS } from '@/lib/constants/segments';
 import { useAuth } from '@/contexts/AuthContext';
 import { BulkMarkChurnedDialog } from '@/components/customers/BulkMarkChurnedDialog';
@@ -486,6 +488,16 @@ export default function CustomersPage() {
         </div>
       ),
       cell: ({ row }) => <SegmentBadge segment={row.original.segment} size="sm" />,
+    },
+    {
+      accessorKey: 'tags',
+      header: 'Tags',
+      cell: ({ row }) => <TagChips tags={row.original.tags} size="sm" />,
+    },
+    {
+      accessorKey: 'cs_owner',
+      header: 'CS Owner',
+      cell: ({ row }) => <CsOwnerBadge owner={row.original.cs_owner} size="sm" />,
     },
   ];
 
