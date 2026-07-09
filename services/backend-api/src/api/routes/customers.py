@@ -2,14 +2,14 @@
 Customer 360 API routes.
 Provides list, profile, history, feedbacks, and activity endpoints.
 """
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, asc, desc, or_
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import csv
 import io
 
@@ -18,9 +18,17 @@ from src.models.customer_health import CustomerHealth
 from src.models.customer_analysis_action import CustomerAnalysisAction
 from src.models.customer_usage import CustomerUsage
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org, get_current_user, require_feature, require_system_admin
+from src.api.dependencies import (
+    get_current_org,
+    get_current_user,
+    require_feature,
+    require_system_admin,
+    require_admin_or_owner,
+)
 from src.models.user import User
 from src.config.plans import has_feature
+from src.schemas.cohort import Cohort, BulkActionSummary
+from src.services.cohort_service import resolve_cohort
 from src.services.segment_service import SEGMENT_SLUGS
 
 router = APIRouter(prefix="/api/v1/customers", tags=["customers"])
@@ -617,6 +625,128 @@ def export_customers(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# Bulk tag + assign-owner  (segment-actions / bulk-actions-api, Phase 4)
+# ---------------------------------------------------------------------------
+
+_TAG_MAX_LENGTH = 50
+_TAG_CAP_PER_CUSTOMER = 20
+
+
+class BulkTagRequest(BaseModel):
+    cohort: Cohort
+    tags: List[str]
+    mode: Literal["add", "remove"]
+
+    @field_validator("tags")
+    @classmethod
+    def _clean_tags(cls, v: List[str]) -> List[str]:
+        """Trim, drop empties, dedupe (order-preserving), enforce max length."""
+        cleaned: List[str] = []
+        seen = set()
+        for raw in v:
+            tag = raw.strip()
+            if not tag:
+                continue
+            if len(tag) > _TAG_MAX_LENGTH:
+                raise ValueError(
+                    f"Tag '{tag[:20]}...' exceeds the {_TAG_MAX_LENGTH}-character limit"
+                )
+            if tag not in seen:
+                seen.add(tag)
+                cleaned.append(tag)
+        return cleaned
+
+
+class BulkAssignOwnerRequest(BaseModel):
+    cohort: Cohort
+    user_id: Optional[int] = None
+
+
+@router.post(
+    "/bulk/tags",
+    response_model=BulkActionSummary,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def bulk_tag_customers(
+    body: BulkTagRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Add or remove tags across a resolved cohort of customers. Admin/owner only.
+
+    `mode="add"` unions each customer's existing tags with `tags`; `mode="remove"`
+    subtracts `tags` from each customer's existing tags. `tags` are trimmed,
+    deduped, and empty entries dropped (422 if any exceeds 50 characters). If
+    applying the change would leave a customer with more than 20 tags, that
+    customer is left **unchanged** and reported in `errors` (not silently
+    truncated, and not counted toward `updated`).
+    """
+    rows, skipped = resolve_cohort(db, current_org, body.cohort)
+    change_set = set(body.tags)
+    updated = 0
+    errors: List[str] = []
+
+    for record in rows:
+        existing = set(record.tags or [])
+        new_tags = (existing | change_set) if body.mode == "add" else (existing - change_set)
+
+        if len(new_tags) > _TAG_CAP_PER_CUSTOMER:
+            errors.append(
+                f"{record.customer_email}: would exceed the {_TAG_CAP_PER_CUSTOMER}-tag "
+                f"limit ({len(new_tags)} after applying) — not updated"
+            )
+            continue
+
+        record.tags = sorted(new_tags)
+        updated += 1
+
+    db.commit()
+
+    return BulkActionSummary(matched=len(rows), updated=updated, skipped=skipped, errors=errors)
+
+
+@router.post(
+    "/bulk/assign-owner",
+    response_model=BulkActionSummary,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def bulk_assign_owner(
+    body: BulkAssignOwnerRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Set (or clear, with `user_id: null`) the CS owner across a resolved
+    cohort of customers. Admin/owner only.
+
+    `user_id` must be an active member of the caller's organization (any
+    role) — a non-member, cross-org, or deactivated `user_id` returns `422`
+    before any row is touched. `null` clears the owner for every customer in
+    the cohort.
+    """
+    if body.user_id is not None:
+        owner = db.query(User).filter(
+            User.id == body.user_id,
+            User.organization_id == current_org.id,
+            User.is_deactivated == False,
+        ).first()
+        if owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"user_id {body.user_id} is not an active member of your organization",
+            )
+
+    rows, skipped = resolve_cohort(db, current_org, body.cohort)
+    updated = 0
+    for record in rows:
+        record.cs_owner_user_id = body.user_id
+        updated += 1
+
+    db.commit()
+
+    return BulkActionSummary(matched=len(rows), updated=updated, skipped=skipped, errors=[])
 
 
 @router.get(
