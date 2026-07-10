@@ -1,0 +1,197 @@
+{
+  "generated_at": "2026-07-10T11:31:13.178534+00:00",
+  "model_id": "cardiffnlp/twitter-roberta-base-sentiment-latest",
+  "model_revision": "main",
+  "public": {
+    "set_name": "public",
+    "n": 180,
+    "vader": {
+      "provider": "vader",
+      "n": 180,
+      "macro_precision": 0.7919819819819821,
+      "macro_recall": 0.7611111111111111,
+      "macro_f1": 0.7580266800305461,
+      "accuracy": 0.7611111111111111,
+      "per_class": {
+        "positive": {
+          "precision": 0.75,
+          "recall": 0.85,
+          "f1": 0.7968749999999999,
+          "support": 60
+        },
+        "neutral": {
+          "precision": 0.68,
+          "recall": 0.85,
+          "f1": 0.7555555555555556,
+          "support": 60
+        },
+        "negative": {
+          "precision": 0.9459459459459459,
+          "recall": 0.5833333333333334,
+          "f1": 0.7216494845360825,
+          "support": 60
+        }
+      },
+      "confusion_matrix": {
+        "positive": {
+          "positive": 51,
+          "neutral": 7,
+          "negative": 2
+        },
+        "neutral": {
+          "positive": 9,
+          "neutral": 51,
+          "negative": 0
+        },
+        "negative": {
+          "positive": 8,
+          "neutral": 17,
+          "negative": 35
+        }
+      }
+    },
+    "transformer": {
+      "provider": "transformer",
+      "n": 180,
+      "macro_precision": 0.8686799359414321,
+      "macro_recall": 0.7999999999999999,
+      "macro_f1": 0.7780853026754665,
+      "accuracy": 0.8,
+      "per_class": {
+        "positive": {
+          "precision": 0.6382978723404256,
+          "recall": 1.0,
+          "f1": 0.7792207792207793,
+          "support": 60
+        },
+        "neutral": {
+          "precision": 1.0,
+          "recall": 0.4,
+          "f1": 0.5714285714285715,
+          "support": 60
+        },
+        "negative": {
+          "precision": 0.967741935483871,
+          "recall": 1.0,
+          "f1": 0.9836065573770492,
+          "support": 60
+        }
+      },
+      "confusion_matrix": {
+        "positive": {
+          "positive": 60,
+          "neutral": 0,
+          "negative": 0
+        },
+        "neutral": {
+          "positive": 34,
+          "neutral": 24,
+          "negative": 2
+        },
+        "negative": {
+          "positive": 0,
+          "neutral": 0,
+          "negative": 60
+        }
+      }
+    },
+    "macro_f1_delta": 0.02005862264492042,
+    "meets_target": null
+  },
+  "in_domain": {
+    "set_name": "in_domain",
+    "n": 169,
+    "vader": {
+      "provider": "vader",
+      "n": 169,
+      "macro_precision": 0.547713529856387,
+      "macro_recall": 0.5472459639126305,
+      "macro_f1": 0.52642089093702,
+      "accuracy": 0.5562130177514792,
+      "per_class": {
+        "positive": {
+          "precision": 0.5972222222222222,
+          "recall": 0.8269230769230769,
+          "f1": 0.6935483870967742,
+          "support": 52
+        },
+        "neutral": {
+          "precision": 0.25,
+          "recall": 0.3333333333333333,
+          "f1": 0.28571428571428575,
+          "support": 36
+        },
+        "negative": {
+          "precision": 0.7959183673469388,
+          "recall": 0.48148148148148145,
+          "f1": 0.6,
+          "support": 81
+        }
+      },
+      "confusion_matrix": {
+        "positive": {
+          "positive": 43,
+          "neutral": 7,
+          "negative": 2
+        },
+        "neutral": {
+          "positive": 16,
+          "neutral": 12,
+          "negative": 8
+        },
+        "negative": {
+          "positive": 13,
+          "neutral": 29,
+          "negative": 39
+        }
+      }
+    },
+    "transformer": {
+      "provider": "transformer",
+      "n": 169,
+      "macro_precision": 0.49474648158858686,
+      "macro_recall": 0.6314498258942703,
+      "macro_f1": 0.5524467054263565,
+      "accuracy": 0.7396449704142012,
+      "per_class": {
+        "positive": {
+          "precision": 0.6710526315789473,
+          "recall": 0.9807692307692307,
+          "f1": 0.7968749999999999,
+          "support": 52
+        },
+        "neutral": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 36
+        },
+        "negative": {
+          "precision": 0.8131868131868132,
+          "recall": 0.9135802469135802,
+          "f1": 0.8604651162790699,
+          "support": 81
+        }
+      },
+      "confusion_matrix": {
+        "positive": {
+          "positive": 51,
+          "neutral": 0,
+          "negative": 1
+        },
+        "neutral": {
+          "positive": 20,
+          "neutral": 0,
+          "negative": 16
+        },
+        "negative": {
+          "positive": 5,
+          "neutral": 2,
+          "negative": 74
+        }
+      }
+    },
+    "macro_f1_delta": 0.026025814489336496,
+    "meets_target": false
+  }
+}
