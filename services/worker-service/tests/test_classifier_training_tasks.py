@@ -140,6 +140,29 @@ def _get_tasks():
 
 
 # ---------------------------------------------------------------------------
+# Redis-lock / incumbent-predictor patch helpers (shared by Phase 3+ tests)
+# ---------------------------------------------------------------------------
+
+
+def _fake_redis_lock_acquired():
+    """A fake `_get_redis()` whose lock() always acquires successfully."""
+    fake_lock = MagicMock()
+    fake_lock.acquire.return_value = True
+    fake_r = MagicMock()
+    fake_r.lock.return_value = fake_lock
+    return fake_r, fake_lock
+
+
+def _fake_redis_lock_denied():
+    """A fake `_get_redis()` whose lock() never acquires (already held)."""
+    fake_lock = MagicMock()
+    fake_lock.acquire.return_value = False
+    fake_r = MagicMock()
+    fake_r.lock.return_value = fake_lock
+    return fake_r, fake_lock
+
+
+# ---------------------------------------------------------------------------
 # Phase 1 — module skeleton + schedule wiring
 # ---------------------------------------------------------------------------
 
@@ -258,3 +281,57 @@ def test_purge_returns_deleted_count(db):
         result = tasks.purge_old_classifier_models()
 
     assert result == {"deleted": 2}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — retrain_org below-gate skip path
+# ---------------------------------------------------------------------------
+#
+# Below min_labels, evaluate() short-circuits BEFORE ever calling train_fn or
+# incumbent_predict (pure stdlib path, no sklearn needed) — so these tests seed a
+# real (< MIN_LABELS) AICorrection set and let the REAL build_sentiment_dataset +
+# evaluate run for real. Only the Redis lock is faked (no real Redis in tests).
+
+
+def test_retrain_org_below_gate_writes_one_skipped_eval_run(db):
+    org = _make_org(db)
+    _seed_corrections(db, org.id, count=5)  # well under MIN_LABELS=20
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    runs = db.query(OrgClassifierEvalRun).all()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.decision == "skipped"
+    assert run.n == 5
+    assert run.notes
+    assert run.duration_ms is not None and run.duration_ms >= 0
+    assert run.classifier_model_id is None
+
+
+def test_retrain_org_below_gate_creates_zero_model_rows(db):
+    org = _make_org(db)
+    _seed_corrections(db, org.id, count=5)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_below_gate_return_shape(db):
+    org = _make_org(db)
+    _seed_corrections(db, org.id, count=5)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db)
+
+    assert result["skipped"] is True
+    assert "promoted" not in result

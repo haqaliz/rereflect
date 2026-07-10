@@ -79,12 +79,87 @@ def _build_incumbent_predict() -> Callable[[str], str]:
     return _predict
 
 
+def _round_or_none(value: Optional[float]) -> Optional[float]:
+    return round(value, 4) if value is not None else None
+
+
+def _skip_result(reason: str, **extra) -> dict:
+    """Convenience dict for a skipped retrain_org run — no "promoted"/"retained" key,
+    per the spec's return-shape contract."""
+    return {"decision": "skipped", "skipped": True, "reason": reason, **extra}
+
+
 def retrain_org(org_id: int, db: Session) -> dict:
     """Retrain the sentiment corrections classifier for a single org.
 
-    Stub — implemented phase by phase via TDD (Phase 3+).
+    1. Acquire a per-org Redis advisory lock (non-blocking) — an overlapping refit
+       already owns this org: write nothing, return {"skipped": True, "reason": "locked"}.
+    2. Build the org's sentiment dataset (aspect B's dataset builder).
+    3. evaluate() the challenger against a live incumbent predictor, leakage-free (the
+       core trains the challenger itself, only on its own train-split/per-fold).
+    4. Always insert one org_classifier_eval_runs row keyed off the decision.
+    5. Only when decision == "promoted": train the FINAL production artifact on ALL
+       rows (train_classifier(dataset)) and persist it via an atomic swap (deactivate
+       prior active row, insert new active row, flush to populate its id before the
+       eval-run FK, commit as one transaction).
+
+    Below-gate (decision == "skipped") writes zero model rows.
+
+    Below-gate handling (Phase 3) is implemented here; promote/retained handling is
+    added in later phases.
     """
-    return {}
+    r = _get_redis()
+    lock = r.lock(f"lock:classifier_refit:{org_id}", timeout=_LOCK_TIMEOUT_SECONDS, blocking=False)
+
+    if not lock.acquire(blocking=False):
+        logger.info("retrain_org: org=%s already refitting, skipping", org_id)
+        return _skip_result("locked")
+
+    try:
+        start = time.monotonic()
+
+        # Lazy imports — the core owns sklearn/numpy; this module stays CPU-only-safe.
+        from analyzer.corrections_classifier.dataset import build_sentiment_dataset
+        from analyzer.corrections_classifier.evaluate import evaluate
+        from analyzer.corrections_classifier.labels import MARGIN, MIN_LABELS
+        from analyzer.corrections_classifier.trainer import train_classifier
+
+        dataset = build_sentiment_dataset(org_id, db)
+        incumbent_predict = _build_incumbent_predict()
+
+        result = evaluate(
+            dataset,
+            incumbent_predict,
+            train_fn=train_classifier,
+            min_labels=MIN_LABELS,
+            margin=MARGIN,
+        )
+        duration_ms = int((time.monotonic() - start) * 1000)
+
+        if result.decision == "skipped":
+            eval_run = OrgClassifierEvalRun(
+                organization_id=org_id,
+                classifier_model_id=None,
+                classifier_type=_CLASSIFIER_TYPE,
+                incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
+                challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
+                macro_f1_delta=_round_or_none(result.macro_f1_delta),
+                decision=result.decision,
+                n=result.n,
+                duration_ms=duration_ms,
+                notes=result.notes,
+            )
+            db.add(eval_run)
+            db.commit()
+            return _skip_result("below_min_labels", n=result.n, notes=result.notes)
+
+        # Promote/retained handling — added in later phases.
+        raise NotImplementedError(f"retrain_org: decision={result.decision!r} not yet handled")
+    finally:
+        try:
+            lock.release()
+        except redis.exceptions.LockNotOwnedError:
+            pass
 
 
 def retrain_all_orgs() -> dict:
