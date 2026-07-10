@@ -591,3 +591,101 @@ def test_retrain_org_releases_lock_in_finally(db):
             tasks.retrain_org(org.id, db)
 
     fake_lock.release.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — retrain_all_orgs orchestration + per-org isolation + folded purge
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_all_orgs_iterates_all_orgs(db):
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+
+    with patch("src.tasks.classifier_training.retrain_org") as mock_retrain, \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_retrain.return_value = {"decision": "retained", "retained": True, "n": 25}
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        tasks.retrain_all_orgs()
+
+    assert mock_retrain.call_count == 3
+    called_org_ids = {c.args[0] for c in mock_retrain.call_args_list}
+    assert called_org_ids == {org1.id, org2.id, org3.id}
+
+
+def test_retrain_all_orgs_aggregates_counts(db):
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+
+    results_by_org = {
+        org1.id: {"decision": "promoted", "promoted": True, "n": 25},
+        org2.id: {"decision": "retained", "retained": True, "n": 25},
+        org3.id: {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+    }
+
+    def side_effect(org_id, session):
+        return results_by_org[org_id]
+
+    with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()
+
+    assert result == {"trained": 2, "promoted": 1, "skipped": 1}
+
+
+def test_retrain_all_orgs_isolates_per_org_exception(db):
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+
+    processed = []
+
+    def side_effect(org_id, session):
+        processed.append(org_id)
+        if org_id == org2.id:
+            raise RuntimeError("simulated retrain failure")
+        return {"decision": "retained", "retained": True, "n": 25}
+
+    with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()  # must not raise
+
+    assert set(processed) == {org1.id, org2.id, org3.id}
+    assert result["trained"] == 2  # org1 + org3 succeeded; org2's exception isolated
+
+
+def test_retrain_all_orgs_runs_purge_once(db):
+    _make_org(db, "Org1")
+    _make_org(db, "Org2")
+
+    with patch("src.tasks.classifier_training.retrain_org") as mock_retrain, \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_retrain.return_value = {"decision": "retained", "retained": True, "n": 25}
+        mock_purge.return_value = {"deleted": 3}
+
+        tasks = _get_tasks()
+        tasks.retrain_all_orgs()
+
+    mock_purge.assert_called_once()

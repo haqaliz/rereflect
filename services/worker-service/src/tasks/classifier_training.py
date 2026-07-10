@@ -226,12 +226,43 @@ def retrain_org(org_id: int, db: Session) -> dict:
 
 def retrain_all_orgs() -> dict:
     """Weekly driver: retrain every org's sentiment classifier, then purge old
-    inactive artifacts.
+    inactive artifacts (folded — no separate beat slot).
+
+    Per-org try/except isolation: one org's exception is logged and skipped, it
+    never aborts the batch.
 
     Beat: Mondays 06:30 UTC.
-    Stub — implemented phase by phase via TDD (Phase 7).
+    Returns {"trained": n, "promoted": m, "skipped": k}. "trained" counts every org
+    that was actually evaluated (decision in {"promoted", "retained"}); "skipped"
+    counts below-gate and lock-miss orgs; "promoted" is the subset of "trained"
+    that was actually promoted.
     """
-    return {}
+    trained = 0
+    promoted = 0
+    skipped = 0
+
+    with get_db_session() as db:
+        org_ids = _all_org_ids(db)
+        for org_id in org_ids:
+            try:
+                result = retrain_org(org_id, db)
+            except Exception:
+                logger.error("retrain_all_orgs: org=%s FAILED", org_id, exc_info=True)
+                continue
+
+            if result.get("skipped"):
+                skipped += 1
+            else:
+                trained += 1
+                if result.get("promoted"):
+                    promoted += 1
+
+    purge_result = purge_old_classifier_models()
+    logger.info(
+        "retrain_all_orgs: done trained=%s promoted=%s skipped=%s purged=%s",
+        trained, promoted, skipped, purge_result.get("deleted"),
+    )
+    return {"trained": trained, "promoted": promoted, "skipped": skipped}
 
 
 def purge_old_classifier_models() -> dict:
