@@ -1,15 +1,27 @@
-"""Sentiment analysis module using VADER and transformers."""
+"""Sentiment analysis — composes a pluggable SentimentProvider with provider-independent
+label / is_extreme / churn_risk logic. Default provider ('vader') is byte-identical to the
+pre-provider-abstraction implementation (see tests/test_sentiment_characterization.py)."""
 import re
-from typing import Dict, Tuple
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from typing import Dict, Union
+
+from .sentiment_providers.base import SentimentProvider
+from .sentiment_providers.factory import SentimentProviderFactory
+from .sentiment_providers.providers.vader import VaderSentimentProvider
 
 
 class SentimentAnalyzer:
     """Analyzes sentiment of feedback text."""
 
-    def __init__(self):
-        """Initialize sentiment analyzer with VADER."""
-        self.vader = SentimentIntensityAnalyzer()
+    def __init__(self, provider: Union[str, SentimentProvider] = "vader"):
+        """Initialize sentiment analyzer with a pluggable sentiment provider (default: VADER)."""
+        self._provider: SentimentProvider = (
+            provider if isinstance(provider, SentimentProvider)
+            else SentimentProviderFactory.create(provider)
+        )
+        self._fallback_provider: SentimentProvider = (
+            self._provider if isinstance(self._provider, VaderSentimentProvider)
+            else VaderSentimentProvider()
+        )
 
         # Patterns for detecting extreme negativity
         self.extreme_negative_patterns = [
@@ -36,18 +48,12 @@ class SentimentAnalyzer:
         Returns:
             Dict with sentiment scores and classification
         """
-        # Get VADER scores
-        scores = self.vader.polarity_scores(text)
+        # Get provider scores
+        scores = self._provider.score(text)
 
         # Classify sentiment based on compound score
         compound = scores['compound']
-
-        if compound >= 0.05:
-            sentiment_label = 'positive'
-        elif compound <= -0.05:
-            sentiment_label = 'negative'
-        else:
-            sentiment_label = 'neutral'
+        sentiment_label = self._classify_label(compound)
 
         # Check for extreme negativity
         is_extreme = self._is_extreme_negative(text)
@@ -62,6 +68,15 @@ class SentimentAnalyzer:
             'is_extreme': is_extreme,
             'churn_risk': has_churn_risk
         }
+
+    @staticmethod
+    def _classify_label(compound: float) -> str:
+        """Classify sentiment label from a compound score."""
+        if compound >= 0.05:
+            return 'positive'
+        elif compound <= -0.05:
+            return 'negative'
+        return 'neutral'
 
     def _is_extreme_negative(self, text: str) -> bool:
         """Check if text contains extreme negative language."""
