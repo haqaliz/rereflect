@@ -83,8 +83,7 @@ def _deserialize(db_row) -> Optional[LoadedClassifier]:
     """Deserialize an OrgClassifierModel row's model_json into a LoadedClassifier.
 
     Falls back to None (incumbent) on any structural defect — mirrors
-    probability_updater._deserialize_model's defensiveness (worker-service).
-    Never raises.
+    probability_updater._deserialize_model's defensiveness. Never raises.
     """
     try:
         mj = db_row.model_json
@@ -183,3 +182,78 @@ def load_active_classifier(org_id: int, classifier_type: str, db) -> Optional[Lo
             org_id, classifier_type, exc, exc_info=True,
         )
         return None
+
+
+def apply_classifier_override(
+    feedback,
+    db,
+    *,
+    classifier_type: str = "sentiment",
+    allow_override: bool = False,
+) -> None:
+    """Compute the challenger classifier prediction and apply off/shadow/auto
+    semantics to `feedback`. Shared by both sentiment call-sites; the ONLY
+    divergence between the worker and backend copies is which value the
+    call-site passes for `allow_override` (see module docstring).
+
+    off (resolve_classifier returns None):
+        No-op. `feedback.sentiment_label`/`sentiment_score` untouched, no
+        shadow log line — byte-identical to the pre-aspect analyzer output.
+    shadow (or auto with allow_override=False):
+        Compute the challenger label/score and log a single
+        `rereflect.classifier.shadow` INFO line. Never mutate `feedback`.
+    auto with allow_override=True and a promoted (non-None) model:
+        Log the shadow line AND overwrite `feedback.sentiment_label`/
+        `sentiment_score` with the challenger's (score_from_proba, already
+        clamped to [-1, 1] by aspect B).
+    auto with no promoted model / a corrupt artifact (loader returns None):
+        Incumbent retained — no log line (nothing to log; there is no
+        challenger prediction to disclose).
+
+    Never raises: any internal failure (resolver, loader, or predict) is
+    caught and swallowed, leaving `feedback` exactly as the caller left it.
+    """
+    try:
+        from src.services.classifier_resolver import resolve_classifier
+
+        org_id = getattr(feedback, "organization_id", None)
+        if org_id is None or db is None:
+            return
+
+        resolved = resolve_classifier(org_id, classifier_type, db)
+        if resolved is None:
+            return  # off / unconfigured — no-op.
+
+        loaded = load_active_classifier(org_id, classifier_type, db)
+        if loaded is None:
+            return  # No promoted model / corrupt artifact — incumbent retained.
+
+        text = getattr(feedback, "text", None) or ""
+        challenger_label, challenger_score = loaded.predict(text)
+
+        shadow_logger.info(
+            "classifier shadow prediction",
+            extra={
+                "org_id": org_id,
+                "feedback_id": getattr(feedback, "id", None),
+                "classifier_type": classifier_type,
+                "incumbent_label": getattr(feedback, "sentiment_label", None),
+                "incumbent_score": getattr(feedback, "sentiment_score", None),
+                "challenger_label": challenger_label,
+                "challenger_score": challenger_score,
+                "model_id": loaded.model_id,
+                "fit_at": loaded.fit_at.isoformat() if loaded.fit_at else None,
+            },
+        )
+
+        if resolved.mode == "auto" and allow_override:
+            feedback.sentiment_label = challenger_label
+            feedback.sentiment_score = challenger_score
+        # shadow, or auto+allow_override=False (backend inline ownership) —
+        # log-only, no mutation.
+
+    except Exception as exc:
+        logger.warning(
+            "apply_classifier_override: failed for classifier_type=%s: %s",
+            classifier_type, exc, exc_info=True,
+        )
