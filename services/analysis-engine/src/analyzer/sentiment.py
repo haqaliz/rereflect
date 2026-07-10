@@ -1,12 +1,15 @@
 """Sentiment analysis — composes a pluggable SentimentProvider with provider-independent
 label / is_extreme / churn_risk logic. Default provider ('vader') is byte-identical to the
 pre-provider-abstraction implementation (see tests/test_sentiment_characterization.py)."""
+import logging
 import re
 from typing import Dict, Union
 
 from .sentiment_providers.base import SentimentProvider
 from .sentiment_providers.factory import SentimentProviderFactory
 from .sentiment_providers.providers.vader import VaderSentimentProvider
+
+logger = logging.getLogger(__name__)
 
 
 class SentimentAnalyzer:
@@ -48,8 +51,15 @@ class SentimentAnalyzer:
         Returns:
             Dict with sentiment scores and classification
         """
-        # Get provider scores
-        scores = self._provider.score(text)
+        # Get provider scores (falls back to VADER on provider failure — never raises)
+        try:
+            scores = self._provider.score(text)
+        except Exception as exc:
+            logger.warning(
+                "Sentiment provider %s failed to score text (falling back to VADER): %s",
+                type(self._provider).__name__, exc, exc_info=True,
+            )
+            scores = self._fallback_provider.score(text)
 
         # Classify sentiment based on compound score
         compound = scores['compound']
