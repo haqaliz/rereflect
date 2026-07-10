@@ -419,6 +419,15 @@ def _analyze_feedback_item(feedback, db=None) -> None:
 
     if llm_result:
         _apply_llm_result(feedback, llm_result)
+        # Per-org corrections-classifier override (M5.2 predict-seam-resolver) —
+        # mirrors the keyword-fallback call-site in _apply_keyword_analysis;
+        # only one of these two branches executes per item, so this is not a
+        # double-call.
+        if db is not None:
+            from src.services.classifier_predict import apply_classifier_override
+            apply_classifier_override(
+                feedback, db, classifier_type="sentiment", allow_override=True,
+            )
         # Also compute heuristic factors for explainability (LLM doesn't return factor breakdown)
         _, churn_factors = _compute_heuristic_churn_risk(feedback, db)
         feedback.churn_risk_factors = churn_factors
@@ -585,6 +594,17 @@ def _apply_keyword_analysis(feedback, db=None) -> None:
 
     # Tag extraction
     feedback.tags = tag_extractor.extract_tags(feedback.text)
+
+    # Per-org corrections-classifier override (M5.2 predict-seam-resolver).
+    # Worker owns the authoritative `auto` override (allow_override=True):
+    # off is a no-op; shadow only logs; auto overwrites sentiment_label/score
+    # in place before the churn-risk heuristic below reads them. Lazy import,
+    # never raises (see classifier_predict.apply_classifier_override).
+    if db is not None:
+        from src.services.classifier_predict import apply_classifier_override
+        apply_classifier_override(
+            feedback, db, classifier_type="sentiment", allow_override=True,
+        )
 
     # Keyword fallback: compute heuristic churn risk score (9-factor with db)
     churn_score, churn_factors = _compute_heuristic_churn_risk(feedback, db)
