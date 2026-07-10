@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from src.models import Organization, OrgAIConfig
 from src.services.sentiment_resolver import (
     resolve_sentiment_provider,
     ResolvedSentiment,
@@ -90,14 +91,47 @@ class TestResolveSentimentProvider:
 
         assert result is None
 
-    def test_cross_org_isolation(self):
-        config_a = _make_config(sentiment_provider="transformer")
-        db_a = _make_db_with_config(config_a)
-        result_a = resolve_sentiment_provider(org_id=1, db=db_a)
+    def test_cross_org_isolation(self, db):
+        """AC5: org A=transformer, org B=unset, resolved independently, no leakage.
 
-        config_b = _make_config(sentiment_provider=None)
-        db_b = _make_db_with_config(config_b)
-        result_b = resolve_sentiment_provider(org_id=2, db=db_b)
+        Uses the worker suite's real DB session fixture (in-memory SQLite,
+        see tests/conftest.py) with two real OrgAIConfig rows for two distinct
+        organizations, queried through the SAME session. This actually
+        exercises `filter_by(organization_id=...)` scoping — a MagicMock
+        hard-wired to always return one config would never catch a resolver
+        that forgot to filter by org_id.
+        """
+        org_a = Organization(name="Org A", plan="pro")
+        org_b = Organization(name="Org B", plan="pro")
+        db.add(org_a)
+        db.add(org_b)
+        db.commit()
+        db.refresh(org_a)
+        db.refresh(org_b)
+
+        config_a = OrgAIConfig(
+            organization_id=org_a.id,
+            default_provider="openai",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+            sentiment_provider="transformer",
+        )
+        db.add(config_a)
+        db.commit()
+        # org_b intentionally gets NO OrgAIConfig row at all — the real "unset"
+        # case. (Note: passing sentiment_provider=None explicitly would NOT
+        # exercise this — the Column(default='vader') fires on INSERT whenever
+        # no value is set, including an explicit None, so a config_b row would
+        # actually persist as 'vader'.) Only one row exists in the whole table,
+        # for org_a — if filter_by(organization_id=...) scoping were broken
+        # (e.g. an unscoped `.first()`), resolving org_b would wrongly return
+        # org_a's 'transformer' config instead of None.
+
+        # Resolve both against the SAME session — proves filter_by(organization_id=...)
+        # scoping, not just "different fixtures produce different results".
+        result_a = resolve_sentiment_provider(org_id=org_a.id, db=db)
+        result_b = resolve_sentiment_provider(org_id=org_b.id, db=db)
 
         assert result_a is not None
         assert result_a.provider == "transformer"

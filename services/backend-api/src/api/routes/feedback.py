@@ -18,6 +18,7 @@ import sys
 import os
 import csv
 import io
+import threading
 
 router = APIRouter(prefix="/api/v1/feedback", tags=["feedback"])
 
@@ -27,6 +28,11 @@ router = APIRouter(prefix="/api/v1/feedback", tags=["feedback"])
 # this cache additionally avoids re-running SentimentAnalyzer(provider=...)
 # construction, including its try/except fallback path, on every request).
 _sentiment_analyzer_cache: dict = {}
+# Guards the cache-miss construction path only (see get_sentiment_analyzer):
+# the threaded backend can otherwise let two concurrent cold requests each
+# construct a ~500MB transformer analyzer before either one populates the
+# cache.
+_sentiment_analyzer_cache_lock = threading.Lock()
 
 
 # Lazy import to add analysis-engine to path only when needed
@@ -42,23 +48,35 @@ def get_sentiment_analyzer(provider_name: str = "vader"):
     if provider_name in _sentiment_analyzer_cache:
         return _sentiment_analyzer_cache[provider_name]
 
-    analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../analysis-engine"))
-    if analysis_engine_path not in sys.path:
-        sys.path.insert(0, analysis_engine_path)
-    from analyzer.sentiment import SentimentAnalyzer
+    # Cache miss: serialize construction so two concurrent cold requests on
+    # the threaded backend don't each load a redundant (potentially ~500MB
+    # transformer) analyzer. Double-checked locking keeps the hit path
+    # (above) lock-free.
+    with _sentiment_analyzer_cache_lock:
+        if provider_name in _sentiment_analyzer_cache:
+            return _sentiment_analyzer_cache[provider_name]
 
-    try:
-        analyzer = SentimentAnalyzer(provider=provider_name)
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning(
-            "get_sentiment_analyzer: failed to construct provider=%r, falling "
-            "back to VADER: %s", provider_name, exc, exc_info=True,
-        )
-        analyzer = SentimentAnalyzer()
+        analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../analysis-engine"))
+        if analysis_engine_path not in sys.path:
+            sys.path.insert(0, analysis_engine_path)
+        from analyzer.sentiment import SentimentAnalyzer
 
-    _sentiment_analyzer_cache[provider_name] = analyzer
-    return analyzer
+        try:
+            analyzer = SentimentAnalyzer(provider=provider_name)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "get_sentiment_analyzer: failed to construct provider=%r, falling "
+                "back to VADER: %s", provider_name, exc, exc_info=True,
+            )
+            # Cache the VADER fallback under the *requested* provider_name key:
+            # a transient transformer construction failure will keep serving
+            # VADER for this key until process restart. Acceptable — these are
+            # offline/HF_HUB_OFFLINE deps that are present-or-absent, not flaky.
+            analyzer = SentimentAnalyzer()
+
+        _sentiment_analyzer_cache[provider_name] = analyzer
+        return analyzer
 
 
 def get_categorizers():

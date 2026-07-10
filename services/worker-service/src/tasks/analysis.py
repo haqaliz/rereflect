@@ -79,8 +79,15 @@ def get_sentiment_analyzer(provider_name: str = "vader"):
             "get_sentiment_analyzer: failed to construct provider=%r, falling "
             "back to VADER: %s", provider_name, exc, exc_info=True,
         )
+        # Cache the VADER fallback under the *requested* provider_name key: a
+        # transient transformer construction failure keeps serving VADER for
+        # this key until process restart. Acceptable — these are offline/
+        # HF_HUB_OFFLINE deps that are present-or-absent, not flaky.
         analyzer = SentimentAnalyzer()
 
+    # No lock here: Celery (prefork) runs each worker in its own OS process,
+    # so there's no intra-process race on this module-level cache like the
+    # threaded FastAPI backend has (see backend-api/src/api/routes/feedback.py).
     _sentiment_analyzer_cache[provider_name] = analyzer
     return analyzer
 
