@@ -11,7 +11,11 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --extra-index-url resolves the CPU-only torch wheel (PyPI's default torch wheel on
+# Linux pulls the multi-GB CUDA build; this repo is CPU-only by design). Non-torch
+# packages still resolve from PyPI normally.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.txt
 
 # Copy application code
 COPY . .

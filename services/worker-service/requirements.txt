@@ -12,6 +12,10 @@ vaderSentiment==3.3.2
 nltk==3.9.1
 scikit-learn==1.5.2
 
+# Transformer sentiment provider (opt-in; mandatory dep once any org enables it — M5.1)
+transformers==4.46.0
+torch==2.5.0
+
 # Utilities
 python-dotenv==1.0.1
 pydantic==2.8.2

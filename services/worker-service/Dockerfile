@@ -12,7 +12,11 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements first for better caching
 COPY worker-service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --extra-index-url resolves the CPU-only torch wheel (PyPI's default torch wheel on
+# Linux pulls the multi-GB CUDA build; this repo is CPU-only by design). Non-torch
+# packages still resolve from PyPI normally.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements.txt
 
 # Download NLTK data for sentiment analysis
 RUN python -c "import nltk; nltk.download('vader_lexicon', quiet=True); nltk.download('punkt', quiet=True)"

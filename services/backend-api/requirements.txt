@@ -40,3 +40,10 @@ sentry-sdk[fastapi]==2.22.0  # Sentry SDK with FastAPI + SQLAlchemy integrations
 # Churn calibration (ChurnCalibrator service — M4.1)
 scikit-learn==1.5.2          # IsotonicRegression for probability calibration
 numpy>=1.26.4                # Array math for bootstrap CI
+
+# Analysis engine dependencies (sync sentiment re-analyze path — feedback.py)
+vaderSentiment==3.3.2         # Default sentiment provider (was missing — sync path couldn't run any provider)
+
+# Transformer sentiment provider (opt-in; mandatory dep once any org enables it — M5.1)
+transformers==4.46.0
+torch==2.5.0
