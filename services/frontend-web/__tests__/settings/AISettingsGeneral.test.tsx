@@ -13,6 +13,7 @@ vi.mock('@/lib/api/ai-settings', () => ({
   aiSettingsAPI: {
     get: vi.fn(),
     update: vi.fn(),
+    getSentimentStatus: vi.fn(),
   },
 }));
 
@@ -34,6 +35,7 @@ const mockSettings = {
   default_provider: 'openai',
   base_url: null,
   model_embeddings: null,
+  sentiment_provider: 'vader',
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',
@@ -53,16 +55,21 @@ describe('AISettingsGeneral', () => {
       ...mockSettings,
       ai_analysis_enabled: false,
     });
+    vi.mocked(aiSettingsAPI.getSentimentStatus).mockResolvedValue({
+      provider: 'vader',
+      available: true,
+      model: null,
+    });
   });
 
   it('renders the AI toggle', () => {
     render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    expect(screen.getByRole('switch')).toBeInTheDocument();
+    expect(screen.getByLabelText('Enable AI Analysis')).toBeInTheDocument();
   });
 
   it('shows toggle as checked when AI is enabled', () => {
     render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    const toggle = screen.getByRole('switch');
+    const toggle = screen.getByLabelText('Enable AI Analysis');
     expect(toggle).toHaveAttribute('aria-checked', 'true');
   });
 
@@ -73,7 +80,7 @@ describe('AISettingsGeneral', () => {
         onUpdate={vi.fn()}
       />
     );
-    const toggle = screen.getByRole('switch');
+    const toggle = screen.getByLabelText('Enable AI Analysis');
     expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
 
@@ -84,7 +91,7 @@ describe('AISettingsGeneral', () => {
       ai_analysis_enabled: false,
     });
     render(<AISettingsGeneral settings={mockSettings} onUpdate={onUpdate} />);
-    const toggle = screen.getByRole('switch');
+    const toggle = screen.getByLabelText('Enable AI Analysis');
     fireEvent.click(toggle);
     await waitFor(() => {
       expect(aiSettingsAPI.update).toHaveBeenCalledWith({ ai_analysis_enabled: false });
