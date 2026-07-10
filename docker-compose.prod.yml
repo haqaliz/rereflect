@@ -61,8 +61,8 @@ services:
   # ===========================================
   backend:
     build:
-      context: ./services/backend-api
-      dockerfile: Dockerfile
+      context: ./services
+      dockerfile: backend-api/Dockerfile
     container_name: rereflect-backend
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rereflect}:${POSTGRES_PASSWORD:-rereflect_secret}@postgres:5432/${POSTGRES_DB:-rereflect}

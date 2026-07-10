@@ -37,8 +37,8 @@ services:
   # Backend API
   backend:
     build:
-      context: ./services/backend-api
-      dockerfile: Dockerfile
+      context: ./services
+      dockerfile: backend-api/Dockerfile
     container_name: rereflect-backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customer_feedback_saas

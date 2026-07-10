@@ -1,4 +1,7 @@
 # Backend API Dockerfile
+# Build context must be ./services (parent directory) -- see docker-compose.yml /
+# docker-compose.prod.yml. Needed so this image can COPY the sibling analysis-engine
+# package (see below); a Docker build context cannot COPY anything outside itself.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -10,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY backend-api/requirements.txt .
 # --extra-index-url resolves the CPU-only torch wheel (PyPI's default torch wheel on
 # Linux pulls the multi-GB CUDA build; this repo is CPU-only by design). Non-torch
 # packages still resolve from PyPI normally.
@@ -18,7 +21,14 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
     -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY backend-api/ .
+
+# Copy analysis engine so the sync sentiment re-analyze path
+# (src/api/routes/feedback.py's sys.path lookup: dirname(__file__) + "../../../analysis-engine",
+# which resolves to /app/analysis-engine at runtime) finds a real 'analyzer' package.
+# Pre-existing bug fix: this COPY + the build-context move above were both previously
+# missing, so `analyzer` could never import in a real backend-api image.
+COPY analysis-engine/src/analyzer ./analysis-engine/analyzer
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
