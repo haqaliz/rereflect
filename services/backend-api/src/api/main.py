@@ -29,6 +29,7 @@ from src.api.routes import api_keys as api_keys_router  # noqa: E402 — Feature
 from src.api.routes import public_api as public_api_router  # noqa: E402 — Feature C: Public REST API surface
 from src.api.routes import churn_analytics as churn_analytics_router  # noqa: E402 — M4.1 Cohort Analytics
 from src.api.routes import churn_accuracy as churn_accuracy_router  # noqa: E402 — M4.1 Accuracy API
+from src.api.routes import ai_readiness as ai_readiness_router  # noqa: E402 — M5.0 readiness report
 from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 Churn Playbooks
 from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402 — product-usage ingest receiver
 from src.seed import seed_admin_user, seed_system_templates
@@ -271,6 +272,8 @@ app.include_router(churn_analytics_router.router)
 # Advanced Churn Prediction — Accuracy API (M4.1 Phase 6.2a)
 app.include_router(churn_accuracy_router.analytics_router)
 app.include_router(churn_accuracy_router.system_router)
+# AI training-readiness report (M5.0 — no ML, per-org data counts)
+app.include_router(ai_readiness_router.router)
 app.include_router(customers.router)
 # AI Copilot (M2.2) — folder router MUST come before conversations to avoid route conflicts
 app.include_router(conversation_folders.router)
