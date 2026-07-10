@@ -10,6 +10,7 @@ default) treats every instance as fully featured.
 - [Required environment variables](#required-environment-variables)
 - [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
 - [Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
+- [Local transformer sentiment model (opt-in, air-gap capable)](#local-transformer-sentiment-model-opt-in-air-gap-capable)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
 - [Send product-usage events](#send-product-usage-events)
 - [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment)
@@ -72,7 +73,10 @@ annotated list):
 Out of the box (`ai_analysis_enabled=false`, no LLM key), Rereflect runs the **free
 local VADER + keyword analysis pipeline**. Sentiment, pain-point, feature-request, and
 heuristic churn detection all work end-to-end with **no external API and no cost**.
-This is the default and recommended starting point.
+This is the default and recommended starting point. A further, still-local, still-$0,
+opt-in upgrade to a transformer-based sentiment model is also available — see
+[Local transformer sentiment model](#local-transformer-sentiment-model-opt-in-air-gap-capable)
+below.
 
 ## Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)
 
@@ -100,6 +104,70 @@ a wrong-but-confident answer.
 > Embeddings are provider/dimension-aware: switching the embedding model re-embeds the
 > built-in query templates automatically on the next startup. Vectors from different
 > providers are never mixed.
+
+## Local transformer sentiment model (opt-in, air-gap capable)
+
+VADER (keyword-based) remains Rereflect's **default** sentiment engine — it's free,
+fast, and needs nothing extra. A CPU transformer model
+([`cardiffnlp/twitter-roberta-base-sentiment-latest`](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest))
+is available as a **per-organization opt-in** (Settings → AI). This section only
+covers *getting the model weights onto your box* — the accuracy trade-offs of
+enabling it are documented separately, not here.
+
+### Fastest path (online, no pre-bake)
+
+Just enable the setting. The backend/worker containers download the model and
+tokenizer and cache them into `HF_HOME=/app/models` the first time any org's feedback
+is analyzed with the transformer provider selected — no rebuild needed. This requires
+one-time outbound network access from the container. The cache persists for the life
+of the container; if you recreate the container (`docker compose up --force-recreate`,
+image upgrades, etc.) with no volume mounted at `/app/models`, it re-downloads on next
+use. Mount a volume at `/app/models` if you want the cache to survive container
+recreation (same idea as the bundled `postgres_data`/`redis_data` volumes).
+
+### Air-gapped path (pre-bake at build time)
+
+For hosts with no runtime network access at all, bake the weights into the image at
+build time instead:
+
+```bash
+BAKE_SENTIMENT_MODEL=true docker compose -f docker-compose.prod.yml build backend worker
+```
+
+This runs the same `from_pretrained` download during `docker build` (so it still
+needs network access **at build time only**) and stores the result in `HF_HOME`
+inside the image — the resulting containers need no runtime network access for
+sentiment analysis. Belt-and-suspenders for a genuinely air-gapped box, also set these
+in your `.env` so the containers never attempt an outbound call even if one becomes
+reachable later:
+
+```bash
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+```
+
+Default builds (`BAKE_SENTIMENT_MODEL` unset or `false`) make **no** network call to
+Hugging Face and bake **no** weights — nothing changes for operators who never touch
+this setting.
+
+### Minimum RAM / first-request latency
+
+> Approximate, CPU-only, `roberta-base`-class model; confirm on your own hardware.
+> These are estimates, not a benchmark result — not marketing numbers.
+
+| | Estimate |
+|---|---|
+| Additional RAM per worker process (model loaded) | ~500 MB – 1 GB |
+| Cold model load (first request after container start) | low single-digit seconds |
+| Steady-state inference per feedback item (CPU) | tens of ms |
+
+### Image size note
+
+The `torch`/`transformers` **packages** themselves add roughly 250–350 MB to the
+worker/backend images unconditionally (present whether or not any org enables the
+transformer setting, since the deps must be importable for the opt-in to work at all).
+The `BAKE_SENTIMENT_MODEL=true` pre-bake additionally adds ~450–500 MB of model
+weights **only** when explicitly requested.
 
 ## Adding your own LLM key (BYOK)
 
