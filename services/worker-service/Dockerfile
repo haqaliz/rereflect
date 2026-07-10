@@ -4,6 +4,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Cache dir for any Hugging Face model download or pre-bake below. Always set --
+# costs nothing unset and implies no network access on its own.
+ENV HF_HOME=/app/models
+# Off by default: pull-and-cache-on-first-use is the default path for the opt-in
+# transformer sentiment provider (M5.1). Set to "true" at build time for air-gapped
+# installs that need the weights baked into the image (see the RUN step below).
+ARG BAKE_SENTIMENT_MODEL=false
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     libpq-dev \
@@ -20,6 +28,19 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 
 # Download NLTK data for sentiment analysis
 RUN python -c "import nltk; nltk.download('vader_lexicon', quiet=True); nltk.download('punkt', quiet=True)"
+
+# Optional build-time pre-bake of the transformer sentiment model for air-gapped installs.
+# Off by default (BAKE_SENTIMENT_MODEL=false) to keep the base image lean; the transformer
+# provider is opt-in per-org and, when enabled without a pre-baked cache, downloads and
+# caches the model into HF_HOME on first use instead (requires runtime network access once).
+# TODO(model-packaging): replace revision='main' with sentiment-provider-core's pinned
+# revision SHA (see transformer.py _MODEL_REVISION) before merge.
+RUN if [ "$BAKE_SENTIMENT_MODEL" = "true" ]; then \
+        python -c "from transformers import AutoModelForSequenceClassification, AutoTokenizer; \
+MODEL_ID='cardiffnlp/twitter-roberta-base-sentiment-latest'; REVISION='main'; \
+AutoModelForSequenceClassification.from_pretrained(MODEL_ID, revision=REVISION); \
+AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION)" ; \
+    fi
 
 # Copy worker service code
 COPY worker-service/src ./src
