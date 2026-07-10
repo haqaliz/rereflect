@@ -71,8 +71,8 @@ describe('AIReadinessCard', () => {
     render(<AIReadinessCard />);
 
     await waitFor(() => {
-      expect(screen.getByText(/340/)).toBeInTheDocument();
-      expect(screen.getByText(/45/)).toBeInTheDocument();
+      expect(screen.getByText('340')).toBeInTheDocument();
+      expect(screen.getByText('45')).toBeInTheDocument();
       expect(screen.getByText('Sentiment')).toBeInTheDocument();
       expect(screen.getByText('30')).toBeInTheDocument();
     });
@@ -84,7 +84,7 @@ describe('AIReadinessCard', () => {
     render(<AIReadinessCard />);
 
     await waitFor(() => {
-      expect(screen.getByText(/120/)).toBeInTheDocument();
+      expect(screen.getByText('120')).toBeInTheDocument();
       expect(screen.getByText('price')).toBeInTheDocument();
       expect(screen.getByText('60')).toBeInTheDocument();
     });

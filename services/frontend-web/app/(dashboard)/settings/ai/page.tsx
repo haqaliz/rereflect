@@ -28,6 +28,7 @@ import { AISettingsGeneral } from '@/components/settings/AISettingsGeneral';
 import { AISettingsProviders } from '@/components/settings/AISettingsProviders';
 import { AISettingsUsage } from '@/components/settings/AISettingsUsage';
 import { HealthWeightsEditor } from '@/components/settings/HealthWeightsEditor';
+import { AIReadinessCard } from '@/components/settings/AIReadinessCard';
 
 type CategoryType = 'pain_point' | 'feature_request' | 'urgency' | 'general';
 
@@ -38,7 +39,7 @@ const CATEGORY_TYPE_LABELS: Record<CategoryType, string> = {
   general: 'General',
 };
 
-const VALID_TABS = ['general', 'providers', 'usage', 'categories', 'accuracy'] as const;
+const VALID_TABS = ['general', 'providers', 'usage', 'categories', 'accuracy', 'readiness'] as const;
 type TabValue = typeof VALID_TABS[number];
 
 const CORRECTION_TYPE_LABELS: Record<string, string> = {
@@ -193,6 +194,7 @@ function AISettingsContent() {
             <TabsTrigger value="usage">Usage</TabsTrigger>
             <TabsTrigger value="categories">Categories</TabsTrigger>
             <TabsTrigger value="accuracy">AI Accuracy</TabsTrigger>
+            <TabsTrigger value="readiness">Readiness</TabsTrigger>
           </TabsList>
 
           {/* General Tab */}
@@ -473,6 +475,10 @@ function AISettingsContent() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+          {/* Readiness Tab */}
+          <TabsContent value="readiness" className="mt-6">
+            <AIReadinessCard />
           </TabsContent>
         </Tabs>
       </main>
