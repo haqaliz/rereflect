@@ -3,8 +3,15 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Brain, Sparkles } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Brain, Sparkles, Wand2 } from 'lucide-react';
 import { aiSettingsAPI, type AISettings, type SentimentStatus } from '@/lib/api/ai-settings';
+
+const CLASSIFIER_MODE_LABELS: Record<string, string> = {
+  off: 'Off',
+  shadow: 'Shadow',
+  auto: 'Auto',
+};
 
 interface AISettingsGeneralProps {
   settings: AISettings;
@@ -16,6 +23,8 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
   const [sentimentSaving, setSentimentSaving] = useState(false);
   const [sentimentError, setSentimentError] = useState<string | null>(null);
   const [sentimentStatus, setSentimentStatus] = useState<SentimentStatus | null>(null);
+  const [classifierSaving, setClassifierSaving] = useState(false);
+  const [classifierError, setClassifierError] = useState<string | null>(null);
 
   useEffect(() => {
     aiSettingsAPI
@@ -49,6 +58,22 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
       );
     } finally {
       setSentimentSaving(false);
+    }
+  };
+
+  const handleClassifierMode = async (classifier_mode: string) => {
+    if (classifier_mode === settings.classifier_mode) return;
+    setClassifierSaving(true);
+    setClassifierError(null);
+    try {
+      const updated = await aiSettingsAPI.update({ classifier_mode });
+      onUpdate(updated);
+    } catch (err: any) {
+      setClassifierError(
+        err?.response?.data?.detail || 'Failed to update classifier mode'
+      );
+    } finally {
+      setClassifierSaving(false);
     }
   };
 
@@ -124,6 +149,49 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
             <p className="text-xs text-muted-foreground">
               Model: {sentimentStatus.model}
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Self-Improving Classifier Mode (M5.2 per-org-corrections-classifier) */}
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex items-center space-x-2">
+            <div className="p-2 bg-secondary rounded-lg">
+              <Wand2 className="w-5 h-5 text-primary" />
+            </div>
+            <CardTitle>Self-Improving Classifier</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-foreground">Corrections-trained sentiment model</p>
+              <p className="text-sm text-muted-foreground">
+                Learns from your team&apos;s sentiment corrections. <strong>Off</strong> disables
+                it. <strong>Shadow</strong> observes and scores in the background without
+                changing stored sentiment — recommended until you have accumulated a
+                substantial number of corrections. <strong>Auto</strong> lets the trained
+                model override stored sentiment once it beats the incumbent.
+              </p>
+            </div>
+            <Select
+              value={settings.classifier_mode}
+              onValueChange={handleClassifierMode}
+              disabled={classifierSaving}
+            >
+              <SelectTrigger aria-label="Classifier mode" className="w-32 shrink-0">
+                <SelectValue>{CLASSIFIER_MODE_LABELS[settings.classifier_mode] ?? settings.classifier_mode}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">Off</SelectItem>
+                <SelectItem value="shadow">Shadow</SelectItem>
+                <SelectItem value="auto">Auto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {classifierError && (
+            <p className="text-xs text-destructive">{classifierError}</p>
           )}
         </CardContent>
       </Card>
