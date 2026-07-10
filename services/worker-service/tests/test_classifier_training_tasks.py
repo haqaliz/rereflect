@@ -516,6 +516,68 @@ def test_retrain_org_small_holdout_retained_with_note(db):
     assert db.query(OrgClassifierModel).count() == 0
 
 
+def test_promote_flushes_deactivation_before_inserting_new_active_row(db):
+    """SQLAlchemy's unit-of-work emits INSERTs before UPDATEs within a single
+    flush(). Postgres' partial-unique index uq_org_classifier_one_active
+    (organization_id, classifier_type WHERE is_active) is IMMEDIATE, so if the
+    deactivating UPDATE and the new active INSERT land in the same flush, the
+    INSERT can hit the DB while the prior row is still is_active=TRUE and raise
+    UniqueViolation. SQLite doesn't enforce the constraint, so we spy on
+    db.flush() and assert there is a DB-visible window where the OLD active row
+    has already been deactivated and the NEW active row has NOT been flushed
+    yet — i.e. deactivation is its own flush, strictly before the insert."""
+    org = _make_org(db)
+    _make_active_model(db, org.id, macro_f1=0.40)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    flush_log: list[dict] = []
+    original_flush = db.flush
+
+    def spy_flush(*args, **kwargs):
+        pending_new_model = any(isinstance(o, OrgClassifierModel) for o in db.new)
+        ret = original_flush(*args, **kwargs)
+        active_count = (
+            db.query(OrgClassifierModel)
+            .filter_by(organization_id=org.id, classifier_type="sentiment", is_active=True)
+            .count()
+        )
+        flush_log.append({
+            "pending_new_model_before_flush": pending_new_model,
+            "active_count_after_flush": active_count,
+        })
+        return ret
+
+    with patch.object(db, "flush", side_effect=spy_flush), \
+         patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    assert len(flush_log) >= 2, (
+        "expected at least 2 flush() calls: one to flush the deactivating "
+        "UPDATE alone, one to flush the new active row's INSERT"
+    )
+    first = flush_log[0]
+    assert first["pending_new_model_before_flush"] is False, (
+        "the new active OrgClassifierModel row must not be pending in the "
+        "session when the first flush() fires — that flush must contain only "
+        "the deactivating UPDATE"
+    )
+    assert first["active_count_after_flush"] == 0, (
+        "after the first flush, the DB must show ZERO active rows for this "
+        "(org, classifier_type) — the old row was deactivated and the new "
+        "one has not been inserted yet. A count of 1 here means the INSERT "
+        "and UPDATE were flushed together (the bug)."
+    )
+
+    final_active_count = (
+        db.query(OrgClassifierModel)
+        .filter_by(organization_id=org.id, classifier_type="sentiment", is_active=True)
+        .count()
+    )
+    assert final_active_count == 1
+
+
 def test_retrain_org_promote_then_worse_keeps_prior_active(db):
     org = _make_org(db)
     fake_r, _ = _fake_redis_lock_acquired()
@@ -647,6 +709,15 @@ def test_retrain_all_orgs_aggregates_counts(db):
 
 
 def test_retrain_all_orgs_isolates_per_org_exception(db):
+    """org2's failure must leave the SHARED session usable for org3. A clean
+    RuntimeError doesn't touch the session, so it can't catch a missing
+    rollback() — instead, org2's mocked retrain_org performs a real write that
+    violates a NOT-NULL column and flush()es it, which raises IntegrityError
+    and leaves the session needing rollback (mirrors the Postgres
+    UniqueViolation this task also needs to survive). org3's mocked
+    retrain_org then performs a real, valid write+commit: without
+    db.rollback() in the batch loop's except, org3's write itself would raise
+    sqlalchemy.exc.PendingRollbackError and never land in the DB."""
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
@@ -656,7 +727,26 @@ def test_retrain_all_orgs_isolates_per_org_exception(db):
     def side_effect(org_id, session):
         processed.append(org_id)
         if org_id == org2.id:
-            raise RuntimeError("simulated retrain failure")
+            # A real DB failure mid-transaction: NOT NULL violation on flush,
+            # leaving the shared session in a needs-rollback state.
+            bad_run = OrgClassifierEvalRun(
+                organization_id=org2.id,
+                classifier_type=None,  # NOT NULL violation
+                decision=None,  # NOT NULL violation
+                n=1,
+            )
+            session.add(bad_run)
+            session.flush()  # raises IntegrityError
+            return {"decision": "retained", "retained": True, "n": 25}  # unreachable
+        # A real, valid write — only succeeds if the session recovered.
+        good_run = OrgClassifierEvalRun(
+            organization_id=org_id,
+            classifier_type="sentiment",
+            decision="retained",
+            n=25,
+        )
+        session.add(good_run)
+        session.commit()
         return {"decision": "retained", "retained": True, "n": 25}
 
     with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
@@ -671,6 +761,13 @@ def test_retrain_all_orgs_isolates_per_org_exception(db):
 
     assert set(processed) == {org1.id, org2.id, org3.id}
     assert result["trained"] == 2  # org1 + org3 succeeded; org2's exception isolated
+
+    # The real proof: org3's write actually landed in the DB, i.e. the shared
+    # session was rolled back and usable again after org2's failure.
+    org3_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org3.id).all()
+    assert len(org3_runs) == 1
+    org1_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org1.id).all()
+    assert len(org1_runs) == 1
 
 
 def test_retrain_all_orgs_runs_purge_once(db):

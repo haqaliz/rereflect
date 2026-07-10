@@ -121,6 +121,14 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
     if prev_active is not None:
         prev_active.is_active = False
         db.add(prev_active)
+        db.flush()  # force the deactivating UPDATE to hit the DB before the new
+        # active row is INSERTed below. SQLAlchemy's unit-of-work otherwise emits
+        # INSERTs before UPDATEs within a single flush, which would transiently
+        # violate Postgres' IMMEDIATE partial-unique index
+        # uq_org_classifier_one_active (organization_id, classifier_type WHERE
+        # is_active) — the new row would INSERT while the old row is still
+        # is_active=TRUE. This extra flush does not commit; the deactivate+insert
+        # remains one atomic transaction (caller commits once).
 
     new_model = OrgClassifierModel(
         organization_id=org_id,
@@ -252,6 +260,12 @@ def retrain_all_orgs() -> dict:
                 result = retrain_org(org_id, db)
             except Exception:
                 logger.error("retrain_all_orgs: org=%s FAILED", org_id, exc_info=True)
+                # This db session is shared across every org in the batch. A
+                # failed flush/commit (e.g. the promotion UniqueViolation above,
+                # or any other per-org DB error) leaves the session needing a
+                # rollback; without it, the NEXT org's first DB operation raises
+                # sqlalchemy.exc.PendingRollbackError and the whole batch cascades.
+                db.rollback()
                 continue
 
             if result.get("skipped"):
