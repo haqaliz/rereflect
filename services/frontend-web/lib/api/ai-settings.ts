@@ -14,6 +14,7 @@ export interface AISettings {
   default_provider: string;
   base_url: string | null;
   model_embeddings: string | null;
+  sentiment_provider: string;
   models: AIModels;
 }
 
@@ -23,6 +24,7 @@ export interface AISettingsUpdate {
   default_provider?: string;
   base_url?: string | null;
   model_embeddings?: string | null;
+  sentiment_provider?: string | null;
   model_categorization?: string;
   model_analysis?: string;
   model_insights?: string;
@@ -34,6 +36,12 @@ export interface EmbeddingStatus {
   dimension: number | null;
   configured: boolean;
   system_templates_embedded: number;
+}
+
+export interface SentimentStatus {
+  provider: string;
+  available: boolean;
+  model: string | null;
 }
 
 export interface AIKey {
@@ -164,6 +172,12 @@ export const aiSettingsAPI = {
   // Embeddings (S3 — local embeddings / offline Copilot)
   getEmbeddingStatus: async (): Promise<EmbeddingStatus> => {
     const response = await apiClient.get('/api/v1/settings/ai/embeddings/status');
+    return response.data;
+  },
+
+  // Sentiment engine (M5.1 local-analyzer-sentiment-model, per-org-resolution)
+  getSentimentStatus: async (): Promise<SentimentStatus> => {
+    const response = await apiClient.get('/api/v1/settings/ai/sentiment/status');
     return response.data;
   },
 };
