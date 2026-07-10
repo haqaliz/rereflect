@@ -15,6 +15,9 @@ TDD: RED first, then production code.
 
 from __future__ import annotations
 
+import sys
+import os
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -22,6 +25,23 @@ from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.models.org_ai_config import OrgAIConfig
 from sqlalchemy.orm import Session
+
+# get_sentiment_analyzer's own sys.path computation
+# (dirname(__file__) + "../../../analysis-engine") only resolves inside the
+# production Docker image (Dockerfile COPYs analysis-engine/src/analyzer to
+# backend-api/analysis-engine/analyzer at build time — see Dockerfile).
+# In a local dev checkout, "analyzer" lives at the sibling
+# services/analysis-engine/src instead. Insert the real path here so the
+# unmocked characterization tests below can import the real analyzer package
+# without depending on that Docker-only layout; once "analyzer" is in
+# sys.modules, feedback.py's own (locally-broken) path insertion is a no-op
+# and its `from analyzer.sentiment import SentimentAnalyzer` resolves from
+# the module cache like it would in production.
+_ANALYSIS_ENGINE_SRC = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../analysis-engine/src")
+)
+if _ANALYSIS_ENGINE_SRC not in sys.path:
+    sys.path.insert(0, _ANALYSIS_ENGINE_SRC)
 
 
 @pytest.fixture(autouse=True)

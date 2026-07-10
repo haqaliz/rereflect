@@ -52,10 +52,37 @@ def _invalidate_org_cache(org_id: int):
         logger.warning(f"Cache invalidation failed for org {org_id}: {e}")
 
 
-def get_sentiment_analyzer():
-    """Get SentimentAnalyzer with lazy import."""
+# Process-level cache: one SentimentAnalyzer instance per provider name per
+# process (must-have #9's call-site half — mirrors backend-api/src/api/routes/
+# feedback.py's cache).
+_sentiment_analyzer_cache: dict = {}
+
+
+def get_sentiment_analyzer(provider_name: str = "vader"):
+    """Get SentimentAnalyzer with lazy import, cached per provider per process.
+
+    provider_name is resolved by resolve_sentiment_provider (per-org-resolution
+    aspect) and injected here via SentimentAnalyzer's `provider` constructor arg
+    (sentiment-provider-core aspect). If construction fails for any reason
+    (unknown name, missing deps, model load error), falls back to the VADER
+    default and logs — never raises.
+    """
+    if provider_name in _sentiment_analyzer_cache:
+        return _sentiment_analyzer_cache[provider_name]
+
     from analyzer.sentiment import SentimentAnalyzer
-    return SentimentAnalyzer()
+
+    try:
+        analyzer = SentimentAnalyzer(provider=provider_name)
+    except Exception as exc:
+        logger.warning(
+            "get_sentiment_analyzer: failed to construct provider=%r, falling "
+            "back to VADER: %s", provider_name, exc, exc_info=True,
+        )
+        analyzer = SentimentAnalyzer()
+
+    _sentiment_analyzer_cache[provider_name] = analyzer
+    return analyzer
 
 
 def get_tag_extractor():
@@ -471,7 +498,20 @@ def _apply_llm_result(feedback, result: dict) -> None:
 
 def _apply_keyword_analysis(feedback, db=None) -> None:
     """Apply traditional keyword-based analysis to a feedback item (fallback)."""
-    sentiment_analyzer = get_sentiment_analyzer()
+    provider_name = "vader"
+    if db is not None:
+        try:
+            from src.services.sentiment_resolver import resolve_sentiment_provider
+            resolved = resolve_sentiment_provider(feedback.organization_id, db)
+            provider_name = resolved.provider if resolved else "vader"
+        except Exception:
+            logger.warning(
+                "_apply_keyword_analysis: sentiment provider resolution failed "
+                "for org=%s; using vader", feedback.organization_id, exc_info=True,
+            )
+            provider_name = "vader"
+
+    sentiment_analyzer = get_sentiment_analyzer(provider_name)
     tag_extractor = get_tag_extractor()
     pain_categorizer, feature_categorizer, urgent_categorizer = get_categorizers()
 

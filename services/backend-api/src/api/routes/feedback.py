@@ -21,14 +21,44 @@ import io
 
 router = APIRouter(prefix="/api/v1/feedback", tags=["feedback"])
 
+# Process-level cache: one SentimentAnalyzer instance per provider name per
+# process (must-have #9's call-site half — the model itself is loaded lazily
+# and singleton-cached inside the transformer provider by sentiment-provider-core;
+# this cache additionally avoids re-running SentimentAnalyzer(provider=...)
+# construction, including its try/except fallback path, on every request).
+_sentiment_analyzer_cache: dict = {}
+
+
 # Lazy import to add analysis-engine to path only when needed
-def get_sentiment_analyzer():
-    """Get SentimentAnalyzer with lazy import."""
+def get_sentiment_analyzer(provider_name: str = "vader"):
+    """Get SentimentAnalyzer with lazy import, cached per provider per process.
+
+    provider_name is resolved by resolve_sentiment_provider (per-org-resolution
+    aspect) and injected here via SentimentAnalyzer's `provider` constructor arg
+    (sentiment-provider-core aspect). If construction fails for any reason
+    (unknown name, missing deps, model load error), falls back to the VADER
+    default and logs — never raises.
+    """
+    if provider_name in _sentiment_analyzer_cache:
+        return _sentiment_analyzer_cache[provider_name]
+
     analysis_engine_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../analysis-engine"))
     if analysis_engine_path not in sys.path:
         sys.path.insert(0, analysis_engine_path)
     from analyzer.sentiment import SentimentAnalyzer
-    return SentimentAnalyzer()
+
+    try:
+        analyzer = SentimentAnalyzer(provider=provider_name)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "get_sentiment_analyzer: failed to construct provider=%r, falling "
+            "back to VADER: %s", provider_name, exc, exc_info=True,
+        )
+        analyzer = SentimentAnalyzer()
+
+    _sentiment_analyzer_cache[provider_name] = analyzer
+    return analyzer
 
 
 def get_categorizers():
@@ -44,7 +74,12 @@ def get_categorizers():
 def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
     """Automatically analyze a single feedback item with categorization."""
     try:
-        sentiment_analyzer = get_sentiment_analyzer()
+        from src.services.sentiment_resolver import resolve_sentiment_provider
+
+        resolved = resolve_sentiment_provider(feedback.organization_id, db)
+        provider_name = resolved.provider if resolved else "vader"
+
+        sentiment_analyzer = get_sentiment_analyzer(provider_name)
         sentiment = sentiment_analyzer.analyze(feedback.text)
 
         feedback.sentiment_score = sentiment['compound']
