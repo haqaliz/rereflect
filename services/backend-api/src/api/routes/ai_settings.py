@@ -28,6 +28,7 @@ from src.api.dependencies import (
     require_feature,
 )
 from src.config.plans import plan_includes, PLAN_HIERARCHY
+from src.services.sentiment_resolver import VALID_SENTIMENT_PROVIDERS
 
 router = APIRouter(prefix="/api/v1/settings/ai", tags=["ai-settings"])
 
@@ -57,6 +58,7 @@ class AISettingsResponse(BaseModel):
     default_provider: str
     base_url: Optional[str] = None
     model_embeddings: Optional[str] = None
+    sentiment_provider: str = "vader"
     models: ModelConfig
 
 
@@ -65,6 +67,7 @@ class AISettingsUpdate(BaseModel):
     default_provider: Optional[str] = None
     base_url: Optional[str] = None
     model_embeddings: Optional[str] = Field(None, max_length=100)
+    sentiment_provider: Optional[str] = None
     model_categorization: Optional[str] = None
     model_analysis: Optional[str] = None
     model_insights: Optional[str] = None
@@ -160,6 +163,12 @@ class EmbeddingStatusResponse(BaseModel):
     system_templates_embedded: int
 
 
+class SentimentStatusResponse(BaseModel):
+    provider: str
+    available: bool
+    model: Optional[str] = None
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_or_create_config(org_id: int, db: Session) -> OrgAIConfig:
@@ -203,12 +212,18 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
 
     base_url = config.base_url if config and hasattr(config, "base_url") else None
     model_embeddings = config.model_embeddings if config and hasattr(config, "model_embeddings") else None
+    sentiment_provider = (
+        config.sentiment_provider
+        if config and getattr(config, "sentiment_provider", None)
+        else "vader"
+    )
 
     return AISettingsResponse(
         ai_analysis_enabled=org.ai_analysis_enabled,
         default_provider=default_provider,
         base_url=base_url,
         model_embeddings=model_embeddings,
+        sentiment_provider=sentiment_provider,
         models=model_config,
     )
 
@@ -356,6 +371,22 @@ def _default_embedding_model(provider: str) -> Optional[str]:
     return None
 
 
+def _sentiment_transformer_deps_available() -> bool:
+    """Cheap, safe check: are torch/transformers importable, without importing
+    them (find_spec has no import side effects). Does NOT verify the model
+    actually loads — that's a much heavier check, deliberately out of scope
+    here (see per-org-resolution/spec.md Open Questions).
+    """
+    import importlib.util
+    return (
+        importlib.util.find_spec("torch") is not None
+        and importlib.util.find_spec("transformers") is not None
+    )
+
+
+_SENTIMENT_TRANSFORMER_MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+
+
 def _plan_level(plan: str) -> int:
     """Return numeric plan level (higher = better)."""
     try:
@@ -437,6 +468,32 @@ def update_ai_settings(
     # Persist model_embeddings if explicitly included in the request (even as null).
     if "model_embeddings" in data.model_fields_set and hasattr(config, "model_embeddings"):
         config.model_embeddings = data.model_embeddings
+
+    # ── Sentiment provider validation ─────────────────────────────────────────
+    if "sentiment_provider" in data.model_fields_set:
+        if (
+            data.sentiment_provider is not None
+            and data.sentiment_provider not in VALID_SENTIMENT_PROVIDERS
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid sentiment_provider. Must be one of: "
+                    f"{', '.join(sorted(VALID_SENTIMENT_PROVIDERS))}"
+                ),
+            )
+        if data.sentiment_provider == "transformer" and not _sentiment_transformer_deps_available():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "sentiment_provider 'transformer' requires torch and transformers "
+                    "to be installed. See docs/SELF_HOSTING.md for the local model setup."
+                ),
+            )
+        # Explicit null is allowed and resets to the 'vader' default via the
+        # column's own semantics (NULL -> resolver returns None -> caller uses vader).
+        if hasattr(config, "sentiment_provider"):
+            config.sentiment_provider = data.sentiment_provider
 
     if data.model_categorization is not None:
         config.model_categorization = data.model_categorization
@@ -864,3 +921,35 @@ def get_embeddings_status(
         configured=configured,
         system_templates_embedded=system_templates_embedded,
     )
+
+
+# ── GET /api/v1/settings/ai/sentiment/status ─────────────────────────────────
+
+@router.get("/sentiment/status", response_model=SentimentStatusResponse)
+def get_sentiment_status(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Return the org's sentiment-engine configuration status.
+
+    Never raises to the caller — mirrors GET /embeddings/status. 'available'
+    reflects dependency importability for 'transformer' (not a full model-load
+    check, which is deliberately out of this endpoint's scope).
+    """
+    config = db.query(OrgAIConfig).filter_by(organization_id=current_org.id).first()
+    provider = (
+        config.sentiment_provider
+        if config and getattr(config, "sentiment_provider", None)
+        else "vader"
+    )
+    if provider not in VALID_SENTIMENT_PROVIDERS:
+        provider = "vader"
+
+    if provider == "vader":
+        available = True
+        model = None
+    else:
+        available = _sentiment_transformer_deps_available()
+        model = _SENTIMENT_TRANSFORMER_MODEL_ID
+
+    return SentimentStatusResponse(provider=provider, available=available, model=model)
