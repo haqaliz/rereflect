@@ -251,6 +251,67 @@ def test_refit_org_deactivates_previous_active_org_model(db):
     assert old_model.is_active is False
 
 
+def test_refit_org_flushes_deactivation_before_inserting_new_active_row(db):
+    """SQLAlchemy's unit-of-work emits INSERTs before UPDATEs within a single
+    flush(). Postgres' partial-unique index uq_churn_cal_model_one_active_per_org
+    (organization_id WHERE is_active) is IMMEDIATE, so if the deactivating UPDATE
+    and the new active INSERT land in the same flush, the INSERT can hit the DB
+    while the prior row is still is_active=TRUE and raise UniqueViolation. SQLite
+    doesn't enforce the constraint, so we spy on db.flush() and assert there is a
+    DB-visible window where the OLD active row has already been deactivated and
+    the NEW active row has NOT been flushed yet — i.e. deactivation is its own
+    flush, strictly before the insert."""
+    from src.services.calibration_refit import refit_org
+
+    org = _make_org(db)
+    _make_calibration_model(db, org_id=org.id, is_active=True)
+    _seed_enough_labels(db, org.id)
+
+    flush_log: list[dict] = []
+    original_flush = db.flush
+
+    def spy_flush(*args, **kwargs):
+        pending_new_model = any(isinstance(o, ChurnCalibrationModel) for o in db.new)
+        ret = original_flush(*args, **kwargs)
+        active_count = (
+            db.query(ChurnCalibrationModel)
+            .filter_by(organization_id=org.id, is_active=True)
+            .count()
+        )
+        flush_log.append({
+            "pending_new_model_before_flush": pending_new_model,
+            "active_count_after_flush": active_count,
+        })
+        return ret
+
+    with patch.object(db, "flush", side_effect=spy_flush):
+        refit_org(org.id, db)
+
+    assert len(flush_log) >= 2, (
+        "expected at least 2 flush() calls: one to flush the deactivating "
+        "UPDATE alone, one to flush the new active row's INSERT"
+    )
+    first = flush_log[0]
+    assert first["pending_new_model_before_flush"] is False, (
+        "the new active ChurnCalibrationModel row must not be pending in the "
+        "session when the first flush() fires — that flush must contain only "
+        "the deactivating UPDATE"
+    )
+    assert first["active_count_after_flush"] == 0, (
+        "after the first flush, the DB must show ZERO active rows for this "
+        "org — the old row was deactivated and the new one has not been "
+        "inserted yet. A count of 1 here means the INSERT and UPDATE were "
+        "flushed together (the bug)."
+    )
+
+    final_active_count = (
+        db.query(ChurnCalibrationModel)
+        .filter_by(organization_id=org.id, is_active=True)
+        .count()
+    )
+    assert final_active_count == 1
+
+
 def test_refit_org_persists_backtest_run_linked_to_new_model(db):
     """refit_org inserts a ChurnBacktestRun row referencing the new model id."""
     from src.services.calibration_refit import refit_org

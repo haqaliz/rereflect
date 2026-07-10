@@ -97,6 +97,14 @@ def refit_org(org_id: int, db: Session) -> dict:
     if prev_model is not None:
         prev_model.is_active = False
         db.add(prev_model)
+        db.flush()  # force the deactivating UPDATE to hit the DB before the new
+        # active row is INSERTed below. SQLAlchemy's unit-of-work otherwise emits
+        # INSERTs before UPDATEs within a single flush, which would transiently
+        # violate Postgres' IMMEDIATE partial-unique index
+        # uq_churn_cal_model_one_active_per_org (organization_id WHERE
+        # is_active) — the new row would INSERT while the old row is still
+        # is_active=TRUE. This extra flush does not commit; the deactivate+insert
+        # remains one atomic transaction (caller commits once).
 
     # Insert new active model
     new_model = ChurnCalibrationModel(
