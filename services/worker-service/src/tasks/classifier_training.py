@@ -101,6 +101,23 @@ def purge_old_classifier_models() -> dict:
     """Delete OrgClassifierModel rows where is_active=False AND fit_at < now()-90d.
 
     Folded into retrain_all_orgs (no separate beat slot).
-    Stub — implemented phase by phase via TDD (Phase 2).
+    Mirrors churn_calibration.purge_old_calibration_models.
+    Returns {"deleted": N}.
     """
-    return {}
+    cutoff = datetime.utcnow() - timedelta(days=_PURGE_AFTER_DAYS)
+
+    with get_db_session() as db:
+        old_rows = (
+            db.query(OrgClassifierModel)
+            .filter(
+                OrgClassifierModel.is_active == False,  # noqa: E712
+                OrgClassifierModel.fit_at < cutoff,
+            )
+            .all()
+        )
+        for row in old_rows:
+            db.delete(row)
+        db.commit()
+
+    logger.info("purge_old_classifier_models: deleted=%s", len(old_rows))
+    return {"deleted": len(old_rows)}

@@ -188,3 +188,73 @@ def test_task_module_in_include():
     import src.celery_app as celery_app
 
     assert "src.tasks.classifier_training" in celery_app.celery_app.conf.include
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — purge_old_classifier_models()
+# ---------------------------------------------------------------------------
+
+
+def test_purge_deletes_inactive_older_than_90d(db):
+    """Inactive model rows with fit_at older than 90 days are deleted."""
+    org = _make_org(db)
+    old_inactive = _make_inactive_model(db, org.id, fit_at=datetime.utcnow() - timedelta(days=91))
+
+    with patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        tasks = _get_tasks()
+        tasks.purge_old_classifier_models()
+
+    remaining = db.query(OrgClassifierModel).filter_by(id=old_inactive.id).first()
+    assert remaining is None
+
+
+def test_purge_keeps_recent_inactive(db):
+    """Inactive model rows less than 90 days old are retained."""
+    org = _make_org(db)
+    recent_inactive = _make_inactive_model(db, org.id, fit_at=datetime.utcnow() - timedelta(days=89))
+
+    with patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        tasks = _get_tasks()
+        tasks.purge_old_classifier_models()
+
+    remaining = db.query(OrgClassifierModel).filter_by(id=recent_inactive.id).first()
+    assert remaining is not None
+
+
+def test_purge_keeps_active_even_if_old(db):
+    """Active model rows are never purged, no matter how old."""
+    org = _make_org(db)
+    old_active = _make_active_model(db, org.id, fit_at=datetime.utcnow() - timedelta(days=200))
+
+    with patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        tasks = _get_tasks()
+        tasks.purge_old_classifier_models()
+
+    remaining = db.query(OrgClassifierModel).filter_by(id=old_active.id).first()
+    assert remaining is not None
+
+
+def test_purge_returns_deleted_count(db):
+    """purge_old_classifier_models() returns {"deleted": N}."""
+    org = _make_org(db)
+    _make_inactive_model(db, org.id, fit_at=datetime.utcnow() - timedelta(days=100))
+    _make_inactive_model(db, org.id, fit_at=datetime.utcnow() - timedelta(days=120))
+    _make_inactive_model(db, org.id, fit_at=datetime.utcnow() - timedelta(days=10))  # too recent
+
+    with patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        tasks = _get_tasks()
+        result = tasks.purge_old_classifier_models()
+
+    assert result == {"deleted": 2}
