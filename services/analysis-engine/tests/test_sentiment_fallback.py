@@ -87,3 +87,32 @@ def test_analyze_happy_path_never_invokes_fallback():
     # analyzer should reuse spy itself as the fallback, not double-construct.
     assert spy.call_count == 1
     assert analyzer._fallback_provider is spy
+
+
+def test_analyze_never_raises_when_both_primary_and_fallback_fail(caplog):
+    """PRD #9: analyze() must TRULY never raise, even if the fallback provider itself raises."""
+    text = "I'm going to cancel my subscription if this isn't fixed."
+    primary = RaisingProvider()
+    analyzer = SentimentAnalyzer(provider=primary)
+    fallback = RaisingProvider()
+    analyzer._fallback_provider = fallback
+
+    with caplog.at_level(logging.ERROR):
+        result = analyzer.analyze(text)  # must not raise
+
+    assert list(result.keys()) == [
+        'compound', 'pos', 'neu', 'neg', 'label', 'is_extreme', 'churn_risk'
+    ]
+
+    # Last-resort neutral score
+    assert result['compound'] == 0.0
+    assert result['pos'] == 0.0
+    assert result['neu'] == 1.0
+    assert result['neg'] == 0.0
+    assert result['label'] == 'neutral'
+
+    # is_extreme/churn_risk still computed from the text itself
+    assert result['churn_risk'] is True
+    assert result['is_extreme'] is True
+
+    assert any(record.levelno == logging.ERROR for record in caplog.records)

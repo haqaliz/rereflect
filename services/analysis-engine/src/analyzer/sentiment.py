@@ -59,7 +59,15 @@ class SentimentAnalyzer:
                 "Sentiment provider %s failed to score text (falling back to VADER): %s",
                 type(self._provider).__name__, exc, exc_info=True,
             )
-            scores = self._fallback_provider.score(text)
+            try:
+                scores = self._fallback_provider.score(text)
+            except Exception as fallback_exc:
+                logger.error(
+                    "Fallback sentiment provider %s also failed to score text "
+                    "(using last-resort neutral score): %s",
+                    type(self._fallback_provider).__name__, fallback_exc, exc_info=True,
+                )
+                scores = {'compound': 0.0, 'pos': 0.0, 'neu': 1.0, 'neg': 0.0}
 
         # Classify sentiment based on compound score
         compound = scores['compound']

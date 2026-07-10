@@ -8,6 +8,8 @@ Expected values below were captured by running SentimentAnalyzer().analyze() aga
 (pre-refactor) sentiment.py and hardcoding the actual observed output — they are not
 independently computed/theoretical VADER values.
 """
+from __future__ import annotations
+
 import pytest
 
 from src.analyzer.sentiment import SentimentAnalyzer

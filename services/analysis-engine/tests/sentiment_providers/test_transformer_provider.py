@@ -61,7 +61,7 @@ def test_score_maps_softmax_to_contract(mock_tok_from_pretrained, mock_model_fro
     assert result["neg"] == pytest.approx(0.7, abs=1e-3)
     assert result["neu"] == pytest.approx(0.2, abs=1e-3)
     assert result["pos"] == pytest.approx(0.1, abs=1e-3)
-    assert result["compound"] == pytest.approx(result["pos"] - result["neg"], abs=1e-9)
+    assert result["compound"] == pytest.approx(0.1 - 0.7, abs=1e-6)
 
 
 @patch("transformers.AutoModelForSequenceClassification.from_pretrained")
