@@ -45,6 +45,7 @@ celery_app = Celery(
         "src.tasks.automation",
         "src.tasks.churn_playbooks",
         "src.tasks.churn_calibration",
+        "src.tasks.classifier_training",
         "src.tasks.usage_metrics",
         "src.tasks.segments",
         "src.tasks.hubspot_sync",
@@ -181,6 +182,13 @@ celery_app.conf.beat_schedule = {
     "refit-churn-calibration-weekly": {
         "task": "src.tasks.churn_calibration.refit_all_orgs",
         "schedule": crontab(hour=7, minute=45, day_of_week=1),
+    },
+    # Retrain per-org sentiment corrections classifier — Mondays 06:30 UTC
+    # (uncrowded slot: before generate-churn-insights at 07:00. Folds in
+    # purge_old_classifier_models after the loop — no separate beat slot.)
+    "retrain-classifier-weekly": {
+        "task": "src.tasks.classifier_training.retrain_all_orgs",
+        "schedule": crontab(hour=6, minute=30, day_of_week=1),
     },
     # Refit global churn calibration model — Daily 03:00 UTC
     "refit-global-calibration-daily": {
