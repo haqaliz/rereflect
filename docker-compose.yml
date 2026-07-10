@@ -39,6 +39,8 @@ services:
     build:
       context: ./services
       dockerfile: backend-api/Dockerfile
+      args:
+        BAKE_SENTIMENT_MODEL: ${BAKE_SENTIMENT_MODEL:-false}
     container_name: rereflect-backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customer_feedback_saas
@@ -67,6 +69,8 @@ services:
     build:
       context: ./services
       dockerfile: worker-service/Dockerfile
+      args:
+        BAKE_SENTIMENT_MODEL: ${BAKE_SENTIMENT_MODEL:-false}
     container_name: rereflect-worker
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/customer_feedback_saas

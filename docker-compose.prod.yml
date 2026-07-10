@@ -19,6 +19,11 @@
 #    Put a reverse proxy (Caddy/nginx/Traefik) in front for internet exposure.
 #  - landing-web (marketing site) is intentionally NOT part of this stack; it
 #    is hosted separately.
+#  - The opt-in transformer sentiment model (Settings -> AI) is NOT baked into
+#    backend/worker images by default -- it downloads and caches on first use
+#    instead. For air-gapped installs, pre-bake it at build time:
+#        BAKE_SENTIMENT_MODEL=true docker compose -f docker-compose.prod.yml build backend worker
+#    See docs/SELF_HOSTING.md for the offline env flags and RAM/latency notes.
 # =============================================================================
 
 services:
@@ -63,6 +68,8 @@ services:
     build:
       context: ./services
       dockerfile: backend-api/Dockerfile
+      args:
+        BAKE_SENTIMENT_MODEL: ${BAKE_SENTIMENT_MODEL:-false}
     container_name: rereflect-backend
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rereflect}:${POSTGRES_PASSWORD:-rereflect_secret}@postgres:5432/${POSTGRES_DB:-rereflect}
@@ -104,6 +111,8 @@ services:
     build:
       context: ./services
       dockerfile: worker-service/Dockerfile
+      args:
+        BAKE_SENTIMENT_MODEL: ${BAKE_SENTIMENT_MODEL:-false}
     container_name: rereflect-worker
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rereflect}:${POSTGRES_PASSWORD:-rereflect_secret}@postgres:5432/${POSTGRES_DB:-rereflect}
