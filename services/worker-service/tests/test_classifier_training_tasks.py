@@ -17,6 +17,7 @@ which is the real target.
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -160,6 +161,45 @@ def _fake_redis_lock_denied():
     fake_r = MagicMock()
     fake_r.lock.return_value = fake_lock
     return fake_r, fake_lock
+
+
+@contextmanager
+def _patch_core(decision: str, *, n: int = 25, incumbent_macro_f1=0.50,
+                 challenger_macro_f1=0.65, macro_f1_delta=0.15, notes=None,
+                 dataset=None, artifact=None):
+    """Patch the training-and-eval-core's build_sentiment_dataset/evaluate/
+    train_classifier so retrain_org's decision is fully deterministic, without
+    needing sklearn to actually fit anything. Mirrors the plan's "patch the core
+    via the autouse stub" strategy."""
+    from analyzer.corrections_classifier.evaluate import EvalResult
+
+    if notes is None:
+        notes = f"{decision} (delta={macro_f1_delta:+.4f}, n={n})" if macro_f1_delta is not None else decision
+    if dataset is None:
+        labels = ["positive", "neutral", "negative"]
+        dataset = [(f"text {i}", labels[i % 3]) for i in range(n)]
+    if artifact is None:
+        artifact = {
+            "model_type": "tfidf_logreg",
+            "classifier_type": "sentiment",
+            "classes": ["negative", "neutral", "positive"],
+            "vectorizer": {"vocabulary": {}, "idf": [], "lowercase": True,
+                           "token_pattern": r"(?u)\b\w\w+\b", "ngram_range": [1, 1],
+                           "norm": "l2", "sublinear_tf": False, "smooth_idf": True},
+            "logreg": {"coef": [[0.0]], "intercept": [0.0], "multi_class": "multinomial"},
+            "label_count": n,
+        }
+
+    fake_result = EvalResult(
+        decision=decision, n=n,
+        incumbent_macro_f1=incumbent_macro_f1, challenger_macro_f1=challenger_macro_f1,
+        macro_f1_delta=macro_f1_delta, notes=notes,
+    )
+
+    with patch("analyzer.corrections_classifier.dataset.build_sentiment_dataset", return_value=dataset), \
+         patch("analyzer.corrections_classifier.evaluate.evaluate", return_value=fake_result), \
+         patch("analyzer.corrections_classifier.trainer.train_classifier", return_value=artifact):
+        yield fake_result, artifact
 
 
 # ---------------------------------------------------------------------------
@@ -335,3 +375,90 @@ def test_retrain_org_below_gate_return_shape(db):
 
     assert result["skipped"] is True
     assert "promoted" not in result
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — retrain_org promote path + atomic-swap invariant
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_promote_inserts_one_active_model(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65) as (fake_result, artifact):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    models = db.query(OrgClassifierModel).filter_by(organization_id=org.id).all()
+    assert len(models) == 1
+    model = models[0]
+    assert model.is_active is True
+    assert model.classifier_type == "sentiment"
+    assert float(model.macro_f1) == pytest.approx(0.65, abs=1e-4)
+    assert model.label_count == 25
+    assert model.fit_at is not None
+    assert model.model_json == artifact
+
+
+def test_retrain_org_promote_flips_prior_active_inactive(db):
+    org = _make_org(db)
+    prior = _make_active_model(db, org.id, macro_f1=0.40)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    db.refresh(prior)
+    assert prior.is_active is False
+
+    active_models = (
+        db.query(OrgClassifierModel)
+        .filter_by(organization_id=org.id, classifier_type="sentiment", is_active=True)
+        .all()
+    )
+    assert len(active_models) == 1
+    assert active_models[0].id != prior.id
+
+
+def test_retrain_org_promote_writes_one_promoted_eval_run(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, incumbent_macro_f1=0.50,
+                      challenger_macro_f1=0.65, macro_f1_delta=0.15):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).all()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.decision == "promoted"
+    assert float(run.macro_f1_delta) == pytest.approx(0.15, abs=1e-4)
+    assert float(run.incumbent_macro_f1) == pytest.approx(0.50, abs=1e-4)
+    assert float(run.challenger_macro_f1) == pytest.approx(0.65, abs=1e-4)
+
+    new_model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert run.classifier_model_id == new_model.id
+
+
+def test_active_invariant_holds_across_repeated_refits(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    for i in range(3):
+        with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+             _patch_core("promoted", n=25, challenger_macro_f1=0.60 + i * 0.01):
+            tasks = _get_tasks()
+            tasks.retrain_org(org.id, db)
+
+        active_count = (
+            db.query(OrgClassifierModel)
+            .filter_by(organization_id=org.id, classifier_type="sentiment", is_active=True)
+            .count()
+        )
+        assert active_count == 1, f"iteration {i}: expected exactly 1 active row"

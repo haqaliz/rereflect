@@ -89,6 +89,12 @@ def _skip_result(reason: str, **extra) -> dict:
     return {"decision": "skipped", "skipped": True, "reason": reason, **extra}
 
 
+def _decision_result(decision: str, **extra) -> dict:
+    """Convenience dict for a promoted/retained retrain_org run — sets a boolean flag
+    named after the decision (e.g. "promoted": True) alongside "decision"."""
+    return {"decision": decision, decision: True, **extra}
+
+
 def retrain_org(org_id: int, db: Session) -> dict:
     """Retrain the sentiment corrections classifier for a single org.
 
@@ -153,8 +159,64 @@ def retrain_org(org_id: int, db: Session) -> dict:
             db.commit()
             return _skip_result("below_min_labels", n=result.n, notes=result.notes)
 
-        # Promote/retained handling — added in later phases.
-        raise NotImplementedError(f"retrain_org: decision={result.decision!r} not yet handled")
+        model_id: Optional[int] = None
+
+        if result.decision == "promoted":
+            # Train the FINAL production artifact on ALL rows (not just the core's
+            # internal train-split) — that is the model that serves predictions.
+            artifact = train_classifier(dataset)
+
+            # Atomic swap, single transaction: deactivate prior active -> insert new
+            # active -> flush (populate id before the eval-run FK) -> commit below.
+            # Never a window with 0 or 2 active rows for (org, classifier_type).
+            prev_active = (
+                db.query(OrgClassifierModel)
+                .filter(
+                    OrgClassifierModel.organization_id == org_id,
+                    OrgClassifierModel.classifier_type == _CLASSIFIER_TYPE,
+                    OrgClassifierModel.is_active == True,  # noqa: E712
+                )
+                .first()
+            )
+            if prev_active is not None:
+                prev_active.is_active = False
+                db.add(prev_active)
+
+            new_model = OrgClassifierModel(
+                organization_id=org_id,
+                classifier_type=_CLASSIFIER_TYPE,
+                model_json=artifact,
+                label_count=len(dataset),
+                # precision/recall/accuracy are not exposed by the core's leakage-free
+                # EvalResult (only macro_f1 is) — left nullable/unset here rather than
+                # re-deriving a second, out-of-band metrics pass. See report deviations.
+                precision=None,
+                recall=None,
+                macro_f1=_round_or_none(result.challenger_macro_f1),
+                accuracy=None,
+                fit_at=datetime.utcnow(),
+                is_active=True,
+            )
+            db.add(new_model)
+            db.flush()  # populate new_model.id before the eval-run FK
+            model_id = new_model.id
+
+        eval_run = OrgClassifierEvalRun(
+            organization_id=org_id,
+            classifier_model_id=model_id,
+            classifier_type=_CLASSIFIER_TYPE,
+            incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
+            challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
+            macro_f1_delta=_round_or_none(result.macro_f1_delta),
+            decision=result.decision,
+            n=result.n,
+            duration_ms=duration_ms,
+            notes=result.notes,
+        )
+        db.add(eval_run)
+        db.commit()
+
+        return _decision_result(result.decision, model_id=model_id, n=result.n, notes=result.notes)
     finally:
         try:
             lock.release()
