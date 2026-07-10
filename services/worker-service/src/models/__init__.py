@@ -600,6 +600,8 @@ class OrgAIConfig(Base):
     base_url = Column(String(500), nullable=True)
     # Per-org embedding-model override; null = derive default from provider (mirrors backend-api)
     model_embeddings = Column(String(100), nullable=True)
+    # Per-org sentiment engine opt-in (mirrors backend-api; this aspect: per-org-resolution)
+    sentiment_provider = Column(String(20), nullable=True, default='vader')
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)

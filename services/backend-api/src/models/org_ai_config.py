@@ -16,6 +16,9 @@ class OrgAIConfig(Base):
     base_url = Column(String(500), nullable=True)
     # Per-org embedding-model override; null = derive default from provider (template-matching-local S1)
     model_embeddings = Column(String(100), nullable=True)
+    # Per-org sentiment engine opt-in (local-analyzer-sentiment-model, per-org-resolution aspect).
+    # 'vader' | 'transformer'; NULL/unrecognized treated as 'vader' by resolve_sentiment_provider.
+    sentiment_provider = Column(String(20), nullable=True, default='vader')
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)
