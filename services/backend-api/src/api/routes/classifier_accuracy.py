@@ -15,10 +15,10 @@ pull sklearn/numpy into every settings-page load for a single integer).
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_current_org, get_current_user
+from src.api.dependencies import get_current_org, get_current_user, require_admin_or_owner
 from src.database.session import get_db
 from src.models.org_classifier import OrgClassifierEvalRun, OrgClassifierModel
 from src.models.organization import Organization
@@ -131,4 +131,63 @@ def get_classifier_accuracy(
     is an honest empty state, not an error (mirrors get_sentiment_accuracy /
     get_embeddings_status).
     """
+    return _build_response(current_org.id, classifier_type, db)
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/settings/ai/classifier/rollback
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/classifier/rollback",
+    response_model=ClassifierAccuracyResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def rollback_classifier(
+    classifier_type: str = DEFAULT_CLASSIFIER_TYPE,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> ClassifierAccuracyResponse:
+    """Deactivate the org's active model and reactivate the most recent prior
+    (inactive) version, if any. If there is no prior version, this simply
+    disables the active model (has_model=false afterward). Admin/owner only.
+
+    404 if the org has no active model of this type to roll back (nothing to
+    do, and re-calling after a successful disable-only rollback is a safe
+    no-op path that also 404s — idempotent-safe, never a 500).
+
+    Ordered deactivate -> flush -> activate -> commit in one transaction so
+    the partial-unique "one active per (org, type)" index never sees two
+    active rows for this org+type at once.
+    """
+    active = _get_active_model(current_org.id, classifier_type, db)
+    if active is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active '{classifier_type}' classifier model to roll back for this organization.",
+        )
+
+    prior = (
+        db.query(OrgClassifierModel)
+        .filter(
+            OrgClassifierModel.organization_id == current_org.id,
+            OrgClassifierModel.classifier_type == classifier_type,
+            OrgClassifierModel.is_active.is_(False),
+            OrgClassifierModel.id != active.id,
+        )
+        .order_by(OrgClassifierModel.fit_at.desc())
+        .first()
+    )
+
+    # Deactivate first (and flush) so the partial-unique index is never asked
+    # to hold two active rows for this (org, type) pair, even momentarily.
+    active.is_active = False
+    db.flush()
+
+    if prior is not None:
+        prior.is_active = True
+
+    db.commit()
+
     return _build_response(current_org.id, classifier_type, db)
