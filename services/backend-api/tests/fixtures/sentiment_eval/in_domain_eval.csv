@@ -1,0 +1,170 @@
+text,label
+The documentation covers the basics but could be more comprehensive.,neutral
+Great workflow system! Would love to add custom status fields beyond the defaults.,positive
+The team management features work well. Easy to assign and track feedback ownership.,positive
+The 'Remember me' checkbox does nothing. Always have to login again next day.,negative
+Our team has lost confidence in the platform. Multiple critical bugs in production.,negative
+The 'Mark as Resolved' button does nothing. Feedback stays in the same status.,negative
+API documentation is outdated. The endpoints listed don't match the actual API.,negative
+We use the analytics every day in our product team meetings. Invaluable insights.,positive
+Automatic renewal charged us despite cancelling 2 weeks ago. This needs to be resolved.,negative
+Your pricing is very fair for the value provided. Great ROI for our team.,positive
+No documentation for the webhook payload format. Had to reverse-engineer it.,negative
+The tagging system is flexible and powerful. We can organize feedback exactly how we want.,positive
+The sentiment analysis is decent for English content. Other languages need improvement.,neutral
+Getting a 500 error on every API call since the maintenance window last night.,negative
+Love the product! Would be great to add a Jira integration for syncing feedback to stories.,positive
+The Slack integration works flawlessly. Our team gets notified instantly about urgent issues.,positive
+Excellent categorization! An API endpoint for custom category training would be awesome.,positive
+The export is useful. Adding scheduled exports to S3/GCS would enable our data pipeline.,positive
+The webhooks work reliably. Payload structure is simple enough to work with.,positive
+Amazing analytics! Would love to see trend analysis over longer time periods (6-12 months).,positive
+Data retention policies are clear and reasonable for our compliance needs.,neutral
+Weekly digest is informative. Would prefer to customize which metrics are included.,neutral
+Multi-factor authentication is broken on the mobile app. QR code scan fails.,negative
+The mobile app is okay. Does what it needs to but feels like a basic version of the web app.,neutral
+The real-time analysis is a game-changer for our customer success team.,positive
+Reports provide a good overview. Drill-down capability would make them more useful.,positive
+Love the sentiment analysis feature! It saves us hours of manual categorization every week.,positive
+Doesn't work on Safari. The charts don't render and some buttons are unclickable.,negative
+The Slack notifications are useful but a bit too frequent. Need better control over triggers.,neutral
+Loading the feedback list with filters applied causes the browser tab to become unresponsive.,negative
+Sorting by date shows items in random order. Neither ascending nor descending.,negative
+Loving the AI features! A chatbot that answers questions about our feedback data would be amazing.,positive
+The filtering and search capabilities are top-notch. Can find any feedback instantly.,positive
+The bulk action toolbar disappears when scrolling. Can't select items and take action.,negative
+"Password reset emails are not being sent. Tried 5 times, nothing in inbox or spam.",negative
+Mobile layout is broken. Buttons overlap text and some menus are inaccessible.,negative
+We've been using it for 3 months now. It's become part of our workflow.,neutral
+Tags are being stripped when editing a feedback item. Have to re-add them every time.,negative
+The alerts work well. Custom alert rules based on keyword combinations would add precision.,positive
+The competition has caught up. Your unique selling points aren't unique anymore.,negative
+"This is our third escalation this month. If things don't improve, we're cancelling.",negative
+Integration with Intercom was straightforward. All our support tickets flow in automatically.,positive
+Your customer support is exceptional. Always get a response within an hour.,positive
+The filter combination of sentiment + date range returns wrong results.,negative
+Great mobile experience! Push notifications for urgent feedback would be the cherry on top.,positive
+Concerned about data security - our audit team found that API tokens don't expire properly.,negative
+Wonderful platform! A public-facing feedback portal for end-users would complete the picture.,positive
+The anomaly detection caught a negative sentiment spike that correlated with our outage.,positive
+Page transitions are choppy and animations stutter on our standard office laptops.,negative
+Churn risk scoring has been incredibly accurate for identifying at-risk customers.,positive
+The export functionality is comprehensive. Works perfectly with our existing BI tools.,positive
+Mobile app performance has degraded significantly after the last update. Constant freezing.,negative
+The dashboard is great. A TV/kiosk mode for displaying on our office monitors would be cool.,positive
+CSV export is missing columns that are visible in the table view.,negative
+Excellent AI categorization accuracy. It correctly identifies pain points 90% of the time.,positive
+The dashboard layout can't be customized. I want to rearrange widgets.,neutral
+The API response time has increased from 200ms to 2+ seconds over the past month.,negative
+The feedback form customization options are limited but workable for now.,neutral
+The search is good - adding advanced search with boolean operators would be a power feature.,positive
+Real-time updates are laggy - there's a 30-second delay between submission and dashboard refresh.,negative
+Really appreciate the weekly digest emails. Perfect summary of what happened.,positive
+The reports are useful - adding scheduled email reports would make them even better.,positive
+"Love the sentiment analysis! Adding emotion detection (anger, joy, frustration) would add depth.",positive
+Payment failed but we weren't notified. Our account got suspended without warning.,negative
+Your platform helped us reduce customer churn by 15% in the first quarter.,positive
+Team members are getting locked out randomly. No failed login attempts on their end.,negative
+The onboarding flow is overwhelming. Too much information all at once.,negative
+The API works but the rate limits are a bit restrictive for our use case.,neutral
+Really like the tagging. Auto-tagging based on custom rules would reduce manual work.,positive
+The Intercom integration doesn't sync metadata fields. Only the text comes through.,negative
+The favicon is blurry on retina displays.,neutral
+Account management is fine. Standard stuff - nothing remarkable but nothing wrong.,neutral
+The CSV import works well. Adding direct database connection support would save us time.,positive
+OAuth integration with Google stopped working after your last update.,negative
+Best feedback tool we've tried. Integration was smooth and the UI is intuitive.,positive
+Great product! White-labeling option for agencies managing multiple client accounts would be useful.,positive
+PDF export generates corrupt files on Windows. Works fine on Mac though.,negative
+The annual billing switch didn't apply the discount. We're being charged monthly rates.,negative
+Dashboard loads in reasonable time. Not the fastest tool we use but acceptable.,neutral
+Love the collaboration features! In-line comments on individual feedback items would help.,positive
+Analytics are useful for weekly reviews. Real-time monitoring would be a nice add.,positive
+Great analytics! Cohort analysis by customer segment would unlock new insights.,positive
+Customer support was helpful when we had setup questions. Response time was fine.,positive
+The categorization is mostly accurate. Sometimes misclassifies neutral items as negative.,neutral
+Team features are basic but sufficient for our 5-person team.,neutral
+Two-factor authentication bypass is possible through the mobile app. Critical security gap.,negative
+Great job on the dark mode! Much easier on the eyes for evening data reviews.,positive
+The CSV import feature saved us from having to manually enter 5000+ historical items.,positive
+The notification system works but could be smarter about grouping related alerts.,neutral
+The batch import feature crashes midway through processing. Imported data is corrupted.,negative
+Integration setup was straightforward. Took about an hour including testing.,positive
+Error messages are cryptic. 'Error code 47' tells me nothing about what went wrong.,negative
+The export feature works but the file format options are limited. Would like JSON support.,neutral
+The interface is functional. Some areas could use improvement but it gets the job done.,neutral
+Webhook notifications stopped firing after we updated our endpoint URL.,negative
+The mobile app requires iOS 17 but most of our team is on iOS 15. Can't use it.,negative
+Copy-paste doesn't work in the feedback text editor. Basic functionality broken.,negative
+"Bulk operations (delete, export) time out consistently. We can't manage our data efficiently.",negative
+Love the Slack integration! Would be great to have Microsoft Teams support too.,positive
+The setup guide is missing steps for Docker deployment. Spent hours figuring it out.,negative
+Our security scan flagged your application for not implementing proper CSRF protection.,negative
+The bulk import handled our migration well. Some edge cases with special characters though.,positive
+The pain point categorization helps us prioritize our development roadmap effectively.,positive
+The loading spinner is off-center on the dashboard.,neutral
+The navigation is confusing. Took me 10 minutes to find the export button.,negative
+Great tool! Could you add the ability to create custom dashboards with drag-and-drop widgets?,positive
+Overall the tool meets our basic requirements. Will evaluate again at renewal time.,neutral
+"Inconsistent button styles across pages. Some are rounded, others are square.",neutral
+The mobile app works surprisingly well. I can review feedback during my commute.,positive
+Signed up last week. Still figuring out the features. Will provide more detailed feedback later.,neutral
+Support responded within the stated SLA. Resolution was adequate.,neutral
+Server returns 502 Bad Gateway intermittently. About every 10th request fails.,negative
+Really impressed with the urgency detection. It caught a critical issue we would have missed.,positive
+The product works as expected. Nothing particularly good or bad to report.,neutral
+Found that deleted user accounts can still access the API with cached tokens.,negative
+Missing ability to merge duplicate feedback items. We have hundreds of duplicates.,negative
+Pricing is in line with competitors. Not cheap but not overpriced either.,neutral
+Can't set up custom notification rules. The default alerts are too noisy.,negative
+We've been loyal customers for a year but the lack of updates is concerning.,negative
+No role-based permissions beyond basic admin/member. We need granular access control.,neutral
+The search doesn't find exact matches. Searching for 'payment' misses 'Payment failed'.,negative
+The UI is clean but could use more visual hierarchy to distinguish sections.,neutral
+White screen of death when loading the settings page. Have to clear cache each time.,negative
+Export to CSV hangs for 5+ minutes on datasets larger than 1000 rows.,negative
+We're evaluating competitors because the performance issues haven't been addressed in 3 months.,negative
+No way to create custom reports. The built-in reports don't cover our use case.,negative
+Too many clicks to perform simple actions. Should be able to resolve feedback in one click.,negative
+The mobile app force-closes when switching between tabs. Happens on both iOS and Android.,negative
+Dashboard takes over 15 seconds to load. This is unusable for our daily standup reviews.,negative
+The search function returns relevant results. Pagination could be improved.,positive
+Seriously considering switching to Canny. They offer better analytics at a lower price.,negative
+The search functionality is painfully slow. Takes 10+ seconds to return results.,negative
+Excellent data visualization. The charts tell a clear story about customer sentiment.,positive
+App crashes every time I try to open the analytics dashboard. Happens consistently.,negative
+The system went down during our busiest hour. We lost access for 45 minutes.,negative
+Firefox shows a completely broken layout on the analytics page.,negative
+Seriously considering switching to Pendo. They offer better analytics at a lower price.,negative
+The onboarding experience was seamless. Had everything set up in under 30 minutes.,positive
+Imported our data successfully. Processing time was about what I'd expect for 2000 items.,neutral
+The SSL certificate configuration allows downgrade attacks. Our security team flagged this.,negative
+No API for creating custom integrations. We're stuck with only the built-in ones.,negative
+Invoice doesn't match the agreed-upon enterprise pricing. Please correct this immediately.,negative
+Can't log in with SSO. Getting 'Invalid redirect URI' error since yesterday.,negative
+No keyboard shortcuts at all. Power users need these for efficient workflow.,neutral
+Duplicate detection is flagging unique feedback items as duplicates incorrectly.,negative
+We downgraded from Business to Pro because the premium features don't work reliably.,negative
+Reluctantly starting to migrate our data to another platform due to reliability issues.,negative
+Security issue: the password reset link doesn't expire after use. Anyone with the link can reset repeatedly.,negative
+Missing multi-language support. Our feedback comes in 5 different languages.,neutral
+The analytics page is incredibly slow when we have more than 500 feedback items.,negative
+No changelog or release notes. We don't know what changed in each update.,neutral
+Can't update payment method. The billing page shows a blank screen after the last update.,negative
+"If these bugs aren't fixed by end of month, we'll have to cancel our subscription.",negative
+The integration guide for Slack is wrong. The OAuth scopes listed are incorrect.,negative
+Session expires every 10 minutes. I have to re-login constantly throughout the day.,negative
+Slack integration breaks when using Slack's EU data residency. Getting CORS errors.,negative
+Our credit card was charged twice for this month's subscription. Need immediate refund.,negative
+Typos on the settings page: 'Notifcation' instead of 'Notification'.,neutral
+We were charged for the Business plan but only have Pro features enabled. Billing discrepancy.,negative
+Can't schedule automated exports. We need daily CSV exports sent to our data warehouse.,neutral
+VAT is not being calculated correctly for our EU-based organization.,negative
+The color scheme makes it hard to distinguish between severity levels.,neutral
+We found a security vulnerability in the API endpoint. Unauthorized users can access other organizations' data.,negative
+Font sizes are inconsistent between the sidebar and main content area.,neutral
+The dashboard is beautifully designed. Our team actually enjoys reviewing feedback now.,positive
+There's no audit log. We need to track who changed what for compliance.,neutral
+Sensitive customer data is being logged in plain text in the error logs. This is a compliance violation.,negative
+The chart colors in dark mode are barely visible. Very low contrast.,negative
+Seriously considering switching to Intercom. They offer better analytics at a lower price.,negative
