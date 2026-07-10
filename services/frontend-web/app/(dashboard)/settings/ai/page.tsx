@@ -29,6 +29,7 @@ import { AISettingsProviders } from '@/components/settings/AISettingsProviders';
 import { AISettingsUsage } from '@/components/settings/AISettingsUsage';
 import { HealthWeightsEditor } from '@/components/settings/HealthWeightsEditor';
 import { AIReadinessCard } from '@/components/settings/AIReadinessCard';
+import { SentimentAccuracyCard } from '@/components/settings/SentimentAccuracyCard';
 
 type CategoryType = 'pain_point' | 'feature_request' | 'urgency' | 'general';
 
@@ -475,6 +476,10 @@ function AISettingsContent() {
                 )}
               </CardContent>
             </Card>
+
+            <div className="mt-6">
+              <SentimentAccuracyCard />
+            </div>
           </TabsContent>
           {/* Readiness Tab */}
           <TabsContent value="readiness" className="mt-6">
