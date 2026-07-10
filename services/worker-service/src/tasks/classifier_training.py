@@ -95,6 +95,68 @@ def _decision_result(decision: str, **extra) -> dict:
     return {"decision": decision, decision: True, **extra}
 
 
+def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db: Session) -> int:
+    """Atomic promotion, single transaction (caller commits): train the FINAL
+    production artifact on ALL rows (not just the core's internal train-split —
+    that one never sees the full data), deactivate the prior active
+    (org, classifier_type) row, insert the new active row, flush to populate its id.
+    Never a window with 0 or 2 active rows for the same (org, classifier_type).
+
+    precision/recall/accuracy are not exposed by the core's leakage-free EvalResult
+    (only macro_f1 is) — left nullable/unset here rather than re-deriving a second,
+    out-of-band metrics pass over the holdout (see worker-trainer-and-schedule
+    report deviations).
+    """
+    artifact = train_classifier(dataset)
+
+    prev_active = (
+        db.query(OrgClassifierModel)
+        .filter(
+            OrgClassifierModel.organization_id == org_id,
+            OrgClassifierModel.classifier_type == _CLASSIFIER_TYPE,
+            OrgClassifierModel.is_active == True,  # noqa: E712
+        )
+        .first()
+    )
+    if prev_active is not None:
+        prev_active.is_active = False
+        db.add(prev_active)
+
+    new_model = OrgClassifierModel(
+        organization_id=org_id,
+        classifier_type=_CLASSIFIER_TYPE,
+        model_json=artifact,
+        label_count=len(dataset),
+        precision=None,
+        recall=None,
+        macro_f1=_round_or_none(result.challenger_macro_f1),
+        accuracy=None,
+        fit_at=datetime.utcnow(),
+        is_active=True,
+    )
+    db.add(new_model)
+    db.flush()  # populate new_model.id before the eval-run FK
+    return new_model.id
+
+
+def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: int, db: Session) -> None:
+    """Insert the one org_classifier_eval_runs row every retrain_org run writes
+    (except a lock-miss, which writes nothing — see module docstring)."""
+    eval_run = OrgClassifierEvalRun(
+        organization_id=org_id,
+        classifier_model_id=model_id,
+        classifier_type=_CLASSIFIER_TYPE,
+        incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
+        challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
+        macro_f1_delta=_round_or_none(result.macro_f1_delta),
+        decision=result.decision,
+        n=result.n,
+        duration_ms=duration_ms,
+        notes=result.notes,
+    )
+    db.add(eval_run)
+
+
 def retrain_org(org_id: int, db: Session) -> dict:
     """Retrain the sentiment corrections classifier for a single org.
 
@@ -103,16 +165,15 @@ def retrain_org(org_id: int, db: Session) -> dict:
     2. Build the org's sentiment dataset (aspect B's dataset builder).
     3. evaluate() the challenger against a live incumbent predictor, leakage-free (the
        core trains the challenger itself, only on its own train-split/per-fold).
-    4. Always insert one org_classifier_eval_runs row keyed off the decision.
-    5. Only when decision == "promoted": train the FINAL production artifact on ALL
-       rows (train_classifier(dataset)) and persist it via an atomic swap (deactivate
-       prior active row, insert new active row, flush to populate its id before the
-       eval-run FK, commit as one transaction).
+    4. Only when decision == "promoted": atomically promote the FINAL production
+       artifact (see _promote — trained on ALL rows, not just the core's internal
+       train-split).
+    5. Always insert one org_classifier_eval_runs row keyed off the decision, then
+       commit once (single transaction covering both the model swap and the
+       eval-run insert).
 
-    Below-gate (decision == "skipped") writes zero model rows.
-
-    Below-gate handling (Phase 3) is implemented here; promote/retained handling is
-    added in later phases.
+    Below-gate / worse-challenger / small-holdout (decision in {"skipped", "retained"})
+    write zero model rows.
     """
     r = _get_redis()
     lock = r.lock(f"lock:classifier_refit:{org_id}", timeout=_LOCK_TIMEOUT_SECONDS, blocking=False)
@@ -142,80 +203,23 @@ def retrain_org(org_id: int, db: Session) -> dict:
         )
         duration_ms = int((time.monotonic() - start) * 1000)
 
-        if result.decision == "skipped":
-            eval_run = OrgClassifierEvalRun(
-                organization_id=org_id,
-                classifier_model_id=None,
-                classifier_type=_CLASSIFIER_TYPE,
-                incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
-                challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
-                macro_f1_delta=_round_or_none(result.macro_f1_delta),
-                decision=result.decision,
-                n=result.n,
-                duration_ms=duration_ms,
-                notes=result.notes,
-            )
-            db.add(eval_run)
-            db.commit()
-            return _skip_result("below_min_labels", n=result.n, notes=result.notes)
-
         model_id: Optional[int] = None
-
         if result.decision == "promoted":
-            # Train the FINAL production artifact on ALL rows (not just the core's
-            # internal train-split) — that is the model that serves predictions.
-            artifact = train_classifier(dataset)
+            model_id = _promote(org_id, dataset, result, train_classifier, db)
 
-            # Atomic swap, single transaction: deactivate prior active -> insert new
-            # active -> flush (populate id before the eval-run FK) -> commit below.
-            # Never a window with 0 or 2 active rows for (org, classifier_type).
-            prev_active = (
-                db.query(OrgClassifierModel)
-                .filter(
-                    OrgClassifierModel.organization_id == org_id,
-                    OrgClassifierModel.classifier_type == _CLASSIFIER_TYPE,
-                    OrgClassifierModel.is_active == True,  # noqa: E712
-                )
-                .first()
-            )
-            if prev_active is not None:
-                prev_active.is_active = False
-                db.add(prev_active)
-
-            new_model = OrgClassifierModel(
-                organization_id=org_id,
-                classifier_type=_CLASSIFIER_TYPE,
-                model_json=artifact,
-                label_count=len(dataset),
-                # precision/recall/accuracy are not exposed by the core's leakage-free
-                # EvalResult (only macro_f1 is) — left nullable/unset here rather than
-                # re-deriving a second, out-of-band metrics pass. See report deviations.
-                precision=None,
-                recall=None,
-                macro_f1=_round_or_none(result.challenger_macro_f1),
-                accuracy=None,
-                fit_at=datetime.utcnow(),
-                is_active=True,
-            )
-            db.add(new_model)
-            db.flush()  # populate new_model.id before the eval-run FK
-            model_id = new_model.id
-
-        eval_run = OrgClassifierEvalRun(
-            organization_id=org_id,
-            classifier_model_id=model_id,
-            classifier_type=_CLASSIFIER_TYPE,
-            incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
-            challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
-            macro_f1_delta=_round_or_none(result.macro_f1_delta),
-            decision=result.decision,
-            n=result.n,
-            duration_ms=duration_ms,
-            notes=result.notes,
-        )
-        db.add(eval_run)
+        _insert_eval_run(org_id, model_id, result, duration_ms, db)
         db.commit()
 
+        if result.decision == "skipped":
+            logger.info(
+                "retrain_org: org=%s skipped (below_min_labels) n=%s", org_id, result.n,
+            )
+            return _skip_result("below_min_labels", n=result.n, notes=result.notes)
+
+        logger.info(
+            "retrain_org: org=%s decision=%s model_id=%s n=%s",
+            org_id, result.decision, model_id, result.n,
+        )
         return _decision_result(result.decision, model_id=model_id, n=result.n, notes=result.notes)
     finally:
         try:
