@@ -33,6 +33,7 @@ const mockSettings = {
   base_url: null,
   model_embeddings: null,
   sentiment_provider: 'vader',
+  classifier_mode: 'off',
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',

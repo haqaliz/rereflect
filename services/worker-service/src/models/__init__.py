@@ -6,7 +6,7 @@ Note: In production, these should be in a shared package.
 For now, we duplicate the essential models.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON, Numeric, UniqueConstraint, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON, Numeric, UniqueConstraint, ForeignKey, text
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -602,6 +602,9 @@ class OrgAIConfig(Base):
     model_embeddings = Column(String(100), nullable=True)
     # Per-org sentiment engine opt-in (mirrors backend-api; this aspect: per-org-resolution)
     sentiment_provider = Column(String(20), nullable=True, default='vader')
+    # Per-org self-improving corrections classifier mode (mirrors backend-api; M5.2).
+    # 'off' | 'shadow' | 'auto'. NULL/unrecognized treated as 'off' by resolve_classifier.
+    classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)
@@ -751,6 +754,102 @@ class ChurnBacktestRun(Base):
 
     __table_args__ = (
         Index("ix_churn_backtest_org_run", "organization_id", "run_at"),
+    )
+
+
+# R?: Keep in sync with services/backend-api/src/models/ai_correction.py
+# No shared package enforces consistency — a test
+# (test_worker_and_backend_ai_correction_columns_match) asserts column
+# parity at CI time.
+class AICorrection(Base):
+    """Human-in-the-loop correction/rating signal for an AI output — worker mirror (M5.2)."""
+    __tablename__ = "ai_corrections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=True)
+
+    correction_type = Column(String(50), nullable=False)  # copilot_response | sentiment | category | churn_risk | response_suggestion
+    entity_type = Column(String(50), nullable=False)  # conversation_message | feedback_item | …
+    entity_id = Column(Integer, nullable=True)
+
+    signal = Column(String(20), nullable=False)  # thumbs_up | thumbs_down | correction
+
+    original_value = Column(Text, nullable=True)
+    corrected_value = Column(Text, nullable=True)
+    feedback_text = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_ai_corrections_org_type", "organization_id", "correction_type"),
+        Index("ix_ai_corrections_entity", "entity_type", "entity_id"),
+    )
+
+
+# R?: Keep in sync with services/backend-api/src/models/org_classifier.py
+# No shared package enforces consistency — a test
+# (test_worker_and_backend_org_classifier_model_columns_match /
+# test_worker_and_backend_org_classifier_eval_run_columns_match) asserts
+# column parity at CI time.
+#
+# Unlike the read-only ChurnCalibrationModel mirror (above), the worker is
+# the SOLE WRITER of org_classifier_models (trainer task, aspect C) — the
+# insert-new-active + flip-old-inactive promotion transaction relies on the
+# DB-level partial-unique guard, so this mirror KEEPS the index.
+class OrgClassifierModel(Base):
+    """Versioned per-org corrections classifier artifact — worker mirror (M5.2)."""
+    __tablename__ = "org_classifier_models"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=True)  # NULL = global/base model
+    classifier_type = Column(String(30), nullable=False)  # v1: 'sentiment'
+
+    model_json = Column(JSON, nullable=False)  # tfidf vocab/idf + logreg coef/intercept + classes — NO pickle
+    label_count = Column(Integer, nullable=False)
+
+    precision = Column(Numeric(5, 4), nullable=True)
+    recall = Column(Numeric(5, 4), nullable=True)
+    macro_f1 = Column(Numeric(5, 4), nullable=True)
+    accuracy = Column(Numeric(5, 4), nullable=True)
+
+    fit_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        Index("ix_org_classifier_model_org_type_fit", "organization_id", "classifier_type", "fit_at"),
+        Index(
+            "uq_org_classifier_one_active",
+            "organization_id",
+            "classifier_type",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active = TRUE"),
+        ),
+    )
+
+
+class OrgClassifierEvalRun(Base):
+    """Shadow-mode A/B eval history — worker mirror (M5.2)."""
+    __tablename__ = "org_classifier_eval_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=True)  # NULL = global run
+    classifier_model_id = Column(Integer, nullable=True)
+    classifier_type = Column(String(30), nullable=False)
+
+    incumbent_macro_f1 = Column(Numeric(5, 4), nullable=True)
+    challenger_macro_f1 = Column(Numeric(5, 4), nullable=True)
+    macro_f1_delta = Column(Numeric(5, 4), nullable=True)
+    decision = Column(String(20), nullable=False)  # promoted | retained | skipped
+    n = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_org_classifier_eval_org_type_created", "organization_id", "classifier_type", "created_at"),
     )
 
 

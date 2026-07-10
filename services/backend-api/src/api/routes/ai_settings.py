@@ -37,6 +37,13 @@ VALID_PROVIDERS = {"openai", "anthropic", "google", "ollama", "openai_compatible
 # Local/offline providers: keyless, require a base_url instead of an API key
 LOCAL_PROVIDERS = {"ollama", "openai_compatible"}
 
+# Per-org corrections classifier mode (M5.2). Defined locally — the resolver
+# in aspect D (src/services/classifier_resolver.py) is NOT a dependency of
+# this settings API; it validates a narrower set ({'shadow', 'auto'}) since
+# 'off' resolves to None there. This is the single validation source for the
+# PATCH endpoint.
+VALID_CLASSIFIER_MODES = {"off", "shadow", "auto"}
+
 
 def _is_valid_url(value: str) -> bool:
     """Return True if value is a well-formed http/https URL with a netloc."""
@@ -59,6 +66,7 @@ class AISettingsResponse(BaseModel):
     base_url: Optional[str] = None
     model_embeddings: Optional[str] = None
     sentiment_provider: str = "vader"
+    classifier_mode: str = "off"
     models: ModelConfig
 
 
@@ -68,6 +76,7 @@ class AISettingsUpdate(BaseModel):
     base_url: Optional[str] = None
     model_embeddings: Optional[str] = Field(None, max_length=100)
     sentiment_provider: Optional[str] = None
+    classifier_mode: Optional[str] = None
     model_categorization: Optional[str] = None
     model_analysis: Optional[str] = None
     model_insights: Optional[str] = None
@@ -217,6 +226,7 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         if config and getattr(config, "sentiment_provider", None)
         else "vader"
     )
+    classifier_mode = getattr(config, "classifier_mode", None) or "off" if config else "off"
 
     return AISettingsResponse(
         ai_analysis_enabled=org.ai_analysis_enabled,
@@ -224,6 +234,7 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         base_url=base_url,
         model_embeddings=model_embeddings,
         sentiment_provider=sentiment_provider,
+        classifier_mode=classifier_mode,
         models=model_config,
     )
 
@@ -387,6 +398,16 @@ def _sentiment_transformer_deps_available() -> bool:
 _SENTIMENT_TRANSFORMER_MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
 
+def _classifier_deps_available() -> bool:
+    """Cheap, safe check: is scikit-learn importable, without importing it
+    (find_spec has no import side effects). The per-org corrections
+    classifier only needs TF-IDF + logistic regression (scikit-learn) — no
+    torch/transformers requirement, unlike the sentiment transformer path.
+    """
+    import importlib.util
+    return importlib.util.find_spec("sklearn") is not None
+
+
 def _plan_level(plan: str) -> int:
     """Return numeric plan level (higher = better)."""
     try:
@@ -494,6 +515,30 @@ def update_ai_settings(
         # column's own semantics (NULL -> resolver returns None -> caller uses vader).
         if hasattr(config, "sentiment_provider"):
             config.sentiment_provider = data.sentiment_provider
+
+    # ── Classifier mode validation ────────────────────────────────────────────
+    if "classifier_mode" in data.model_fields_set:
+        if (
+            data.classifier_mode is not None
+            and data.classifier_mode not in VALID_CLASSIFIER_MODES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid classifier_mode. Must be one of: "
+                    f"{', '.join(sorted(VALID_CLASSIFIER_MODES))}"
+                ),
+            )
+        if data.classifier_mode in ("shadow", "auto") and not _classifier_deps_available():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"classifier_mode '{data.classifier_mode}' requires scikit-learn "
+                    "to be installed. See docs/SELF_HOSTING.md for the local model setup."
+                ),
+            )
+        if hasattr(config, "classifier_mode"):
+            config.classifier_mode = data.classifier_mode
 
     if data.model_categorization is not None:
         config.model_categorization = data.model_categorization

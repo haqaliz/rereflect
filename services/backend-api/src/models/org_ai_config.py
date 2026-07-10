@@ -19,6 +19,9 @@ class OrgAIConfig(Base):
     # Per-org sentiment engine opt-in (local-analyzer-sentiment-model, per-org-resolution aspect).
     # 'vader' | 'transformer'; NULL/unrecognized treated as 'vader' by resolve_sentiment_provider.
     sentiment_provider = Column(String(20), nullable=True, default='vader')
+    # Per-org self-improving corrections classifier mode (M5.2). 'off' | 'shadow' | 'auto'.
+    # NULL/unrecognized treated as 'off' by resolve_classifier (defense in depth).
+    classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)

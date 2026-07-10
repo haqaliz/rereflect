@@ -33,6 +33,7 @@ from src.api.routes import ai_readiness as ai_readiness_router  # noqa: E402 —
 from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 Churn Playbooks
 from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402 — product-usage ingest receiver
 from src.api.routes import sentiment_accuracy as sentiment_accuracy_router  # noqa: E402 — eval-harness-and-card (M5.1 disclosure)
+from src.api.routes import classifier_accuracy as classifier_accuracy_router  # noqa: E402 — M5.2 settings-api-and-accuracy-card
 from src.seed import seed_admin_user, seed_system_templates
 from src.services.copilot.template_saver import TemplateSaver
 from src.services.embeddings import resolve_embedding_provider
@@ -277,6 +278,8 @@ app.include_router(churn_accuracy_router.system_router)
 app.include_router(ai_readiness_router.router)
 # Sentiment eval accuracy card (M5.1 disclosure — transformer vs VADER, not a merge gate)
 app.include_router(sentiment_accuracy_router.router)
+# Per-org corrections classifier accuracy card (M5.2 settings-api-and-accuracy-card)
+app.include_router(classifier_accuracy_router.router)
 app.include_router(customers.router)
 # AI Copilot (M2.2) — folder router MUST come before conversations to avoid route conflicts
 app.include_router(conversation_folders.router)

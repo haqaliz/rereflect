@@ -15,6 +15,7 @@ export interface AISettings {
   base_url: string | null;
   model_embeddings: string | null;
   sentiment_provider: string;
+  classifier_mode: string;
   models: AIModels;
 }
 
@@ -25,6 +26,7 @@ export interface AISettingsUpdate {
   base_url?: string | null;
   model_embeddings?: string | null;
   sentiment_provider?: string | null;
+  classifier_mode?: string | null;
   model_categorization?: string;
   model_analysis?: string;
   model_insights?: string;
