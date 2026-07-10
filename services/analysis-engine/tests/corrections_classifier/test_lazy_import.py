@@ -73,3 +73,46 @@ def test_trainer_module_importable_without_sklearn_or_numpy():
     result = _run(code)
     assert result.returncode == 0, result.stderr
     assert "OK" in result.stdout
+
+
+def test_public_surface_importable_without_sklearn_or_numpy():
+    """Phase 5: the full re-export surface (including train_classifier, re-exported at
+    package level) is importable without sklearn/numpy actually being installed — proving
+    the __init__.py's `from .trainer import train_classifier` doesn't defeat the laziness
+    (trainer.py's own module scope has no heavy import; only calling the function does)."""
+    code = (
+        _STUB_PARENT_PACKAGES
+        + "sys.modules['sklearn'] = None\n"
+        "sys.modules['numpy'] = None\n"
+        "from src.analyzer.corrections_classifier import (\n"
+        "    build_sentiment_dataset, rows_to_dataset, train_classifier,\n"
+        "    predict, score_from_proba, evaluate, EvalResult, SENTIMENT_LABELS,\n"
+        "    MIN_LABELS, HOLDOUT_FRAC, MIN_HOLDOUT, MARGIN, RANDOM_STATE,\n"
+        ")\n"
+        "from src.analyzer.corrections_classifier.metrics import compute_multiclass_metrics\n"
+        "print('OK')\n"
+    )
+    result = _run(code)
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_calling_train_classifier_without_sklearn_raises_importerror_not_silent():
+    """Documents the boundary precisely (mirrors sentiment_providers'
+    test_transformer_path_fails_cleanly_without_torch): importing is fine; CALLING
+    train_classifier() without sklearn installed is where the missing dep surfaces,
+    as a normal ImportError — never a silent no-op."""
+    code = (
+        _STUB_PARENT_PACKAGES
+        + "sys.modules['sklearn'] = None\n"
+        "sys.modules['numpy'] = None\n"
+        "from src.analyzer.corrections_classifier.trainer import train_classifier\n"
+        "try:\n"
+        "    train_classifier([('a', 'positive'), ('b', 'negative')])\n"
+        "    raise SystemExit('expected ImportError')\n"
+        "except ImportError:\n"
+        "    print('OK')\n"
+    )
+    result = _run(code)
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
