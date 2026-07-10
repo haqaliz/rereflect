@@ -169,6 +169,73 @@ transformer setting, since the deps must be importable for the opt-in to work at
 The `BAKE_SENTIMENT_MODEL=true` pre-bake additionally adds ~450–500 MB of model
 weights **only** when explicitly requested.
 
+## Per-Org Corrections Classifier (M5.2, self-improving)
+
+Rereflect can train a small per-organization sentiment classifier on your own
+corrections, run it locally (CPU-only, offline), and auto-promote it when it
+measurably beats the default analyzer. The classifier is **off by default** — your
+analyzer output stays byte-identical until you enable it.
+
+### What it is
+
+The per-org classifier is a **small, fully-offline model** trained exclusively on
+your organization's own feedback text + your own sentiment corrections (stored in
+`AICorrection`). Under the hood it's a **TF-IDF + logistic regression model**
+(scikit-learn, CPU-only, no GPU needed, ~few KB JSON artifact). It improves the
+more you correct feedback, runs locally with no cloud dependency, and retrains
+weekly on a schedule. This is different from the M5.1 transformer model (which is
+shared/generic); this one is yours alone.
+
+### Three modes
+
+Go to **Settings → AI** to choose:
+
+| Mode | Behavior | Use case |
+|------|----------|----------|
+| **off** (default) | Analyzer output unchanged, no classifier trained. | Safe default. |
+| **shadow** | Classifier trains silently on your corrections. Shows you the accuracy delta vs the incumbent but **never changes stored values**. | Watch the model's accuracy without risk. |
+| **auto** | Classifier trains. When it beats the incumbent by ≥ +0.02 macro-F1 on held-out corrections **and** meets minimum volume thresholds, it auto-promotes and becomes the live model. You see the delta and can roll back. | Opt in to automatic self-improvement. |
+
+### Activation gate: per-type correction volume
+
+The classifier only trains when you've made enough corrections of a specific type.
+The minimum threshold is **20 corrections of a given type** (sentiment, category,
+etc.). The **Accuracy tab** (Settings → AI → Accuracy) shows your current per-type
+correction counts and whether each type is ready.
+
+- Below the threshold: the card shows "not ready — 5/20 sentiment corrections" and
+  nothing trains.
+- At or above: the model trains weekly (Mondays 06:30 UTC) and the card shows the
+  incumbent vs challenger macro-F1 with the delta.
+
+This is an honest gate — real-org self-improvement needs enough training data to be
+meaningful.
+
+### How to read the accuracy card
+
+Once you've collected enough corrections, the **Accuracy tab** (Settings → AI) shows:
+
+- **Model type**: "Per-org TF-IDF + logistic regression"
+- **Label count** (`n`): the number of corrections used to train
+- **Incumbent macro-F1**: the default analyzer's accuracy on held-out corrections
+- **Challenger macro-F1** + **delta**: the per-org model's accuracy and how much
+  better (or worse) it is than the incumbent
+- **Decision**: "promoted" (now live), "retained" (challenger not good enough),
+  or "skipped" (not enough data)
+- **History**: last 10 training runs, showing the trend
+
+If you enable `auto` mode and the model gets promoted, the card displays a
+**Roll back** button — one click reverts to the previous model.
+
+### Known v1 limitation
+
+In `auto` mode, if the promoted classifier flips a feedback item's sentiment label
+(e.g., from neutral to negative), the **pain-point, feature-request, and urgency
+categories on that item stay keyed to the incumbent sentiment**. This preserves
+consistency of churn signals, health scores, and trend analytics (they read the
+recomputed `sentiment_score` coherently). Full re-categorization across all three
+heads when a model is promoted is the v2 follow-on (M5.2b category head).
+
 ## Adding your own LLM key (BYOK)
 
 To use a hosted frontier model for analysis and the AI Copilot instead of (or alongside)

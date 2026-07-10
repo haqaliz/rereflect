@@ -59,6 +59,7 @@
 | Zendesk Integration — inbound feedback source via agent email + API token (Basic auth, encrypted); tickets → feedback (one item/ticket, deduped by ticket ID, requester → `customer_email`); dual ingestion (incremental **pull** beat + optional HMAC **webhook**) through a shared dedup core; `zendesk` selectable source type; SSRF-hardened; auto-provisions a default source on connect | Yes | Settings > Integrations (Zendesk token-paste page + tile), source-wizard branch, landing page + `SELF_HOSTING.md`; OAuth / per-comment / backfill / filters / write-back deferred v2 | Unlocked (OSS) |
 | Asana Integration (slice 1) — **outbound** work-management target via a **Personal Access Token** (Bearer auth, encrypted); create Asana **task** from feedback (workspace/project selection, plain-text notes, `permalink_url` link, org-scoped duplicate guard + `asana_task_created` timeline event); `asana` selectable own-auth source type; fixed host `app.asana.com` (no per-org subdomain → no SSRF DNS gate) | Yes | Settings > Integrations (Asana PAT token-paste page + tile), create-task wizard Asana branch (Workspace→Project pickers), landing page + `SELF_HOSTING.md`; **AI-drafted content shipped 2026-07-07** (see row below); OAuth / inbound status-sync / team-scoped-project picker deferred v2 | Unlocked (OSS) |
 | AI-Drafted Issue/Task Content — "Draft with AI" in the create-work-item wizard (Jira + Asana branches) drafts issue/task **title + body** from the feedback item via the org's LLM; shared `POST /api/v1/feedback/{id}/issue-draft` (admin/owner), gated on `resolve_generation_llm().is_configured` (409 when no LLM); provider-agnostic (cloud BYOK + local Ollama/OpenAI-compatible), org tone/brand voice, `LLMUsageLog(task_type="issue_draft")`; **populates editable fields for review — never auto-creates**; button hidden when no LLM configured; prompt hardens against injection (feedback as delimited untrusted data) | Yes | "✨ Draft with AI" button in Jira + Asana wizard branches; overwrite-confirm if edited; degrades to manual fields when unconfigured | Unlocked (OSS) |
+| Per-Org Self-Improving Sentiment Classifier (M5.2) — CPU-only, offline TF-IDF + logistic regression trained on org's own feedback text + sentiment corrections; three modes (off/shadow/auto); auto-promotes challenger only when macro-F1 delta ≥ +0.02 on held-out set and correction volume ≥ 20 per type; weekly refit Mon 06:30 UTC; promoted model is reversible via one-click rollback | Yes | Settings → AI (General tab: mode toggle; Accuracy tab: incumbent-vs-challenger macro-F1 + delta + rollback) + endpoint GET `/api/v1/settings/ai/classifier/accuracy`, POST `/api/v1/settings/ai/classifier/rollback` | Unlocked (OSS) |
 
 ---
 
@@ -293,7 +294,7 @@
 
 ---
 
-## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2–M5.4 planned)
+## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2 shipped 2026-07-11; M5.3–M5.4 planned)
 
 > **Strategic framing.** For an OSS / self-hosted / BYOK product the moat is **not** a trained
 > foundation model, a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks
@@ -346,15 +347,14 @@
       verified correct. Per the plan's decision the spine ships regardless, model **off by default**,
       and the card states the honest result (incl. `n`).
 
-#### M5.2 — Corrections flywheel: per-org self-improving classifiers (Track A — flagship moat)
-- [ ] Train a small per-org model (SetFit / logistic-regression-on-embeddings via the installed
-      `sentence-transformers`) on the org's feedback + `AICorrection`s, on the worker, CPU, scheduled.
-- [ ] Per-org **shadow A/B** on held-out corrections; **auto-promote only when the challenger beats the
+#### M5.2 — Corrections flywheel: per-org self-improving classifiers (Track A — flagship moat) — COMPLETE (shipped 2026-07-11)
+> Spine + sentiment; category head is the v2 follow-on; real-org auto-promotion is the later exit — spine proven on synthetic corrections.
+- [x] Train a small per-org model (TF-IDF + logistic regression via the installed `scikit-learn`) on the org's feedback + `AICorrection`s, on the worker, CPU, scheduled.
+- [x] Per-org **shadow A/B** on held-out corrections; **auto-promote only when the challenger beats the
       incumbent** by a margin; operator sees the delta and can roll back.
-- [ ] Activates per-org once corrections ≥ the threshold from M5.0. Honesty: "your model, trained on your
+- [x] Activates per-org once corrections ≥ the threshold from M5.0. Honesty: "your model, trained on your
       data, promoted only when measurably better."
-- *Serves:* the self-improving data moat (flagship goal), accuracy, offline. **Exit:** ≥1 design-partner
-      org has a promoted per-org model beating the default on their own held-out data.
+- *Serves:* the self-improving data moat (flagship goal), accuracy, offline. **Exit:** spine proven on synthetic corrections; real-org exit is deferred.
 
 #### M5.3 — Per-org churn ML model (Track C — data-gated)
 - [ ] Upgrade from isotonic calibration to a gradient-boosted / logistic churn classifier per org on

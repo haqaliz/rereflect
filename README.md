@@ -50,7 +50,7 @@ all behind a multi-tenant dashboard you host yourself.
 
 | | |
 |---|---|
-| 🧠 **AI feedback analysis** | Sentiment, pain points, feature requests, urgency and topic clustering — local (VADER default) or LLM-powered (BYOK). Optional **opt-in local transformer sentiment model** (CPU, offline, per-org) with a built-in accuracy card that compares it against VADER on a labeled set — honest numbers, off by default. |
+| 🧠 **AI feedback analysis** | Sentiment, pain points, feature requests, urgency and topic clustering — local (VADER default) or LLM-powered (BYOK). Optional **opt-in local transformer sentiment model** (CPU, offline, per-org) with a built-in accuracy card that compares it against VADER on a labeled set — honest numbers, off by default. **Per-org self-improving classifier** — trains on your own sentiment corrections, auto-promotes only when measurably better (≥ +0.02 macro-F1), fully reversible. |
 | 💬 **AI Copilot (Cmd+K)** | Ask questions in natural language, generate reports and draft responses. Runs **fully offline on a local model** (Ollama or any OpenAI-compatible endpoint) — including the template-matching embeddings — or on your BYOK cloud key. |
 | 📉 **Churn risk scoring** | Per-item churn risk with suggested actions, plus cohort analytics and playbooks. |
 | 🧑‍💼 **Customer 360 + timeline** | Per-customer health profile with a unified, paginated activity timeline (feedback, product usage, churn and health-score events); CRM enrichment (HubSpot, Salesforce) with optional health-score writeback to both HubSpot and Salesforce — also readable over the public API. |
