@@ -1,59 +1,71 @@
-# Card — feat/segment-actions (freeform)
+# Card — feat/local-analyzer-sentiment-model
 
-**Type:** feat · **Slug:** `segment-actions` · **Branch:** `feat/segment-actions`
-**Source:** freeform task from `/rereflect-next` recommendation (no GitHub issue), 2026-07-08.
+**Type:** feat
+**Source:** freeform (no GitHub issue) — originated from the `rereflect-next` recommendation
+**Branch:** `feat/local-analyzer-sentiment-model`
+**Worktree:** `.claude/worktrees/feat-local-analyzer-sentiment-model`
+**Date:** 2026-07-10
 
 ---
 
-## Brief (from rereflect-next pick)
+## Brief (from rereflect-next handoff)
 
-**Actionable Segments — segment-targeted playbooks + bulk actions on the Customers page.**
+Build **M5.1 of the Local Model Layer** (`AI-TRACKING.md:320`): a pluggable
+**analyzer-provider abstraction** for sentiment (mirroring the existing LLM /
+embedding provider layers), with VADER wired through it as the **byte-stable
+default** so existing installs are unchanged, plus one **opt-in
+distilled-transformer sentiment provider** running CPU-only. Ship an **eval
+harness + accuracy card** (labeled set → precision / recall / F1 / confusion)
+that *proves* the model beats the lexicon before it is recommended.
 
-Make the just-merged Customer Segments (commit `010bfdf`, M3.4) *actionable* by wiring them into
-existing action surfaces, instead of leaving them as a passive label/filter.
+### Why this was picked (moat + shipped-state grounding)
+- **Unblocked first slice of the just-planned M5 moat, and the only M5 track that
+  isn't data-gated.** `AI-TRACKING.md:329` marks M5.1 "Not data-gated → first
+  shipped," vs M5.2 (gated on correction volume, `:332`) and M5.3 (gated at ~500
+  churn labels, `:342`). M5 is docs-only so far — commit `9592f51` added the
+  roadmap block; nothing is built and there is no `docs/planning/` entry for it.
+- **Builds the spine everything else in M5 stands on.** M5.1 is explicitly
+  "Track B + spine v1" (`AI-TRACKING.md:320`) — the provider abstraction that
+  M5.2's per-org classifiers and M5.3's churn model plug into.
+- **Deepens the real OSS / self-hosted / BYOK moat, honestly.** CPU-only,
+  offline, default stays VADER (byte-stable), and the eval harness makes "more
+  accurate than a lexicon" *proven, not marketing* (`AI-TRACKING.md:327-330`).
+  The heavy stack (`torch`, `transformers`, `sentence-transformers`) is already
+  installed (`AI-TRACKING.md:304`), so this is wiring + eval, not new infra.
 
-### Why this was picked (grounding — not invented)
-- Segments merged as the latest commit; the segments PRD explicitly parks the payoff for later:
-  *"Automation/playbook/copilot targeting on segments (later fast-follows; hooks noted, not built)"*
-  and lists **Playbook segment-targeting** + **Copilot `segment` scope** as the cleanest fast-follows
-  (`docs/planning/customer-segments/prd.md:93-96,143`).
-- Segments today are a passive label/filter (`AI-TRACKING.md:222`).
-- Hardens the core moat loop: churn → health → **playbook** → copilot → automation
-  (`AI-TRACKING.md:5`) — operating on cohorts is the reason segments exist.
-- Completes M3.4's only unchecked item: *"Bulk actions: export customer list, bulk assign CS owner,
-  trigger outreach"* (`AI-TRACKING.md:223`).
+## Scope (from the roadmap M5.1 bullets, `AI-TRACKING.md:320-330`)
+1. **Pluggable analyzer-provider abstraction** — mirror the existing LLM/embedding
+   provider layers so sentiment/category/urgency can be backed by
+   `{ default (VADER/keyword) | shipped model | per-org trained }`. (This slice
+   focuses on **sentiment**; category/urgency backends come later in M5.)
+2. **Opt-in distilled transformer sentiment (+ optional emotion) provider** — CPU
+   inference; download-on-first-run + cached; default stays VADER (lean image,
+   zero-config, byte-stable); documented **air-gapped pre-bake** path.
+3. **Eval harness + accuracy card** — a labeled eval set + precision/recall/F1/
+   confusion so the model provably beats VADER on the eval set, offline.
 
-### Scope of slice 1 (proposed)
-On `/customers`, select a segment/cohort (reuse the `?segment=` filter + the existing
-`BulkMarkChurnedDialog` selection pattern) and act on it in bulk:
-- CSV export of the filtered customer list
-- bulk tag / CS-owner assign
-- run an existing playbook on the segment via the `RunPlaybookDropdown` path
+## Known caveats to design around (from the handoff)
+- **No labeled sentiment eval set exists in the repo yet** — slice 1 must source
+  or hand-label one (a public sentiment corpus, or a hand-labeled sample of the
+  org's own feedback) before the "beats VADER" gate means anything.
+- **Model download breaks air-gapped self-hosters** — "download-on-first-run +
+  cached" pulls a model over the network; the documented **pre-bake** path is
+  part of slice 1, not optional polish.
+- **Keep the transformer strictly opt-in and the default byte-identical to
+  today** so existing installs don't change (characterization-test VADER-through-
+  the-provider for byte-stability).
 
-### Known caveat (dig into first)
-Playbooks' `probability_min` / `probability_max` are `NOT NULL`, so binding a playbook to a *segment
-predicate* (instead of a probability band) needs a small migration to relax those
-(`docs/planning/customer-segments/prd.md:96`). Also inherits the repo-wide Alembic multi-heads
-condition — resolve `merge heads` before adding a migration.
+## Suggested testable first slice
+Provider abstraction + VADER-as-default-provider (characterization-tested for
+byte-stability) + the eval harness → then add the transformer provider behind an
+opt-in flag. Optionally fold in the cheap **M5.0 readiness report**
+(`AI-TRACKING.md:313`, no ML) since it de-risks the next M5 track.
 
-### Explicitly deferred (not slice 1)
-- **"Trigger outreach campaign"** — outbound email under self-hosting depends on the operator's own
-  SMTP/Resend config; do not gate slice 1 on it.
-- Copilot `segment` scope + `@segment:` mention — separate fast-follow (alternate pick).
+## Exit criteria (roadmap M5.1, `AI-TRACKING.md:330`)
+Opt-in model provably beats VADER on the eval set, offline; default unchanged.
 
-### Fit guardrails
-Open-source / self-hosted / BYOK; no plan-gating or hosted-SaaS assumptions (CLAUDE.md billing/tier
-sections are stale). Reuses existing bulk-churn (`/customers/churn-events/bulk`,
-`BulkMarkChurnedDialog`) and playbook (`RunPlaybookDropdown`) infrastructure — extends a proven
-pattern, not greenfield.
+---
 
-## Reference points to confirm in Phase 2 dig
-- Customers page + selection UI: `app/(dashboard)/customers/page.tsx`, `BulkMarkChurnedDialog`,
-  `RunPlaybookDropdown` (`components/customers/`).
-- Customers list API + `?segment=` filter + serializer (`src/api/routes/customers.py`).
-- Bulk churn endpoint precedent: `POST /customers/churn-events/bulk` (`churn_events.py`,
-  `churn_event.py` schema).
-- Playbook model + CRUD + execution: `playbooks.py`, `playbook_seeder.py`, playbook model
-  (`probability_min/max` NOT NULL).
-- Segment engine/classifier + `segment` column on `customer_health_scores` (segments commits
-  `ba2a4bd`..`d3fbf5e`).
+_Note: this worktree inherited a stale `_card/understanding.md` from the prior
+`segment-actions` task (committed to master). Phase 2 overwrites it with this
+task's understanding note._

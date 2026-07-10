@@ -293,7 +293,7 @@
 
 ---
 
-## M5 — Local Model Layer (self-improving, on-device) — PLANNED
+## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2–M5.4 planned)
 
 > **Strategic framing.** For an OSS / self-hosted / BYOK product the moat is **not** a trained
 > foundation model, a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks
@@ -310,24 +310,41 @@
 > paths stay byte-stable; every model swap is A/B-gated and reversible; no central/cross-tenant data;
 > models are small and described honestly.
 
-#### M5.0 — Data & Model Readiness Assessment (no ML)
-- [ ] Instrument, per org: feedback volume, `AICorrection` counts by type (sentiment/category/urgency),
-      churn-label counts + distribution; ship an "AI training readiness" admin report/endpoint.
-- [ ] Output defines the activation thresholds that gate M5.2 (correction volume) and M5.3 (~500 churn
-      labels). **Exit:** we know per real org whether A and C are buildable now or need bootstrapping.
+#### M5.0 — Data & Model Readiness Assessment (no ML) — COMPLETE (shipped 2026-07-10, as `local-analyzer-sentiment-model`)
+- [x] Instrument, per org: feedback volume, `AICorrection` counts by type (**dynamic `by_type`** —
+      real values are `sentiment`/`category`/`churn_risk`/`copilot_response`; there is no `urgency`
+      correction in the code, so the report groups by whatever types exist), churn-label counts +
+      distribution (from `CustomerChurnEvent`); shipped `GET /api/v1/analytics/ai-readiness` + a
+      "Readiness" tab card on Settings → AI.
+- [x] Output surfaces the activation thresholds that gate M5.2 (correction volume — stated
+      `CORRECTION_VOLUME_TARGET`, explicitly unvalidated v1) and M5.3 (`CHURN_LABEL_TARGET = 500`),
+      with honest ready/not-ready flags. **Exit met:** an operator can see per-org whether the next
+      tracks are buildable.
 - *Serves:* de-risks all tracks. Cheap, first, non-negotiable given data readiness is unknown.
 
-#### M5.1 — Analyzer model-provider layer + better local defaults (Track B + spine v1)
-- [ ] Pluggable analyzer-provider abstraction (mirror the existing LLM/embedding provider layers) so
-      sentiment/category/urgency can be backed by `{default (VADER/keyword) | shipped model | per-org
-      trained}`.
-- [ ] Ship a distilled transformer sentiment (+ optional emotion) model as an **opt-in** provider; CPU
-      inference; **download-on-first-run + cached**, default stays VADER (lean image, zero-config,
-      byte-stable); documented **air-gapped pre-bake** path (doubles as a privacy pitch).
-- [ ] **Eval harness + accuracy card** — a labeled eval set + precision/recall/F1/confusion so
-      "more accurate than a lexicon" is *proven*, not marketing.
-- *Serves:* accuracy leadership + offline/zero-cloud + credibility floor. Not data-gated → first shipped.
-      **Exit:** opt-in model provably beats VADER on the eval set, offline; default unchanged.
+#### M5.1 — Analyzer model-provider layer + better local defaults (Track B + spine v1) — COMPLETE (shipped 2026-07-10, as `local-analyzer-sentiment-model`)
+> See `docs/planning/local-analyzer-sentiment-model/`. Built via 5 aspects (sentiment-provider-core,
+> per-org-resolution, model-packaging, eval-harness-and-card, m5.0-readiness-report), strict TDD.
+- [x] Pluggable **sentiment**-provider abstraction (`analysis-engine/src/analyzer/sentiment_providers/`,
+      mirrors the embedding/LLM provider layers): `SentimentProvider` ABC + `VaderSentimentProvider`
+      (byte-identical default, characterization-locked) + `TransformerSentimentProvider` + factory.
+      Per-org opt-in via `OrgAIConfig.sentiment_provider` (default `'vader'`) + `resolve_sentiment_provider`
+      (backend + worker mirrors), injected at both sentiment call sites; VADER fallback on any failure,
+      per-process single model load. (category/urgency backends deferred to a later M5 slice.)
+- [x] Ship a **CPU transformer sentiment** model (`cardiffnlp/twitter-roberta-base-sentiment-latest`,
+      3-class) as an **opt-in** provider; **pull-on-first-enable + cached** (lean default image,
+      `BAKE_SENTIMENT_MODEL=false`), default stays VADER (byte-stable); documented **air-gapped
+      pre-bake** + `HF_HUB_OFFLINE` path in `docs/SELF_HOSTING.md`. (emotion head deferred.)
+- [x] **Eval harness + accuracy card** — offline harness + two labeled sets (self-authored public
+      n=180 + in-domain n=169) + precision/recall/F1/confusion (reuses the churn-accuracy metric
+      pattern); `GET /api/v1/settings/ai/sentiment/accuracy` reads a committed results artifact; card
+      on the Settings → AI "accuracy" tab.
+- *Serves:* accuracy leadership + offline/zero-cloud + credibility floor. Not data-gated → shipped first.
+      **Exit (honest, DISCLOSURE not gate):** on the in-domain set the transformer **marginally beats**
+      VADER (macro-F1 **0.552 vs 0.526**, +0.026) but does **not** clear the ambitious +0.05 target
+      (it under-recalls `neutral` on flat B2B feedback); on the public set 0.778 vs 0.758. Label order
+      verified correct. Per the plan's decision the spine ships regardless, model **off by default**,
+      and the card states the honest result (incl. `n`).
 
 #### M5.2 — Corrections flywheel: per-org self-improving classifiers (Track A — flagship moat)
 - [ ] Train a small per-org model (SetFit / logistic-regression-on-embeddings via the installed
