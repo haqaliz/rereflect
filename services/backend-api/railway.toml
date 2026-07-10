@@ -1,10 +1,12 @@
 # Railway configuration for Backend API (FastAPI)
+# IMPORTANT: Set Root Directory to "services/" in Railway dashboard
+# This allows the Dockerfile to copy from both backend-api/ and analysis-engine/
 # Docs: https://docs.railway.com/guides/build-configuration
 
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
-watchPatterns = ["/services/backend-api/**"]
+dockerfilePath = "backend-api/Dockerfile"
+watchPatterns = ["/services/backend-api/**", "/services/analysis-engine/**"]
 
 [deploy]
 healthcheckPath = "/health"
