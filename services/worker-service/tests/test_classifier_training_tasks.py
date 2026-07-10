@@ -544,3 +544,50 @@ def test_retrain_org_promote_then_worse_keeps_prior_active(db):
         .count()
     )
     assert active_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — per-org advisory lock (overlap guard)
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_acquires_per_org_lock(db):
+    org = _make_org(db)
+    fake_r, fake_lock = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    fake_r.lock.assert_called_once()
+    args, kwargs = fake_r.lock.call_args
+    assert args[0] == f"lock:classifier_refit:{org.id}"
+    fake_lock.acquire.assert_called_once_with(blocking=False)
+
+
+def test_retrain_org_lock_not_acquired_skips_without_writes(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_denied()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db)
+
+    assert result == {"decision": "skipped", "skipped": True, "reason": "locked"}
+    assert db.query(OrgClassifierEvalRun).count() == 0
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_releases_lock_in_finally(db):
+    org = _make_org(db)
+    fake_r, fake_lock = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch("analyzer.corrections_classifier.dataset.build_sentiment_dataset",
+               side_effect=RuntimeError("boom")):
+        tasks = _get_tasks()
+        with pytest.raises(RuntimeError):
+            tasks.retrain_org(org.id, db)
+
+    fake_lock.release.assert_called_once()
