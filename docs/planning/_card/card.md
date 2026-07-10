@@ -1,71 +1,69 @@
-# Card — feat/local-analyzer-sentiment-model
+# Card — feat/per-org-corrections-classifier (freeform)
 
-**Type:** feat
-**Source:** freeform (no GitHub issue) — originated from the `rereflect-next` recommendation
-**Branch:** `feat/local-analyzer-sentiment-model`
-**Worktree:** `.claude/worktrees/feat-local-analyzer-sentiment-model`
-**Date:** 2026-07-10
+> **Source:** freeform task (no GitHub issue). Brief derived from the `rereflect-next`
+> recommendation (2026-07-10) and `AI-TRACKING.md` **M5.2**. The issue number lives in
+> the branch/PR; this card is the single source for later phases.
 
----
+## Task
 
-## Brief (from rereflect-next handoff)
+Build **M5.2 — Corrections flywheel: per-org self-improving classifiers** (Track A, the
+flagship moat of the active M5 "Local Model Layer" block). Close the loop that has been
+open since M3.3: `AICorrection`s are collected but **never trained on** (verified by grep —
+`AICorrection` appears only in model/service/readiness/public-API-write code, no training
+consumer; M4.2's "fine-tuned classification" was deferred, `AI-TRACKING.md:249`).
 
-Build **M5.1 of the Local Model Layer** (`AI-TRACKING.md:320`): a pluggable
-**analyzer-provider abstraction** for sentiment (mirroring the existing LLM /
-embedding provider layers), with VADER wired through it as the **byte-stable
-default** so existing installs are unchanged, plus one **opt-in
-distilled-transformer sentiment provider** running CPU-only. Ship an **eval
-harness + accuracy card** (labeled set → precision / recall / F1 / confusion)
-that *proves* the model beats the lexicon before it is recommended.
+## What M5.2 says (AI-TRACKING.md:349-357)
 
-### Why this was picked (moat + shipped-state grounding)
-- **Unblocked first slice of the just-planned M5 moat, and the only M5 track that
-  isn't data-gated.** `AI-TRACKING.md:329` marks M5.1 "Not data-gated → first
-  shipped," vs M5.2 (gated on correction volume, `:332`) and M5.3 (gated at ~500
-  churn labels, `:342`). M5 is docs-only so far — commit `9592f51` added the
-  roadmap block; nothing is built and there is no `docs/planning/` entry for it.
-- **Builds the spine everything else in M5 stands on.** M5.1 is explicitly
-  "Track B + spine v1" (`AI-TRACKING.md:320`) — the provider abstraction that
-  M5.2's per-org classifiers and M5.3's churn model plug into.
-- **Deepens the real OSS / self-hosted / BYOK moat, honestly.** CPU-only,
-  offline, default stays VADER (byte-stable), and the eval harness makes "more
-  accurate than a lexicon" *proven, not marketing* (`AI-TRACKING.md:327-330`).
-  The heavy stack (`torch`, `transformers`, `sentence-transformers`) is already
-  installed (`AI-TRACKING.md:304`), so this is wiring + eval, not new infra.
+- Train a **small per-org model** (SetFit / logistic-regression-on-embeddings via the
+  already-installed `sentence-transformers`) on the org's feedback + `AICorrection`s — on
+  the **worker**, **CPU-only**, **scheduled**.
+- Per-org **shadow A/B** on held-out corrections; **auto-promote the challenger only when it
+  beats the incumbent** by a margin; operator sees the delta and can **roll back**.
+- **Activates per org** once corrections ≥ the threshold surfaced by M5.0
+  (`CORRECTION_VOLUME_TARGET`).
+- Honesty framing: "your model, trained on your data, promoted only when measurably better."
+- **Exit (real):** ≥1 design-partner org has a promoted per-org model beating the default on
+  their own held-out data.
 
-## Scope (from the roadmap M5.1 bullets, `AI-TRACKING.md:320-330`)
-1. **Pluggable analyzer-provider abstraction** — mirror the existing LLM/embedding
-   provider layers so sentiment/category/urgency can be backed by
-   `{ default (VADER/keyword) | shipped model | per-org trained }`. (This slice
-   focuses on **sentiment**; category/urgency backends come later in M5.)
-2. **Opt-in distilled transformer sentiment (+ optional emotion) provider** — CPU
-   inference; download-on-first-run + cached; default stays VADER (lean image,
-   zero-config, byte-stable); documented **air-gapped pre-bake** path.
-3. **Eval harness + accuracy card** — a labeled eval set + precision/recall/F1/
-   confusion so the model provably beats VADER on the eval set, offline.
+## Why this is the pick (moat + shipped-state grounding)
 
-## Known caveats to design around (from the handoff)
-- **No labeled sentiment eval set exists in the repo yet** — slice 1 must source
-  or hand-label one (a public sentiment corpus, or a hand-labeled sample of the
-  org's own feedback) before the "beats VADER" gate means anything.
-- **Model download breaks air-gapped self-hosters** — "download-on-first-run +
-  cached" pulls a model over the network; the documented **pre-bake** path is
-  part of slice 1, not optional polish.
-- **Keep the transformer strictly opt-in and the default byte-identical to
-  today** so existing installs don't change (characterization-test VADER-through-
-  the-provider for byte-stability).
+- Both prerequisites shipped **today** (2026-07-10) on local master (unpushed):
+  - **M5.0** — readiness gate that decides per-org activation:
+    `GET /api/v1/analytics/ai-readiness` (`AI-TRACKING.md:313-323`).
+  - **M5.1** — pluggable analyzer provider-layer **spine** M5.2 mirrors:
+    `analysis-engine/src/analyzer/sentiment_providers/` (ABC + factory + per-org
+    `resolve_*` in backend & worker mirrors) (`AI-TRACKING.md:325-347`).
+- It **is** the OSS/self-hosted/BYOK moat verbatim (`AI-TRACKING.md:298-311`): per-org,
+  local, CPU-only, no cross-tenant data, self-improving, gets better as base embedding
+  models improve. Heavy stack (`sentence-transformers`, `scikit-learn`, `bertopic`) already
+  installed; per-org fitting already exists shallowly in `churn_calibrator.py` (isotonic per
+  org at `MIN_LABELS=20`) — a proven pattern to mirror.
 
-## Suggested testable first slice
-Provider abstraction + VADER-as-default-provider (characterization-tested for
-byte-stability) + the eval harness → then add the transformer provider behind an
-opt-in flag. Optionally fold in the cheap **M5.0 readiness report**
-(`AI-TRACKING.md:313`, no ML) since it de-risks the next M5 track.
+## Cross-cutting M5 principles (must hold — AI-TRACKING.md:309-311)
 
-## Exit criteria (roadmap M5.1, `AI-TRACKING.md:330`)
-Opt-in model provably beats VADER on the eval set, offline; default unchanged.
+- **CPU-only**, no GPU ever required.
+- Default analyzer paths stay **byte-stable** (challenger runs in shadow; promotion is opt-in
+  per org and reversible).
+- No central / cross-tenant data.
+- Models small, described **honestly**.
+- Every model swap is **A/B-gated and reversible**.
 
----
+## Known caveat (carry into the dig / PRD — do not be surprised)
 
-_Note: this worktree inherited a stale `_card/understanding.md` from the prior
-`segment-actions` task (committed to master). Phase 2 overwrites it with this
-task's understanding note._
+M5.2 is **soft-gated** on correction volume (`CORRECTION_VOLUME_TARGET`, marked "explicitly
+unvalidated v1" in M5.0, `AI-TRACKING.md:320`). Real *auto-promotion in production* needs a
+design-partner org with enough corrections. **But** unlike M5.3's hard ≥500 churn-label gate,
+this threshold is tunable and the **buildable/testable first slice** — CPU training pipeline +
+shadow-A/B-on-held-out-corrections + promote-only-if-better + rollback mechanics — can be built
+and proven end-to-end with **seeded/synthetic corrections**, independent of any live org's
+volume. Only the "promoted on a real org's held-out data" exit is data-dependent. Scope the
+first slice accordingly; treat "promoted on a real org" as the later exit, not the first PR.
+
+## Related roadmap neighbours (context, not in scope)
+
+- **M5.3** — per-org churn ML model — hard-gated at ≥500 churn labels/org (deferred).
+- **M5.4** — local embedding quality — parked / nice-to-have.
+- **M3.3** — Human-in-the-Loop corrections (the data source; `AICorrection`, correction
+  dashboard, AI Accuracy tab).
+- **M5.0/M5.1** — the just-shipped readiness gate + sentiment provider spine (the platform
+  this builds on).
