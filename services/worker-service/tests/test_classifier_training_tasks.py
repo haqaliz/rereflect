@@ -462,3 +462,85 @@ def test_active_invariant_holds_across_repeated_refits(db):
             .count()
         )
         assert active_count == 1, f"iteration {i}: expected exactly 1 active row"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — retrain_org retained path (worse + small-holdout forced-retain)
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_worse_challenger_creates_no_model_row(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", n=25, incumbent_macro_f1=0.65, challenger_macro_f1=0.60,
+                      macro_f1_delta=-0.05):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_worse_challenger_writes_one_retained_eval_run(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", n=25, incumbent_macro_f1=0.65, challenger_macro_f1=0.60,
+                      macro_f1_delta=-0.05):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).all()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run.decision == "retained"
+    assert float(run.macro_f1_delta) == pytest.approx(-0.05, abs=1e-4)
+    assert run.classifier_model_id is None
+
+
+def test_retrain_org_small_holdout_retained_with_note(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", n=3, incumbent_macro_f1=None, challenger_macro_f1=None,
+                      macro_f1_delta=None, notes="held-out too small"):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    run = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).one()
+    assert run.decision == "retained"
+    assert run.notes == "held-out too small"
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_promote_then_worse_keeps_prior_active(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    promoted_model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert promoted_model.is_active is True
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", n=25, incumbent_macro_f1=0.65, challenger_macro_f1=0.60,
+                      macro_f1_delta=-0.05):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    db.refresh(promoted_model)
+    assert promoted_model.is_active is True
+    assert db.query(OrgClassifierModel).filter_by(organization_id=org.id).count() == 1
+
+    active_count = (
+        db.query(OrgClassifierModel)
+        .filter_by(organization_id=org.id, classifier_type="sentiment", is_active=True)
+        .count()
+    )
+    assert active_count == 1
