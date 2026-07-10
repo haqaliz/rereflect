@@ -1,0 +1,10 @@
+text,label
+"This is fantastic, love it!",positive
+"Absolutely wonderful experience, highly recommend.",positive
+"Great support team, solved my issue in minutes.",positive
+"It arrived on Tuesday.",neutral
+"The dashboard has three tabs.",neutral
+"I logged in and checked my settings.",neutral
+"Absolutely terrible, cancelling today.",negative
+"Worst experience I've ever had with a product.",negative
+"This is completely broken and unusable.",negative
