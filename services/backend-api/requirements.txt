@@ -45,5 +45,5 @@ numpy>=1.26.4                # Array math for bootstrap CI
 vaderSentiment==3.3.2         # Default sentiment provider (was missing — sync path couldn't run any provider)
 
 # Transformer sentiment provider (opt-in; mandatory dep once any org enables it — M5.1)
-transformers==4.46.0
+transformers==4.46.3
 torch==2.5.0

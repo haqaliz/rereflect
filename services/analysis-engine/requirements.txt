@@ -5,7 +5,7 @@ pydantic==2.9.2
 python-dotenv==1.0.1
 
 # NLP and ML
-transformers==4.46.0
+transformers==4.46.3
 torch==2.5.0
 sentence-transformers==3.2.0
 scikit-learn==1.5.2
