@@ -624,8 +624,25 @@ def test_retrain_org_acquires_per_org_lock(db):
 
     fake_r.lock.assert_called_once()
     args, kwargs = fake_r.lock.call_args
-    assert args[0] == f"lock:classifier_refit:{org.id}"
+    assert args[0] == f"lock:classifier_refit:sentiment:{org.id}"
     fake_lock.acquire.assert_called_once_with(blocking=False)
+
+
+def test_retrain_org_classifier_type_defaults_to_sentiment(db):
+    """Characterization: calling retrain_org with NO classifier_type arg reproduces the
+    pre-change sentiment-only behavior — writes classifier_type='sentiment' rows."""
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert model.classifier_type == "sentiment"
+    run = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).one()
+    assert run.classifier_type == "sentiment"
 
 
 def test_retrain_org_lock_not_acquired_skips_without_writes(db):

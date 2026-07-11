@@ -42,7 +42,8 @@ from src.models import Organization, OrgClassifierEvalRun, OrgClassifierModel
 
 logger = logging.getLogger(__name__)
 
-_CLASSIFIER_TYPE = "sentiment"
+_DEFAULT_CLASSIFIER_TYPE = "sentiment"
+_CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category")
 _PURGE_AFTER_DAYS = 90
 _LOCK_TIMEOUT_SECONDS = 600
 
@@ -95,7 +96,8 @@ def _decision_result(decision: str, **extra) -> dict:
     return {"decision": decision, decision: True, **extra}
 
 
-def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db: Session) -> int:
+def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db: Session,
+             classifier_type: str) -> int:
     """Atomic promotion, single transaction (caller commits): train the FINAL
     production artifact on ALL rows (not just the core's internal train-split —
     that one never sees the full data), deactivate the prior active
@@ -113,7 +115,7 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
         db.query(OrgClassifierModel)
         .filter(
             OrgClassifierModel.organization_id == org_id,
-            OrgClassifierModel.classifier_type == _CLASSIFIER_TYPE,
+            OrgClassifierModel.classifier_type == classifier_type,
             OrgClassifierModel.is_active == True,  # noqa: E712
         )
         .first()
@@ -132,7 +134,7 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
 
     new_model = OrgClassifierModel(
         organization_id=org_id,
-        classifier_type=_CLASSIFIER_TYPE,
+        classifier_type=classifier_type,
         model_json=artifact,
         label_count=len(dataset),
         precision=None,
@@ -147,13 +149,14 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
     return new_model.id
 
 
-def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: int, db: Session) -> None:
+def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: int, db: Session,
+                      classifier_type: str) -> None:
     """Insert the one org_classifier_eval_runs row every retrain_org run writes
     (except a lock-miss, which writes nothing — see module docstring)."""
     eval_run = OrgClassifierEvalRun(
         organization_id=org_id,
         classifier_model_id=model_id,
-        classifier_type=_CLASSIFIER_TYPE,
+        classifier_type=classifier_type,
         incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
         challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
         macro_f1_delta=_round_or_none(result.macro_f1_delta),
@@ -165,12 +168,13 @@ def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: 
     db.add(eval_run)
 
 
-def retrain_org(org_id: int, db: Session) -> dict:
-    """Retrain the sentiment corrections classifier for a single org.
+def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSIFIER_TYPE) -> dict:
+    """Retrain the corrections classifier (sentiment or category) for a single org.
 
-    1. Acquire a per-org Redis advisory lock (non-blocking) — an overlapping refit
-       already owns this org: write nothing, return {"skipped": True, "reason": "locked"}.
-    2. Build the org's sentiment dataset (aspect B's dataset builder).
+    1. Acquire a per-(classifier_type, org) Redis advisory lock (non-blocking) — an
+       overlapping refit already owns this org+type: write nothing, return
+       {"skipped": True, "reason": "locked"}.
+    2. Build the org's dataset (aspect B's dataset builder).
     3. evaluate() the challenger against a live incumbent predictor, leakage-free (the
        core trains the challenger itself, only on its own train-split/per-fold).
     4. Only when decision == "promoted": atomically promote the FINAL production
@@ -181,13 +185,17 @@ def retrain_org(org_id: int, db: Session) -> dict:
        eval-run insert).
 
     Below-gate / worse-challenger / small-holdout (decision in {"skipped", "retained"})
-    write zero model rows.
+    write zero model rows. classifier_type selects which correction bucket / incumbent /
+    lock this call operates on; "sentiment" is the byte-stable default.
     """
     r = _get_redis()
-    lock = r.lock(f"lock:classifier_refit:{org_id}", timeout=_LOCK_TIMEOUT_SECONDS, blocking=False)
+    lock = r.lock(
+        f"lock:classifier_refit:{classifier_type}:{org_id}",
+        timeout=_LOCK_TIMEOUT_SECONDS, blocking=False,
+    )
 
     if not lock.acquire(blocking=False):
-        logger.info("retrain_org: org=%s already refitting, skipping", org_id)
+        logger.info("retrain_org: org=%s type=%s already refitting, skipping", org_id, classifier_type)
         return _skip_result("locked")
 
     try:
@@ -213,20 +221,21 @@ def retrain_org(org_id: int, db: Session) -> dict:
 
         model_id: Optional[int] = None
         if result.decision == "promoted":
-            model_id = _promote(org_id, dataset, result, train_classifier, db)
+            model_id = _promote(org_id, dataset, result, train_classifier, db, classifier_type)
 
-        _insert_eval_run(org_id, model_id, result, duration_ms, db)
+        _insert_eval_run(org_id, model_id, result, duration_ms, db, classifier_type)
         db.commit()
 
         if result.decision == "skipped":
             logger.info(
-                "retrain_org: org=%s skipped (below_min_labels) n=%s", org_id, result.n,
+                "retrain_org: org=%s type=%s skipped (below_min_labels) n=%s",
+                org_id, classifier_type, result.n,
             )
             return _skip_result("below_min_labels", n=result.n, notes=result.notes)
 
         logger.info(
-            "retrain_org: org=%s decision=%s model_id=%s n=%s",
-            org_id, result.decision, model_id, result.n,
+            "retrain_org: org=%s type=%s decision=%s model_id=%s n=%s",
+            org_id, classifier_type, result.decision, model_id, result.n,
         )
         return _decision_result(result.decision, model_id=model_id, n=result.n, notes=result.notes)
     finally:
