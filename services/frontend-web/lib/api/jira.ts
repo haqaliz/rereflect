@@ -14,6 +14,12 @@ export interface JiraConnectionStatus {
   last_sync_status: string | null;
   last_error: string | null;
   connected_at: string | null;
+  // Inbound status sync (jira-status-sync/inbound-status-sync, Phase 5/6):
+  // opt-in poller that pulls Jira issue status back onto linked feedback.
+  // `last_sync_status`/`last_error` above are shared with the general
+  // connection status but are also updated by the status-sync poller.
+  status_sync_enabled: boolean;
+  last_status_synced_at: string | null;
 }
 
 export interface JiraConnectRequest {
@@ -86,6 +92,10 @@ export interface JiraLinkedIssue {
   created_at: string;
 }
 
+export interface JiraSyncTriggerResponse {
+  status: string;
+}
+
 // ---- API ----
 
 export const jiraAPI = {
@@ -133,3 +143,23 @@ export const jiraAPI = {
     return response.data;
   },
 };
+
+// Inbound status sync (jira-status-sync/inbound-status-sync, Phase 6). Kept
+// as standalone exports — used directly by JiraStatusSyncCard, mirroring
+// zendeskAPI.triggerSync's shape but exposed at module scope.
+
+export async function patchJiraStatusSync(
+  enabled: boolean,
+  statusMapping?: Record<string, string>
+): Promise<JiraConnectionStatus> {
+  const response = await apiClient.patch('/api/v1/integrations/jira/status-sync', {
+    enabled,
+    ...(statusMapping !== undefined ? { status_mapping: statusMapping } : {}),
+  });
+  return response.data;
+}
+
+export async function triggerJiraSync(): Promise<JiraSyncTriggerResponse> {
+  const response = await apiClient.post('/api/v1/integrations/jira/sync');
+  return response.data;
+}

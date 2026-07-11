@@ -549,13 +549,18 @@ class CustomerAnalysisAction(Base):
 
 
 class FeedbackWorkflowEvent(Base):
-    """Workflow timeline event model - mirrors backend-api model (lightweight, no FKs)."""
+    """Workflow timeline event model - mirrors backend-api model (lightweight, no FKs).
+
+    actor_id is nullable (mirrors services/backend-api/src/models/feedback_workflow_event.py) —
+    system-driven events (e.g. jira-status-sync, see src/tasks/jira_sync.py) have no acting
+    user and write actor_id=None.
+    """
     __tablename__ = "feedback_workflow_events"
 
     id = Column(Integer, primary_key=True, index=True)
     feedback_id = Column(Integer, nullable=False)
     organization_id = Column(Integer, nullable=False)
-    actor_id = Column(Integer, nullable=False)
+    actor_id = Column(Integer, nullable=True)
     event_type = Column(String(50), nullable=False)
     old_value = Column(String, nullable=True)
     new_value = Column(String, nullable=True)
@@ -1131,4 +1136,54 @@ class ZendeskIntegration(Base):
     __table_args__ = (
         UniqueConstraint('organization_id', name='uq_zendesk_integrations_org_id'),
         Index('ix_zendesk_integrations_org_id', 'organization_id'),
+    )
+
+
+class JiraIntegration(Base):
+    """Jira Cloud connection per org — no-FK mirror for worker read access
+    (jira-status-sync/inbound-status-sync, Phase 4).
+
+    MINIMAL mirror: only the columns src/tasks/jira_sync.py actually reads/writes.
+    Keep in sync with services/backend-api/src/models/jira_integration.py.
+    """
+    __tablename__ = "jira_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    site_url = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False)
+    api_token = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    status_mapping = Column(JSON, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String(50), nullable=True)
+    last_error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', name='uq_jira_integrations_org_id'),
+        Index('ix_jira_integrations_org_id', 'organization_id'),
+    )
+
+
+class FeedbackJiraIssue(Base):
+    """Links feedback items to Jira issues — no-FK mirror for worker read access
+    (jira-status-sync/inbound-status-sync, Phase 4).
+
+    MINIMAL mirror: only the columns src/tasks/jira_sync.py actually reads/writes.
+    Keep in sync with services/backend-api/src/models/jira_integration.py.
+    """
+    __tablename__ = "feedback_jira_issues"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    feedback_id = Column(Integer, nullable=False)
+    jira_issue_key = Column(String(50), nullable=False)
+    jira_status = Column(String(100), nullable=True)
+    jira_status_category = Column(String(20), nullable=True)
+    last_status_synced_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index('ix_feedback_jira_issues_org_id', 'organization_id'),
+        Index('ix_feedback_jira_issues_feedback_id', 'feedback_id'),
     )

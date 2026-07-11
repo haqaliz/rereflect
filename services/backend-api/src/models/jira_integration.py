@@ -5,7 +5,8 @@ One row per organization. api_token is Fernet-encrypted via encrypt_api_key
 (never stored plaintext). Encryption happens in the route layer, not here.
 See src/utils/encryption.py.
 """
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, UniqueConstraint
+import sqlalchemy as sa
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, UniqueConstraint, JSON
 from datetime import datetime
 from .base import Base
 
@@ -28,6 +29,8 @@ class JiraIntegration(Base):
     last_synced_at = Column(DateTime, nullable=True)
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
+    status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status_mapping = Column(JSON, nullable=True)  # {jira_status_name: rereflect_status}
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -53,6 +56,9 @@ class FeedbackJiraIssue(Base):
     jira_issue_url = Column(Text, nullable=False)
     jira_issue_title = Column(String(500), nullable=False)
     created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    jira_status = Column(String(100), nullable=True)  # raw Jira status name, e.g. "In Progress"
+    jira_status_category = Column(String(20), nullable=True)  # Jira statusCategory key: new/indeterminate/done
+    last_status_synced_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
