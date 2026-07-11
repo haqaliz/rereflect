@@ -46,17 +46,21 @@ export function formatDelta(delta: number | null): string {
 }
 
 /** Fetch the per-org corrections-classifier accuracy card data (no plan-gating — disclosure feature). */
-export async function getClassifierAccuracy(): Promise<ClassifierAccuracyResponse> {
+export async function getClassifierAccuracy(
+  classifierType: string = 'sentiment'
+): Promise<ClassifierAccuracyResponse> {
   const response = await apiClient.get<ClassifierAccuracyResponse>(
-    '/api/v1/settings/ai/classifier/accuracy'
+    `/api/v1/settings/ai/classifier/accuracy?classifier_type=${classifierType}`
   );
   return response.data;
 }
 
 /** Roll back the org's active classifier model (reactivate prior version, or disable). Admin/owner only. */
-export async function rollbackClassifier(): Promise<ClassifierAccuracyResponse> {
+export async function rollbackClassifier(
+  classifierType: string = 'sentiment'
+): Promise<ClassifierAccuracyResponse> {
   const response = await apiClient.post<ClassifierAccuracyResponse>(
-    '/api/v1/settings/ai/classifier/rollback'
+    `/api/v1/settings/ai/classifier/rollback?classifier_type=${classifierType}`
   );
   return response.data;
 }
