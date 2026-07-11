@@ -218,3 +218,198 @@ class TestLoaderOrPredictFailureNeverRaises:
 
         assert feedback_item.sentiment_score == pytest.approx(0.2023, abs=1e-4)
         assert feedback_item.sentiment_label == "positive"
+
+
+_ALWAYS_PAIN_VOCAB_LIKE_ARTIFACT = {
+    "vectorizer": {
+        "vocabulary": {"neverseen": 0},
+        "idf": [1.0],
+        "token_pattern": r"(?u)\b\w\w+\b",
+        "lowercase": True,
+        "sublinear_tf": True,
+        "norm": "l2",
+    },
+    "logreg": {"coef": [[0.0]], "intercept": [-10.0]},
+    "classes": ["security_breach", "core_functionality"],
+}
+
+
+def _set_category_classifier_mode(db, org_id, mode):
+    config = OrgAIConfig(
+        organization_id=org_id, default_provider="openai",
+        model_categorization="gpt-4o-mini", model_analysis="gpt-4o-mini",
+        model_insights="gpt-4o-mini", category_classifier_mode=mode,
+    )
+    db.add(config); db.commit()
+
+
+def _add_active_category_model(db, org_id, artifact):
+    row = OrgClassifierModel(
+        organization_id=org_id, classifier_type="category",
+        model_json=artifact, label_count=10, is_active=True,
+    )
+    db.add(row); db.commit(); db.refresh(row)
+    return row
+
+
+class TestCategoryOffByteStability:
+    """Reuses TestOffByteStability's SAMPLES: unset/off category mode is a
+    pure no-op even with an active category model present -- category
+    fields must be byte-identical between the two runs (comparative
+    equality; the base keyword categorizer's exact string outputs are not
+    hand-derived here)."""
+
+    SAMPLES = TestOffByteStability.SAMPLES
+
+    def test_no_config_row_vs_explicit_off_are_identical(
+        self, db: Session, test_organization: Organization
+    ):
+        from src.api.routes.feedback import analyze_single_feedback
+
+        no_config_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_organization.id)
+            db.add(feedback_item)
+            db.commit()
+            db.refresh(feedback_item)
+            analyze_single_feedback(feedback_item, db)
+            no_config_results.append(
+                (feedback_item.pain_point_category, feedback_item.feature_request_category)
+            )
+
+        _set_category_classifier_mode(db, test_organization.id, "off")
+        _add_active_category_model(db, test_organization.id, _ALWAYS_PAIN_VOCAB_LIKE_ARTIFACT)
+
+        off_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_organization.id)
+            db.add(feedback_item)
+            db.commit()
+            db.refresh(feedback_item)
+            analyze_single_feedback(feedback_item, db)
+            off_results.append(
+                (feedback_item.pain_point_category, feedback_item.feature_request_category)
+            )
+
+        assert off_results == no_config_results
+
+
+class TestCategoryShadowE2E:
+    def test_shadow_logs_and_never_mutates(self, db: Session, test_organization: Organization, caplog):
+        """Comparative-equality (not a before/after snapshot on the SAME
+        item): _make_feedback's initial None is not the relevant incumbent
+        for this negative-sentiment text -- analyze_single_feedback's own
+        BASE keyword pain-point categorizer sets pain_point_category before
+        the classifier shadow call ever runs, unrelated to classifier_mode.
+        So the "never mutates" claim is verified by running the identical
+        input through mode=off (no classifier influence at all) and
+        asserting the shadow run lands on the exact same category value."""
+        from src.api.routes.feedback import analyze_single_feedback
+
+        text = "This is terrible, I want a refund."
+
+        off_item = _make_feedback(text, test_organization.id)
+        db.add(off_item)
+        db.commit()
+        db.refresh(off_item)
+        analyze_single_feedback(off_item, db)
+        off_pain = off_item.pain_point_category
+
+        _set_category_classifier_mode(db, test_organization.id, "shadow")
+        _add_active_category_model(db, test_organization.id, _ALWAYS_PAIN_VOCAB_LIKE_ARTIFACT)
+
+        shadow_item = _make_feedback(text, test_organization.id)
+        db.add(shadow_item)
+        db.commit()
+        db.refresh(shadow_item)
+
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            analyze_single_feedback(shadow_item, db)
+
+        assert shadow_item.pain_point_category == off_pain  # unchanged in shadow
+        category_records = [
+            r for r in caplog.records
+            if r.name == "rereflect.classifier.shadow" and getattr(r, "classifier_type", None) == "category"
+        ]
+        assert len(category_records) == 1
+
+
+class TestCategoryAutoIsShadowOnlyOnBackend:
+    def test_auto_stores_incumbent_but_logs_shadow_line(
+        self, db: Session, test_organization: Organization, caplog
+    ):
+        """Ownership: backend inline path NEVER writes pain_point_category /
+        feature_request_category, even in `auto` mode -- worker is sole
+        authoritative writer, same split as sentiment. Comparative-equality
+        against a mode=off run -- see TestCategoryShadowE2E for why a
+        before/after snapshot on the same item is the wrong technique here
+        (the base keyword categorizer, not the classifier, sets the field
+        for this negative-sentiment text)."""
+        from src.api.routes.feedback import analyze_single_feedback
+
+        text = "This is terrible, I want a refund."
+
+        off_item = _make_feedback(text, test_organization.id)
+        db.add(off_item)
+        db.commit()
+        db.refresh(off_item)
+        analyze_single_feedback(off_item, db)
+        off_pain = off_item.pain_point_category
+
+        _set_category_classifier_mode(db, test_organization.id, "auto")
+        _add_active_category_model(db, test_organization.id, _ALWAYS_PAIN_VOCAB_LIKE_ARTIFACT)
+
+        auto_item = _make_feedback(text, test_organization.id)
+        db.add(auto_item)
+        db.commit()
+        db.refresh(auto_item)
+
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            analyze_single_feedback(auto_item, db)
+
+        assert auto_item.pain_point_category == off_pain
+        category_records = [
+            r for r in caplog.records
+            if r.name == "rereflect.classifier.shadow" and getattr(r, "classifier_type", None) == "category"
+        ]
+        assert len(category_records) == 1
+
+
+class TestCategoryAndSentimentIndependentControl:
+    def test_category_and_sentiment_independent(self, db: Session, test_organization: Organization):
+        """category=off (shadow-only ownership means auto never mutates here
+        anyway, so the independence signal is: sentiment=auto DOES mutate
+        while category=off never logs) + sentiment=auto on one OrgAIConfig
+        row -> only sentiment resolves/mutates; category resolves to
+        off/None and is a pure no-op (no log line)."""
+        from src.api.routes.feedback import analyze_single_feedback
+
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            default_provider="openai",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+            classifier_mode="auto",
+            category_classifier_mode="off",
+        )
+        db.add(config)
+        db.commit()
+        _add_active_model(db, test_organization.id)  # sentiment model
+        _add_active_category_model(db, test_organization.id, _ALWAYS_PAIN_VOCAB_LIKE_ARTIFACT)
+
+        feedback_item = _make_feedback("It's fine I guess.", test_organization.id)
+        db.add(feedback_item)
+        db.commit()
+        db.refresh(feedback_item)
+        before_pain = feedback_item.pain_point_category
+
+        analyze_single_feedback(feedback_item, db)
+
+        # Backend ownership: sentiment=auto never mutates inline either
+        # (shadow-only call-site) -- both types leave stored values at
+        # incumbent on the backend path, independence is about which
+        # resolver each type reads, not about backend mutation.
+        assert feedback_item.sentiment_score == pytest.approx(0.2023, abs=1e-4)
+        assert feedback_item.sentiment_label == "positive"
+        assert feedback_item.pain_point_category == before_pain

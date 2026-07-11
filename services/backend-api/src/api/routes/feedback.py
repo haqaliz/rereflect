@@ -146,14 +146,23 @@ def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
             if feedback.categorization_confidence is None or urgent_result.confidence > feedback.categorization_confidence:
                 feedback.categorization_confidence = urgent_result.confidence
 
-        # Per-org corrections-classifier override (M5.2 predict-seam-resolver).
-        # SHADOW-ONLY here (allow_override=False): even in `auto` mode this
-        # inline create-time call-site logs the challenger but leaves stored
-        # sentiment_label/score at the incumbent value. The worker
-        # (tasks/analysis.py) is the sole authoritative `auto` writer — this
-        # ownership split avoids a double-write / create-time-vs-reanalysis
-        # race. Lazy import, never raises.
+        # Per-org corrections-classifier override (M5.2 predict-seam), category
+        # type. SHADOW-ONLY here (allow_override=False) — same ownership
+        # split as the sentiment call below: the worker is the sole
+        # authoritative `auto` writer for both types. Lazy import, never
+        # raises.
         from src.services.classifier_predict import apply_classifier_override
+        apply_classifier_override(
+            feedback, db, classifier_type="category", allow_override=False,
+        )
+
+        # Per-org corrections-classifier override (M5.2 predict-seam-resolver),
+        # sentiment type. SHADOW-ONLY here (allow_override=False): even in
+        # `auto` mode this inline create-time call-site logs the challenger
+        # but leaves stored sentiment_label/score at the incumbent value.
+        # The worker (tasks/analysis.py) is the sole authoritative `auto`
+        # writer — this ownership split avoids a double-write /
+        # create-time-vs-reanalysis race.
         apply_classifier_override(
             feedback, db, classifier_type="sentiment", allow_override=False,
         )
