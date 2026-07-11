@@ -246,17 +246,15 @@ def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSI
 
 
 def retrain_all_orgs() -> dict:
-    """Weekly driver: retrain every org's sentiment classifier, then purge old
-    inactive artifacts (folded — no separate beat slot).
+    """Weekly driver: retrain every org's classifier for BOTH types (sentiment, category),
+    then purge old inactive artifacts once (folded — no separate beat slot, not type-scoped).
 
-    Per-org try/except isolation: one org's exception is logged and skipped, it
-    never aborts the batch.
+    Per-(type, org) try/except isolation: one (type, org) combination's exception is logged
+    and skipped, it never aborts the rest of the batch — same shared-session
+    rollback-on-error discipline as before, now applied per (classifier_type, org_id) pair.
 
-    Beat: Mondays 06:30 UTC.
-    Returns {"trained": n, "promoted": m, "skipped": k}. "trained" counts every org
-    that was actually evaluated (decision in {"promoted", "retained"}); "skipped"
-    counts below-gate and lock-miss orgs; "promoted" is the subset of "trained"
-    that was actually promoted.
+    Beat: Mondays 06:30 UTC. Returns {"trained": n, "promoted": m, "skipped": k} — tallies now
+    cover BOTH classifier types combined (a 3-org run does up to 6 retrain_org calls).
     """
     trained = 0
     promoted = 0
@@ -264,25 +262,29 @@ def retrain_all_orgs() -> dict:
 
     with get_db_session() as db:
         org_ids = _all_org_ids(db)
-        for org_id in org_ids:
-            try:
-                result = retrain_org(org_id, db)
-            except Exception:
-                logger.error("retrain_all_orgs: org=%s FAILED", org_id, exc_info=True)
-                # This db session is shared across every org in the batch. A
-                # failed flush/commit (e.g. the promotion UniqueViolation above,
-                # or any other per-org DB error) leaves the session needing a
-                # rollback; without it, the NEXT org's first DB operation raises
-                # sqlalchemy.exc.PendingRollbackError and the whole batch cascades.
-                db.rollback()
-                continue
+        for classifier_type in _CLASSIFIER_TYPES:
+            for org_id in org_ids:
+                try:
+                    result = retrain_org(org_id, db, classifier_type=classifier_type)
+                except Exception:
+                    logger.error(
+                        "retrain_all_orgs: org=%s type=%s FAILED", org_id, classifier_type,
+                        exc_info=True,
+                    )
+                    # This db session is shared across every (type, org) in the batch. A
+                    # failed flush/commit (e.g. the promotion UniqueViolation above,
+                    # or any other per-org DB error) leaves the session needing a
+                    # rollback; without it, the NEXT iteration's first DB operation raises
+                    # sqlalchemy.exc.PendingRollbackError and the whole batch cascades.
+                    db.rollback()
+                    continue
 
-            if result.get("skipped"):
-                skipped += 1
-            else:
-                trained += 1
-                if result.get("promoted"):
-                    promoted += 1
+                if result.get("skipped"):
+                    skipped += 1
+                else:
+                    trained += 1
+                    if result.get("promoted"):
+                        promoted += 1
 
     purge_result = purge_old_classifier_models()
     logger.info(

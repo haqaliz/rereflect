@@ -677,7 +677,7 @@ def test_retrain_org_releases_lock_in_finally(db):
 # ---------------------------------------------------------------------------
 
 
-def test_retrain_all_orgs_iterates_all_orgs(db):
+def test_retrain_all_orgs_iterates_all_orgs_and_both_types(db):
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
@@ -693,24 +693,33 @@ def test_retrain_all_orgs_iterates_all_orgs(db):
         tasks = _get_tasks()
         tasks.retrain_all_orgs()
 
-    assert mock_retrain.call_count == 3
-    called_org_ids = {c.args[0] for c in mock_retrain.call_args_list}
-    assert called_org_ids == {org1.id, org2.id, org3.id}
+    assert mock_retrain.call_count == 6  # 3 orgs x 2 classifier types
+    called_pairs = {
+        (c.args[0], c.kwargs.get("classifier_type")) for c in mock_retrain.call_args_list
+    }
+    assert called_pairs == {
+        (org1.id, "sentiment"), (org1.id, "category"),
+        (org2.id, "sentiment"), (org2.id, "category"),
+        (org3.id, "sentiment"), (org3.id, "category"),
+    }
 
 
-def test_retrain_all_orgs_aggregates_counts(db):
+def test_retrain_all_orgs_aggregates_counts_across_both_types(db):
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
 
-    results_by_org = {
-        org1.id: {"decision": "promoted", "promoted": True, "n": 25},
-        org2.id: {"decision": "retained", "retained": True, "n": 25},
-        org3.id: {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+    results_by_key = {
+        (org1.id, "sentiment"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org1.id, "category"): {"decision": "retained", "retained": True, "n": 25},
+        (org2.id, "sentiment"): {"decision": "retained", "retained": True, "n": 25},
+        (org2.id, "category"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org3.id, "sentiment"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+        (org3.id, "category"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 2},
     }
 
-    def side_effect(org_id, session):
-        return results_by_org[org_id]
+    def side_effect(org_id, session, classifier_type="sentiment"):
+        return results_by_key[(org_id, classifier_type)]
 
     with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
          patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
@@ -722,30 +731,23 @@ def test_retrain_all_orgs_aggregates_counts(db):
         tasks = _get_tasks()
         result = tasks.retrain_all_orgs()
 
-    assert result == {"trained": 2, "promoted": 1, "skipped": 1}
+    # trained (promoted+retained) = 4 across both types (org1 both, org2 both); skipped = 2 (org3 both)
+    assert result == {"trained": 4, "promoted": 2, "skipped": 2}
 
 
-def test_retrain_all_orgs_isolates_per_org_exception(db):
-    """org2's failure must leave the SHARED session usable for org3. A clean
-    RuntimeError doesn't touch the session, so it can't catch a missing
-    rollback() — instead, org2's mocked retrain_org performs a real write that
-    violates a NOT-NULL column and flush()es it, which raises IntegrityError
-    and leaves the session needing rollback (mirrors the Postgres
-    UniqueViolation this task also needs to survive). org3's mocked
-    retrain_org then performs a real, valid write+commit: without
-    db.rollback() in the batch loop's except, org3's write itself would raise
-    sqlalchemy.exc.PendingRollbackError and never land in the DB."""
+def test_retrain_all_orgs_isolates_per_org_exception_across_both_types(db):
+    """org2's failure (both type-iterations) must leave the SHARED session usable for org1/org3's
+    iterations. Mirrors the original single-type test's real-IntegrityError-and-rollback proof,
+    doubled across the type loop."""
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
 
     processed = []
 
-    def side_effect(org_id, session):
-        processed.append(org_id)
+    def side_effect(org_id, session, classifier_type="sentiment"):
+        processed.append((org_id, classifier_type))
         if org_id == org2.id:
-            # A real DB failure mid-transaction: NOT NULL violation on flush,
-            # leaving the shared session in a needs-rollback state.
             bad_run = OrgClassifierEvalRun(
                 organization_id=org2.id,
                 classifier_type=None,  # NOT NULL violation
@@ -755,10 +757,9 @@ def test_retrain_all_orgs_isolates_per_org_exception(db):
             session.add(bad_run)
             session.flush()  # raises IntegrityError
             return {"decision": "retained", "retained": True, "n": 25}  # unreachable
-        # A real, valid write — only succeeds if the session recovered.
         good_run = OrgClassifierEvalRun(
             organization_id=org_id,
-            classifier_type="sentiment",
+            classifier_type=classifier_type,
             decision="retained",
             n=25,
         )
@@ -776,15 +777,17 @@ def test_retrain_all_orgs_isolates_per_org_exception(db):
         tasks = _get_tasks()
         result = tasks.retrain_all_orgs()  # must not raise
 
-    assert set(processed) == {org1.id, org2.id, org3.id}
-    assert result["trained"] == 2  # org1 + org3 succeeded; org2's exception isolated
+    assert set(processed) == {
+        (org1.id, "sentiment"), (org1.id, "category"),
+        (org2.id, "sentiment"), (org2.id, "category"),
+        (org3.id, "sentiment"), (org3.id, "category"),
+    }
+    assert result["trained"] == 4  # org1 x2 + org3 x2 succeeded; org2 x2 isolated-failed
 
-    # The real proof: org3's write actually landed in the DB, i.e. the shared
-    # session was rolled back and usable again after org2's failure.
     org3_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org3.id).all()
-    assert len(org3_runs) == 1
+    assert len(org3_runs) == 2
     org1_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org1.id).all()
-    assert len(org1_runs) == 1
+    assert len(org1_runs) == 2
 
 
 def test_retrain_all_orgs_runs_purge_once(db):
