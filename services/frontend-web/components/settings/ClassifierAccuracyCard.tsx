@@ -19,9 +19,31 @@ const DECISION_LABELS: Record<string, string> = {
   skipped: 'Skipped (held-out too small)',
 };
 
+/**
+ * Per-classifier-type copy. Keeps the two PRD-mandated honesty clauses (critique #3) intact:
+ * (a) the model is "promoted only when it beats the keyword categorizer on your held-out data"
+ * (b) the fair-A/B disclosure — "evaluated on labels the [keyword] baseline can produce".
+ * Do not paraphrase these away.
+ */
+const TYPE_COPY: Record<string, { label: string; trainedOn: string; note?: string }> = {
+  sentiment: {
+    label: 'Sentiment',
+    trainedOn: "your team's sentiment corrections",
+  },
+  category: {
+    label: 'Category',
+    trainedOn:
+      "your team's category corrections; promoted only when it beats the keyword " +
+      'categorizer on your held-out data',
+    note: 'Evaluated on labels the keyword categorizer can produce.',
+  },
+};
+
 interface ClassifierAccuracyCardProps {
   /** Show the Roll back action — admin/owner only. Defaults to false. */
   isAdminOrOwner?: boolean;
+  /** Which classifier this card reports on — 'sentiment' (default) or 'category'. */
+  classifierType?: string;
 }
 
 function SkeletonBar({ className }: { className?: string }) {
@@ -79,19 +101,27 @@ function EvalRunRow({ run }: { run: ClassifierEvalRunSummary }) {
   );
 }
 
-export function ClassifierAccuracyCard({ isAdminOrOwner = false }: ClassifierAccuracyCardProps) {
+export function ClassifierAccuracyCard({
+  isAdminOrOwner = false,
+  classifierType = 'sentiment',
+}: ClassifierAccuracyCardProps) {
   const [data, setData] = useState<ClassifierAccuracyResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackError, setRollbackError] = useState<string | null>(null);
 
+  const copy = TYPE_COPY[classifierType] ?? {
+    label: classifierType,
+    trainedOn: `your team's ${classifierType} corrections`,
+  };
+
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setError(false);
 
-    getClassifierAccuracy()
+    getClassifierAccuracy(classifierType)
       .then((result) => {
         if (!cancelled) {
           setData(result);
@@ -111,7 +141,7 @@ export function ClassifierAccuracyCard({ isAdminOrOwner = false }: ClassifierAcc
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [classifierType]);
 
   useEffect(() => {
     return load();
@@ -121,7 +151,7 @@ export function ClassifierAccuracyCard({ isAdminOrOwner = false }: ClassifierAcc
     setRollingBack(true);
     setRollbackError(null);
     try {
-      await rollbackClassifier();
+      await rollbackClassifier(classifierType);
       load();
     } catch (err: any) {
       setRollbackError(err?.response?.data?.detail || 'Failed to roll back classifier');
@@ -135,13 +165,13 @@ export function ClassifierAccuracyCard({ isAdminOrOwner = false }: ClassifierAcc
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Wand2 className="w-4 h-4 text-[var(--chart-1)]" />
-          Corrections Classifier Accuracy
+          {copy.label} Corrections Classifier Accuracy
         </CardTitle>
         <p className="text-xs text-muted-foreground">
-          Per-org TF-IDF + logistic regression, trained on your team&apos;s sentiment
-          corrections. We recommend <strong>shadow</strong> mode until this history is
-          substantial.
+          Per-org TF-IDF + logistic regression, trained on {copy.trainedOn}. We recommend{' '}
+          <strong>shadow</strong> mode until this history is substantial.
         </p>
+        {copy.note && <p className="text-xs text-muted-foreground">{copy.note}</p>}
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -153,8 +183,8 @@ export function ClassifierAccuracyCard({ isAdminOrOwner = false }: ClassifierAcc
           <p className="text-sm text-muted-foreground">Failed to load classifier accuracy.</p>
         ) : data === null || !data.has_model ? (
           <p className="text-sm text-muted-foreground">
-            No model yet &mdash; accumulate at least {data?.min_labels ?? 20} sentiment
-            corrections and wait for the next scheduled fit.
+            No model yet &mdash; accumulate at least {data?.min_labels ?? 20}{' '}
+            {copy.label.toLowerCase()} corrections and wait for the next scheduled fit.
           </p>
         ) : !data.is_ready ? (
           <div className="space-y-2">
