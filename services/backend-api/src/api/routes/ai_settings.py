@@ -67,6 +67,7 @@ class AISettingsResponse(BaseModel):
     model_embeddings: Optional[str] = None
     sentiment_provider: str = "vader"
     classifier_mode: str = "off"
+    category_classifier_mode: str = "off"
     models: ModelConfig
 
 
@@ -77,6 +78,7 @@ class AISettingsUpdate(BaseModel):
     model_embeddings: Optional[str] = Field(None, max_length=100)
     sentiment_provider: Optional[str] = None
     classifier_mode: Optional[str] = None
+    category_classifier_mode: Optional[str] = None
     model_categorization: Optional[str] = None
     model_analysis: Optional[str] = None
     model_insights: Optional[str] = None
@@ -227,6 +229,7 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         else "vader"
     )
     classifier_mode = getattr(config, "classifier_mode", None) or "off" if config else "off"
+    category_classifier_mode = getattr(config, "category_classifier_mode", None) or "off" if config else "off"
 
     return AISettingsResponse(
         ai_analysis_enabled=org.ai_analysis_enabled,
@@ -235,6 +238,7 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         model_embeddings=model_embeddings,
         sentiment_provider=sentiment_provider,
         classifier_mode=classifier_mode,
+        category_classifier_mode=category_classifier_mode,
         models=model_config,
     )
 
@@ -539,6 +543,33 @@ def update_ai_settings(
             )
         if hasattr(config, "classifier_mode"):
             config.classifier_mode = data.classifier_mode
+
+    # ── Category classifier mode validation ───────────────────────────────────
+    # Reuses VALID_CLASSIFIER_MODES + _classifier_deps_available (same three
+    # values, same sklearn dependency as the sentiment classifier_mode block
+    # above) — independent column, independent persistence, no shared state.
+    if "category_classifier_mode" in data.model_fields_set:
+        if (
+            data.category_classifier_mode is not None
+            and data.category_classifier_mode not in VALID_CLASSIFIER_MODES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid category_classifier_mode. Must be one of: "
+                    f"{', '.join(sorted(VALID_CLASSIFIER_MODES))}"
+                ),
+            )
+        if data.category_classifier_mode in ("shadow", "auto") and not _classifier_deps_available():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"category_classifier_mode '{data.category_classifier_mode}' requires "
+                    "scikit-learn to be installed. See docs/SELF_HOSTING.md for the local model setup."
+                ),
+            )
+        if hasattr(config, "category_classifier_mode"):
+            config.category_classifier_mode = data.category_classifier_mode
 
     if data.model_categorization is not None:
         config.model_categorization = data.model_categorization
