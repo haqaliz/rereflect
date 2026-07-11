@@ -1,68 +1,55 @@
-# Card — feat/per-org-category-classifier (freeform)
+# Card — feat/jira-status-sync (freeform)
 
 **Type:** feat
-**Slug/id:** per-org-category-classifier
-**Source:** Freeform — no GitHub issue. Brief is the `rereflect-next` recommendation (2026-07-11).
-**Branch:** feat/per-org-category-classifier
+**Slug:** jira-status-sync
+**Branch:** feat/jira-status-sync
+**Source:** freeform (no GitHub issue) — brief captured from the `rereflect-next` recommendation (2026-07-11) + user go-ahead.
 
-> Supersedes the prior M5.2 (`per-org-corrections-classifier`) card that shipped 2026-07-11.
-> This is the M5.2 **category-head v2** follow-on.
+## Brief
 
----
+Build **inbound status-sync for Jira** to close the integration loop. Today the Jira
+integration (shipped 2026-07-05, slice 1) is outbound-only: it creates Jira issues from
+feedback items. When the linked Jira issue's status later changes (e.g. an engineer moves
+it to *Done*), Rereflect's feedback item does not reflect it. This feature reconciles the
+Jira issue status back onto the linked feedback item.
 
-## Brief (the pick from rereflect-next)
+### Core behavior (first testable slice)
+- A **Celery beat** polls Jira for the current status of issues recorded in the existing
+  `feedback_jira_issues` link table (`services/backend-api/src/models/jira_integration.py`).
+- Each status change maps onto the linked feedback item's `workflow_status`.
+- Emit a `jira_status_synced` timeline event on the feedback item when a change is applied.
+- Scope the first slice to a single org: poll → map → update `workflow_status` + timeline event.
 
-Extend the just-shipped **M5.2 per-org self-improving classifier** from **sentiment** to a
-**category head** — pain-point / feature-request / urgency classification, trained per-org on the
-org's own feedback text + its `AICorrection` **category** corrections, using the same TF-IDF +
-logistic-regression spine, the same shadow-A/B gate, the same off/shadow/auto seam, and the same
-Settings accuracy + one-click rollback surface that sentiment already has.
+### Design constraints / decisions carried from the recommendation
+- **Poll-first.** Self-hosted instances are frequently behind NAT/firewalls, so inbound
+  webhooks are unreliable. Build polling first; a Jira webhook path is optional v2.
+- **Reuse existing plumbing.** Mirror the existing **Linear inbound pattern**
+  (`services/backend-api/src/api/routes/linear_webhook.py`) and reuse the encrypted Jira
+  API-token client from the outbound slice.
+- **Zero-config default mapping.** A small per-org status-mapping (Jira status → feedback
+  `workflow_status`) with a working default so it works out of the box:
+  `Done → resolved`, `In Progress → in_progress` (exact defaults TBD in PRD against the
+  real `workflow_status` enum).
+- **Generalize the core.** After Jira works, factor the mapping/reconcile core so Zendesk
+  and Asana (both have the same inbound-sync v2 deferral) can adopt it.
+- **Rate limits.** Batch by JQL over stored issue keys; respect Jira Cloud rate limits and
+  429 `Retry-After` (the Zendesk poller already has a throttle precedent).
 
-This is the **explicitly-named "immediate v2"** of M5.2 and closes M4.2's long-deferred
-"fine-tuned classification."
+## Provenance (from AI-TRACKING.md / DEV-TRACKING.md)
+- Jira slice 1 shipped 2026-07-05 (`DEV-TRACKING.md:189`). **Deferred v2** explicitly includes
+  "inbound webhook / status sync back to Rereflect, project/status mapping config"
+  (`DEV-TRACKING.md:198`).
+- Same inbound-sync deferral exists for **Asana** (`DEV-TRACKING.md:209`) and **Zendesk**
+  (`DEV-TRACKING.md:220`) — this feature is the first of a cross-integration close-the-loop.
+- **Linear** already does inbound sync via `linear_webhook.py` — the in-repo pattern to mirror.
 
-### Why (grounded)
-- **Named next slice of the flagship moat.** `docs/planning/per-org-corrections-classifier/prd.md:145`
-  lists the "Category classifier head (pain-point + feature-request) … the immediate **v2**," and
-  `:245` puts it out-of-scope for v1. `AI-TRACKING.md:350` records M5.2 shipped with the note
-  "category head is the v2 follow-on."
-- **Unblocked; spine already built.** `services/analysis-engine/src/analyzer/corrections_classifier/`
-  (dataset → trainer → evaluate → predict → metrics/labels), the worker retrain orchestration, the
-  predict-seam (off/shadow/auto), and the Settings accuracy/rollback UI all shipped this week
-  (commits `886db52`..`24b3621`). `labels.py` hard-codes `SENTIMENT_LABELS` — the only sentiment-locked
-  piece. Category-correction data is already collected: `AICorrection.by_type` includes real
-  `category` rows (`AI-TRACKING.md:315`).
-- **Fits OSS / self-hosted / BYOK moat.** CPU-only, offline, per-org, small-and-honest, gets better
-  the more it is corrected (`AI-TRACKING.md:299-312`). No cloud/cross-tenant dependency.
-
-### Known caveat (carried into the dig / PRD — do not be surprised)
-Category is harder than 3-class sentiment:
-1. **Dynamic label set per org** — built-in taxonomies ∪ active `CustomCategory` rows — needs vocab
-   reconciliation (`prd.md:145`).
-2. **Pain-point vs feature-request disambiguation** (are these one multi-class head, or separate heads?).
-3. **Thinner correction volume** per category than sentiment → more orgs stay below the `MIN_LABELS`
-   activation gate.
-
-**Mitigation / first slice:** ship a **fixed built-in category label set** first, reusing the spine
-parameterized by task (rather than hard-coding `SENTIMENT_LABELS`), keeping default analyzer output
-byte-stable and every promotion A/B-gated and reversible. **Defer** dynamic `CustomCategory` vocab
-reconciliation and pain-vs-feature disambiguation to a second slice.
-
-### Roadmap position
-- M5.0 (readiness), M5.1 (sentiment provider layer), **M5.2 (sentiment corrections classifier) — SHIPPED 2026-07-11.**
-- M5.3 (per-org churn ML) — **blocked**: needs ~500 churn labels/org (`AI-TRACKING.md:321,359`). Not this work.
-- M5.4 (local embedding quality) — parked / nice-to-have.
-- **This work = the M5.2 category-head v2.**
-
-### Cross-cutting M5 principles (must hold — AI-TRACKING.md:309-311)
-- **CPU-only**, no GPU ever required.
-- Default analyzer paths stay **byte-stable** (challenger runs in shadow; promotion is opt-in per org, reversible).
-- No central / cross-tenant data.
-- Models small, described **honestly**.
-- Every model swap is **A/B-gated and reversible**.
-
-### Related roadmap neighbours (context, not in scope)
-- **M3.3** — Human-in-the-Loop corrections (the data source; `AICorrection`, AI Accuracy tab).
-- **M5.2 sentiment** — the spine this parameterizes.
-- **Custom AI (M4.2)** — per-org `CustomCategory` taxonomies injected into the analyzer prompt/keyword
-  categorizers; the dynamic-label-set piece this must eventually reconcile with.
+## Open questions (for the deep dig / PRD)
+- What is the exact `workflow_status` enum on the feedback model, and what is the sensible
+  default Jira-status → workflow_status mapping?
+- Poll cadence (beat interval) and batching strategy (JQL `issue in (...)` chunk size).
+- Where does per-org status-mapping config live (new column/table vs. reuse of Jira
+  integration config), and is it editable in the frontend in this slice or deferred?
+- Conflict policy: if a user manually changed `workflow_status` in Rereflect after the Jira
+  link was made, does an inbound Jira change overwrite it? (last-writer-wins vs. guard)
+- Should sync be bidirectional-aware (avoid ping-pong) given outbound only creates, never
+  updates, Jira today?
