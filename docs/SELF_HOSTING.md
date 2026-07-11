@@ -604,11 +604,39 @@ or shown again in the UI.
   pick a project and issue type, and Rereflect creates the issue and keeps a
   link back to the originating feedback.
 
+### Syncing Jira status back to feedback (opt-in)
+
+Once an issue is linked, Rereflect can keep the feedback item's status in step
+with the Jira issue — so when an engineer moves the ticket to *In Progress* or
+*Done*, the feedback item follows without anyone updating it by hand.
+
+- **Off by default.** Turn it on under **Settings → Integrations → Jira** with the
+  **"Sync issue status back to Rereflect"** toggle (admin/owner). The tile shows
+  the last sync time and any error, plus a **Sync now** button.
+- **Poll-based (works behind a firewall).** A background job checks your linked
+  issues every ~15 minutes over the same API token — no public URL or inbound
+  webhook required, so it works on a self-hosted box behind NAT.
+- **Category-based mapping.** Rereflect maps Jira's status *category* — not each
+  custom status name — so it works with any Jira workflow:
+  - *To Do* → `new`
+  - *In Progress* → `in_review`
+  - *Done* → `resolved`
+  You can override this per-organization if your team uses the feedback statuses
+  differently.
+- **Non-destructive.** Turning it on does **not** retroactively rewrite the status
+  of feedback you already linked — it records the current Jira status as a baseline
+  and only moves a feedback item when the Jira issue *changes* afterward. It will
+  not fight a status you set by hand unless the Jira issue genuinely moves. If a
+  feedback item is linked to several Jira issues, the most-advanced status wins.
+
+Real-time webhook sync (instead of polling) and a per-status-name mapping editor
+are planned for a future release.
+
 ### All features unlocked
 
-Because Rereflect is self-hosted and open-source, Jira issue creation has no
-plan gate, seat limit, or usage cap — it's available to every organization
-running the app.
+Because Rereflect is self-hosted and open-source, Jira issue creation and
+status-sync have no plan gate, seat limit, or usage cap — they're available to
+every organization running the app.
 
 ## Connecting Zendesk
 

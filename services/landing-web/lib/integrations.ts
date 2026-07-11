@@ -249,8 +249,8 @@ export const integrations: Integration[] = [
   {
     slug: 'jira',
     name: 'Jira',
-    tagline: 'Push feedback straight into Jira issues your team already tracks',
-    description: 'Connect Jira Cloud and create issues directly from feedback items — with sentiment, customer context, and a link back to the original feedback included automatically.',
+    tagline: 'Two-way sync with the Jira issues your team already tracks',
+    description: 'Connect Jira Cloud and create issues directly from feedback items — with sentiment, customer context, and a link back to the original feedback. When your team moves an issue to In Progress or Done, Rereflect syncs that status back onto the feedback automatically.',
     status: 'available',
     color: 'chart-2',
     gradient: 'from-[#0052CC] to-[#2684FF]',
@@ -260,13 +260,14 @@ export const integrations: Integration[] = [
     howItWorks: [
       { step: '1', title: 'Connect Jira', description: 'Paste your Jira site URL, account email, and a personal API token to authorize Rereflect — no OAuth redirect required.' },
       { step: '2', title: 'Create Issues from Feedback', description: 'Pick a project and issue type, then create a Jira issue directly from any feedback item — pre-filled with the feedback content and AI context.' },
-      { step: '3', title: 'Track the Link', description: 'Rereflect keeps a link between the feedback item and the Jira issue, so your team can jump straight to the ticket that came from a customer.' },
+      { step: '3', title: 'Track the Link & Sync Status Back', description: 'Rereflect keeps a link between the feedback item and the Jira issue. Turn on status-sync and the feedback item follows the issue — moving to Resolved when the ticket is done, all on its own.' },
     ],
     features: [
       { title: 'Token-Based Connection', description: 'Connect with a personal Atlassian API token — no OAuth app to register, no admin approval workflow required.', icon: 'KeyRound' },
       { title: 'One-Click Issue Creation', description: 'Turn any feedback item into a Jira issue in a couple of clicks, pre-filled with title, description, and customer context.', icon: 'FileText' },
       { title: 'Project & Issue-Type Picker', description: 'Choose which Jira project and issue type (Bug, Task, Story) each issue is created in — no hardcoded defaults.', icon: 'Tags' },
       { title: 'Feedback-to-Issue Linking', description: 'Every created issue is linked back to the originating feedback item, so context is never lost.', icon: 'RefreshCw' },
+      { title: 'Two-Way Status Sync', description: 'Opt in and Rereflect polls your linked Jira issues, moving the feedback item to In Review, Resolved, or Closed when the Jira status changes — no manual updating, and it never overwrites a status you set by hand.', icon: 'RefreshCw' },
       { title: 'Cloud-Native', description: 'Built for Jira Cloud (*.atlassian.net) using the official REST API v3 with Basic auth.', icon: 'Zap' },
     ],
     useCases: [
