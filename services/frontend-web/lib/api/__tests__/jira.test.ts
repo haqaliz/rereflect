@@ -11,7 +11,7 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 import apiClient from '@/lib/api-client';
-import { jiraAPI } from '@/lib/api/jira';
+import { jiraAPI, patchJiraStatusSync, triggerJiraSync } from '@/lib/api/jira';
 
 describe('jiraAPI', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -150,5 +150,46 @@ describe('jiraAPI', () => {
     });
     expect(result).toHaveLength(1);
     expect(result[0].jira_issue_key).toBe('ENG-123');
+  });
+
+  it('patchJiraStatusSync calls PATCH /api/v1/integrations/jira/status-sync with { enabled }', async () => {
+    (apiClient.patch as any).mockResolvedValue({
+      data: {
+        connected: true,
+        site_url: 'https://acme.atlassian.net',
+        email: 'admin@acme.com',
+        token_hint: '...abcd',
+        account_id: 'acc-1',
+        display_name: 'Admin User',
+        is_active: true,
+        last_synced_at: null,
+        last_sync_status: null,
+        last_error: null,
+        connected_at: '2026-01-01T00:00:00Z',
+        status_sync_enabled: true,
+        last_status_synced_at: null,
+      },
+    });
+    const result = await patchJiraStatusSync(true);
+    expect(apiClient.patch).toHaveBeenCalledWith('/api/v1/integrations/jira/status-sync', {
+      enabled: true,
+    });
+    expect(result.status_sync_enabled).toBe(true);
+  });
+
+  it('patchJiraStatusSync includes status_mapping when provided', async () => {
+    (apiClient.patch as any).mockResolvedValue({ data: { status_sync_enabled: true } });
+    await patchJiraStatusSync(true, { done: 'resolved' });
+    expect(apiClient.patch).toHaveBeenCalledWith('/api/v1/integrations/jira/status-sync', {
+      enabled: true,
+      status_mapping: { done: 'resolved' },
+    });
+  });
+
+  it('triggerJiraSync calls POST /api/v1/integrations/jira/sync', async () => {
+    (apiClient.post as any).mockResolvedValue({ data: { status: 'queued' } });
+    const result = await triggerJiraSync();
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v1/integrations/jira/sync');
+    expect(result.status).toBe('queued');
   });
 });

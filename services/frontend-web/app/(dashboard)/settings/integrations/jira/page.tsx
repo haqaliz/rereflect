@@ -31,6 +31,7 @@ import {
 import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
 import { useAuth } from '@/contexts/AuthContext';
 import { JiraIcon } from '@/components/icons/JiraIcon';
+import { JiraStatusSyncCard } from '@/components/settings/JiraStatusSyncCard';
 
 export default function JiraSettingsPage() {
   const router = useRouter();
@@ -105,6 +106,8 @@ export default function JiraSettingsPage() {
         last_sync_status: null,
         last_error: null,
         connected_at: null,
+        status_sync_enabled: false,
+        last_status_synced_at: null,
       });
       setTokenInput('');  // clear after successful connect
     } catch (err: any) {
@@ -402,6 +405,11 @@ export default function JiraSettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Inbound status sync (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <JiraStatusSyncCard status={status} onStatusChange={setStatus} />
+        )}
 
         {/* Help card */}
         <Card className="animate-slide-up stagger-1">
