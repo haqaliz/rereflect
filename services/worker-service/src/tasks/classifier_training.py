@@ -1,17 +1,19 @@
 """
-Celery tasks for weekly per-org sentiment corrections classifier retraining —
-worker-trainer-and-schedule aspect (M5.2 per-org-corrections-classifier).
+Celery tasks for weekly per-org sentiment and category corrections classifier
+retraining — worker-trainer-and-schedule aspect (M5.2 per-org-corrections-classifier).
 
 Beat schedule (registered in celery_app.py):
-- retrain_all_orgs → Mondays 06:30 UTC (folds in purge_old_classifier_models after
-  the loop — no separate beat slot)
+- retrain_all_orgs → Mondays 06:30 UTC (loops both classifier types, no new beat
+  entry; folds in purge_old_classifier_models after the loop — no separate beat slot)
 
 Mirrors tasks/churn_calibration.py + services/calibration_refit.py conventions:
 - versioned artifact + atomic active-model swap (deactivate prev active -> insert new
   is_active row -> flush (populate id) -> insert eval-run -> commit; never a window
   with 0 or 2 active rows for the same (org, classifier_type)).
-- per-org Redis advisory lock, mirroring tasks/analysis.py's `_get_redis()` +
-  `r.lock(...)` pattern (here keyed per-org: lock:classifier_refit:{org_id}).
+- Redis advisory lock, mirroring tasks/analysis.py's `_get_redis()` + `r.lock(...)`
+  pattern, here keyed per-(classifier_type, org):
+  lock:classifier_refit:{classifier_type}:{org_id}, so the sentiment and category
+  heads never serialize each other.
 - a folded purge (mirrors purge_old_calibration_models, no separate beat slot).
 
 This module is the ONLY writer of org_classifier_models. It does not touch
