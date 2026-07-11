@@ -289,3 +289,212 @@ class TestLoaderOrPredictFailureNeverRaises:
 
         assert feedback_item.sentiment_score == pytest.approx(0.2023, abs=1e-4)
         assert feedback_item.sentiment_label == "positive"
+
+
+# Deterministic category artifacts — binary shape (coef=[[0.0]], very
+# negative intercept) collapses P(classes[1])->0 regardless of input text
+# (vocabulary token "neverseen" never matches), so argmax always picks
+# classes[0]. Same proven pattern as _ALWAYS_NEGATIVE_ARTIFACT, just with
+# category class names.
+_ALWAYS_PAIN_VOCAB_ARTIFACT = {
+    "vectorizer": {
+        "vocabulary": {"neverseen": 0}, "idf": [1.0],
+        "token_pattern": r"(?u)\b\w\w+\b", "lowercase": True,
+        "sublinear_tf": True, "norm": "l2",
+    },
+    "logreg": {"coef": [[0.0]], "intercept": [-10.0]},
+    "classes": ["security_breach", "core_functionality"],
+}
+_ALWAYS_FEATURE_VOCAB_ARTIFACT = {
+    **_ALWAYS_PAIN_VOCAB_ARTIFACT,
+    "classes": ["core_functionality", "security_breach"],  # swap order -> classes[0] now feature-vocab
+}
+_ALWAYS_CUSTOM_LABEL_ARTIFACT = {
+    **_ALWAYS_PAIN_VOCAB_ARTIFACT,
+    "classes": ["totally_custom_thing", "another_custom_thing"],
+}
+
+
+def _set_category_classifier_mode(db, org_id: int, mode: str) -> None:
+    config = OrgAIConfig(
+        organization_id=org_id,
+        default_provider="openai",
+        model_categorization="gpt-4o-mini",
+        model_analysis="gpt-4o-mini",
+        model_insights="gpt-4o-mini",
+        category_classifier_mode=mode,
+    )
+    db.add(config)
+    db.commit()
+
+
+def _add_active_category_model(db, org_id, artifact) -> OrgClassifierModel:
+    row = OrgClassifierModel(
+        organization_id=org_id,
+        classifier_type="category",
+        model_json=artifact,
+        label_count=10,
+        is_active=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+class TestCategoryOffByteStability:
+    """Reuses TestOffByteStability's SAMPLES: unset/off category mode is a
+    pure no-op even with an active category model present -- category
+    fields must be byte-identical between the two runs."""
+
+    SAMPLES = TestOffByteStability.SAMPLES
+
+    def test_no_config_row_vs_explicit_off_are_identical(self, db, test_org):
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        no_config_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_org.id)
+            _apply_keyword_analysis(feedback_item, db)
+            no_config_results.append(
+                (feedback_item.pain_point_category, feedback_item.feature_request_category)
+            )
+
+        _set_category_classifier_mode(db, test_org.id, "off")
+        _add_active_category_model(db, test_org.id, _ALWAYS_PAIN_VOCAB_ARTIFACT)
+
+        off_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_org.id)
+            _apply_keyword_analysis(feedback_item, db)
+            off_results.append(
+                (feedback_item.pain_point_category, feedback_item.feature_request_category)
+            )
+
+        assert off_results == no_config_results
+
+
+class TestCategoryAutoRouting:
+    def test_auto_overrides_pain_point_category(self, db, test_org):
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        _set_category_classifier_mode(db, test_org.id, "auto")
+        _add_active_category_model(db, test_org.id, _ALWAYS_PAIN_VOCAB_ARTIFACT)
+
+        # Positive text -> base keyword path sets feature_request_category,
+        # leaves pain_point_category at None -> proves the category override
+        # fires unconditionally (not gated on the base categorizer having run).
+        feedback_item = _make_feedback("I love this product, it's amazing!", test_org.id)
+        _apply_keyword_analysis(feedback_item, db)
+
+        assert feedback_item.pain_point_category == "security_breach"
+
+    def test_auto_overrides_feature_request_category(self, db, test_org):
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        _set_category_classifier_mode(db, test_org.id, "auto")
+        _add_active_category_model(db, test_org.id, _ALWAYS_FEATURE_VOCAB_ARTIFACT)
+
+        feedback_item = _make_feedback("This is terrible, I want a refund.", test_org.id)
+        _apply_keyword_analysis(feedback_item, db)
+
+        assert feedback_item.feature_request_category == "core_functionality"
+
+    def test_auto_neither_vocab_leaves_both_fields_untouched(self, db, test_org, caplog):
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        _set_category_classifier_mode(db, test_org.id, "auto")
+        _add_active_category_model(db, test_org.id, _ALWAYS_CUSTOM_LABEL_ARTIFACT)
+
+        feedback_item = _make_feedback("This is terrible, I want a refund.", test_org.id)
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            _apply_keyword_analysis(feedback_item, db)
+
+        # Base keyword categorizer's own pain_point_category is untouched by
+        # the classifier (no write, ambiguous label) -- do NOT assert None,
+        # assert it matches whatever the keyword categorizer itself set.
+        shadow_records = [r for r in caplog.records if r.name == "rereflect.classifier.shadow"]
+        category_records = [r for r in shadow_records if r.classifier_type == "category"]
+        assert len(category_records) == 1
+        assert category_records[0].target_field is None
+
+    def test_auto_both_vocabs_ambiguous_leaves_fields_untouched(self, db, test_org, monkeypatch, caplog):
+        """A label in BOTH built-in vocabs (contrived collision) must not be
+        written to either field -- the classifier override is a no-op on
+        top of whatever the BASE keyword categorizer already set (D7:
+        the override runs unconditionally, but "no target_field" means "no
+        setattr call", not "field forced back to None"). Verified via the
+        shadow log's target_field=None rather than a before/after value
+        comparison, since _make_feedback's initial None is not the relevant
+        "incumbent" here -- the base keyword categorizer runs first and is
+        the true incumbent (same technique as
+        test_auto_neither_vocab_leaves_both_fields_untouched above)."""
+        from analyzer.categorizer import FeatureRequestCategorizer
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        monkeypatch.setitem(
+            FeatureRequestCategorizer._BASE_CATEGORIES, "security_breach",
+            {"keywords": ["x"], "priority": "high"},
+        )
+        _set_category_classifier_mode(db, test_org.id, "auto")
+        _add_active_category_model(db, test_org.id, _ALWAYS_PAIN_VOCAB_ARTIFACT)
+
+        feedback_item = _make_feedback("This is terrible, I want a refund.", test_org.id)
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            _apply_keyword_analysis(feedback_item, db)
+
+        shadow_records = [r for r in caplog.records if r.name == "rereflect.classifier.shadow"]
+        category_records = [r for r in shadow_records if r.classifier_type == "category"]
+        assert len(category_records) == 1
+        assert category_records[0].target_field is None
+        # Never written to security_breach (the classifier's challenger
+        # label) by the override -- whatever value is present came only
+        # from the base keyword categorizer.
+        assert feedback_item.pain_point_category != "security_breach"
+
+    def test_category_and_sentiment_independent(self, db, test_org):
+        """category=auto + sentiment=off (mixed independently on one
+        OrgAIConfig row) -> only category mutates."""
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        config = OrgAIConfig(
+            organization_id=test_org.id,
+            default_provider="openai",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+            classifier_mode="off",
+            category_classifier_mode="auto",
+        )
+        db.add(config)
+        db.commit()
+        _add_active_category_model(db, test_org.id, _ALWAYS_PAIN_VOCAB_ARTIFACT)
+        _add_active_model(db, test_org.id)  # sentiment model, irrelevant since sentiment=off
+
+        feedback_item = _make_feedback("It's fine I guess.", test_org.id)
+        _apply_keyword_analysis(feedback_item, db)
+
+        assert feedback_item.pain_point_category == "security_breach"  # category auto fired
+        assert feedback_item.sentiment_score == pytest.approx(0.2023, abs=1e-4)  # sentiment off, untouched
+        assert feedback_item.sentiment_label == "positive"
+
+
+class TestCategoryLLMBranch:
+    def test_auto_overrides_category_on_llm_branch_too(self, db, ai_enabled_org, unanalyzed_feedback):
+        from src.tasks.analysis import _analyze_feedback_item
+
+        _set_category_classifier_mode(db, ai_enabled_org.id, "auto")
+        _add_active_category_model(db, ai_enabled_org.id, _ALWAYS_PAIN_VOCAB_ARTIFACT)
+
+        llm_result = {
+            "sentiment_label": "positive", "sentiment_score": 0.6, "is_urgent": False,
+            "confidence": 0.9,
+            "pain_point_category": None,
+            "feature_request_category": "ui_enhancement",  # LLM's own guess
+        }
+
+        with patch("src.tasks.analysis.categorize_feedback", return_value=llm_result):
+            _analyze_feedback_item(unanalyzed_feedback, db)
+
+        assert unanalyzed_feedback.llm_analyzed is True
+        assert unanalyzed_feedback.pain_point_category == "security_breach"  # overridden post-LLM

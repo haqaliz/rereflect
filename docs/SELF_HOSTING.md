@@ -171,10 +171,11 @@ weights **only** when explicitly requested.
 
 ## Per-Org Corrections Classifier (M5.2, self-improving)
 
-Rereflect can train a small per-organization sentiment classifier on your own
-corrections, run it locally (CPU-only, offline), and auto-promote it when it
-measurably beats the default analyzer. The classifier is **off by default** — your
-analyzer output stays byte-identical until you enable it.
+Rereflect can train small per-organization classifiers — one for **sentiment** and
+one for **category** (pain-point / feature-request) — on your own corrections, run
+them locally (CPU-only, offline), and auto-promote each when it measurably beats the
+default analyzer. Both are **off by default** and are controlled **independently** —
+your analyzer output stays byte-identical until you enable them.
 
 ### What it is
 
@@ -227,14 +228,35 @@ Once you've collected enough corrections, the **Accuracy tab** (Settings → AI)
 If you enable `auto` mode and the model gets promoted, the card displays a
 **Roll back** button — one click reverts to the previous model.
 
-### Known v1 limitation
+### Category classifier (M5.2 v2)
 
-In `auto` mode, if the promoted classifier flips a feedback item's sentiment label
-(e.g., from neutral to negative), the **pain-point, feature-request, and urgency
-categories on that item stay keyed to the incumbent sentiment**. This preserves
-consistency of churn signals, health scores, and trend analytics (they read the
-recomputed `sentiment_score` coherently). Full re-categorization across all three
-heads when a model is promoted is the v2 follow-on (M5.2b category head).
+Alongside sentiment, Rereflect trains a per-org **category** classifier on your
+`category` corrections (when you fix an AI-assigned pain-point or feature-request
+category). It shares the same spine and Settings surface, with a **separate**
+`category_classifier_mode` toggle and its own accuracy card — so you can run
+sentiment in `auto` while category is still in `shadow`, or vice versa.
+
+Two things specific to the category head, both chosen for honesty:
+
+- **Dynamic labels from your data.** Its label set is exactly the categories that
+  appear in *your* corrections (built-in categories and any custom ones), not a
+  fixed list — so it adapts to how your team actually categorizes.
+- **Unambiguous routing (no silent mis-writes).** In `auto`, a predicted label
+  overrides the item's `pain_point_category` **or** `feature_request_category`
+  **only when the label maps unambiguously to exactly one** built-in vocabulary. A
+  label that matches neither (e.g. a custom category) or both is **shadow-logged
+  only** and never written to a guessed field.
+- **Fair accuracy comparison.** The challenger is scored **only over labels the
+  keyword baseline can produce** ("evaluated on labels the baseline can produce" on
+  the card) — so a custom-only category the baseline could never guess can't inflate
+  the challenger's win and trigger a promotion.
+
+### Known limitation
+
+The category head is a **single unified model**, so it predicts one category per
+item — it can set the pain-point *or* the feature-request field, not both
+independently on the same item. Separate per-kind heads (pain-point vs
+feature-request vs urgency) and multi-label items are the v3 follow-on.
 
 ## Adding your own LLM key (BYOK)
 

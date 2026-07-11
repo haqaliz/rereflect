@@ -16,6 +16,7 @@ which is the real target.
 
 from __future__ import annotations
 
+import importlib
 import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -111,6 +112,42 @@ def _make_inactive_model(db, org_id: int | None, fit_at: datetime) -> OrgClassif
     return model
 
 
+def _seed_category_corrections(db, org_id: int, pairs: list) -> None:
+    """Seed AICorrection rows (correction_type='category') that build_category_dataset()
+    will pick up for real. pairs: list[(feedback_text, corrected_value)]."""
+    for text_, label in pairs:
+        db.add(
+            AICorrection(
+                organization_id=org_id,
+                correction_type="category",
+                entity_type="feedback_item",
+                entity_id=None,
+                signal="correction",
+                original_value="functionality_broken",
+                corrected_value=label,
+                feedback_text=text_,
+            )
+        )
+    db.commit()
+
+
+def _beatable_category_pairs(n_per_class: int = 20) -> list:
+    """Synthetic (text, label) pairs for a REAL end-to-end category promote test. Labels are
+    drawn from the built-in keyword-categorizer vocab ('performance' / 'security_breach'),
+    but the marker tokens ('zunder' / 'quorbex') are deliberately absent from every
+    _BASE_CATEGORIES keyword list in analyzer/categorizer.py — both PainPointCategorizer and
+    FeatureRequestCategorizer score 0 on every row here and fall through to their tied
+    0.3-confidence defaults. _build_category_incumbent_predict()'s pain-point-wins-ties rule
+    then makes the REAL keyword incumbent predict 'functionality_broken' for every single
+    row, regardless of true label — i.e. the incumbent's macro-F1 on this 2-class eval is
+    deterministically 0.0, a reliably beatable floor."""
+    pairs = []
+    for i in range(n_per_class):
+        pairs.append((f"zunder zunder flexnorb entry {i} zunder", "performance"))
+        pairs.append((f"quorbex quorbex vindlar entry {i} quorbex", "security_breach"))
+    return pairs
+
+
 def _seed_corrections(db, org_id: int, count: int = 25) -> None:
     """Seed AICorrection rows that build_sentiment_dataset() will pick up for real."""
     labels = ["positive", "neutral", "negative"]
@@ -164,25 +201,30 @@ def _fake_redis_lock_denied():
 
 
 @contextmanager
-def _patch_core(decision: str, *, n: int = 25, incumbent_macro_f1=0.50,
-                 challenger_macro_f1=0.65, macro_f1_delta=0.15, notes=None,
-                 dataset=None, artifact=None):
-    """Patch the training-and-eval-core's build_sentiment_dataset/evaluate/
-    train_classifier so retrain_org's decision is fully deterministic, without
-    needing sklearn to actually fit anything. Mirrors the plan's "patch the core
-    via the autouse stub" strategy."""
+def _patch_core(decision: str, *, classifier_type: str = "sentiment", n: int = 25,
+                 incumbent_macro_f1=0.50, challenger_macro_f1=0.65, macro_f1_delta=0.15,
+                 notes=None, dataset=None, artifact=None):
+    """Patch the training-and-eval-core so retrain_org's decision is fully deterministic for
+    EITHER classifier_type, without needing sklearn to actually fit anything. The default
+    fake category dataset uses REAL built-in vocab labels ("performance"/"security_breach")
+    so the fair-A/B eval_labels computation in retrain_org's category branch never hits the
+    Phase-4 "no built-in overlap" guard by accident for these mocked-core tests."""
     from analyzer.corrections_classifier.evaluate import EvalResult
 
     if notes is None:
         notes = f"{decision} (delta={macro_f1_delta:+.4f}, n={n})" if macro_f1_delta is not None else decision
     if dataset is None:
-        labels = ["positive", "neutral", "negative"]
-        dataset = [(f"text {i}", labels[i % 3]) for i in range(n)]
+        if classifier_type == "category":
+            labels = ["performance", "security_breach"]  # both built-in vocab members
+        else:
+            labels = ["positive", "neutral", "negative"]
+        dataset = [(f"text {i}", labels[i % len(labels)]) for i in range(n)]
     if artifact is None:
+        classes = sorted({label for _, label in dataset})
         artifact = {
             "model_type": "tfidf_logreg",
-            "classifier_type": "sentiment",
-            "classes": ["negative", "neutral", "positive"],
+            "classifier_type": classifier_type,
+            "classes": classes,
             "vectorizer": {"vocabulary": {}, "idf": [], "lowercase": True,
                            "token_pattern": r"(?u)\b\w\w+\b", "ngram_range": [1, 1],
                            "norm": "l2", "sublinear_tf": False, "smooth_idf": True},
@@ -196,8 +238,20 @@ def _patch_core(decision: str, *, n: int = 25, incumbent_macro_f1=0.50,
         macro_f1_delta=macro_f1_delta, notes=notes,
     )
 
-    with patch("analyzer.corrections_classifier.dataset.build_sentiment_dataset", return_value=dataset), \
-         patch("analyzer.corrections_classifier.evaluate.evaluate", return_value=fake_result), \
+    dataset_builder_target = (
+        "analyzer.corrections_classifier.dataset.build_category_dataset"
+        if classifier_type == "category"
+        else "analyzer.corrections_classifier.dataset.build_sentiment_dataset"
+    )
+    # NOTE: patch.object(module_obj, ...) here, NOT a dotted patch() string —
+    # analyzer.corrections_classifier.__init__ re-exports the function "evaluate" under
+    # the same name as the "evaluate" submodule, which breaks mock.patch's dotted-path getattr
+    # walk (though not the module's own real sys.modules entry). importlib.import_module resolves
+    # the real submodule directly.
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+
+    with patch(dataset_builder_target, return_value=dataset), \
+         patch.object(evaluate_module, "evaluate", return_value=fake_result), \
          patch("analyzer.corrections_classifier.trainer.train_classifier", return_value=artifact):
         yield fake_result, artifact
 
@@ -624,8 +678,25 @@ def test_retrain_org_acquires_per_org_lock(db):
 
     fake_r.lock.assert_called_once()
     args, kwargs = fake_r.lock.call_args
-    assert args[0] == f"lock:classifier_refit:{org.id}"
+    assert args[0] == f"lock:classifier_refit:sentiment:{org.id}"
     fake_lock.acquire.assert_called_once_with(blocking=False)
+
+
+def test_retrain_org_classifier_type_defaults_to_sentiment(db):
+    """Characterization: calling retrain_org with NO classifier_type arg reproduces the
+    pre-change sentiment-only behavior — writes classifier_type='sentiment' rows."""
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert model.classifier_type == "sentiment"
+    run = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).one()
+    assert run.classifier_type == "sentiment"
 
 
 def test_retrain_org_lock_not_acquired_skips_without_writes(db):
@@ -660,7 +731,7 @@ def test_retrain_org_releases_lock_in_finally(db):
 # ---------------------------------------------------------------------------
 
 
-def test_retrain_all_orgs_iterates_all_orgs(db):
+def test_retrain_all_orgs_iterates_all_orgs_and_both_types(db):
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
@@ -676,24 +747,33 @@ def test_retrain_all_orgs_iterates_all_orgs(db):
         tasks = _get_tasks()
         tasks.retrain_all_orgs()
 
-    assert mock_retrain.call_count == 3
-    called_org_ids = {c.args[0] for c in mock_retrain.call_args_list}
-    assert called_org_ids == {org1.id, org2.id, org3.id}
+    assert mock_retrain.call_count == 6  # 3 orgs x 2 classifier types
+    called_pairs = {
+        (c.args[0], c.kwargs.get("classifier_type")) for c in mock_retrain.call_args_list
+    }
+    assert called_pairs == {
+        (org1.id, "sentiment"), (org1.id, "category"),
+        (org2.id, "sentiment"), (org2.id, "category"),
+        (org3.id, "sentiment"), (org3.id, "category"),
+    }
 
 
-def test_retrain_all_orgs_aggregates_counts(db):
+def test_retrain_all_orgs_aggregates_counts_across_both_types(db):
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
 
-    results_by_org = {
-        org1.id: {"decision": "promoted", "promoted": True, "n": 25},
-        org2.id: {"decision": "retained", "retained": True, "n": 25},
-        org3.id: {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+    results_by_key = {
+        (org1.id, "sentiment"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org1.id, "category"): {"decision": "retained", "retained": True, "n": 25},
+        (org2.id, "sentiment"): {"decision": "retained", "retained": True, "n": 25},
+        (org2.id, "category"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org3.id, "sentiment"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+        (org3.id, "category"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 2},
     }
 
-    def side_effect(org_id, session):
-        return results_by_org[org_id]
+    def side_effect(org_id, session, classifier_type="sentiment"):
+        return results_by_key[(org_id, classifier_type)]
 
     with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
          patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
@@ -705,30 +785,23 @@ def test_retrain_all_orgs_aggregates_counts(db):
         tasks = _get_tasks()
         result = tasks.retrain_all_orgs()
 
-    assert result == {"trained": 2, "promoted": 1, "skipped": 1}
+    # trained (promoted+retained) = 4 across both types (org1 both, org2 both); skipped = 2 (org3 both)
+    assert result == {"trained": 4, "promoted": 2, "skipped": 2}
 
 
-def test_retrain_all_orgs_isolates_per_org_exception(db):
-    """org2's failure must leave the SHARED session usable for org3. A clean
-    RuntimeError doesn't touch the session, so it can't catch a missing
-    rollback() — instead, org2's mocked retrain_org performs a real write that
-    violates a NOT-NULL column and flush()es it, which raises IntegrityError
-    and leaves the session needing rollback (mirrors the Postgres
-    UniqueViolation this task also needs to survive). org3's mocked
-    retrain_org then performs a real, valid write+commit: without
-    db.rollback() in the batch loop's except, org3's write itself would raise
-    sqlalchemy.exc.PendingRollbackError and never land in the DB."""
+def test_retrain_all_orgs_isolates_per_org_exception_across_both_types(db):
+    """org2's failure (both type-iterations) must leave the SHARED session usable for org1/org3's
+    iterations. Mirrors the original single-type test's real-IntegrityError-and-rollback proof,
+    doubled across the type loop."""
     org1 = _make_org(db, "Org1")
     org2 = _make_org(db, "Org2")
     org3 = _make_org(db, "Org3")
 
     processed = []
 
-    def side_effect(org_id, session):
-        processed.append(org_id)
+    def side_effect(org_id, session, classifier_type="sentiment"):
+        processed.append((org_id, classifier_type))
         if org_id == org2.id:
-            # A real DB failure mid-transaction: NOT NULL violation on flush,
-            # leaving the shared session in a needs-rollback state.
             bad_run = OrgClassifierEvalRun(
                 organization_id=org2.id,
                 classifier_type=None,  # NOT NULL violation
@@ -738,10 +811,9 @@ def test_retrain_all_orgs_isolates_per_org_exception(db):
             session.add(bad_run)
             session.flush()  # raises IntegrityError
             return {"decision": "retained", "retained": True, "n": 25}  # unreachable
-        # A real, valid write — only succeeds if the session recovered.
         good_run = OrgClassifierEvalRun(
             organization_id=org_id,
-            classifier_type="sentiment",
+            classifier_type=classifier_type,
             decision="retained",
             n=25,
         )
@@ -759,15 +831,17 @@ def test_retrain_all_orgs_isolates_per_org_exception(db):
         tasks = _get_tasks()
         result = tasks.retrain_all_orgs()  # must not raise
 
-    assert set(processed) == {org1.id, org2.id, org3.id}
-    assert result["trained"] == 2  # org1 + org3 succeeded; org2's exception isolated
+    assert set(processed) == {
+        (org1.id, "sentiment"), (org1.id, "category"),
+        (org2.id, "sentiment"), (org2.id, "category"),
+        (org3.id, "sentiment"), (org3.id, "category"),
+    }
+    assert result["trained"] == 4  # org1 x2 + org3 x2 succeeded; org2 x2 isolated-failed
 
-    # The real proof: org3's write actually landed in the DB, i.e. the shared
-    # session was rolled back and usable again after org2's failure.
     org3_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org3.id).all()
-    assert len(org3_runs) == 1
+    assert len(org3_runs) == 2
     org1_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org1.id).all()
-    assert len(org1_runs) == 1
+    assert len(org1_runs) == 2
 
 
 def test_retrain_all_orgs_runs_purge_once(db):
@@ -786,3 +860,311 @@ def test_retrain_all_orgs_runs_purge_once(db):
         tasks.retrain_all_orgs()
 
     mock_purge.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — category incumbent + built-in vocab helpers
+# ---------------------------------------------------------------------------
+
+
+def test_built_in_category_vocab_is_union_of_both_categorizers():
+    tasks = _get_tasks()
+    vocab = tasks._built_in_category_vocab()
+    assert "security_breach" in vocab       # pain-point built-in
+    assert "performance" in vocab           # pain-point built-in
+    assert "automation" in vocab            # feature-request built-in
+    assert "reporting" in vocab             # feature-request built-in
+    assert "custom_widget_bug" not in vocab  # never a fixed/custom tuple
+    assert len(vocab) == 22  # 12 pain-point + 10 feature-request, verified disjoint
+
+
+def test_build_category_incumbent_predict_uses_real_keyword_categorizers():
+    tasks = _get_tasks()
+    predict = tasks._build_category_incumbent_predict()
+    # Strong pain-point signal -> PainPointCategorizer wins on confidence.
+    assert predict("the system was hacked, a security breach exposed our data") == "security_breach"
+    # Strong feature-request signal -> FeatureRequestCategorizer wins on confidence.
+    assert predict("please add slack integration and zapier webhook support") == "integration"
+
+
+def test_build_category_incumbent_predict_ties_toward_pain_point_default():
+    """Text matching neither categorizer's keywords -> both categorizers fall through to
+    their own 0.3-confidence defaults (a tie) -> the incumbent deterministically prefers the
+    pain-point categorizer's default ('functionality_broken'), never 'core_functionality'."""
+    tasks = _get_tasks()
+    predict = tasks._build_category_incumbent_predict()
+    assert predict("zunder zunder flexnorb entry 0 zunder") == "functionality_broken"
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 — category dataset dispatch + fair-A/B labels wiring (mocked core)
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_category_dispatches_to_build_category_dataset(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", classifier_type="category", n=25, challenger_macro_f1=0.70) as (_, artifact):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert result["decision"] == "promoted"
+    model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert model.classifier_type == "category"
+    assert model.model_json == artifact
+
+
+def test_retrain_org_category_passes_fair_ab_intersected_labels_to_evaluate(db):
+    """The label subset PASSED TO evaluate() must exclude a custom (non-built-in-vocab)
+    label present in the dataset — proves the fair-A/B wiring calls
+    derive_labels(dataset) ∩ built_in_category_vocab, not the raw derive_labels() output."""
+    org = _make_org(db)
+    dataset_with_custom_label = [
+        (f"performance issue {i}", "performance") for i in range(15)
+    ] + [
+        (f"security incident {i}", "security_breach") for i in range(15)
+    ] + [
+        (f"onboarding flow request {i}", "onboarding_flow") for i in range(10)  # NOT built-in
+    ]
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    captured_kwargs = {}
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+
+    def spy_evaluate(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        from analyzer.corrections_classifier.evaluate import EvalResult
+        return EvalResult(decision="retained", n=10, incumbent_macro_f1=0.5,
+                           challenger_macro_f1=0.5, macro_f1_delta=0.0, notes="retained (delta=+0.0000, n=10)")
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch("analyzer.corrections_classifier.dataset.build_category_dataset",
+               return_value=dataset_with_custom_label), \
+         patch.object(evaluate_module, "evaluate", side_effect=spy_evaluate):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert captured_kwargs["labels"] == ("performance", "security_breach")
+    assert "onboarding_flow" not in captured_kwargs["labels"]
+
+
+def test_retrain_org_sentiment_never_passes_labels_kwarg_byte_stable(db):
+    """Byte-stability: the sentiment path must call evaluate() with NO labels kwarg at all
+    (relying on evaluate()'s own SENTIMENT_LABELS default), never an explicit
+    labels=SENTIMENT_LABELS — proves this aspect didn't touch the sentiment call."""
+    org = _make_org(db)
+    _seed_corrections(db, org.id, count=5)  # below gate, real dataset+evaluate, no mocking needed
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    captured_kwargs = {}
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+    real_evaluate = evaluate_module.evaluate
+
+    def spy_evaluate(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_evaluate(*args, **kwargs)
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch.object(evaluate_module, "evaluate", side_effect=spy_evaluate):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    assert "labels" not in captured_kwargs
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 — category end-to-end: real promote / below-gate / no-overlap guard
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_category_real_end_to_end_promotes_with_beatable_incumbent(db):
+    """Spec acceptance criterion: synthetic category corrections (>=MIN_LABELS, >=2 classes,
+    a deliberately-beatable incumbent) -> retrain_org(org_id, db, classifier_type="category")
+    promotes a model: one OrgClassifierModel row (classifier_type='category', is_active=True)
+    + one OrgClassifierEvalRun (decision='promoted'). Uses the REAL build_category_dataset,
+    REAL _build_category_incumbent_predict() (actual keyword categorizers), REAL evaluate(),
+    and REAL train_classifier() (actual sklearn fit) — nothing in the core is mocked, proving
+    the whole pipeline end-to-end."""
+    org = _make_org(db)
+    _seed_category_corrections(db, org.id, _beatable_category_pairs(n_per_class=20))  # 40 rows
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert result["decision"] == "promoted"
+
+    models = db.query(OrgClassifierModel).filter_by(
+        organization_id=org.id, classifier_type="category").all()
+    assert len(models) == 1
+    assert models[0].is_active is True
+    assert models[0].label_count == 40
+
+    runs = db.query(OrgClassifierEvalRun).filter_by(
+        organization_id=org.id, classifier_type="category").all()
+    assert len(runs) == 1
+    assert runs[0].decision == "promoted"
+    assert runs[0].classifier_model_id == models[0].id
+    assert float(runs[0].incumbent_macro_f1) == pytest.approx(0.0, abs=1e-4)
+    assert float(runs[0].macro_f1_delta) >= 0.02  # MARGIN
+
+
+def test_retrain_org_category_below_gate_writes_skipped_eval_run(db):
+    org = _make_org(db)
+    _seed_category_corrections(db, org.id, _beatable_category_pairs(n_per_class=3))  # 6 rows, < MIN_LABELS=20
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert result["decision"] == "skipped"
+    runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).all()
+    assert len(runs) == 1
+    assert runs[0].classifier_type == "category"
+    assert runs[0].decision == "skipped"
+    assert runs[0].n == 6
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_category_all_custom_labels_no_crash_no_promote(db):
+    """Design decision #2: >=MIN_LABELS corrections, >=2 classes, but EVERY corrected label is
+    custom (disjoint from the built-in vocab) -> retained, zero model rows, no crash (proves
+    the empty-intersection ZeroDivisionError guard)."""
+    org = _make_org(db)
+    pairs = []
+    for i in range(15):
+        pairs.append((f"onboarding flow issue {i}", "onboarding_flow"))
+        pairs.append((f"referral program request {i}", "referral_program"))
+    _seed_category_corrections(db, org.id, pairs)  # 30 rows, 2 classes, 100% custom
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert result["decision"] == "retained"
+    assert db.query(OrgClassifierModel).count() == 0
+    run = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).one()
+    assert run.decision == "retained"
+    assert run.n == 30
+    assert "built-in" in run.notes
+    assert run.incumbent_macro_f1 is None
+    assert run.challenger_macro_f1 is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 11 — single active category model invariant + sentiment/category independence
+# ---------------------------------------------------------------------------
+
+
+def test_repeated_category_refits_never_have_two_active_rows(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    for i in range(3):
+        with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+             _patch_core("promoted", classifier_type="category", n=25, challenger_macro_f1=0.60 + i * 0.01):
+            tasks = _get_tasks()
+            tasks.retrain_org(org.id, db, classifier_type="category")
+
+        active_count = (
+            db.query(OrgClassifierModel)
+            .filter_by(organization_id=org.id, classifier_type="category", is_active=True)
+            .count()
+        )
+        assert active_count == 1, f"iteration {i}: expected exactly 1 active category row"
+
+
+def test_category_and_sentiment_models_coexist_independently(db):
+    """Promoting a category model must not affect the sentiment model, and vice versa — they
+    are independent (org, classifier_type) rows, both simultaneously active."""
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", classifier_type="sentiment", n=25, challenger_macro_f1=0.65):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db, classifier_type="sentiment")
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", classifier_type="category", n=25, challenger_macro_f1=0.70):
+        tasks.retrain_org(org.id, db, classifier_type="category")
+
+    sentiment_active = db.query(OrgClassifierModel).filter_by(
+        organization_id=org.id, classifier_type="sentiment", is_active=True).all()
+    category_active = db.query(OrgClassifierModel).filter_by(
+        organization_id=org.id, classifier_type="category", is_active=True).all()
+    assert len(sentiment_active) == 1
+    assert len(category_active) == 1
+    assert sentiment_active[0].id != category_active[0].id
+    assert db.query(OrgClassifierModel).filter_by(organization_id=org.id).count() == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 12 — independent per-type locks
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_lock_key_includes_classifier_type(db):
+    org = _make_org(db)
+
+    fake_r1, fake_lock1 = _fake_redis_lock_acquired()
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r1), \
+         _patch_core("retained", classifier_type="sentiment", n=25):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db, classifier_type="sentiment")
+    fake_r1.lock.assert_called_once_with(
+        f"lock:classifier_refit:sentiment:{org.id}", timeout=600, blocking=False,
+    )
+
+    fake_r2, fake_lock2 = _fake_redis_lock_acquired()
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r2), \
+         _patch_core("retained", classifier_type="category", n=25):
+        tasks.retrain_org(org.id, db, classifier_type="category")
+    fake_r2.lock.assert_called_once_with(
+        f"lock:classifier_refit:category:{org.id}", timeout=600, blocking=False,
+    )
+
+
+def test_category_lock_held_does_not_block_sentiment_retrain_same_org(db):
+    """A held category-type lock must not block a concurrent sentiment retrain for the SAME
+    org — the two heads use independent lock keys and must not serialize each other."""
+    org = _make_org(db)
+
+    def fake_lock_factory(key, **kwargs):
+        m = MagicMock()
+        m.acquire.return_value = "category" not in key  # category lock DENIED, sentiment GRANTED
+        return m
+
+    fake_r = MagicMock()
+    fake_r.lock.side_effect = fake_lock_factory
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", classifier_type="sentiment", n=25):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="sentiment")
+
+    assert result["decision"] == "retained"  # sentiment proceeded despite category lock being "held"
+
+
+def test_sentiment_lock_held_does_not_block_category_retrain_same_org(db):
+    org = _make_org(db)
+
+    def fake_lock_factory(key, **kwargs):
+        m = MagicMock()
+        m.acquire.return_value = "sentiment" not in key  # sentiment lock DENIED, category GRANTED
+        return m
+
+    fake_r = MagicMock()
+    fake_r.lock.side_effect = fake_lock_factory
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", classifier_type="category", n=25):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert result["decision"] == "retained"

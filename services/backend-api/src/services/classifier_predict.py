@@ -78,6 +78,21 @@ class LoadedClassifier:
         score = score_from_proba(proba)
         return label, score
 
+    def predict_label_only(self, text: str) -> str:
+        """Predict just the label for `text`, bypassing score_from_proba.
+
+        Used for classifier_type="category": there is no signed axis
+        (positive/negative poles) to reduce through score_from_proba, so
+        this skips that step entirely and returns only the argmax label.
+        Same lazy import as predict() — importing this module never
+        requires analyzer.corrections_classifier.predict until a prediction
+        is actually made.
+        """
+        from analyzer.corrections_classifier.predict import predict as _predict
+
+        label, _proba = _predict(self.artifact, text)
+        return label
+
 
 def _deserialize(db_row) -> Optional[LoadedClassifier]:
     """Deserialize an OrgClassifierModel row's model_json into a LoadedClassifier.
@@ -184,6 +199,36 @@ def load_active_classifier(org_id: int, classifier_type: str, db) -> Optional[Lo
         return None
 
 
+def _route_category_label(label: str) -> Optional[str]:
+    """Map a predicted category label to the FeedbackItem field it should
+    override, by built-in-vocab membership (unambiguous-routing rule).
+
+    Reuses analyzer/categorizer.py's built-in keyword-category dicts as the
+    single shared vocab source (no second copy to let drift between the
+    backend and worker mirrors — see predict-seam spec's open question).
+
+    Returns:
+        "pain_point_category" if `label` is in PainPointCategorizer's
+            built-in vocab and NOT FeatureRequestCategorizer's.
+        "feature_request_category" if the reverse.
+        None if `label` is in NEITHER built-in vocab (e.g. a custom
+            category the org's corrections introduced) or in BOTH
+            (should not happen with today's disjoint base vocabs, but
+            defended anyway) — the caller must not guess a field to
+            write; shadow-log only.
+    """
+    from analyzer.categorizer import PainPointCategorizer, FeatureRequestCategorizer
+
+    in_pain = label in PainPointCategorizer._BASE_CATEGORIES
+    in_feature = label in FeatureRequestCategorizer._BASE_CATEGORIES
+
+    if in_pain and not in_feature:
+        return "pain_point_category"
+    if in_feature and not in_pain:
+        return "feature_request_category"
+    return None
+
+
 def apply_classifier_override(
     feedback,
     db,
@@ -210,6 +255,13 @@ def apply_classifier_override(
         Incumbent retained — no log line (nothing to log; there is no
         challenger prediction to disclose).
 
+    For classifier_type="category": score_from_proba is bypassed entirely
+    (challenger_score is always None); the write target is
+    feedback.pain_point_category or feedback.feature_request_category,
+    chosen by _route_category_label. A label outside both built-in vocabs,
+    or inside both, is shadow-logged only — never written (unambiguous-
+    routing rule).
+
     Never raises: any internal failure (resolver, loader, or predict) is
     caught and swallowed, leaving `feedback` exactly as the caller left it.
     """
@@ -229,7 +281,18 @@ def apply_classifier_override(
             return  # No promoted model / corrupt artifact — incumbent retained.
 
         text = getattr(feedback, "text", None) or ""
-        challenger_label, challenger_score = loaded.predict(text)
+
+        if classifier_type == "category":
+            challenger_label = loaded.predict_label_only(text)
+            challenger_score = None
+            target_field = _route_category_label(challenger_label)
+            incumbent_label = getattr(feedback, target_field, None) if target_field else None
+            incumbent_score = None
+        else:
+            challenger_label, challenger_score = loaded.predict(text)
+            target_field = None
+            incumbent_label = getattr(feedback, "sentiment_label", None)
+            incumbent_score = getattr(feedback, "sentiment_score", None)
 
         shadow_logger.info(
             "classifier shadow prediction",
@@ -237,18 +300,25 @@ def apply_classifier_override(
                 "org_id": org_id,
                 "feedback_id": getattr(feedback, "id", None),
                 "classifier_type": classifier_type,
-                "incumbent_label": getattr(feedback, "sentiment_label", None),
-                "incumbent_score": getattr(feedback, "sentiment_score", None),
+                "incumbent_label": incumbent_label,
+                "incumbent_score": incumbent_score,
                 "challenger_label": challenger_label,
                 "challenger_score": challenger_score,
                 "model_id": loaded.model_id,
                 "fit_at": loaded.fit_at.isoformat() if loaded.fit_at else None,
+                "target_field": target_field,
             },
         )
 
         if resolved.mode == "auto" and allow_override:
-            feedback.sentiment_label = challenger_label
-            feedback.sentiment_score = challenger_score
+            if classifier_type == "category":
+                if target_field is not None:
+                    setattr(feedback, target_field, challenger_label)
+                # else: ambiguous (neither/both built-in vocab) — shadow-
+                # logged above, never guess-write a field.
+            else:
+                feedback.sentiment_label = challenger_label
+                feedback.sentiment_score = challenger_score
         # shadow, or auto+allow_override=False (backend inline ownership) —
         # log-only, no mutation.
 

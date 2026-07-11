@@ -32,9 +32,10 @@ from src.services.classifier_resolver import (
 )
 
 
-def _make_config(classifier_mode=None) -> MagicMock:
+def _make_config(classifier_mode=None, category_classifier_mode=None) -> MagicMock:
     cfg = MagicMock()
     cfg.classifier_mode = classifier_mode
+    cfg.category_classifier_mode = category_classifier_mode
     return cfg
 
 
@@ -152,15 +153,90 @@ class TestResolveClassifier:
         assert result_a.mode == "auto"
         assert result_b is None
 
-    def test_classifier_type_is_passed_through(self):
-        """classifier_type is accepted and does not affect the off/None degrade."""
-        config = _make_config(classifier_mode="shadow")
+    def test_valid_classifier_modes_constant(self):
+        assert VALID_CLASSIFIER_MODES == frozenset({"shadow", "auto"})
+
+
+class TestPerTypeModeColumn:
+    def test_category_reads_category_column_independent_of_sentiment(self):
+        config = _make_config(classifier_mode="shadow", category_classifier_mode="auto")
         db = _make_db_with_config(config)
 
         result = resolve_classifier(org_id=1, classifier_type="category", db=db)
 
         assert result is not None
-        assert result.mode == "shadow"
+        assert result.mode == "auto"
 
-    def test_valid_classifier_modes_constant(self):
-        assert VALID_CLASSIFIER_MODES == frozenset({"shadow", "auto"})
+    def test_sentiment_reads_sentiment_column_independent_of_category(self):
+        config = _make_config(classifier_mode="auto", category_classifier_mode="shadow")
+        db = _make_db_with_config(config)
+
+        result = resolve_classifier(org_id=1, classifier_type="sentiment", db=db)
+
+        assert result is not None
+        assert result.mode == "auto"
+
+    def test_category_off_returns_none(self):
+        config = _make_config(category_classifier_mode="off")
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="category", db=db) is None
+
+    def test_category_unset_column_returns_none(self):
+        config = _make_config()  # both None
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="category", db=db) is None
+
+    def test_category_unrecognized_value_returns_none(self):
+        config = _make_config(category_classifier_mode="nonsense")
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="category", db=db) is None
+
+    def test_missing_category_classifier_mode_column_returns_none(self):
+        """Un-migrated-DB case: ORM row has no category_classifier_mode
+        attribute at all (getattr default fires, never raises)."""
+        config = MagicMock(spec=[])
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="category", db=db) is None
+
+    def test_unrecognized_classifier_type_returns_none(self):
+        config = _make_config(classifier_mode="auto", category_classifier_mode="auto")
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="urgency", db=db) is None
+
+    def test_mode_column_by_classifier_type_constant(self):
+        from src.services.classifier_resolver import MODE_COLUMN_BY_CLASSIFIER_TYPE
+
+        assert MODE_COLUMN_BY_CLASSIFIER_TYPE == {
+            "sentiment": "classifier_mode",
+            "category": "category_classifier_mode",
+        }
+
+    def test_cross_type_isolation_same_org(self, db: Session):
+        """Same org, sentiment=auto + category=off -> only sentiment resolves."""
+        org = Organization(name="Org C", plan="pro")
+        db.add(org)
+        db.commit()
+        db.refresh(org)
+
+        config = OrgAIConfig(
+            organization_id=org.id,
+            default_provider="openai",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+            classifier_mode="auto",
+            category_classifier_mode="off",
+        )
+        db.add(config)
+        db.commit()
+
+        sentiment_result = resolve_classifier(org_id=org.id, classifier_type="sentiment", db=db)
+        category_result = resolve_classifier(org_id=org.id, classifier_type="category", db=db)
+
+        assert sentiment_result is not None and sentiment_result.mode == "auto"
+        assert category_result is None

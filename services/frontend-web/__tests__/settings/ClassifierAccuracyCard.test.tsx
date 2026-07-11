@@ -142,3 +142,95 @@ describe('ClassifierAccuracyCard', () => {
     });
   });
 });
+
+describe('ClassifierAccuracyCard — category classifierType prop', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fetches with classifierType="category" when the prop is passed', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(emptyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="category" />);
+
+    await waitFor(() => {
+      expect(getClassifierAccuracy).toHaveBeenCalledWith('category');
+    });
+  });
+
+  it('header copy reflects "Category" and never mentions "sentiment"', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(emptyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="category" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/category/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/sentiment/i)).toBeNull();
+  });
+
+  it('carries the required fair-A/B honesty disclosure when populated', async () => {
+    // Fixture's classifier_type field is left 'sentiment' intentionally — the component
+    // never reads that field back, only the classifierType prop it was given.
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+
+    render(<ClassifierAccuracyCard classifierType="category" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/beats the keyword categorizer/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/labels the keyword categorizer can produce/i)).toBeInTheDocument();
+  });
+
+  it('renders the honest "no model yet" empty state for category with no fabricated numbers', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue({ ...emptyResponse, classifier_type: 'category' });
+
+    render(<ClassifierAccuracyCard classifierType="category" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no model/i)).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/category corrections/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it('renders the not-ready state identically for category (label_count/min_labels)', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(notReadyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="category" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/12\s*\/\s*20/)).toBeInTheDocument();
+    });
+  });
+
+  it('renders the populated state identically for category (macro-F1, decisions, runs)', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+
+    render(<ClassifierAccuracyCard classifierType="category" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/71%/).length).toBeGreaterThanOrEqual(1);
+      // Exact case-sensitive match — the decision label "Promoted" is distinct from the
+      // lowercase "promoted" that appears inside the fair-A/B honesty disclosure copy.
+      expect(screen.getByText('Promoted')).toBeInTheDocument();
+      expect(screen.getByText('Retained')).toBeInTheDocument();
+    });
+  });
+
+  it('rollback with classifierType="category" calls rollbackClassifier("category")', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(populatedResponse);
+    vi.mocked(rollbackClassifier).mockResolvedValue(emptyResponse);
+    vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(emptyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="category" isAdminOrOwner />);
+
+    const rollbackButton = await screen.findByRole('button', { name: /roll back/i });
+    await user.click(rollbackButton);
+
+    await waitFor(() => {
+      expect(rollbackClassifier).toHaveBeenCalledWith('category');
+    });
+  });
+});

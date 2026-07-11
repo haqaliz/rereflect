@@ -175,6 +175,7 @@ def evaluate(
     incumbent_predict: Callable[[str], str],
     train_fn: Callable[[list[tuple[str, str]]], dict],
     *,
+    labels: tuple[str, ...] = SENTIMENT_LABELS,
     min_labels: int = MIN_LABELS,
     holdout_frac: float = HOLDOUT_FRAC,
     min_holdout: int = MIN_HOLDOUT,
@@ -193,6 +194,15 @@ def evaluate(
     incumbent_predict: Callable[[str], str] — injected so evaluate stays agnostic of
     what implementation backs it (aspect D wraps a live SentimentAnalyzer).
     challenger label = predict(challenger_artifact, text)[0].
+
+    labels: tuple[str, ...] — the label set to SCORE ON (confusion matrix axes). Defaults to
+    SENTIMENT_LABELS for byte-stable sentiment callers. For category, the caller passes
+    derive_labels(dataset) ∩ <incumbent's emittable vocab> — NOT the raw derive_labels()
+    output — so the challenger is never credited for classes the incumbent structurally
+    cannot guess (see dataset.derive_labels docstring; PRD critique #3 / fair-A/B).
+    Rows whose true label falls outside `labels` are silently excluded from scoring (never
+    counted in either confusion matrix — see _confusion_for's out-of-vocab guard) rather than
+    raising or being misattributed.
     """
     n_total = len(dataset)
     if n_total < min_labels:
@@ -202,7 +212,6 @@ def evaluate(
             notes="below min_labels",
         )
 
-    labels = SENTIMENT_LABELS
     rng = random.Random(random_state)
     holdout_size = round(n_total * holdout_frac)
 

@@ -19,9 +19,10 @@ Design:
     column, or an unrecognized value.
   - Never raises to the caller.
   - Multi-tenant: always scoped by org_id.
-  - classifier_type is accepted (and passed through in log messages) for
-    forward-compat with a future non-sentiment classifier type; v1 only has
-    OrgAIConfig.classifier_mode (a single per-org mode, not per-type).
+  - classifier_type selects which OrgAIConfig column is read
+    (MODE_COLUMN_BY_CLASSIFIER_TYPE) — sentiment and category are
+    independently configurable; an unrecognized classifier_type degrades to
+    None (off), same as an unrecognized mode value.
 
 References:
   - services/backend-api/src/services/sentiment_resolver.py (shape mirrored)
@@ -37,6 +38,16 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 VALID_CLASSIFIER_MODES: frozenset = frozenset({"shadow", "auto"})
+
+# Per-classifier_type OrgAIConfig column holding the off/shadow/auto mode.
+# Each type is independently controllable (PRD "Independent control" success
+# metric) — enabling category never reads/writes the sentiment column and
+# vice versa. Unknown classifier_type -> resolve_classifier degrades to None
+# (same contract as an unrecognized mode value).
+MODE_COLUMN_BY_CLASSIFIER_TYPE: dict = {
+    "sentiment": "classifier_mode",
+    "category": "category_classifier_mode",
+}
 
 
 @dataclass
@@ -72,10 +83,19 @@ def resolve_classifier(org_id: int, classifier_type: str, db) -> Optional[Resolv
             )
             return None
 
+        mode_column = MODE_COLUMN_BY_CLASSIFIER_TYPE.get(classifier_type)
+        if mode_column is None:
+            logger.warning(
+                "resolve_classifier: unrecognized classifier_type=%r for "
+                "org=%s — degrading to off",
+                classifier_type, org_id,
+            )
+            return None
+
         # getattr with default so this resolver never breaks against a DB
         # that hasn't run this aspect's migration yet (mirrors
         # resolve_sentiment_provider's precedent).
-        mode: Optional[str] = getattr(config, "classifier_mode", None)
+        mode: Optional[str] = getattr(config, mode_column, None)
 
         if not mode or mode == "off":
             return None

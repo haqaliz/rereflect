@@ -95,3 +95,31 @@ def test_model_type_and_classifier_type_are_tagged():
 def test_label_count_matches_dataset_size():
     artifact = train_classifier(_DATASET)
     assert artifact["label_count"] == len(_DATASET)
+
+
+def test_classifier_type_defaults_to_sentiment_byte_stable():
+    """Characterization: calling train_classifier with NO classifier_type kwarg reproduces
+    the exact pre-change artifact tag."""
+    artifact = train_classifier(_DATASET)
+    assert artifact["classifier_type"] == "sentiment"
+
+
+def test_classifier_type_param_is_written_into_artifact():
+    artifact = train_classifier(_DATASET, classifier_type="category")
+    assert artifact["classifier_type"] == "category"
+
+
+def test_classifier_type_category_with_dynamic_open_label_set():
+    """Classes are dynamic from whatever the fitted model saw — no fixed category tuple
+    anywhere in trainer.py."""
+    category_dataset = [
+        ("the button is broken", "ui_bug"),
+        ("nothing happens when I click", "ui_bug"),
+        ("invoice was wrong amount", "billing"),
+        ("charged twice this month", "billing"),
+        ("please add dark mode", "custom_feature_request"),
+        ("dark theme would be great", "custom_feature_request"),
+    ]
+    artifact = train_classifier(category_dataset, classifier_type="category")
+    assert artifact["classifier_type"] == "category"
+    assert artifact["classes"] == sorted({label for _, label in category_dataset})

@@ -1,69 +1,68 @@
-# Card — feat/per-org-corrections-classifier (freeform)
+# Card — feat/per-org-category-classifier (freeform)
 
-> **Source:** freeform task (no GitHub issue). Brief derived from the `rereflect-next`
-> recommendation (2026-07-10) and `AI-TRACKING.md` **M5.2**. The issue number lives in
-> the branch/PR; this card is the single source for later phases.
+**Type:** feat
+**Slug/id:** per-org-category-classifier
+**Source:** Freeform — no GitHub issue. Brief is the `rereflect-next` recommendation (2026-07-11).
+**Branch:** feat/per-org-category-classifier
 
-## Task
+> Supersedes the prior M5.2 (`per-org-corrections-classifier`) card that shipped 2026-07-11.
+> This is the M5.2 **category-head v2** follow-on.
 
-Build **M5.2 — Corrections flywheel: per-org self-improving classifiers** (Track A, the
-flagship moat of the active M5 "Local Model Layer" block). Close the loop that has been
-open since M3.3: `AICorrection`s are collected but **never trained on** (verified by grep —
-`AICorrection` appears only in model/service/readiness/public-API-write code, no training
-consumer; M4.2's "fine-tuned classification" was deferred, `AI-TRACKING.md:249`).
+---
 
-## What M5.2 says (AI-TRACKING.md:349-357)
+## Brief (the pick from rereflect-next)
 
-- Train a **small per-org model** (SetFit / logistic-regression-on-embeddings via the
-  already-installed `sentence-transformers`) on the org's feedback + `AICorrection`s — on
-  the **worker**, **CPU-only**, **scheduled**.
-- Per-org **shadow A/B** on held-out corrections; **auto-promote the challenger only when it
-  beats the incumbent** by a margin; operator sees the delta and can **roll back**.
-- **Activates per org** once corrections ≥ the threshold surfaced by M5.0
-  (`CORRECTION_VOLUME_TARGET`).
-- Honesty framing: "your model, trained on your data, promoted only when measurably better."
-- **Exit (real):** ≥1 design-partner org has a promoted per-org model beating the default on
-  their own held-out data.
+Extend the just-shipped **M5.2 per-org self-improving classifier** from **sentiment** to a
+**category head** — pain-point / feature-request / urgency classification, trained per-org on the
+org's own feedback text + its `AICorrection` **category** corrections, using the same TF-IDF +
+logistic-regression spine, the same shadow-A/B gate, the same off/shadow/auto seam, and the same
+Settings accuracy + one-click rollback surface that sentiment already has.
 
-## Why this is the pick (moat + shipped-state grounding)
+This is the **explicitly-named "immediate v2"** of M5.2 and closes M4.2's long-deferred
+"fine-tuned classification."
 
-- Both prerequisites shipped **today** (2026-07-10) on local master (unpushed):
-  - **M5.0** — readiness gate that decides per-org activation:
-    `GET /api/v1/analytics/ai-readiness` (`AI-TRACKING.md:313-323`).
-  - **M5.1** — pluggable analyzer provider-layer **spine** M5.2 mirrors:
-    `analysis-engine/src/analyzer/sentiment_providers/` (ABC + factory + per-org
-    `resolve_*` in backend & worker mirrors) (`AI-TRACKING.md:325-347`).
-- It **is** the OSS/self-hosted/BYOK moat verbatim (`AI-TRACKING.md:298-311`): per-org,
-  local, CPU-only, no cross-tenant data, self-improving, gets better as base embedding
-  models improve. Heavy stack (`sentence-transformers`, `scikit-learn`, `bertopic`) already
-  installed; per-org fitting already exists shallowly in `churn_calibrator.py` (isotonic per
-  org at `MIN_LABELS=20`) — a proven pattern to mirror.
+### Why (grounded)
+- **Named next slice of the flagship moat.** `docs/planning/per-org-corrections-classifier/prd.md:145`
+  lists the "Category classifier head (pain-point + feature-request) … the immediate **v2**," and
+  `:245` puts it out-of-scope for v1. `AI-TRACKING.md:350` records M5.2 shipped with the note
+  "category head is the v2 follow-on."
+- **Unblocked; spine already built.** `services/analysis-engine/src/analyzer/corrections_classifier/`
+  (dataset → trainer → evaluate → predict → metrics/labels), the worker retrain orchestration, the
+  predict-seam (off/shadow/auto), and the Settings accuracy/rollback UI all shipped this week
+  (commits `886db52`..`24b3621`). `labels.py` hard-codes `SENTIMENT_LABELS` — the only sentiment-locked
+  piece. Category-correction data is already collected: `AICorrection.by_type` includes real
+  `category` rows (`AI-TRACKING.md:315`).
+- **Fits OSS / self-hosted / BYOK moat.** CPU-only, offline, per-org, small-and-honest, gets better
+  the more it is corrected (`AI-TRACKING.md:299-312`). No cloud/cross-tenant dependency.
 
-## Cross-cutting M5 principles (must hold — AI-TRACKING.md:309-311)
+### Known caveat (carried into the dig / PRD — do not be surprised)
+Category is harder than 3-class sentiment:
+1. **Dynamic label set per org** — built-in taxonomies ∪ active `CustomCategory` rows — needs vocab
+   reconciliation (`prd.md:145`).
+2. **Pain-point vs feature-request disambiguation** (are these one multi-class head, or separate heads?).
+3. **Thinner correction volume** per category than sentiment → more orgs stay below the `MIN_LABELS`
+   activation gate.
 
+**Mitigation / first slice:** ship a **fixed built-in category label set** first, reusing the spine
+parameterized by task (rather than hard-coding `SENTIMENT_LABELS`), keeping default analyzer output
+byte-stable and every promotion A/B-gated and reversible. **Defer** dynamic `CustomCategory` vocab
+reconciliation and pain-vs-feature disambiguation to a second slice.
+
+### Roadmap position
+- M5.0 (readiness), M5.1 (sentiment provider layer), **M5.2 (sentiment corrections classifier) — SHIPPED 2026-07-11.**
+- M5.3 (per-org churn ML) — **blocked**: needs ~500 churn labels/org (`AI-TRACKING.md:321,359`). Not this work.
+- M5.4 (local embedding quality) — parked / nice-to-have.
+- **This work = the M5.2 category-head v2.**
+
+### Cross-cutting M5 principles (must hold — AI-TRACKING.md:309-311)
 - **CPU-only**, no GPU ever required.
-- Default analyzer paths stay **byte-stable** (challenger runs in shadow; promotion is opt-in
-  per org and reversible).
+- Default analyzer paths stay **byte-stable** (challenger runs in shadow; promotion is opt-in per org, reversible).
 - No central / cross-tenant data.
 - Models small, described **honestly**.
 - Every model swap is **A/B-gated and reversible**.
 
-## Known caveat (carry into the dig / PRD — do not be surprised)
-
-M5.2 is **soft-gated** on correction volume (`CORRECTION_VOLUME_TARGET`, marked "explicitly
-unvalidated v1" in M5.0, `AI-TRACKING.md:320`). Real *auto-promotion in production* needs a
-design-partner org with enough corrections. **But** unlike M5.3's hard ≥500 churn-label gate,
-this threshold is tunable and the **buildable/testable first slice** — CPU training pipeline +
-shadow-A/B-on-held-out-corrections + promote-only-if-better + rollback mechanics — can be built
-and proven end-to-end with **seeded/synthetic corrections**, independent of any live org's
-volume. Only the "promoted on a real org's held-out data" exit is data-dependent. Scope the
-first slice accordingly; treat "promoted on a real org" as the later exit, not the first PR.
-
-## Related roadmap neighbours (context, not in scope)
-
-- **M5.3** — per-org churn ML model — hard-gated at ≥500 churn labels/org (deferred).
-- **M5.4** — local embedding quality — parked / nice-to-have.
-- **M3.3** — Human-in-the-Loop corrections (the data source; `AICorrection`, correction
-  dashboard, AI Accuracy tab).
-- **M5.0/M5.1** — the just-shipped readiness gate + sentiment provider spine (the platform
-  this builds on).
+### Related roadmap neighbours (context, not in scope)
+- **M3.3** — Human-in-the-Loop corrections (the data source; `AICorrection`, AI Accuracy tab).
+- **M5.2 sentiment** — the spine this parameterizes.
+- **Custom AI (M4.2)** — per-org `CustomCategory` taxonomies injected into the analyzer prompt/keyword
+  categorizers; the dynamic-label-set piece this must eventually reconcile with.

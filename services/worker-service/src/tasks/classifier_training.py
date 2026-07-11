@@ -1,17 +1,19 @@
 """
-Celery tasks for weekly per-org sentiment corrections classifier retraining —
-worker-trainer-and-schedule aspect (M5.2 per-org-corrections-classifier).
+Celery tasks for weekly per-org sentiment and category corrections classifier
+retraining — worker-trainer-and-schedule aspect (M5.2 per-org-corrections-classifier).
 
 Beat schedule (registered in celery_app.py):
-- retrain_all_orgs → Mondays 06:30 UTC (folds in purge_old_classifier_models after
-  the loop — no separate beat slot)
+- retrain_all_orgs → Mondays 06:30 UTC (loops both classifier types, no new beat
+  entry; folds in purge_old_classifier_models after the loop — no separate beat slot)
 
 Mirrors tasks/churn_calibration.py + services/calibration_refit.py conventions:
 - versioned artifact + atomic active-model swap (deactivate prev active -> insert new
   is_active row -> flush (populate id) -> insert eval-run -> commit; never a window
   with 0 or 2 active rows for the same (org, classifier_type)).
-- per-org Redis advisory lock, mirroring tasks/analysis.py's `_get_redis()` +
-  `r.lock(...)` pattern (here keyed per-org: lock:classifier_refit:{org_id}).
+- Redis advisory lock, mirroring tasks/analysis.py's `_get_redis()` + `r.lock(...)`
+  pattern, here keyed per-(classifier_type, org):
+  lock:classifier_refit:{classifier_type}:{org_id}, so the sentiment and category
+  heads never serialize each other.
 - a folded purge (mirrors purge_old_calibration_models, no separate beat slot).
 
 This module is the ONLY writer of org_classifier_models. It does not touch
@@ -42,7 +44,8 @@ from src.models import Organization, OrgClassifierEvalRun, OrgClassifierModel
 
 logger = logging.getLogger(__name__)
 
-_CLASSIFIER_TYPE = "sentiment"
+_DEFAULT_CLASSIFIER_TYPE = "sentiment"
+_CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category")
 _PURGE_AFTER_DAYS = 90
 _LOCK_TIMEOUT_SECONDS = 600
 
@@ -79,6 +82,51 @@ def _build_incumbent_predict() -> Callable[[str], str]:
     return _predict
 
 
+_category_categorizer_cache = None
+
+
+def _category_categorizers():
+    """Lazily construct + process-cache (PainPointCategorizer, FeatureRequestCategorizer)
+    instances — mirrors _get_redis()'s caching pattern. No add_custom_categories() call: the
+    incumbent is deliberately un-merged, built-in-vocab-only, matching the analysis-engine
+    keyword path's default construction (core.py never calls add_custom_categories either —
+    see PRD 'Category incumbent for the A/B eval' note). Lazy import keeps this module
+    importable without the analysis-engine's heavier analyzer/__init__.py import chain at
+    module load time (Py3.14 CI target)."""
+    global _category_categorizer_cache
+    if _category_categorizer_cache is None:
+        from analyzer.categorizer import FeatureRequestCategorizer, PainPointCategorizer
+        _category_categorizer_cache = (PainPointCategorizer(), FeatureRequestCategorizer())
+    return _category_categorizer_cache
+
+
+def _build_category_incumbent_predict() -> Callable[[str], str]:
+    """Build a deterministic incumbent predictor from the production keyword categorizers,
+    covering the built-in category vocab only. For a given text, run BOTH categorizers and
+    return the label with the strictly higher confidence; an exact tie (including the common
+    all-zero-match case, where both categorizers fall through to their own unrelated
+    defaults) breaks deterministically toward the pain-point categorizer's result."""
+    pain_point_categorizer, feature_categorizer = _category_categorizers()
+
+    def _predict(text: str) -> str:
+        pain_result = pain_point_categorizer.categorize(text)
+        feature_result = feature_categorizer.categorize(text)
+        if feature_result.confidence > pain_result.confidence:
+            return feature_result.category
+        return pain_result.category
+
+    return _predict
+
+
+def _built_in_category_vocab() -> frozenset:
+    """Union of both keyword categorizers' built-in category names — the label space the
+    keyword incumbent can structurally emit. Used to compute the fair-A/B eval label subset
+    (PRD critique #3): derive_labels(dataset) ∩ this set. NOT a fixed tuple defined here —
+    read live off the categorizer instances so it can never drift from categorizer.py."""
+    pain_point_categorizer, feature_categorizer = _category_categorizers()
+    return frozenset(pain_point_categorizer.CATEGORIES) | frozenset(feature_categorizer.CATEGORIES)
+
+
 def _round_or_none(value: Optional[float]) -> Optional[float]:
     return round(value, 4) if value is not None else None
 
@@ -95,7 +143,8 @@ def _decision_result(decision: str, **extra) -> dict:
     return {"decision": decision, decision: True, **extra}
 
 
-def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db: Session) -> int:
+def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db: Session,
+             classifier_type: str) -> int:
     """Atomic promotion, single transaction (caller commits): train the FINAL
     production artifact on ALL rows (not just the core's internal train-split —
     that one never sees the full data), deactivate the prior active
@@ -113,7 +162,7 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
         db.query(OrgClassifierModel)
         .filter(
             OrgClassifierModel.organization_id == org_id,
-            OrgClassifierModel.classifier_type == _CLASSIFIER_TYPE,
+            OrgClassifierModel.classifier_type == classifier_type,
             OrgClassifierModel.is_active == True,  # noqa: E712
         )
         .first()
@@ -132,7 +181,7 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
 
     new_model = OrgClassifierModel(
         organization_id=org_id,
-        classifier_type=_CLASSIFIER_TYPE,
+        classifier_type=classifier_type,
         model_json=artifact,
         label_count=len(dataset),
         precision=None,
@@ -147,13 +196,14 @@ def _promote(org_id: int, dataset: list, result, train_classifier: Callable, db:
     return new_model.id
 
 
-def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: int, db: Session) -> None:
+def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: int, db: Session,
+                      classifier_type: str) -> None:
     """Insert the one org_classifier_eval_runs row every retrain_org run writes
     (except a lock-miss, which writes nothing — see module docstring)."""
     eval_run = OrgClassifierEvalRun(
         organization_id=org_id,
         classifier_model_id=model_id,
-        classifier_type=_CLASSIFIER_TYPE,
+        classifier_type=classifier_type,
         incumbent_macro_f1=_round_or_none(result.incumbent_macro_f1),
         challenger_macro_f1=_round_or_none(result.challenger_macro_f1),
         macro_f1_delta=_round_or_none(result.macro_f1_delta),
@@ -165,12 +215,48 @@ def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: 
     db.add(eval_run)
 
 
-def retrain_org(org_id: int, db: Session) -> dict:
-    """Retrain the sentiment corrections classifier for a single org.
+def _no_builtin_overlap_result(n: int):
+    """Synthetic EvalResult for the fair-A/B empty-intersection guard (design decision #2):
+    the org's category corrections cleared MIN_LABELS but none of the corrected labels are
+    in the keyword incumbent's built-in vocab, so there is no fair baseline to score
+    against. Never promote in this case; evaluate() is never called (an empty `labels` tuple
+    would ZeroDivisionError inside compute_multiclass_metrics)."""
+    from analyzer.corrections_classifier.evaluate import EvalResult
+    return EvalResult(
+        decision="retained", n=n,
+        incumbent_macro_f1=None, challenger_macro_f1=None, macro_f1_delta=None,
+        notes="no built-in-vocab labels among corrections; cannot fairly evaluate the keyword incumbent",
+    )
 
-    1. Acquire a per-org Redis advisory lock (non-blocking) — an overlapping refit
-       already owns this org: write nothing, return {"skipped": True, "reason": "locked"}.
-    2. Build the org's sentiment dataset (aspect B's dataset builder).
+
+def _dataset_and_incumbent_for(org_id: int, db: Session, classifier_type: str):
+    """Per-type setup: (dataset, incumbent_predict, eval_labels). eval_labels is None for
+    sentiment (evaluate() uses its own byte-stable SENTIMENT_LABELS default — this aspect
+    never passes labels= for sentiment); a tuple (possibly empty) for category — the fair-A/B
+    subset (design decision #2 handles the empty case before evaluate() is ever called)."""
+    if classifier_type == "category":
+        from analyzer.corrections_classifier.dataset import build_category_dataset, derive_labels
+
+        dataset = build_category_dataset(org_id, db)
+        incumbent_predict = _build_category_incumbent_predict()
+        full_labels = derive_labels(dataset)
+        eval_labels = tuple(label for label in full_labels if label in _built_in_category_vocab())
+        return dataset, incumbent_predict, eval_labels
+
+    from analyzer.corrections_classifier.dataset import build_sentiment_dataset
+
+    dataset = build_sentiment_dataset(org_id, db)
+    incumbent_predict = _build_incumbent_predict()
+    return dataset, incumbent_predict, None
+
+
+def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSIFIER_TYPE) -> dict:
+    """Retrain the corrections classifier (sentiment or category) for a single org.
+
+    1. Acquire a per-(classifier_type, org) Redis advisory lock (non-blocking) — an
+       overlapping refit already owns this org+type: write nothing, return
+       {"skipped": True, "reason": "locked"}.
+    2. Build the org's dataset (aspect B's dataset builder).
     3. evaluate() the challenger against a live incumbent predictor, leakage-free (the
        core trains the challenger itself, only on its own train-split/per-fold).
     4. Only when decision == "promoted": atomically promote the FINAL production
@@ -181,52 +267,66 @@ def retrain_org(org_id: int, db: Session) -> dict:
        eval-run insert).
 
     Below-gate / worse-challenger / small-holdout (decision in {"skipped", "retained"})
-    write zero model rows.
+    write zero model rows. classifier_type selects which correction bucket / incumbent /
+    lock this call operates on; "sentiment" is the byte-stable default.
     """
     r = _get_redis()
-    lock = r.lock(f"lock:classifier_refit:{org_id}", timeout=_LOCK_TIMEOUT_SECONDS, blocking=False)
+    lock = r.lock(
+        f"lock:classifier_refit:{classifier_type}:{org_id}",
+        timeout=_LOCK_TIMEOUT_SECONDS, blocking=False,
+    )
 
     if not lock.acquire(blocking=False):
-        logger.info("retrain_org: org=%s already refitting, skipping", org_id)
+        logger.info("retrain_org: org=%s type=%s already refitting, skipping", org_id, classifier_type)
         return _skip_result("locked")
 
     try:
         start = time.monotonic()
 
         # Lazy imports — the core owns sklearn/numpy; this module stays CPU-only-safe.
-        from analyzer.corrections_classifier.dataset import build_sentiment_dataset
         from analyzer.corrections_classifier.evaluate import evaluate
         from analyzer.corrections_classifier.labels import MARGIN, MIN_LABELS
         from analyzer.corrections_classifier.trainer import train_classifier
 
-        dataset = build_sentiment_dataset(org_id, db)
-        incumbent_predict = _build_incumbent_predict()
-
-        result = evaluate(
-            dataset,
-            incumbent_predict,
-            train_fn=train_classifier,
-            min_labels=MIN_LABELS,
-            margin=MARGIN,
+        dataset, incumbent_predict, eval_labels = _dataset_and_incumbent_for(
+            org_id, db, classifier_type
         )
+
+        if eval_labels is not None and len(dataset) >= MIN_LABELS and not eval_labels:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            result = _no_builtin_overlap_result(len(dataset))
+            _insert_eval_run(org_id, None, result, duration_ms, db, classifier_type)
+            db.commit()
+            logger.info(
+                "retrain_org: org=%s type=%s no built-in-vocab labels n=%s",
+                org_id, classifier_type, result.n,
+            )
+            return _decision_result("retained", model_id=None, n=result.n, notes=result.notes)
+
+        eval_kwargs = dict(train_fn=train_classifier, min_labels=MIN_LABELS, margin=MARGIN)
+        if eval_labels is not None:
+            eval_kwargs["labels"] = eval_labels
+
+        result = evaluate(dataset, incumbent_predict, **eval_kwargs)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         model_id: Optional[int] = None
         if result.decision == "promoted":
-            model_id = _promote(org_id, dataset, result, train_classifier, db)
+            model_id = _promote(org_id, dataset, result, train_classifier, db, classifier_type)
 
-        _insert_eval_run(org_id, model_id, result, duration_ms, db)
+        _insert_eval_run(org_id, model_id, result, duration_ms, db, classifier_type)
         db.commit()
 
         if result.decision == "skipped":
             logger.info(
-                "retrain_org: org=%s skipped (below_min_labels) n=%s", org_id, result.n,
+                "retrain_org: org=%s type=%s skipped (below_min_labels) n=%s",
+                org_id, classifier_type, result.n,
             )
             return _skip_result("below_min_labels", n=result.n, notes=result.notes)
 
         logger.info(
-            "retrain_org: org=%s decision=%s model_id=%s n=%s",
-            org_id, result.decision, model_id, result.n,
+            "retrain_org: org=%s type=%s decision=%s model_id=%s n=%s",
+            org_id, classifier_type, result.decision, model_id, result.n,
         )
         return _decision_result(result.decision, model_id=model_id, n=result.n, notes=result.notes)
     finally:
@@ -237,17 +337,15 @@ def retrain_org(org_id: int, db: Session) -> dict:
 
 
 def retrain_all_orgs() -> dict:
-    """Weekly driver: retrain every org's sentiment classifier, then purge old
-    inactive artifacts (folded — no separate beat slot).
+    """Weekly driver: retrain every org's classifier for BOTH types (sentiment, category),
+    then purge old inactive artifacts once (folded — no separate beat slot, not type-scoped).
 
-    Per-org try/except isolation: one org's exception is logged and skipped, it
-    never aborts the batch.
+    Per-(type, org) try/except isolation: one (type, org) combination's exception is logged
+    and skipped, it never aborts the rest of the batch — same shared-session
+    rollback-on-error discipline as before, now applied per (classifier_type, org_id) pair.
 
-    Beat: Mondays 06:30 UTC.
-    Returns {"trained": n, "promoted": m, "skipped": k}. "trained" counts every org
-    that was actually evaluated (decision in {"promoted", "retained"}); "skipped"
-    counts below-gate and lock-miss orgs; "promoted" is the subset of "trained"
-    that was actually promoted.
+    Beat: Mondays 06:30 UTC. Returns {"trained": n, "promoted": m, "skipped": k} — tallies now
+    cover BOTH classifier types combined (a 3-org run does up to 6 retrain_org calls).
     """
     trained = 0
     promoted = 0
@@ -255,25 +353,29 @@ def retrain_all_orgs() -> dict:
 
     with get_db_session() as db:
         org_ids = _all_org_ids(db)
-        for org_id in org_ids:
-            try:
-                result = retrain_org(org_id, db)
-            except Exception:
-                logger.error("retrain_all_orgs: org=%s FAILED", org_id, exc_info=True)
-                # This db session is shared across every org in the batch. A
-                # failed flush/commit (e.g. the promotion UniqueViolation above,
-                # or any other per-org DB error) leaves the session needing a
-                # rollback; without it, the NEXT org's first DB operation raises
-                # sqlalchemy.exc.PendingRollbackError and the whole batch cascades.
-                db.rollback()
-                continue
+        for classifier_type in _CLASSIFIER_TYPES:
+            for org_id in org_ids:
+                try:
+                    result = retrain_org(org_id, db, classifier_type=classifier_type)
+                except Exception:
+                    logger.error(
+                        "retrain_all_orgs: org=%s type=%s FAILED", org_id, classifier_type,
+                        exc_info=True,
+                    )
+                    # This db session is shared across every (type, org) in the batch. A
+                    # failed flush/commit (e.g. the promotion UniqueViolation above,
+                    # or any other per-org DB error) leaves the session needing a
+                    # rollback; without it, the NEXT iteration's first DB operation raises
+                    # sqlalchemy.exc.PendingRollbackError and the whole batch cascades.
+                    db.rollback()
+                    continue
 
-            if result.get("skipped"):
-                skipped += 1
-            else:
-                trained += 1
-                if result.get("promoted"):
-                    promoted += 1
+                if result.get("skipped"):
+                    skipped += 1
+                else:
+                    trained += 1
+                    if result.get("promoted"):
+                        promoted += 1
 
     purge_result = purge_old_classifier_models()
     logger.info(
