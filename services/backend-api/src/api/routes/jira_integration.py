@@ -2,11 +2,13 @@
 Jira Cloud integration routes (backend-connection aspect, Phase 3).
 
 Routes:
-  POST   /api/v1/integrations/jira/connect     — validate + encrypt + store
-  GET    /api/v1/integrations/jira/status      — connection status (no token)
-  DELETE /api/v1/integrations/jira/disconnect  — deactivate (soft; preserves
-                                                   feedback_jira_issues)
-  POST   /api/v1/integrations/jira/test        — re-validate stored token
+  POST   /api/v1/integrations/jira/connect      — validate + encrypt + store
+  GET    /api/v1/integrations/jira/status       — connection + status-sync status (no token)
+  DELETE /api/v1/integrations/jira/disconnect   — deactivate (soft; preserves
+                                                    feedback_jira_issues)
+  POST   /api/v1/integrations/jira/test         — re-validate stored token
+  PATCH  /api/v1/integrations/jira/status-sync  — toggle inbound status sync + set mapping
+  POST   /api/v1/integrations/jira/sync         — manually enqueue an inbound status-sync run
 
 All endpoints require admin/owner role. Jira is NOT a CRM — disconnect does
 NOT call crm_integration_common.another_crm_active / purge_crm_enrichment.
@@ -27,12 +29,13 @@ import ipaddress
 import logging
 import socket
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_org, get_current_user, require_admin_or_owner
@@ -86,7 +89,19 @@ class JiraStatusResponse(BaseModel):
     last_sync_status: Optional[str] = None
     last_error: Optional[str] = None
     connected_at: Optional[datetime] = None
+    # Inbound status-sync fields (Phase 5 — operator control surface)
+    status_sync_enabled: bool = False
+    last_status_synced_at: Optional[datetime] = None
     # api_token is intentionally NEVER included
+
+
+class JiraStatusSyncUpdateRequest(BaseModel):
+    enabled: bool
+    status_mapping: Optional[Dict[str, str]] = None
+
+
+class JiraSyncTriggerResponse(BaseModel):
+    status: str
 
 
 class JiraDisconnectResponse(BaseModel):
@@ -206,6 +221,63 @@ def _assert_host_not_ssrf(host: str) -> None:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="site_url resolves to a disallowed address.",
             )
+
+
+# Valid Jira statusCategory keys (mapping source) and Rereflect workflow
+# statuses (mapping target) for the inbound status-sync feature.
+VALID_JIRA_CATEGORIES = {"new", "indeterminate", "done"}
+VALID_WORKFLOW_STATUSES = {"new", "in_review", "resolved", "closed"}
+
+
+def _validate_status_mapping(mapping: Optional[Dict[str, str]]) -> None:
+    """422 if any status_mapping key/value falls outside the valid sets."""
+    if mapping is None:
+        return
+    for key, value in mapping.items():
+        if key not in VALID_JIRA_CATEGORIES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid status_mapping key '{key}'. Must be one of "
+                    f"{sorted(VALID_JIRA_CATEGORIES)}."
+                ),
+            )
+        if value not in VALID_WORKFLOW_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid status_mapping value '{value}' for key '{key}'. "
+                    f"Must be one of {sorted(VALID_WORKFLOW_STATUSES)}."
+                ),
+            )
+
+
+def _last_status_synced_at(db: Session, org_id: int) -> Optional[datetime]:
+    """Max FeedbackJiraIssue.last_status_synced_at across the org's linked issues, or None."""
+    return (
+        db.query(func.max(FeedbackJiraIssue.last_status_synced_at))
+        .filter(FeedbackJiraIssue.organization_id == org_id)
+        .scalar()
+    )
+
+
+def _build_status_response(db: Session, org_id: int, row: JiraIntegration) -> JiraStatusResponse:
+    """Build the full JiraStatusResponse (connection + status-sync fields) for an existing row."""
+    return JiraStatusResponse(
+        connected=True,
+        site_url=row.site_url,
+        email=row.email,
+        token_hint=row.token_hint,
+        account_id=row.account_id,
+        display_name=row.display_name,
+        is_active=row.is_active,
+        last_synced_at=row.last_synced_at,
+        last_sync_status=row.last_sync_status,
+        last_error=row.last_error,
+        connected_at=row.connected_at,
+        status_sync_enabled=bool(row.status_sync_enabled),
+        last_status_synced_at=_last_status_synced_at(db, org_id),
+    )
 
 
 def _get_active_integration(db: Session, org_id: int) -> Optional[JiraIntegration]:
@@ -392,23 +464,11 @@ def jira_status(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
-    """Return connection status. Never returns the api_token."""
+    """Return connection status (and inbound status-sync status). Never returns the api_token."""
     row = _get_active_integration(db, current_org.id)
     if not row:
         return JiraStatusResponse(connected=False)
-    return JiraStatusResponse(
-        connected=True,
-        site_url=row.site_url,
-        email=row.email,
-        token_hint=row.token_hint,
-        account_id=row.account_id,
-        display_name=row.display_name,
-        is_active=row.is_active,
-        last_synced_at=row.last_synced_at,
-        last_sync_status=row.last_sync_status,
-        last_error=row.last_error,
-        connected_at=row.connected_at,
-    )
+    return _build_status_response(db, current_org.id, row)
 
 
 @router.delete(
@@ -478,6 +538,108 @@ def jira_test(
     except Exception as exc:  # noqa: BLE001 — must never surface as a 500
         logger.warning("Jira test failed for org %s: %s", current_org.id, exc)
         return JiraTestResponse(success=False, message=str(exc))
+
+
+# ────────────────────── Inbound status-sync operator controls ─────────────────
+
+
+@router.patch(
+    "/status-sync",
+    response_model=JiraStatusResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_update_status_sync(
+    payload: JiraStatusSyncUpdateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle inbound Jira status sync and/or update the status_mapping override.
+
+    404 if the org has no Jira integration row at all (connected or not — the
+    setting is persisted on the integration row, so one must exist first).
+    422 if status_mapping contains a key outside {new, indeterminate, done}
+    or a value outside {new, in_review, resolved, closed}.
+    """
+    row = _get_org_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Jira integration found. Connect Jira first.",
+        )
+
+    _validate_status_mapping(payload.status_mapping)
+
+    row.status_sync_enabled = payload.enabled
+    if payload.status_mapping is not None:
+        row.status_mapping = payload.status_mapping
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "Jira status-sync updated for org %s (enabled=%s)",
+        current_org.id,
+        row.status_sync_enabled,
+    )
+    return _build_status_response(db, current_org.id, row)
+
+
+def _get_celery_app():
+    """Lazy accessor for the Celery client app — injectable in tests (mirrors
+    zendesk_integration.py's _get_celery_app)."""
+    from src.background.celery_client import get_celery_app
+    return get_celery_app()
+
+
+@router.post(
+    "/sync",
+    response_model=JiraSyncTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_trigger_sync(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually enqueue an inbound Jira status-sync run for this org.
+
+    Requires an ACTIVE Jira integration (400 if none — mirrors /test and the
+    create-issue aspect's active-integration guard). Enqueues
+    sync_jira_org via Celery send_task (non-blocking). Never surfaces a 500 —
+    a broker/dispatch failure is reported as a clean 502.
+    """
+    integ = _get_active_integration(db, current_org.id)
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Jira integration.",
+        )
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.jira_sync.sync_jira_org",
+            args=[integ.id],
+        )
+    except Exception as exc:  # noqa: BLE001 — must never surface as a 500
+        logger.error(
+            "Jira status sync could not be enqueued for org %s (integration_id=%s): %s",
+            current_org.id,
+            integ.id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Jira status sync could not be enqueued. Please try again shortly.",
+        ) from exc
+
+    logger.info(
+        "Jira status sync manually triggered for org %s (integration_id=%s)",
+        current_org.id,
+        integ.id,
+    )
+    return JiraSyncTriggerResponse(status="queued")
 
 
 # ──────────────────────────── Create-issue aspect ─────────────────────────────
