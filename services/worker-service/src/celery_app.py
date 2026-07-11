@@ -53,6 +53,7 @@ celery_app = Celery(
         "src.tasks.salesforce_sync",
         "src.tasks.salesforce_writeback",
         "src.tasks.zendesk_sync",
+        "src.tasks.jira_sync",
     ],
 )
 
@@ -230,6 +231,13 @@ celery_app.conf.beat_schedule = {
     # time), same style as process-unanalyzed-feedback's 30.0.
     "sync-zendesk-every-15-min": {
         "task": "src.tasks.zendesk_sync.sync_all_zendesk",
+        "schedule": 900.0,  # every 15 minutes
+    },
+    # Poll Jira issue status every 15 minutes (jira-status-sync/inbound-status-sync
+    # aspect — see docs/planning/jira-status-sync/inbound-status-sync/plan_20260711.md
+    # Phase 4). Fixed-interval cadence, same style as sync-zendesk-every-15-min.
+    "sync-jira-status-every-15-min": {
+        "task": "src.tasks.jira_sync.sync_all_jira",
         "schedule": 900.0,  # every 15 minutes
     },
 }
