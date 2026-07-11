@@ -213,6 +213,41 @@ def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: 
     db.add(eval_run)
 
 
+def _no_builtin_overlap_result(n: int):
+    """Synthetic EvalResult for the fair-A/B empty-intersection guard (design decision #2):
+    the org's category corrections cleared MIN_LABELS but none of the corrected labels are
+    in the keyword incumbent's built-in vocab, so there is no fair baseline to score
+    against. Never promote in this case; evaluate() is never called (an empty `labels` tuple
+    would ZeroDivisionError inside compute_multiclass_metrics)."""
+    from analyzer.corrections_classifier.evaluate import EvalResult
+    return EvalResult(
+        decision="retained", n=n,
+        incumbent_macro_f1=None, challenger_macro_f1=None, macro_f1_delta=None,
+        notes="no built-in-vocab labels among corrections; cannot fairly evaluate the keyword incumbent",
+    )
+
+
+def _dataset_and_incumbent_for(org_id: int, db: Session, classifier_type: str):
+    """Per-type setup: (dataset, incumbent_predict, eval_labels). eval_labels is None for
+    sentiment (evaluate() uses its own byte-stable SENTIMENT_LABELS default — this aspect
+    never passes labels= for sentiment); a tuple (possibly empty) for category — the fair-A/B
+    subset (design decision #2 handles the empty case before evaluate() is ever called)."""
+    if classifier_type == "category":
+        from analyzer.corrections_classifier.dataset import build_category_dataset, derive_labels
+
+        dataset = build_category_dataset(org_id, db)
+        incumbent_predict = _build_category_incumbent_predict()
+        full_labels = derive_labels(dataset)
+        eval_labels = tuple(label for label in full_labels if label in _built_in_category_vocab())
+        return dataset, incumbent_predict, eval_labels
+
+    from analyzer.corrections_classifier.dataset import build_sentiment_dataset
+
+    dataset = build_sentiment_dataset(org_id, db)
+    incumbent_predict = _build_incumbent_predict()
+    return dataset, incumbent_predict, None
+
+
 def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSIFIER_TYPE) -> dict:
     """Retrain the corrections classifier (sentiment or category) for a single org.
 
@@ -247,21 +282,30 @@ def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSI
         start = time.monotonic()
 
         # Lazy imports — the core owns sklearn/numpy; this module stays CPU-only-safe.
-        from analyzer.corrections_classifier.dataset import build_sentiment_dataset
         from analyzer.corrections_classifier.evaluate import evaluate
         from analyzer.corrections_classifier.labels import MARGIN, MIN_LABELS
         from analyzer.corrections_classifier.trainer import train_classifier
 
-        dataset = build_sentiment_dataset(org_id, db)
-        incumbent_predict = _build_incumbent_predict()
-
-        result = evaluate(
-            dataset,
-            incumbent_predict,
-            train_fn=train_classifier,
-            min_labels=MIN_LABELS,
-            margin=MARGIN,
+        dataset, incumbent_predict, eval_labels = _dataset_and_incumbent_for(
+            org_id, db, classifier_type
         )
+
+        if eval_labels is not None and len(dataset) >= MIN_LABELS and not eval_labels:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            result = _no_builtin_overlap_result(len(dataset))
+            _insert_eval_run(org_id, None, result, duration_ms, db, classifier_type)
+            db.commit()
+            logger.info(
+                "retrain_org: org=%s type=%s no built-in-vocab labels n=%s",
+                org_id, classifier_type, result.n,
+            )
+            return _decision_result("retained", model_id=None, n=result.n, notes=result.notes)
+
+        eval_kwargs = dict(train_fn=train_classifier, min_labels=MIN_LABELS, margin=MARGIN)
+        if eval_labels is not None:
+            eval_kwargs["labels"] = eval_labels
+
+        result = evaluate(dataset, incumbent_predict, **eval_kwargs)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         model_id: Optional[int] = None

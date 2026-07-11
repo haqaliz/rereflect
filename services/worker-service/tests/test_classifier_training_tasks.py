@@ -16,6 +16,7 @@ which is the real target.
 
 from __future__ import annotations
 
+import importlib
 import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -164,25 +165,30 @@ def _fake_redis_lock_denied():
 
 
 @contextmanager
-def _patch_core(decision: str, *, n: int = 25, incumbent_macro_f1=0.50,
-                 challenger_macro_f1=0.65, macro_f1_delta=0.15, notes=None,
-                 dataset=None, artifact=None):
-    """Patch the training-and-eval-core's build_sentiment_dataset/evaluate/
-    train_classifier so retrain_org's decision is fully deterministic, without
-    needing sklearn to actually fit anything. Mirrors the plan's "patch the core
-    via the autouse stub" strategy."""
+def _patch_core(decision: str, *, classifier_type: str = "sentiment", n: int = 25,
+                 incumbent_macro_f1=0.50, challenger_macro_f1=0.65, macro_f1_delta=0.15,
+                 notes=None, dataset=None, artifact=None):
+    """Patch the training-and-eval-core so retrain_org's decision is fully deterministic for
+    EITHER classifier_type, without needing sklearn to actually fit anything. The default
+    fake category dataset uses REAL built-in vocab labels ("performance"/"security_breach")
+    so the fair-A/B eval_labels computation in retrain_org's category branch never hits the
+    Phase-4 "no built-in overlap" guard by accident for these mocked-core tests."""
     from analyzer.corrections_classifier.evaluate import EvalResult
 
     if notes is None:
         notes = f"{decision} (delta={macro_f1_delta:+.4f}, n={n})" if macro_f1_delta is not None else decision
     if dataset is None:
-        labels = ["positive", "neutral", "negative"]
-        dataset = [(f"text {i}", labels[i % 3]) for i in range(n)]
+        if classifier_type == "category":
+            labels = ["performance", "security_breach"]  # both built-in vocab members
+        else:
+            labels = ["positive", "neutral", "negative"]
+        dataset = [(f"text {i}", labels[i % len(labels)]) for i in range(n)]
     if artifact is None:
+        classes = sorted({label for _, label in dataset})
         artifact = {
             "model_type": "tfidf_logreg",
-            "classifier_type": "sentiment",
-            "classes": ["negative", "neutral", "positive"],
+            "classifier_type": classifier_type,
+            "classes": classes,
             "vectorizer": {"vocabulary": {}, "idf": [], "lowercase": True,
                            "token_pattern": r"(?u)\b\w\w+\b", "ngram_range": [1, 1],
                            "norm": "l2", "sublinear_tf": False, "smooth_idf": True},
@@ -196,8 +202,20 @@ def _patch_core(decision: str, *, n: int = 25, incumbent_macro_f1=0.50,
         macro_f1_delta=macro_f1_delta, notes=notes,
     )
 
-    with patch("analyzer.corrections_classifier.dataset.build_sentiment_dataset", return_value=dataset), \
-         patch("analyzer.corrections_classifier.evaluate.evaluate", return_value=fake_result), \
+    dataset_builder_target = (
+        "analyzer.corrections_classifier.dataset.build_category_dataset"
+        if classifier_type == "category"
+        else "analyzer.corrections_classifier.dataset.build_sentiment_dataset"
+    )
+    # NOTE: patch.object(module_obj, ...) here, NOT a dotted patch() string —
+    # analyzer.corrections_classifier.__init__ re-exports the function "evaluate" under
+    # the same name as the "evaluate" submodule, which breaks mock.patch's dotted-path getattr
+    # walk (though not the module's own real sys.modules entry). importlib.import_module resolves
+    # the real submodule directly.
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+
+    with patch(dataset_builder_target, return_value=dataset), \
+         patch.object(evaluate_module, "evaluate", return_value=fake_result), \
          patch("analyzer.corrections_classifier.trainer.train_classifier", return_value=artifact):
         yield fake_result, artifact
 
@@ -840,3 +858,81 @@ def test_build_category_incumbent_predict_ties_toward_pain_point_default():
     tasks = _get_tasks()
     predict = tasks._build_category_incumbent_predict()
     assert predict("zunder zunder flexnorb entry 0 zunder") == "functionality_broken"
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 — category dataset dispatch + fair-A/B labels wiring (mocked core)
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_category_dispatches_to_build_category_dataset(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", classifier_type="category", n=25, challenger_macro_f1=0.70) as (_, artifact):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert result["decision"] == "promoted"
+    model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert model.classifier_type == "category"
+    assert model.model_json == artifact
+
+
+def test_retrain_org_category_passes_fair_ab_intersected_labels_to_evaluate(db):
+    """The label subset PASSED TO evaluate() must exclude a custom (non-built-in-vocab)
+    label present in the dataset — proves the fair-A/B wiring calls
+    derive_labels(dataset) ∩ built_in_category_vocab, not the raw derive_labels() output."""
+    org = _make_org(db)
+    dataset_with_custom_label = [
+        (f"performance issue {i}", "performance") for i in range(15)
+    ] + [
+        (f"security incident {i}", "security_breach") for i in range(15)
+    ] + [
+        (f"onboarding flow request {i}", "onboarding_flow") for i in range(10)  # NOT built-in
+    ]
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    captured_kwargs = {}
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+
+    def spy_evaluate(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        from analyzer.corrections_classifier.evaluate import EvalResult
+        return EvalResult(decision="retained", n=10, incumbent_macro_f1=0.5,
+                           challenger_macro_f1=0.5, macro_f1_delta=0.0, notes="retained (delta=+0.0000, n=10)")
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch("analyzer.corrections_classifier.dataset.build_category_dataset",
+               return_value=dataset_with_custom_label), \
+         patch.object(evaluate_module, "evaluate", side_effect=spy_evaluate):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db, classifier_type="category")
+
+    assert captured_kwargs["labels"] == ("performance", "security_breach")
+    assert "onboarding_flow" not in captured_kwargs["labels"]
+
+
+def test_retrain_org_sentiment_never_passes_labels_kwarg_byte_stable(db):
+    """Byte-stability: the sentiment path must call evaluate() with NO labels kwarg at all
+    (relying on evaluate()'s own SENTIMENT_LABELS default), never an explicit
+    labels=SENTIMENT_LABELS — proves this aspect didn't touch the sentiment call."""
+    org = _make_org(db)
+    _seed_corrections(db, org.id, count=5)  # below gate, real dataset+evaluate, no mocking needed
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    captured_kwargs = {}
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+    real_evaluate = evaluate_module.evaluate
+
+    def spy_evaluate(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_evaluate(*args, **kwargs)
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch.object(evaluate_module, "evaluate", side_effect=spy_evaluate):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    assert "labels" not in captured_kwargs
