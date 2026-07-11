@@ -806,3 +806,37 @@ def test_retrain_all_orgs_runs_purge_once(db):
         tasks.retrain_all_orgs()
 
     mock_purge.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — category incumbent + built-in vocab helpers
+# ---------------------------------------------------------------------------
+
+
+def test_built_in_category_vocab_is_union_of_both_categorizers():
+    tasks = _get_tasks()
+    vocab = tasks._built_in_category_vocab()
+    assert "security_breach" in vocab       # pain-point built-in
+    assert "performance" in vocab           # pain-point built-in
+    assert "automation" in vocab            # feature-request built-in
+    assert "reporting" in vocab             # feature-request built-in
+    assert "custom_widget_bug" not in vocab  # never a fixed/custom tuple
+    assert len(vocab) == 22  # 12 pain-point + 10 feature-request, verified disjoint
+
+
+def test_build_category_incumbent_predict_uses_real_keyword_categorizers():
+    tasks = _get_tasks()
+    predict = tasks._build_category_incumbent_predict()
+    # Strong pain-point signal -> PainPointCategorizer wins on confidence.
+    assert predict("the system was hacked, a security breach exposed our data") == "security_breach"
+    # Strong feature-request signal -> FeatureRequestCategorizer wins on confidence.
+    assert predict("please add slack integration and zapier webhook support") == "integration"
+
+
+def test_build_category_incumbent_predict_ties_toward_pain_point_default():
+    """Text matching neither categorizer's keywords -> both categorizers fall through to
+    their own 0.3-confidence defaults (a tie) -> the incumbent deterministically prefers the
+    pain-point categorizer's default ('functionality_broken'), never 'core_functionality'."""
+    tasks = _get_tasks()
+    predict = tasks._build_category_incumbent_predict()
+    assert predict("zunder zunder flexnorb entry 0 zunder") == "functionality_broken"

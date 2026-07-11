@@ -80,6 +80,51 @@ def _build_incumbent_predict() -> Callable[[str], str]:
     return _predict
 
 
+_category_categorizer_cache = None
+
+
+def _category_categorizers():
+    """Lazily construct + process-cache (PainPointCategorizer, FeatureRequestCategorizer)
+    instances — mirrors _get_redis()'s caching pattern. No add_custom_categories() call: the
+    incumbent is deliberately un-merged, built-in-vocab-only, matching the analysis-engine
+    keyword path's default construction (core.py never calls add_custom_categories either —
+    see PRD 'Category incumbent for the A/B eval' note). Lazy import keeps this module
+    importable without the analysis-engine's heavier analyzer/__init__.py import chain at
+    module load time (Py3.14 CI target)."""
+    global _category_categorizer_cache
+    if _category_categorizer_cache is None:
+        from analyzer.categorizer import FeatureRequestCategorizer, PainPointCategorizer
+        _category_categorizer_cache = (PainPointCategorizer(), FeatureRequestCategorizer())
+    return _category_categorizer_cache
+
+
+def _build_category_incumbent_predict() -> Callable[[str], str]:
+    """Build a deterministic incumbent predictor from the production keyword categorizers,
+    covering the built-in category vocab only. For a given text, run BOTH categorizers and
+    return the label with the strictly higher confidence; an exact tie (including the common
+    all-zero-match case, where both categorizers fall through to their own unrelated
+    defaults) breaks deterministically toward the pain-point categorizer's result."""
+    pain_point_categorizer, feature_categorizer = _category_categorizers()
+
+    def _predict(text: str) -> str:
+        pain_result = pain_point_categorizer.categorize(text)
+        feature_result = feature_categorizer.categorize(text)
+        if feature_result.confidence > pain_result.confidence:
+            return feature_result.category
+        return pain_result.category
+
+    return _predict
+
+
+def _built_in_category_vocab() -> frozenset:
+    """Union of both keyword categorizers' built-in category names — the label space the
+    keyword incumbent can structurally emit. Used to compute the fair-A/B eval label subset
+    (PRD critique #3): derive_labels(dataset) ∩ this set. NOT a fixed tuple defined here —
+    read live off the categorizer instances so it can never drift from categorizer.py."""
+    pain_point_categorizer, feature_categorizer = _category_categorizers()
+    return frozenset(pain_point_categorizer.CATEGORIES) | frozenset(feature_categorizer.CATEGORIES)
+
+
 def _round_or_none(value: Optional[float]) -> Optional[float]:
     return round(value, 4) if value is not None else None
 
