@@ -1,9 +1,12 @@
-"""Per-org sentiment corrections classifier — pure-compute core (M5.2).
+"""Per-org sentiment and category corrections classifier — pure-compute core (M5.2).
 
-CPU-only, offline, per-org TF-IDF + logistic-regression sentiment classifier,
-mirroring the churn split (`churn_calibrator.py` pure compute driven by
-`calibration_refit.py`): no Celery, no HTTP, no DB writes. Every function here
-is deterministic given its inputs.
+CPU-only, offline, per-org TF-IDF + logistic-regression classifier, mirroring the
+churn split (`churn_calibrator.py` pure compute driven by `calibration_refit.py`):
+no Celery, no HTTP, no DB writes. Every function here is deterministic given its
+inputs. The dataset/trainer/evaluate spine is task-generic: sentiment uses a fixed
+3-class vocab (`SENTIMENT_LABELS`), category uses a dynamic, per-org label vocab
+derived from the org's own corrections (`build_category_dataset` + `derive_labels`) —
+there is no fixed category label tuple anywhere in this package.
 
 Only `train_classifier` (trainer.py) imports scikit-learn/numpy, and it does so
 LAZILY INSIDE THE FUNCTION — importing this package (including trainer.py's module
@@ -23,7 +26,14 @@ from .labels import (
     RANDOM_STATE,
     SENTIMENT_LABELS,
 )
-from .dataset import build_sentiment_dataset, rows_to_dataset
+from .dataset import (
+    build_category_dataset,
+    build_sentiment_dataset,
+    derive_labels,
+    fetch_correction_rows,
+    fetch_sentiment_correction_rows,
+    rows_to_dataset,
+)
 from .predict import predict, score_from_proba
 from .evaluate import EvalResult, evaluate
 from .trainer import train_classifier
@@ -36,7 +46,11 @@ __all__ = [
     "MARGIN",
     "RANDOM_STATE",
     "build_sentiment_dataset",
+    "build_category_dataset",
     "rows_to_dataset",
+    "fetch_correction_rows",
+    "fetch_sentiment_correction_rows",
+    "derive_labels",
     "train_classifier",
     "predict",
     "score_from_proba",

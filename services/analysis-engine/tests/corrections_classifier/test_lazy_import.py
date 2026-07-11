@@ -85,11 +85,25 @@ def test_public_surface_importable_without_sklearn_or_numpy():
         + "sys.modules['sklearn'] = None\n"
         "sys.modules['numpy'] = None\n"
         "from src.analyzer.corrections_classifier import (\n"
-        "    build_sentiment_dataset, rows_to_dataset, train_classifier,\n"
-        "    predict, score_from_proba, evaluate, EvalResult, SENTIMENT_LABELS,\n"
-        "    MIN_LABELS, HOLDOUT_FRAC, MIN_HOLDOUT, MARGIN, RANDOM_STATE,\n"
+        "    build_sentiment_dataset, build_category_dataset, rows_to_dataset,\n"
+        "    fetch_correction_rows, fetch_sentiment_correction_rows, derive_labels,\n"
+        "    train_classifier, predict, score_from_proba, evaluate, EvalResult,\n"
+        "    SENTIMENT_LABELS, MIN_LABELS, HOLDOUT_FRAC, MIN_HOLDOUT, MARGIN, RANDOM_STATE,\n"
         ")\n"
         "from src.analyzer.corrections_classifier.metrics import compute_multiclass_metrics\n"
+        "print('OK')\n"
+    )
+    result = _run(code)
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
+
+
+def test_category_dataset_builder_importable_without_sklearn_or_numpy():
+    code = (
+        _STUB_PARENT_PACKAGES
+        + "sys.modules['sklearn'] = None\n"
+        "sys.modules['numpy'] = None\n"
+        "from src.analyzer.corrections_classifier import build_category_dataset, derive_labels\n"
         "print('OK')\n"
     )
     result = _run(code)
