@@ -237,3 +237,129 @@ class TestApplyClassifierOverrideExplicit:
 
         assert feedback.sentiment_label == "positive"
         assert feedback.sentiment_score == 0.5
+
+
+# Category-branch cases. Fake feedback carries pain_point_category /
+# feature_request_category instead of sentiment_label/score. "label" drives
+# _route_category_label's real (unmocked) vocab lookup — use real built-in
+# category names so this exercises the actual routing table, not a mock.
+CATEGORY_SEAM_CASES = [
+    {
+        "name": "category_off",
+        "classifier_mode": "off",
+        "promoted": True,
+        "allow_override": True,
+        "label": "security_breach",
+        "expected_field": None,
+        "expected_logged": False,
+    },
+    {
+        "name": "category_shadow_promoted",
+        "classifier_mode": "shadow",
+        "promoted": True,
+        "allow_override": True,
+        "label": "security_breach",
+        "expected_field": None,
+        "expected_logged": True,
+    },
+    {
+        "name": "category_auto_pain_only",
+        "classifier_mode": "auto",
+        "promoted": True,
+        "allow_override": True,
+        "label": "security_breach",
+        "expected_field": "pain_point_category",
+        "expected_logged": True,
+    },
+    {
+        "name": "category_auto_feature_only",
+        "classifier_mode": "auto",
+        "promoted": True,
+        "allow_override": True,
+        "label": "core_functionality",
+        "expected_field": "feature_request_category",
+        "expected_logged": True,
+    },
+    {
+        "name": "category_auto_neither_vocab",
+        "classifier_mode": "auto",
+        "promoted": True,
+        "allow_override": True,
+        "label": "totally_custom_thing",
+        "expected_field": None,
+        "expected_logged": True,
+    },
+    {
+        "name": "category_auto_no_allow_backend_ownership",
+        "classifier_mode": "auto",
+        "promoted": True,
+        "allow_override": False,
+        "label": "security_breach",
+        "expected_field": None,
+        "expected_logged": True,
+    },
+    {
+        "name": "category_auto_not_promoted",
+        "classifier_mode": "auto",
+        "promoted": False,
+        "allow_override": True,
+        "label": "security_breach",
+        "expected_field": None,
+        "expected_logged": False,
+    },
+]
+
+
+class _FakeCategoryFeedback:
+    def __init__(self):
+        self.id = 43
+        self.organization_id = 1
+        self.text = "This is fine."
+        self.pain_point_category = "existing_pain"
+        self.feature_request_category = "existing_feature"
+
+
+class _FakeCategoryLoadedClassifier:
+    model_id = 100
+    fit_at = None
+
+    def __init__(self, label):
+        self._label = label
+
+    def predict_label_only(self, text):
+        return self._label
+
+
+class TestCategorySeamMatrix:
+    @pytest.mark.parametrize(
+        "case", CATEGORY_SEAM_CASES, ids=[c["name"] for c in CATEGORY_SEAM_CASES]
+    )
+    def test_category_case(self, case, caplog):
+        feedback = _FakeCategoryFeedback()
+        loaded = _FakeCategoryLoadedClassifier(case["label"]) if case["promoted"] else None
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode(case["classifier_mode"]),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=loaded,
+        ), caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            apply_classifier_override(
+                feedback, object(),
+                classifier_type="category",
+                allow_override=case["allow_override"],
+            )
+
+        if case["expected_field"] == "pain_point_category":
+            assert feedback.pain_point_category == case["label"]
+            assert feedback.feature_request_category == "existing_feature"
+        elif case["expected_field"] == "feature_request_category":
+            assert feedback.feature_request_category == case["label"]
+            assert feedback.pain_point_category == "existing_pain"
+        else:
+            assert feedback.pain_point_category == "existing_pain"
+            assert feedback.feature_request_category == "existing_feature"
+
+        shadow_records = [r for r in caplog.records if r.name == "rereflect.classifier.shadow"]
+        assert len(shadow_records) == (1 if case["expected_logged"] else 0)
