@@ -22,6 +22,12 @@ class OrgAIConfig(Base):
     # Per-org self-improving corrections classifier mode (M5.2). 'off' | 'shadow' | 'auto'.
     # NULL/unrecognized treated as 'off' by resolve_classifier (defense in depth).
     classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
+    # Per-org self-improving CATEGORY-corrections classifier mode (M5.2 v2).
+    # 'off' | 'shadow' | 'auto'. Independent of `classifier_mode` (sentiment) —
+    # enabling one never changes the other (PRD independent-control goal).
+    # NULL/unrecognized treated as 'off' by resolve_classifier's per-type branch
+    # (predict-seam aspect, not yet wired here).
+    category_classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)
