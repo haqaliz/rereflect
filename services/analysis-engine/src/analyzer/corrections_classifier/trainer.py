@@ -3,6 +3,9 @@
 Serializes ONLY to JSON-native types (never pickle) — vocabulary/idf weights + logreg
 coef_/intercept_/classes_ + vectorizer params, enough for predict.py to reconstruct the
 linear model from JSON alone, no sklearn model object required at predict time.
+`classifier_type` is a `train_classifier` parameter (default "sentiment", byte-stable),
+not a hard-coded module constant — it is written verbatim into the artifact so callers
+(sentiment or category) can tag the artifact with the head that produced it.
 
 sklearn/numpy are imported LAZILY inside `train_classifier` (mirroring
 worker-service/src/services/calibration_refit.py's `_fit_isotonic`) so this module — and
@@ -25,12 +28,19 @@ from __future__ import annotations
 from .labels import RANDOM_STATE
 
 _MODEL_TYPE = "tfidf_logreg"
-_CLASSIFIER_TYPE = "sentiment"
+_DEFAULT_CLASSIFIER_TYPE = "sentiment"
 
 
-def train_classifier(dataset: list[tuple[str, str]], *, random_state: int = RANDOM_STATE) -> dict:
-    """Train a TF-IDF + LogisticRegression sentiment classifier and return a JSON-only
-    artifact dict. Deterministic given the same dataset + random_state."""
+def train_classifier(
+    dataset: list[tuple[str, str]],
+    *,
+    random_state: int = RANDOM_STATE,
+    classifier_type: str = _DEFAULT_CLASSIFIER_TYPE,
+) -> dict:
+    """Train a TF-IDF + LogisticRegression classifier and return a JSON-only artifact dict.
+    Deterministic given the same dataset + random_state. `classifier_type` is written
+    verbatim into the artifact ("sentiment" by default — byte-stable for existing callers;
+    "category" for the dynamic-label category head)."""
     from sklearn.feature_extraction.text import TfidfVectorizer  # lazy
     from sklearn.linear_model import LogisticRegression  # lazy
 
@@ -54,14 +64,16 @@ def train_classifier(dataset: list[tuple[str, str]], *, random_state: int = RAND
     )
     clf.fit(X, labels)
 
-    return _serialize(vectorizer, clf, label_count=len(dataset))
+    return _serialize(
+        vectorizer, clf, label_count=len(dataset), classifier_type=classifier_type
+    )
 
 
-def _serialize(vectorizer, clf, *, label_count: int) -> dict:
+def _serialize(vectorizer, clf, *, label_count: int, classifier_type: str) -> dict:
     vocabulary = {term: int(idx) for term, idx in vectorizer.vocabulary_.items()}
     return {
         "model_type": _MODEL_TYPE,
-        "classifier_type": _CLASSIFIER_TYPE,
+        "classifier_type": classifier_type,
         "classes": clf.classes_.tolist(),
         "vectorizer": {
             "vocabulary": vocabulary,
