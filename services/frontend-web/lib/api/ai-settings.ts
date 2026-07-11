@@ -16,6 +16,7 @@ export interface AISettings {
   model_embeddings: string | null;
   sentiment_provider: string;
   classifier_mode: string;
+  category_classifier_mode: string;
   models: AIModels;
 }
 
@@ -27,6 +28,7 @@ export interface AISettingsUpdate {
   model_embeddings?: string | null;
   sentiment_provider?: string | null;
   classifier_mode?: string | null;
+  category_classifier_mode?: string | null;
   model_categorization?: string;
   model_analysis?: string;
   model_insights?: string;
