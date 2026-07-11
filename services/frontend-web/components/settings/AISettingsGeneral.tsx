@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Brain, Sparkles, Wand2 } from 'lucide-react';
+import { Brain, Sparkles, Wand2, Tags } from 'lucide-react';
 import { aiSettingsAPI, type AISettings, type SentimentStatus } from '@/lib/api/ai-settings';
 
 const CLASSIFIER_MODE_LABELS: Record<string, string> = {
@@ -25,6 +25,8 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
   const [sentimentStatus, setSentimentStatus] = useState<SentimentStatus | null>(null);
   const [classifierSaving, setClassifierSaving] = useState(false);
   const [classifierError, setClassifierError] = useState<string | null>(null);
+  const [categoryClassifierSaving, setCategoryClassifierSaving] = useState(false);
+  const [categoryClassifierError, setCategoryClassifierError] = useState<string | null>(null);
 
   useEffect(() => {
     aiSettingsAPI
@@ -74,6 +76,22 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
       );
     } finally {
       setClassifierSaving(false);
+    }
+  };
+
+  const handleCategoryClassifierMode = async (category_classifier_mode: string) => {
+    if (category_classifier_mode === settings.category_classifier_mode) return;
+    setCategoryClassifierSaving(true);
+    setCategoryClassifierError(null);
+    try {
+      const updated = await aiSettingsAPI.update({ category_classifier_mode });
+      onUpdate(updated);
+    } catch (err: any) {
+      setCategoryClassifierError(
+        err?.response?.data?.detail || 'Failed to update category classifier mode'
+      );
+    } finally {
+      setCategoryClassifierSaving(false);
     }
   };
 
@@ -192,6 +210,54 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
           </div>
           {classifierError && (
             <p className="text-xs text-destructive">{classifierError}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Self-Improving Category Classifier Mode (M5.2 v2 per-org-category-classifier) */}
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex items-center space-x-2">
+            <div className="p-2 bg-secondary rounded-lg">
+              <Tags className="w-5 h-5 text-primary" />
+            </div>
+            <CardTitle>Self-Improving Category Classifier</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-foreground">Corrections-trained category model</p>
+              <p className="text-sm text-muted-foreground">
+                Learns from your team&apos;s category corrections on pain-point/feature-request
+                items. <strong>Off</strong> disables it. <strong>Shadow</strong> observes and
+                scores in the background without changing stored categories &mdash;
+                recommended until you have accumulated a substantial number of corrections.{' '}
+                <strong>Auto</strong> lets the trained model override the stored category once
+                it beats the keyword categorizer, and only when its predicted label is
+                unambiguous (belongs to exactly one built-in category type).
+              </p>
+            </div>
+            <Select
+              value={settings.category_classifier_mode ?? 'off'}
+              onValueChange={handleCategoryClassifierMode}
+              disabled={categoryClassifierSaving}
+            >
+              <SelectTrigger aria-label="Category classifier mode" className="w-32 shrink-0">
+                <SelectValue>
+                  {CLASSIFIER_MODE_LABELS[settings.category_classifier_mode ?? 'off'] ??
+                    settings.category_classifier_mode}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">Off</SelectItem>
+                <SelectItem value="shadow">Shadow</SelectItem>
+                <SelectItem value="auto">Auto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {categoryClassifierError && (
+            <p className="text-xs text-destructive">{categoryClassifierError}</p>
           )}
         </CardContent>
       </Card>

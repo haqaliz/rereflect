@@ -38,6 +38,7 @@ const mockSettings = {
   model_embeddings: null,
   sentiment_provider: 'vader',
   classifier_mode: 'off',
+  category_classifier_mode: 'off',
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',
@@ -63,13 +64,17 @@ describe('AISettingsGeneral — classifier mode toggle (M5.2)', () => {
   it('renders the off/shadow/auto control with the current mode selected', () => {
     render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
     expect(screen.getByText(/self-improving classifier/i)).toBeInTheDocument();
-    const trigger = screen.getByLabelText(/classifier mode/i);
+    // Exact match — "Classifier mode" is a substring of the category card's
+    // "Category classifier mode" aria-label (both now render), so a regex match would
+    // be ambiguous now that the category card (M5.2 v2) is also on this tab.
+    const trigger = screen.getByLabelText('Classifier mode');
     expect(trigger).toHaveTextContent('Off');
   });
 
   it('shows honest copy recommending shadow mode until n is substantial', () => {
     render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
-    expect(screen.getByText(/shadow/i)).toBeInTheDocument();
+    // Both the sentiment and category cards recommend shadow mode now — assert at least one.
+    expect(screen.getAllByText(/shadow/i).length).toBeGreaterThan(0);
   });
 
   it('calls update({ classifier_mode: "shadow" }) and lifts state via onUpdate when shadow is selected', async () => {
@@ -80,7 +85,7 @@ describe('AISettingsGeneral — classifier mode toggle (M5.2)', () => {
 
     render(<AISettingsGeneral settings={mockSettings} onUpdate={onUpdate} />);
 
-    const trigger = screen.getByLabelText(/classifier mode/i);
+    const trigger = screen.getByLabelText('Classifier mode');
     await user.click(trigger);
     const shadowOption = await screen.findByRole('option', { name: 'Shadow' });
     await user.click(shadowOption);
@@ -99,7 +104,7 @@ describe('AISettingsGeneral — classifier mode toggle (M5.2)', () => {
 
     render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
 
-    const trigger = screen.getByLabelText(/classifier mode/i);
+    const trigger = screen.getByLabelText('Classifier mode');
     await user.click(trigger);
     const autoOption = await screen.findByRole('option', { name: 'Auto' });
     await user.click(autoOption);
