@@ -45,8 +45,30 @@ Core (Celery-free, tested directly):
                      is still recorded and won't re-trigger 'changed' next
                      poll.
 
-  _sync_zendesk_status_org_body — added in a later phase of this module
-  (see plan Phase 3).
+  _sync_zendesk_status_org_body(integration_id, db, client=None) — loads the
+  integration + this org's Zendesk-linked feedback (source='zendesk',
+  source_external_id IS NOT NULL), batch-fetches current ticket status via
+  `client.show_many(ids)` (chunked defense-in-depth, mirrors jira_sync's
+  `_SEARCH_CHUNK_SIZE` pattern even though ZendeskClient.show_many already
+  chunks internally), and reconciles every returned ticket through
+  `reconcile_feedback`. Tickets requested but absent from the response
+  (deleted/archived) are simply skipped — not an error.
+
+  `client` is injectable (a plain object exposing `show_many`) so tests
+  never need real HTTP or Celery. When `client` is None (the real
+  `sync_zendesk_status_org` task path), a real `ZendeskClient` is
+  constructed from the decrypted token.
+
+R3: the api_token is never logged. Log messages use integration_id/org_id only.
+R6: missing LLM_ENCRYPTION_KEY returns {"status": "error", "reason": "missing_encryption_key"}
+    and does NOT retry (non-transient config error) — mirrors jira_sync.py/zendesk_sync.py.
+D7 (mirrors jira_sync.py/zendesk_sync.py): a ZendeskAuthError is operator-recoverable —
+    last_status_sync_error is recorded WITHOUT disconnecting (is_active untouched) and
+    without raising/retrying.
+
+Beat schedule: every 15 minutes (interval, matching sync-zendesk-every-15-min
+/ sync-jira-status-every-15-min).
+Registration: see src/celery_app.py include list.
 
 The worker cannot import backend-api — it uses its own copy of the pure
 reconcile core (src/services/zendesk_status_core.py, a verbatim copy of
@@ -61,9 +83,75 @@ status change only.
 
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime
+from typing import Any, Dict
 
+from celery import shared_task
+
+from src.clients.zendesk import ZendeskAuthError, ZendeskClient, ZendeskTransientError
+from src.database import get_db_session
 from src.services.zendesk_status_core import decide_update, resolve_target_status
+
+logger = logging.getLogger(__name__)
+
+# Cap the number of ticket ids sent to a single client.show_many() call —
+# mirrors jira_sync's _SEARCH_CHUNK_SIZE (defense in depth; ZendeskClient
+# already chunks internally at 100/request, but this keeps a single logical
+# "page" of work per DB-visible batch here too).
+_SHOW_MANY_CHUNK_SIZE = 100
+
+# Per-run cap on the number of Zendesk-linked feedback items reconciled in a
+# single beat tick (mirrors ZendeskClient.PER_RUN_PAGE_CAP's throttle
+# intent) — a huge backlog reconciles over several beats rather than one
+# task run trying to do everything at once.
+_PER_RUN_FEEDBACK_CAP = 1000
+
+
+# ---------------------------------------------------------------------------
+# Local token decryption (mirrors jira_sync.py / zendesk_sync.py _decrypt)
+# R6: Worker cannot import from backend-api; uses its own Fernet helper.
+# ---------------------------------------------------------------------------
+
+
+def _decrypt(token: str) -> str:
+    """Decrypt a Fernet-encrypted string using LLM_ENCRYPTION_KEY."""
+    from cryptography.fernet import Fernet
+    key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if not key:
+        raise ValueError("LLM_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode()).decrypt(token.encode()).decode()
+
+
+def _persist_terminal_status(integration_id: int, error: str) -> None:
+    """
+    Persist last_status_sync_error in a FRESH session that commits
+    independently of the caller's session (mirrors jira_sync.py's
+    identically-purposed helper — see its docstring for the full rollback
+    rationale: the caller's `with get_db_session() as db:` block rolls back
+    on any exception that propagates out of it, so a terminal failure
+    status written just before `raise self.retry(...)` would otherwise be
+    silently discarded).
+    """
+    from src.models import ZendeskIntegration
+
+    try:
+        with get_db_session() as fresh_db:
+            row = (
+                fresh_db.query(ZendeskIntegration)
+                .filter(ZendeskIntegration.id == integration_id)
+                .first()
+            )
+            if row is not None:
+                row.last_status_sync_error = error
+    except Exception:
+        logger.error(
+            "zendesk_status_sync: failed to persist terminal status for "
+            "integration_id=%s",
+            integration_id,
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -207,3 +295,199 @@ def reconcile_feedback(db, feedback, fetched_status: str, integ) -> str:
     # seed AND changed both record the last-observed status.
     _upsert_sidecar(db, feedback.id, fetched_status)
     return action
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — core sync logic (Celery-free — tested directly)
+# ---------------------------------------------------------------------------
+
+
+def _sync_zendesk_status_org_body(integration_id: int, db, client=None) -> Dict[str, Any]:
+    """
+    Inner logic of sync_zendesk_status_org. Extracted as a plain function
+    taking `db` and an injectable `client` so tests never need real HTTP or
+    Celery machinery.
+
+    Raises:
+        ZendeskTransientError: propagated to the caller
+            (sync_zendesk_status_org) so Celery can retry — never caught
+            here.
+
+    ZendeskAuthError is caught HERE (not propagated) — recorded on the
+    integration row and returned as a result dict, matching D7
+    (operator-recoverable, no retry, no disconnect).
+    """
+    from src.models import FeedbackItem, ZendeskIntegration
+
+    integ = (
+        db.query(ZendeskIntegration)
+        .filter(ZendeskIntegration.id == integration_id)
+        .first()
+    )
+    if not integ:
+        return {"status": "not_found", "integration_id": integration_id}
+    if not integ.is_active:
+        return {"status": "inactive", "integration_id": integration_id}
+    if not integ.status_sync_enabled:
+        return {"status": "disabled", "integration_id": integration_id}
+
+    owns_client = client is None
+    if owns_client:
+        # R6: missing LLM_ENCRYPTION_KEY -> non-transient config error; do not retry.
+        try:
+            token = _decrypt(integ.api_token)
+        except ValueError:
+            logger.error(
+                "zendesk_status_sync: LLM_ENCRYPTION_KEY unset for org=%s "
+                "— cannot decrypt api_token; skipping (integration_id=%s)",
+                integ.organization_id,
+                integration_id,
+            )
+            integ.last_status_sync_error = "missing_encryption_key"
+            db.flush()
+            return {"status": "error", "reason": "missing_encryption_key"}
+
+        client = ZendeskClient(integ.subdomain, integ.email, token)
+
+    try:
+        feedback_items = (
+            db.query(FeedbackItem)
+            .filter(
+                FeedbackItem.source == "zendesk",
+                FeedbackItem.source_external_id.isnot(None),
+                FeedbackItem.organization_id == integ.organization_id,
+            )
+            .limit(_PER_RUN_FEEDBACK_CAP)
+            .all()
+        )
+
+        by_ticket_id = {fb.source_external_id: fb for fb in feedback_items}
+        ticket_ids = list(by_ticket_id.keys())
+
+        fetched: Dict[str, str] = {}
+        for start in range(0, len(ticket_ids), _SHOW_MANY_CHUNK_SIZE):
+            chunk = ticket_ids[start : start + _SHOW_MANY_CHUNK_SIZE]
+            fetched.update(client.show_many(chunk))
+
+        seeded = 0
+        noop = 0
+        changed = 0
+
+        for ticket_id, fetched_status in fetched.items():
+            feedback = by_ticket_id.get(ticket_id)
+            if feedback is None:
+                # Not one of ours (shouldn't happen — show_many is only
+                # ever called with our own ids) — skip defensively.
+                continue
+
+            action = reconcile_feedback(db, feedback, fetched_status, integ)
+            if action == "seed":
+                seeded += 1
+            elif action == "noop":
+                noop += 1
+            elif action == "changed":
+                changed += 1
+
+        integ.last_status_synced_at = datetime.utcnow()
+        integ.last_status_sync_error = None
+        db.flush()
+
+        return {
+            "status": "success",
+            "polled": len(ticket_ids),
+            "seeded": seeded,
+            "noop": noop,
+            "changed": changed,
+        }
+
+    except ZendeskAuthError as exc:
+        # D7: operator-recoverable auth failure — record without
+        # disconnecting (is_active untouched) and without raising/retrying.
+        logger.error(
+            "zendesk_status_sync: auth error for org=%s (integration_id=%s): %s",
+            integ.organization_id,
+            integration_id,
+            exc,
+        )
+        integ.last_status_sync_error = str(exc)[:500]
+        db.flush()
+        return {"status": "error", "reason": "auth_error"}
+
+    finally:
+        if owns_client:
+            client.close()
+
+
+# ---------------------------------------------------------------------------
+# Celery tasks
+# ---------------------------------------------------------------------------
+
+
+@shared_task(name="src.tasks.zendesk_status_sync.sync_all_zendesk_status")
+def sync_all_zendesk_status() -> Dict[str, Any]:
+    """
+    Fan-out: scan all active + status_sync_enabled Zendesk integrations and
+    enqueue per-org status sync.
+
+    Per-org try/except ensures one failure never aborts the batch.
+    """
+    from src.models import ZendeskIntegration
+
+    with get_db_session() as db:
+        integrations = (
+            db.query(ZendeskIntegration)
+            .filter(
+                ZendeskIntegration.is_active.is_(True),
+                ZendeskIntegration.status_sync_enabled.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            return {"status": "no_integrations", "queued": 0}
+
+        queued = 0
+        for integ in integrations:
+            try:
+                sync_zendesk_status_org.delay(integ.id)
+                queued += 1
+            except Exception as exc:
+                logger.error(
+                    "sync_all_zendesk_status: failed to enqueue org=%s (integration_id=%s): %s",
+                    integ.organization_id,
+                    integ.id,
+                    exc,
+                )
+
+        return {"status": "queued", "queued": queued}
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    name="src.tasks.zendesk_status_sync.sync_zendesk_status_org",
+)
+def sync_zendesk_status_org(self, integration_id: int) -> Dict[str, Any]:
+    """
+    Per-org Zendesk status-sync poll. Retries on ZendeskTransientError
+    (max 3x). ZendeskAuthError / missing-encryption-key are handled inside
+    `_sync_zendesk_status_org_body` (recorded without raising/retrying).
+    """
+    with get_db_session() as db:
+        try:
+            return _sync_zendesk_status_org_body(integration_id, db)
+        except ZendeskTransientError as exc:
+            logger.warning(
+                "zendesk_status_sync: transient error for integration_id=%s: %s",
+                integration_id,
+                exc,
+            )
+            # NOTE: deliberately NOT db.flush()'d — this session's
+            # transaction rolls back on the `raise` below regardless (see
+            # get_db_session), and flushing here would additionally take a
+            # row lock that could self-deadlock against the fresh session
+            # _persist_terminal_status opens next (same row, same process).
+            # _persist_terminal_status is the sole durable write for this
+            # branch — mirrors jira_sync.py/zendesk_sync.py.
+            _persist_terminal_status(integration_id, str(exc))
+            raise self.retry(exc=exc)
