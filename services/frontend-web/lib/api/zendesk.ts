@@ -23,6 +23,14 @@ export interface ZendeskConnectionStatus {
   // auto-provisions one — see backend-connection/_impl-report.md). Absent on
   // older/partial payloads; treat as falsy, never assume true.
   has_feedback_source?: boolean | null;
+  // Inbound status sync (zendesk-status-sync/frontend): opt-in poller that
+  // pulls Zendesk ticket status back onto linked feedback. Unlike Jira,
+  // Zendesk tracks its own `last_status_sync_error` separate from the
+  // general connection `last_error` — see zendesk_integration.py.
+  status_sync_enabled: boolean;
+  status_mapping: Record<string, string> | null;
+  last_status_synced_at: string | null;
+  last_status_sync_error: string | null;
 }
 
 export interface ZendeskConnectRequest {
@@ -60,6 +68,10 @@ export interface ZendeskSyncResponse {
   integration_id: number;
 }
 
+export interface ZendeskStatusSyncTriggerResponse {
+  status: string;
+}
+
 // ---- API ----
 
 export const zendeskAPI = {
@@ -90,3 +102,25 @@ export const zendeskAPI = {
     return response.data;
   },
 };
+
+// Inbound status sync (zendesk-status-sync/frontend). Kept as standalone
+// exports — used directly by ZendeskStatusSyncCard, mirroring
+// patchJiraStatusSync/triggerJiraSync's shape but against the Zendesk
+// status-sync sub-path (distinct from zendeskAPI.triggerSync, which pulls
+// tickets rather than reconciling status).
+
+export async function patchZendeskStatusSync(
+  enabled: boolean,
+  statusMapping?: Record<string, string>
+): Promise<ZendeskConnectionStatus> {
+  const response = await apiClient.patch('/api/v1/integrations/zendesk/status-sync', {
+    enabled,
+    ...(statusMapping !== undefined ? { status_mapping: statusMapping } : {}),
+  });
+  return response.data;
+}
+
+export async function triggerZendeskStatusSync(): Promise<ZendeskStatusSyncTriggerResponse> {
+  const response = await apiClient.post('/api/v1/integrations/zendesk/status-sync/sync');
+  return response.data;
+}
