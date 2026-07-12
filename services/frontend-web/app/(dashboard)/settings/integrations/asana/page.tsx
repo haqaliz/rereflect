@@ -31,6 +31,7 @@ import {
 import { asanaAPI, AsanaConnectionStatus } from '@/lib/api/asana';
 import { useAuth } from '@/contexts/AuthContext';
 import { AsanaIcon } from '@/components/icons/AsanaIcon';
+import { AsanaStatusSyncCard } from '@/components/settings/AsanaStatusSyncCard';
 
 export default function AsanaSettingsPage() {
   const router = useRouter();
@@ -99,6 +100,8 @@ export default function AsanaSettingsPage() {
         last_sync_status: null,
         last_error: null,
         connected_at: null,
+        status_sync_enabled: false,
+        last_status_synced_at: null,
       });
       setTokenInput('');  // clear after successful connect
     } catch (err: any) {
@@ -349,6 +352,11 @@ export default function AsanaSettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Inbound status sync (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <AsanaStatusSyncCard status={status} onStatusChange={setStatus} />
+        )}
 
         {/* Help card */}
         <Card className="animate-slide-up stagger-1">

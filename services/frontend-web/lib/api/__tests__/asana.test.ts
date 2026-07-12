@@ -11,7 +11,7 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 import apiClient from '@/lib/api-client';
-import { asanaAPI } from '@/lib/api/asana';
+import { asanaAPI, patchAsanaStatusSync, triggerAsanaSync } from '@/lib/api/asana';
 
 describe('asanaAPI', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -140,5 +140,44 @@ describe('asanaAPI', () => {
     });
     expect(result).toHaveLength(1);
     expect(result[0].asana_task_gid).toBe('333');
+  });
+
+  it('patchAsanaStatusSync calls PATCH /api/v1/integrations/asana/status-sync with { enabled }', async () => {
+    (apiClient.patch as any).mockResolvedValue({
+      data: {
+        connected: true,
+        token_hint: '...abcd',
+        account_gid: 'acc-1',
+        display_name: 'Admin User',
+        is_active: true,
+        last_synced_at: null,
+        last_sync_status: null,
+        last_error: null,
+        connected_at: '2026-01-01T00:00:00Z',
+        status_sync_enabled: true,
+        last_status_synced_at: null,
+      },
+    });
+    const result = await patchAsanaStatusSync(true);
+    expect(apiClient.patch).toHaveBeenCalledWith('/api/v1/integrations/asana/status-sync', {
+      enabled: true,
+    });
+    expect(result.status_sync_enabled).toBe(true);
+  });
+
+  it('patchAsanaStatusSync includes status_mapping when provided', async () => {
+    (apiClient.patch as any).mockResolvedValue({ data: { status_sync_enabled: true } });
+    await patchAsanaStatusSync(true, { done: 'resolved' });
+    expect(apiClient.patch).toHaveBeenCalledWith('/api/v1/integrations/asana/status-sync', {
+      enabled: true,
+      status_mapping: { done: 'resolved' },
+    });
+  });
+
+  it('triggerAsanaSync calls POST /api/v1/integrations/asana/sync', async () => {
+    (apiClient.post as any).mockResolvedValue({ data: { status: 'queued' } });
+    const result = await triggerAsanaSync();
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v1/integrations/asana/sync');
+    expect(result.status).toBe('queued');
   });
 });
