@@ -40,6 +40,7 @@ class TestAsanaIntegrationModel:
             "account_gid", "display_name", "is_active",
             "connected_by_user_id", "connected_at", "last_synced_at",
             "last_sync_status", "last_error", "created_at", "updated_at",
+            "status_sync_enabled", "status_mapping",
         }
         assert expected.issubset(set(columns))
 
@@ -238,6 +239,7 @@ class TestFeedbackAsanaTaskModel:
             "id", "organization_id", "feedback_id", "asana_task_gid",
             "asana_task_url", "asana_task_name",
             "created_by_user_id", "created_at",
+            "asana_completed", "asana_status_category", "last_status_synced_at",
         }
         assert expected.issubset(set(columns))
 
