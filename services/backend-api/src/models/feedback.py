@@ -78,6 +78,7 @@ class FeedbackItem(Base):
         Index('ix_feedback_org_urgent', 'organization_id', 'is_urgent'),
         Index('ix_feedback_org_pain_cat', 'organization_id', 'pain_point_category'),
         Index('ix_feedback_org_feature_cat', 'organization_id', 'feature_request_category'),
+        Index('ix_feedback_items_org_source_external', 'organization_id', 'source', 'source_external_id'),
     )
 
     def __repr__(self):
