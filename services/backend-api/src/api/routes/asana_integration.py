@@ -1,14 +1,17 @@
 """
-Asana integration routes (backend-connection aspect, Phase 3).
+Asana integration routes (backend-connection aspect, Phase 3;
+backend-routes / inbound status-sync aspect).
 
 Routes:
-  POST   /api/v1/integrations/asana/connect     — validate + encrypt + store
-  GET    /api/v1/integrations/asana/status      — connection status (no token)
-  DELETE /api/v1/integrations/asana/disconnect  — deactivate (soft; preserves
-                                                    feedback_asana_tasks)
-  POST   /api/v1/integrations/asana/test        — re-validate stored token
-  GET    /api/v1/integrations/asana/workspaces  — list workspaces
-  GET    /api/v1/integrations/asana/projects    — list projects in a workspace
+  POST   /api/v1/integrations/asana/connect      — validate + encrypt + store
+  GET    /api/v1/integrations/asana/status       — connection + status-sync status (no token)
+  DELETE /api/v1/integrations/asana/disconnect   — deactivate (soft; preserves
+                                                     feedback_asana_tasks)
+  POST   /api/v1/integrations/asana/test         — re-validate stored token
+  GET    /api/v1/integrations/asana/workspaces   — list workspaces
+  GET    /api/v1/integrations/asana/projects     — list projects in a workspace
+  PATCH  /api/v1/integrations/asana/status-sync  — toggle inbound status sync + set mapping
+  POST   /api/v1/integrations/asana/sync         — manually enqueue an inbound status-sync run
 
 All endpoints require admin/owner role. Asana is a PAT-only integration
 against a fixed host (https://app.asana.com/api/1.0) — there is no
@@ -23,11 +26,12 @@ when LLM_ENCRYPTION_KEY is unset) and returns HTTP 422 — never a 500.
 """
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_org, get_current_user, require_admin_or_owner
@@ -77,7 +81,19 @@ class AsanaStatusResponse(BaseModel):
     last_sync_status: Optional[str] = None
     last_error: Optional[str] = None
     connected_at: Optional[datetime] = None
+    # Inbound status-sync fields (operator control surface)
+    status_sync_enabled: bool = False
+    last_status_synced_at: Optional[datetime] = None
     # api_token is intentionally NEVER included
+
+
+class AsanaStatusSyncUpdateRequest(BaseModel):
+    enabled: bool
+    status_mapping: Optional[Dict[str, str]] = None
+
+
+class AsanaSyncTriggerResponse(BaseModel):
+    status: str
 
 
 class AsanaDisconnectResponse(BaseModel):
@@ -158,6 +174,69 @@ def _require_active_integration(db: Session, org_id: int) -> AsanaIntegration:
 def _get_org_integration(db: Session, org_id: int) -> Optional[AsanaIntegration]:
     """Return the Asana integration row for an org regardless of is_active (for upsert/disconnect)."""
     return db.query(AsanaIntegration).filter(AsanaIntegration.organization_id == org_id).first()
+
+
+# Category keys accepted from the Asana completion→category adapter (mapping source) and
+# Rereflect workflow statuses (mapping target). Only `new`/`done` are meaningful for Asana;
+# `indeterminate` is accepted for forward-compat/parity with Jira but is inert here.
+VALID_ASANA_CATEGORIES = {"new", "indeterminate", "done"}
+VALID_WORKFLOW_STATUSES = {"new", "in_review", "resolved", "closed"}
+
+
+def _validate_status_mapping(mapping: Optional[Dict[str, str]]) -> None:
+    """422 if any status_mapping key/value falls outside the valid sets."""
+    if mapping is None:
+        return
+    for key, value in mapping.items():
+        if key not in VALID_ASANA_CATEGORIES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid status_mapping key '{key}'. Must be one of "
+                    f"{sorted(VALID_ASANA_CATEGORIES)}."
+                ),
+            )
+        if value not in VALID_WORKFLOW_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid status_mapping value '{value}' for key '{key}'. "
+                    f"Must be one of {sorted(VALID_WORKFLOW_STATUSES)}."
+                ),
+            )
+
+
+def _last_status_synced_at(db: Session, org_id: int) -> Optional[datetime]:
+    """Max FeedbackAsanaTask.last_status_synced_at across the org's linked tasks, or None."""
+    return (
+        db.query(func.max(FeedbackAsanaTask.last_status_synced_at))
+        .filter(FeedbackAsanaTask.organization_id == org_id)
+        .scalar()
+    )
+
+
+def _build_status_response(db: Session, org_id: int, row: AsanaIntegration) -> AsanaStatusResponse:
+    """Build the full AsanaStatusResponse (connection + status-sync fields) for an existing row."""
+    return AsanaStatusResponse(
+        connected=True,
+        token_hint=row.token_hint,
+        account_gid=row.account_gid,
+        display_name=row.display_name,
+        is_active=row.is_active,
+        last_synced_at=row.last_synced_at,
+        last_sync_status=row.last_sync_status,
+        last_error=row.last_error,
+        connected_at=row.connected_at,
+        status_sync_enabled=bool(row.status_sync_enabled),
+        last_status_synced_at=_last_status_synced_at(db, org_id),
+    )
+
+
+def _get_celery_app():
+    """Lazy accessor for the Celery client app — injectable in tests (mirrors
+    jira_integration.py's _get_celery_app)."""
+    from src.background.celery_client import get_celery_app
+    return get_celery_app()
 
 
 def get_decrypted_token(integration: AsanaIntegration) -> str:
@@ -300,21 +379,11 @@ def asana_status(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
 ):
-    """Return connection status. Never returns the api_token."""
+    """Return connection status (and inbound status-sync status). Never returns the api_token."""
     row = _get_active_integration(db, current_org.id)
     if not row:
         return AsanaStatusResponse(connected=False)
-    return AsanaStatusResponse(
-        connected=True,
-        token_hint=row.token_hint,
-        account_gid=row.account_gid,
-        display_name=row.display_name,
-        is_active=row.is_active,
-        last_synced_at=row.last_synced_at,
-        last_sync_status=row.last_sync_status,
-        last_error=row.last_error,
-        connected_at=row.connected_at,
-    )
+    return _build_status_response(db, current_org.id, row)
 
 
 @router.delete(
@@ -383,6 +452,101 @@ def asana_test(
     except Exception as exc:  # noqa: BLE001 — must never surface as a 500
         logger.warning("Asana test failed for org %s: %s", current_org.id, exc)
         return AsanaTestResponse(success=False, message=str(exc))
+
+
+# ────────────────────── Inbound status-sync operator controls ─────────────────
+
+
+@router.patch(
+    "/status-sync",
+    response_model=AsanaStatusResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def asana_update_status_sync(
+    payload: AsanaStatusSyncUpdateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle inbound Asana status sync and/or update the status_mapping override.
+
+    404 if the org has no Asana integration row at all (connected or not — the
+    setting is persisted on the integration row, so one must exist first).
+    422 if status_mapping contains a key outside {new, indeterminate, done}
+    or a value outside {new, in_review, resolved, closed}.
+    """
+    row = _get_org_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Asana integration found. Connect Asana first.",
+        )
+
+    _validate_status_mapping(payload.status_mapping)
+
+    row.status_sync_enabled = payload.enabled
+    if payload.status_mapping is not None:
+        row.status_mapping = payload.status_mapping
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "Asana status-sync updated for org %s (enabled=%s)",
+        current_org.id,
+        row.status_sync_enabled,
+    )
+    return _build_status_response(db, current_org.id, row)
+
+
+@router.post(
+    "/sync",
+    response_model=AsanaSyncTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def asana_trigger_sync(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually enqueue an inbound Asana status-sync run for this org.
+
+    Requires an ACTIVE Asana integration (400 if none — mirrors /test and the
+    create-task aspect's active-integration guard). Enqueues
+    sync_asana_org via Celery send_task (non-blocking). Never surfaces a 500 —
+    a broker/dispatch failure is reported as a clean 502.
+    """
+    integ = _get_active_integration(db, current_org.id)
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Asana integration.",
+        )
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.asana_sync.sync_asana_org",
+            args=[integ.id],
+        )
+    except Exception as exc:  # noqa: BLE001 — must never surface as a 500
+        logger.error(
+            "Asana status sync could not be enqueued for org %s (integration_id=%s): %s",
+            current_org.id,
+            integ.id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Asana status sync could not be enqueued. Please try again shortly.",
+        ) from exc
+
+    logger.info(
+        "Asana status sync manually triggered for org %s (integration_id=%s)",
+        current_org.id,
+        integ.id,
+    )
+    return AsanaSyncTriggerResponse(status="queued")
 
 
 @router.get(
