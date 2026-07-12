@@ -744,9 +744,12 @@ enrichment are available to every organization running the app.
 
 Like Jira, Rereflect writes *out* to Asana — it creates tasks directly from
 feedback items, with sentiment and customer context included automatically.
-Asana is **not** a CRM and does not enrich the Customer 360 profile. This is
-**one-way, outbound task creation**: Rereflect does not sync task status,
-assignees, or comments back in from Asana.
+Asana is **not** a CRM and does not enrich the Customer 360 profile. Task
+**creation** is outbound, but Rereflect can optionally sync a linked task's
+**completion status** back onto the feedback item (see
+[Syncing Asana status back to feedback](#syncing-asana-status-back-to-feedback-opt-in)
+below). It still does not pull assignees, comments, or due dates back in from
+Asana.
 
 ### 1. Mint a Personal Access Token
 
@@ -776,6 +779,46 @@ token is never returned in any API response or shown again in the UI.
   link back to the originating feedback. Creating a task twice from the same
   feedback item surfaces the existing linked task instead of duplicating it.
 
+### Syncing Asana status back to feedback (opt-in)
+
+Once a task is linked, Rereflect can optionally keep the feedback item's
+status in step with the Asana task — so when the task is marked complete, the
+feedback item follows without anyone updating it by hand.
+
+- **Off by default.** Turn it on under **Settings → Integrations → Asana**
+  with the status-sync toggle (admin/owner). The tile shows the last sync
+  time and any error, plus a **Sync now** button.
+- **Poll-based (works behind a firewall).** A background job checks your
+  linked tasks every ~15 minutes over the same personal access token — no
+  webhook or public URL required, so it works on a self-hosted box behind
+  NAT. Real-time Asana webhooks are **not** part of this release.
+- **Completion-based mapping — Asana has only two states.** An Asana task is
+  either **completed** or **not**, so Rereflect maps:
+  - not completed → `new`
+  - completed → `resolved`
+  The default mapping is `{done: resolved, new: new}`. There is **no
+  `in_review` / intermediate state** from Asana in this release — unlike
+  Jira, which exposes a real "in progress" status category, Asana only
+  exposes a completed/not-completed flag on a task. Section-name or
+  custom-field mapping that could add an intermediate state is a planned v2
+  follow-up.
+- **Remap per-organization.** Override the mapping via
+  `PATCH /api/v1/integrations/asana/status-sync` with
+  `{ "enabled": true, "status_mapping": { "done": "closed" } }`
+  (admin/owner) — e.g. resolve to `closed` instead of `resolved`. Invalid
+  keys/values are rejected (422).
+- **Non-destructive and bidirectional.** Turning it on does **not**
+  retroactively rewrite feedback you already linked — the first poll records
+  the task's current state as a baseline and only moves a feedback item when
+  the task *changes* afterward. If a task is later **re-opened** in Asana
+  (completed → not completed), the linked feedback reverts back toward
+  `new`, with a timeline entry recording the change (tagged `source=asana`).
+  If a feedback item is linked to several Asana tasks, the most-advanced
+  status wins.
+
+Real-time webhook sync, section/custom-field → intermediate-state mapping,
+and OAuth connection are planned for a future release.
+
 ### Known limitation: team-scoped projects
 
 Rereflect lists projects with a **flat workspace → project picker**
@@ -789,9 +832,9 @@ projects can be selected.
 
 ### All features unlocked
 
-Because Rereflect is self-hosted and open-source, Asana task creation has no
-plan gate, seat limit, or usage cap — it's available to every organization
-running the app.
+Because Rereflect is self-hosted and open-source, Asana task creation and
+status-sync have no plan gate, seat limit, or usage cap — they're available
+to every organization running the app.
 
 ## Production notes
 
