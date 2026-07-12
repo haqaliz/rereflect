@@ -12,6 +12,12 @@ export interface AsanaConnectionStatus {
   last_sync_status: string | null;
   last_error: string | null;
   connected_at: string | null;
+  // Inbound status sync (asana-status-sync). Opt-in poller that pulls
+  // Asana task completion back onto linked feedback. `last_sync_status` /
+  // `last_error` above are shared with the general connection status but
+  // are also updated by the status-sync poller.
+  status_sync_enabled: boolean;
+  last_status_synced_at: string | null;
 }
 
 export interface AsanaConnectRequest {
@@ -77,6 +83,10 @@ export interface AsanaLinkedTask {
   created_at: string;
 }
 
+export interface AsanaSyncTriggerResponse {
+  status: string;
+}
+
 // ---- API ----
 
 export const asanaAPI = {
@@ -124,3 +134,23 @@ export const asanaAPI = {
     return response.data;
   },
 };
+
+// Inbound status sync (asana-status-sync). Kept as standalone exports —
+// used directly by AsanaStatusSyncCard, mirroring the Jira status-sync
+// client shape but exposed at module scope.
+
+export async function patchAsanaStatusSync(
+  enabled: boolean,
+  statusMapping?: Record<string, string>
+): Promise<AsanaConnectionStatus> {
+  const response = await apiClient.patch('/api/v1/integrations/asana/status-sync', {
+    enabled,
+    ...(statusMapping !== undefined ? { status_mapping: statusMapping } : {}),
+  });
+  return response.data;
+}
+
+export async function triggerAsanaSync(): Promise<AsanaSyncTriggerResponse> {
+  const response = await apiClient.post('/api/v1/integrations/asana/sync');
+  return response.data;
+}

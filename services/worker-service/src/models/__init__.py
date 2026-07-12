@@ -1187,3 +1187,52 @@ class FeedbackJiraIssue(Base):
         Index('ix_feedback_jira_issues_org_id', 'organization_id'),
         Index('ix_feedback_jira_issues_feedback_id', 'feedback_id'),
     )
+
+
+class AsanaIntegration(Base):
+    """Asana connection per org — no-FK mirror for worker read access
+    (asana-status-sync, model-migrations aspect).
+
+    MINIMAL mirror: only the columns the Asana sync task will read/write.
+    Keep in sync with services/backend-api/src/models/asana_integration.py.
+    Asana is Bearer PAT + fixed host app.asana.com — no site_url/email (contrast Jira).
+    """
+    __tablename__ = "asana_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    api_token = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    status_mapping = Column(JSON, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String(50), nullable=True)
+    last_error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', name='uq_asana_integrations_org_id'),
+        Index('ix_asana_integrations_org_id', 'organization_id'),
+    )
+
+
+class FeedbackAsanaTask(Base):
+    """Links feedback items to Asana tasks — no-FK mirror for worker read access
+    (asana-status-sync, model-migrations aspect).
+
+    MINIMAL mirror: only the columns the Asana sync task will read/write.
+    Keep in sync with services/backend-api/src/models/asana_integration.py.
+    """
+    __tablename__ = "feedback_asana_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    feedback_id = Column(Integer, nullable=False)
+    asana_task_gid = Column(String(255), nullable=False)
+    asana_completed = Column(Boolean, nullable=True)
+    asana_status_category = Column(String(20), nullable=True)
+    last_status_synced_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index('ix_feedback_asana_tasks_org_id', 'organization_id'),
+        Index('ix_feedback_asana_tasks_feedback_id', 'feedback_id'),
+    )

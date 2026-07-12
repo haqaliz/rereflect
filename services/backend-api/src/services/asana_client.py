@@ -249,3 +249,37 @@ class AsanaClient:
             url = fallback.json().get("data", {}).get("permalink_url")
 
         return {"gid": gid, "url": url}
+
+    # ------------------------------------------------------------------
+    # get_task (asana-client-get-task aspect)
+    # ------------------------------------------------------------------
+
+    def get_task(self, task_gid: str) -> dict:
+        """
+        Fetch a single task's completion state via
+        `GET /tasks/{gid}?opt_fields=completed,completed_at,memberships.section.name`.
+
+        There is no batch endpoint — Asana has no JQL-style `issue in (...)`,
+        so the poller calls this once per linked task gid.
+
+        Returns:
+            dict with `completed` (bool), `completed_at` (str|None),
+            `memberships` (list, `[]` when absent from the payload).
+
+        Raises:
+            AsanaAuthError: on 401/403 (invalid/expired token).
+            AsanaTransientError: on 429 or 5xx. No `Retry-After` handling
+                here by design — that throttle behavior lives only in the
+                worker-owned client (services/worker-service/src/clients/asana.py).
+            AsanaNotFoundError: on 404 (task deleted/moved).
+        """
+        resp = self._get(
+            f"/tasks/{task_gid}",
+            params={"opt_fields": "completed,completed_at,memberships.section.name"},
+        )
+        data = resp.json().get("data", {})
+        return {
+            "completed": data.get("completed"),
+            "completed_at": data.get("completed_at"),
+            "memberships": data.get("memberships") or [],
+        }

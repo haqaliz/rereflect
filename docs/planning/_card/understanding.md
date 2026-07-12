@@ -1,87 +1,94 @@
-# Phase 2 — Deep-dig understanding: jira-status-sync
+# Understanding — feat/asana-status-sync (Phase 2 deep dig)
 
-Grounded in three read-only dig agents. All refs are primary-checkout `file:line`.
+Synthesis of three read-only mapping agents (Jira reconcile core, Asana integration, frontend tiles).
 
-## What the feature really is
-Close the Jira integration loop: the outbound slice (shipped 2026-07-05) only *creates* Jira
-issues from feedback. When that Jira issue later moves (e.g. → Done), the linked Rereflect
-feedback item's `workflow_status` should follow. **Poll-first** (self-host is often behind NAT;
-webhook is optional v2).
+## What the feature really asks
 
-## The exact mirror that already exists (Linear)
-`services/backend-api/src/api/routes/linear_webhook.py` does inbound status-sync **via webhook**:
-- looks up `FeedbackLinearIssue` by `linear_issue_id` (lines 124-138),
-- maps by a DB table `LinearStatusMapping` keyed on **`linear_status_type`** (backlog/unstarted/
-  started/completed/canceled) → `rereflect_status` (lines 141-177),
-- writes `feedback.workflow_status` **directly** (line 176) — does NOT call `apply_status_change`,
-  emits a `linear_status_changed` timeline event (line 184), fires **no** outbound webhook.
+Close the Asana integration loop the way `jira-status-sync` (merged 2026-07-12) closed Jira's:
+poll Asana for the completion state of tasks Rereflect created from feedback, and reflect it back
+onto the linked feedback item's `workflow_status` — **opt-in per org, off by default**,
+non-destructive first-poll seed, one `status_changed` timeline event tagged `source=asana`.
 
-**Design lesson:** map by Jira **`statusCategory`** (`new` / `indeterminate` / `done` — the 3
-Jira category keys), NOT brittle free-text status names, exactly as Linear maps by *type*.
+The Jira feature is a **ready-made 7-layer blueprint**; Asana is a near-mechanical mirror. The
+only genuinely provider-specific pieces are (a) Asana's status model, (b) the `"source":"asana"`
+metadata tags, and (c) the Asana API client (no JQL batch — one GET per task).
 
-## Ground truth: workflow_status
-- `services/backend-api/src/models/feedback.py:65` — `workflow_status String(50)` default `"new"`,
-  not a DB enum.
-- Valid values (route-enforced): **`new`, `in_review`, `resolved`, `closed`**
-  (`api/routes/workflow.py:29`; `api/routes/public_api.py:322`). → **brief's `in_progress` is
-  invalid; use `in_review`.**
-- Shared helper `apply_status_change(db, feedbacks, new_status, *, organization_id, actor_id,
-  actor_label, resolution_note)` — `services/workflow_service.py:15-50`. No-op on same value;
-  mutates status; emits ONE `status_changed` `FeedbackWorkflowEvent`; returns changed items.
-  Caller drives commit + cache-invalidate + `dispatch_status_webhooks` (see `workflow.py:160-197`).
+## The reusable spine (do NOT rebuild)
 
-## Zero-config default mapping (corrected)
-| Jira statusCategory (key) | → workflow_status |
-|---|---|
-| `done` | `resolved` |
-| `indeterminate` | `in_review` |
-| `new` (To Do) | `new` |
-`closed` is not auto-targeted by the default (reserve for explicit user mapping).
+- **Pure reconcile core** — `services/{backend-api,worker-service}/src/services/status_sync_core.py`
+  (duplicated verbatim; worker can't import backend). Zero-I/O, stdlib-only. Public surface:
+  `VALID_STATUSES=("new","in_review","resolved","closed")`, `DEFAULT_CATEGORY_MAP={done:resolved,
+  indeterminate:in_review, new:new}`, `CATEGORY_RANK`, `resolve_target_status(category, mapping)`,
+  `is_seed()`, `most_advanced(categories)`, `decide_link_update(fetched_cat, fetched_name,
+  stored_cat) -> (action, ...)` where action ∈ seed|noop|changed. **Reuse as-is.**
+- **Contract an adapter must satisfy:** emit each external item's `{name, category}` where
+  `category ∈ {done, indeterminate, new}`. The core does the rest (mapping override, most-advanced,
+  seed/noop/changed).
+- **`workflow_status`** is a `String(50)` allow-list (`feedback.py:65`), canonical values in
+  `workflow.py:29` — provider-agnostic, no change.
+- **Worker `apply_status_change_worker(db, feedback, new_status, *, organization_id, actor_label,
+  metadata)`** (`worker-service/src/tasks/jira_sync.py:130-179`) — no-ops on same status, writes ONE
+  `FeedbackWorkflowEvent(event_type="status_changed", old/new_value, metadata_=...)`. **Source
+  tagging is caller-supplied metadata.** Body is fully provider-agnostic → lift to a shared worker
+  helper (or copy with `source="asana"`).
 
-## Existing Jira plumbing to REUSE (dig agent 1)
-- `JiraIntegration` (`models/jira_integration.py:17-33`): one row/org, `site_url`, `email`,
-  Fernet `api_token`, `is_active`, `last_synced_at`, `last_sync_status`, `last_error`.
-- `FeedbackJiraIssue` (`:44-62`): `feedback_id`, `jira_issue_id`, `jira_issue_key`,
-  `jira_issue_url`, `jira_issue_title` — **no status field, no synced-at.**
-- `services/jira_client.py`: Basic-auth httpx client, error taxonomy (`JiraAuthError` 401/403,
-  `JiraTransientError` 429/5xx, `JiraNotFoundError` 404), `_get`/`_post`, `validate/get_projects/
-  get_issue_types/create_issue`. **No `get_issue`/JQL `search` method — must add.**
-- Encryption: `utils/encryption.py` `encrypt_api_key`/`decrypt_api_key` (`LLM_ENCRYPTION_KEY`).
-- Timeline: `_add_timeline_entry` (`routes/jira_integration.py:258-275`) writes `FeedbackWorkflowEvent`;
-  existing event strings: `jira_issue_created`, `asana_task_created`, `linear_status_changed`.
+## Key design decision — Asana's status model → the 3-bucket vocabulary
 
-## Worker/beat pattern to CLONE (dig agent 3) — Zendesk poller
-**The worker does NOT import backend-api** — it mirrors models + duplicates clients against the
-shared DB. So we add a worker-side `JiraIntegration` mirror + `services/worker-service/src/clients/
-jira.py` + `services/worker-service/src/tasks/jira_sync.py`.
-- Two-task fan-out: `sync_all_jira` (query active integrations, `sync_jira_org.delay(id)` each,
-  per-org try/except) + `sync_jira_org` (`@shared_task(bind=True, max_retries=3,
-  default_retry_delay=30)`) — mirror `tasks/zendesk_sync.py:339-385`.
-- 429/`Retry-After` throttle in the client `_handle_response` → `JiraTransientError`; task
-  `raise self.retry(exc)` (mirror `clients/zendesk.py:102-125`, `zendesk_sync.py:296-314`).
-- Cursor: reuse `integ.last_synced_at`; only act when Jira category changed vs stored `jira_status`
-  → natural guard against clobbering manual edits + against re-writing every poll.
-- Terminal status durability: write `last_sync_status`/`last_error` in a fresh session on failure
-  (`zendesk_sync.py:97-133`).
-- Beat: add `"src.tasks.jira_sync"` to `include` (`celery_app.py:36-56`) + a beat entry (mirror
-  Zendesk `900.0` = 15 min, `celery_app.py:231-234`).
-- Manual "sync now": backend `POST /api/v1/integrations/jira/sync` → `send_task(
-  "src.tasks.jira_sync.sync_jira_org", args=[integ.id])` (mirror `zendesk_integration.py:516-565`).
+Asana has **no `statusCategory`**. A task exposes `completed` (bool) + `memberships[].section`.
+**Decision (slice 1):** the Asana adapter maps `completed=true → "done"`, `completed=false → "new"`
+— it emits only two of the three category keys, never `indeterminate`. This lets us reuse the
+core AND the `status_mapping` override shape **verbatim** (default `{done:resolved, new:new}`).
+Section-name / custom-field → `indeterminate` mapping is **deferred to v2**.
 
-## Net new work (slice 1)
-1. `feedback_jira_issues`: add `jira_status` (+ `jira_status_category`) + `last_status_synced_at`
-   — Alembic migration + backend model + worker mirror.
-2. Status-mapping store: JSON column on `jira_integrations` (slice-1 simple) with zero-config
-   default in code — OR a `JiraStatusMapping` table mirroring Linear (more consistent; costs a
-   table). **PRD decision.**
-3. Poll enablement flag: on-by-default vs opt-in `status_sync_enabled` (off by default, CRM/usage
-   precedent, since it mutates `workflow_status`). **PRD decision (product).**
-4. `JiraClient.get_issue(key)` / `search_issues(jql)` (batch by `issue in (...)`), backend + worker.
-5. Worker poller task + beat + manual `/sync` route.
-6. Apply status: route through `apply_status_change` (dedup + cache + subscriber webhooks, stamp
-   `actor_label="jira-sync"`) vs Linear-style silent direct-write + `jira_status_synced` event.
-   **PRD decision.** No echo-loop risk today (outbound Jira never pushes status back).
+## What exists vs what must be built
 
-## Reconcile/mapping core → later Zendesk/Asana reuse
-Factor a provider-agnostic "given (external status category, mapping) → target workflow_status,
-apply + record" core so Zendesk/Asana inbound-sync (both deferred v2) can adopt it.
+**Already exists (reuse):**
+- `AsanaIntegration` model (`models/asana_integration.py`) — encrypted PAT, org-unique, and already
+  carries `last_synced_at` / `last_sync_status` / `last_error` (written today only by the create-task
+  error path — reuse for sync status).
+- `FeedbackAsanaTask` link (`asana_task_gid`, `feedback_id`, `organization_id`, url, name) — the poll set.
+- `AsanaClient` (`services/asana_client.py`) — fixed host `app.asana.com`, Bearer auth, error taxonomy
+  (`AsanaError/AuthError/TransientError/NotFoundError`). Backend-only; **no worker footprint at all.**
+- Frontend `JiraStatusSyncCard.tsx` + `jira.ts` client — copyable line-for-line.
+
+**Must build (the gap list):**
+1. **`AsanaClient.get_task(task_gid)`** → `GET /tasks/{gid}?opt_fields=completed,completed_at,memberships.section.name`
+   returning `{completed, completed_at, memberships}`. **No batch** (Asana has no JQL `in(...)`) — one
+   GET per gid; add `Retry-After` handling (absent today; worker `JiraClient` sleeps on 429).
+2. **`FeedbackAsanaTask` new columns** — `asana_completed` (Bool), `asana_status_category` (String(20)),
+   `last_status_synced_at` (DateTime) + migration.
+3. **`AsanaIntegration` new columns** — `status_sync_enabled` (Bool, default False, server_default false)
+   + `status_mapping` (JSON) + migration (chain off the current single alembic head — VERIFY head first;
+   repo has had multi-head issues).
+4. **Backend routes** on `routes/asana_integration.py` — `PATCH /api/v1/integrations/asana/status-sync`
+   (toggle + validated `status_mapping`, 422 on bad keys/values, `require_admin_or_owner`),
+   `POST /api/v1/integrations/asana/sync` (202, enqueue `sync_asana_org`, 502 on broker failure),
+   and extend `GET /status` with `status_sync_enabled` + `last_status_synced_at`
+   (`MAX(FeedbackAsanaTask.last_status_synced_at)`).
+5. **Worker service (all new for Asana)** — worker `AsanaClient` copy under `src/clients/`, worker
+   mirror models (`AsanaIntegration` + `FeedbackAsanaTask`, no FKs, own `_decrypt`), `src/tasks/asana_sync.py`
+   (`sync_all_asana` fan-out over active + `status_sync_enabled`; `sync_asana_org` retryable;
+   `_sync_asana_org_body(integration_id, db, client=None)` injectable), reuse the pure `status_sync_core.py`,
+   add `"src.tasks.asana_sync"` to celery `include` + a `sync-asana-status-every-15-min` (900s) beat entry.
+6. **Frontend** — new `components/settings/AsanaStatusSyncCard.tsx` (copy of Jira card, jira→asana),
+   add `patchAsanaStatusSync` + `triggerAsanaSync` + `AsanaSyncTriggerResponse` to `lib/api/asana.ts`,
+   add `status_sync_enabled` + `last_status_synced_at` to `AsanaConnectionStatus` (+ `handleConnect`
+   literal), render the card on `settings/integrations/asana/page.tsx` (~line 351, admin/owner only).
+
+## Ambiguities / open questions for the PRD interview
+- **Un-completion behavior:** if an Asana task is reopened (`completed` flips true→false), the adapter
+  emits `new`, which would move `workflow_status` resolved→new. Jira reflects reopens for parity — do we
+  want the same, or should Asana sync be forward-only (done→resolved, never revert)? **Lean: mirror Jira
+  (reflect reopen), it falls out of the core for free** — confirm.
+- **Poll cadence:** 15 min like Jira/Zendesk (default). Confirm.
+- **N-GET fan-out:** no batch endpoint → one GET per linked task. Per-org throttle + Retry-After needed;
+  acceptable for self-hosted volumes. Confirm no hard cap needed in slice 1.
+- **`status_mapping` keys exposed to operators:** only `done`/`new` are meaningful for Asana in slice 1
+  (no `indeterminate`). Validate against that reduced set, or accept all 3 keys for forward-compat?
+
+## Contradiction / risk flags
+- The reconcile core's `DEFAULT_CATEGORY_MAP` includes `indeterminate → in_review`; Asana never emits it
+  in slice 1, so that entry is inert (harmless). No code change needed, but the operator-facing mapping
+  UI/docs should not imply Asana has an intermediate state.
+- Repo has a documented multi-alembic-head gotcha — the new migration must chain off the verified current
+  single head (the Jira status-sync migration already had to correct a stale down_revision). Verify at plan time.
