@@ -54,6 +54,7 @@ celery_app = Celery(
         "src.tasks.salesforce_writeback",
         "src.tasks.zendesk_sync",
         "src.tasks.jira_sync",
+        "src.tasks.zendesk_status_sync",
         "src.tasks.asana_sync",
     ],
 )
@@ -239,6 +240,13 @@ celery_app.conf.beat_schedule = {
     # Phase 4). Fixed-interval cadence, same style as sync-zendesk-every-15-min.
     "sync-jira-status-every-15-min": {
         "task": "src.tasks.jira_sync.sync_all_jira",
+        "schedule": 900.0,  # every 15 minutes
+    },
+    # Poll Zendesk ticket status every 15 minutes (zendesk-status-sync/poll-task
+    # aspect — see docs/planning/zendesk-status-sync/poll-task/plan_20260712.md
+    # Phase 4). Fixed-interval cadence, same style as sync-jira-status-every-15-min.
+    "sync-zendesk-status-every-15-min": {
+        "task": "src.tasks.zendesk_status_sync.sync_all_zendesk_status",
         "schedule": 900.0,  # every 15 minutes
     },
     # Poll Asana task completion every 15 minutes (asana-status-sync/worker-sync-task

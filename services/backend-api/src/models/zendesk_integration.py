@@ -7,7 +7,8 @@ nullable — it is generated at connect time (secrets.token_urlsafe(32)), not
 supplied by the operator. Encryption happens in the route layer, not here.
 See src/utils/encryption.py.
 """
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, UniqueConstraint
+import sqlalchemy as sa
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, UniqueConstraint, JSON
 from datetime import datetime
 from .base import Base
 
@@ -31,6 +32,10 @@ class ZendeskIntegration(Base):
     last_synced_at = Column(DateTime, nullable=True)
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
+    status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status_mapping = Column(JSON, nullable=True)  # {zendesk_status: rereflect_status}
+    last_status_synced_at = Column(DateTime, nullable=True)
+    last_status_sync_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

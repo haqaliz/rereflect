@@ -32,8 +32,11 @@ from sqlalchemy.orm import Session
 
 from src.models.organization import Organization
 from src.models.zendesk_integration import ZendeskIntegration
+from src.models.feedback import FeedbackItem
 from src.models.feedback_source import FeedbackSource
 from src.models.feedback_source_event import FeedbackSourceEvent
+from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+from src.models.feedback_zendesk_sync import FeedbackZendeskSync
 from src.utils.encryption import encrypt_api_key
 
 
@@ -60,6 +63,24 @@ def _valid_ticket_payload(ticket_id=35436, subdomain=SUBDOMAIN):
             "status": "new",
             "requester_email": "jane@customer.example.com",
             "tags": ["login"],
+        },
+    }
+
+
+# Anti-spoof discriminator (webhook-realtime aspect, design task #3): the
+# operator's Zendesk UPDATE-trigger body must set this exact field/value so
+# the status-change branch can never be reached via the ingestion trigger's
+# (or an attacker's) payload shape. See docs/SELF_HOSTING.md.
+STATUS_CHANGE_EVENT = "ticket.status_changed"
+
+
+def _status_change_payload(ticket_id=35436, status="solved", subdomain=SUBDOMAIN):
+    return {
+        "event": STATUS_CHANGE_EVENT,
+        "subdomain": subdomain,
+        "ticket": {
+            "id": ticket_id,
+            "status": status,
         },
     }
 
@@ -681,3 +702,343 @@ class TestZendeskWebhookNever500s:
             )
         assert WEBHOOK_SECRET_PLAIN not in response.text
         assert sig not in response.text
+
+
+# ============================================================================
+# Phase 6 (webhook-realtime aspect) — status-change branch
+#
+# Discriminator (anti-spoof, design task #3): payload["event"] ==
+# "ticket.status_changed" (see STATUS_CHANGE_EVENT / _status_change_payload
+# above). This field is NOT present in the ingestion trigger's payload
+# shape, so an ingestion delivery can never accidentally (or maliciously)
+# reach the status-change branch, and vice versa.
+# ============================================================================
+
+
+def _make_linked_feedback(
+    db: Session, org_id: int, ticket_id, workflow_status="in_review"
+) -> FeedbackItem:
+    feedback = FeedbackItem(
+        organization_id=org_id,
+        text="It crashes on export",
+        source="zendesk",
+        source_external_id=str(ticket_id),
+        workflow_status=workflow_status,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return feedback
+
+
+def _make_sidecar(db: Session, feedback_id: int, last_ticket_status: str) -> FeedbackZendeskSync:
+    from datetime import datetime
+
+    row = FeedbackZendeskSync(
+        feedback_id=feedback_id,
+        last_ticket_status=last_ticket_status,
+        last_status_synced_at=datetime.utcnow(),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _events_for(db: Session, feedback_id: int):
+    return (
+        db.query(FeedbackWorkflowEvent)
+        .filter(FeedbackWorkflowEvent.feedback_id == feedback_id)
+        .all()
+    )
+
+
+class TestZendeskStatusChangeWebhook:
+    """Tests for the status-change branch of POST /api/v1/webhooks/zendesk/events."""
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_verified_status_event_sync_on_resolves_feedback_one_event(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 35436, workflow_status="in_review")
+        _make_sidecar(db, feedback.id, "open")
+
+        payload = _status_change_payload(ticket_id=35436, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        mock_queue.assert_not_called()
+
+        db.refresh(feedback)
+        assert feedback.workflow_status == "resolved"
+
+        events = _events_for(db, feedback.id)
+        assert len(events) == 1
+        assert events[0].event_type == "status_changed"
+        assert events[0].old_value == "in_review"
+        assert events[0].new_value == "resolved"
+        assert events[0].metadata_["source"] == "zendesk"
+        assert events[0].metadata_["zendesk_status"] == "solved"
+        assert events[0].metadata_["zendesk_ticket_id"] == "35436"
+
+        sidecar = db.get(FeedbackZendeskSync, feedback.id)
+        assert sidecar.last_ticket_status == "solved"
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_sync_disabled_acks_200_no_change_no_event(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        zendesk_integration.status_sync_enabled = False
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 35436, workflow_status="in_review")
+        _make_sidecar(db, feedback.id, "open")
+
+        payload = _status_change_payload(ticket_id=35436, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        mock_queue.assert_not_called()
+
+        db.refresh(feedback)
+        assert feedback.workflow_status == "in_review"
+        assert _events_for(db, feedback.id) == []
+
+        sidecar = db.get(FeedbackZendeskSync, feedback.id)
+        assert sidecar.last_ticket_status == "open"
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_first_observation_via_webhook_seeds_no_apply(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 35436, workflow_status="new")
+
+        payload = _status_change_payload(ticket_id=35436, status="open")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        mock_queue.assert_not_called()
+
+        db.refresh(feedback)
+        assert feedback.workflow_status == "new"
+        assert _events_for(db, feedback.id) == []
+
+        sidecar = db.get(FeedbackZendeskSync, feedback.id)
+        assert sidecar is not None
+        assert sidecar.last_ticket_status == "open"
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_unlinked_ticket_is_200_noop(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+
+        payload = _status_change_payload(ticket_id=99999, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        mock_queue.assert_not_called()
+        assert db.query(FeedbackWorkflowEvent).count() == 0
+        assert db.query(FeedbackZendeskSync).count() == 0
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_bad_signature_rejected_401_status_branch(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 35436, workflow_status="in_review")
+        _make_sidecar(db, feedback.id, "open")
+
+        payload = _status_change_payload(ticket_id=35436, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        wrong_sig = _make_zendesk_signature(body, timestamp, "wrong-secret")
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": wrong_sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 401
+        mock_queue.assert_not_called()
+        db.refresh(feedback)
+        assert feedback.workflow_status == "in_review"
+        assert _events_for(db, feedback.id) == []
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_missing_hmac_rejected_401_status_branch(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        payload = _status_change_payload(ticket_id=35436, status="solved")
+        body = json.dumps(payload).encode()
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+
+        assert response.status_code == 401
+        mock_queue.assert_not_called()
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_idempotency_two_reconciles_same_change_single_event(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        """Webhook redelivered (or webhook + poll) on the SAME change must
+        result in exactly one status_changed event total -- the second
+        reconcile sees fetched == already-stored status -> noop
+        (change-gate closes the idempotency window)."""
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 35436, workflow_status="in_review")
+        _make_sidecar(db, feedback.id, "open")
+
+        payload = _status_change_payload(ticket_id=35436, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+        headers = {
+            "Content-Type": "application/json",
+            "X-Zendesk-Webhook-Signature": sig,
+            "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+        }
+
+        response1 = client.post("/api/v1/webhooks/zendesk/events", content=body, headers=headers)
+        response2 = client.post("/api/v1/webhooks/zendesk/events", content=body, headers=headers)
+
+        assert response1.status_code == 200
+        assert response2.status_code == 200
+        db.refresh(feedback)
+        assert feedback.workflow_status == "resolved"
+        assert len(_events_for(db, feedback.id)) == 1
+
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_ticket_id_zero_boundary_not_treated_as_missing(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        """A literal ticket id of 0 is a valid (if unusual) Zendesk ticket id
+        and must NOT be treated as a missing ticket_id -- `not ticket_id`
+        is falsy for 0, so the guard must use `ticket_id is None` instead."""
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 0, workflow_status="in_review")
+        _make_sidecar(db, feedback.id, "open")
+
+        payload = _status_change_payload(ticket_id=0, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() != {"status": "ignored", "reason": "missing_ticket_id_or_status"}
+        mock_queue.assert_not_called()
+
+        db.refresh(feedback)
+        assert feedback.workflow_status == "resolved"
+        events = _events_for(db, feedback.id)
+        assert len(events) == 1
+        assert events[0].metadata_["zendesk_ticket_id"] == "0"
+
+    @patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-zd-ingest")
+    def test_ingestion_ticket_created_path_unchanged_characterization(
+        self, mock_queue, client: TestClient, zendesk_integration, zendesk_source, db: Session
+    ):
+        """Characterization: a normal ingestion payload (no `event` field --
+        the discriminator is absent, exactly as today's operator-configured
+        creation trigger sends it) must still queue via the untouched
+        ticket.created path, byte-identical to the pre-existing behavior."""
+        payload = _valid_ticket_payload(ticket_id=77777)
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "queued"
+        mock_queue.assert_called_once_with(
+            source_type="zendesk",
+            external_event_id="77777",
+            event_type="ticket.created",
+            event_data={"ticket": payload["ticket"], "subdomain": SUBDOMAIN},
+            provider_context={"subdomain": SUBDOMAIN},
+        )

@@ -286,8 +286,8 @@ export const integrations: Integration[] = [
   {
     slug: 'zendesk',
     name: 'Zendesk',
-    tagline: 'Turn new support tickets into analyzed feedback automatically',
-    description: 'Connect Zendesk and let Rereflect analyze every new support ticket — subject and description — for sentiment, pain points, and churn risk, mapping each one to the requester in Customer 360.',
+    tagline: 'Turn tickets into analyzed feedback — and sync status back automatically',
+    description: 'Connect Zendesk and let Rereflect analyze every new support ticket — subject and description — for sentiment, pain points, and churn risk, mapping each one to the requester in Customer 360. Opt in and Rereflect syncs the feedback item\'s status back too, so it follows the ticket to Solved on its own.',
     status: 'available',
     color: 'chart-3',
     gradient: 'from-[#03363D] to-[#17494D]',
@@ -298,6 +298,7 @@ export const integrations: Integration[] = [
       { step: '1', title: 'Connect Zendesk', description: 'Paste your Zendesk subdomain, agent email, and an API token to authorize Rereflect — no OAuth redirect required.' },
       { step: '2', title: 'Tickets Flow In', description: 'Rereflect polls for new tickets automatically from the moment you connect. Want real-time? Wire an optional Zendesk trigger/webhook.' },
       { step: '3', title: 'AI Extracts Insights', description: 'Every ticket is analyzed for sentiment, categorized, flagged for churn risk, and mapped to the requester in Customer 360.' },
+      { step: '4', title: 'Status Syncs Back', description: 'Turn on status-sync and the feedback item follows the ticket — moving to In Review or Resolved as the agent works it, via a 15-minute poll plus an optional real-time webhook trigger.' },
     ],
     features: [
       { title: 'Ticket Analysis', description: 'Each ticket\'s subject and description are analyzed for sentiment, pain points, and feature requests — automatically.', icon: 'FileText' },
@@ -306,6 +307,7 @@ export const integrations: Integration[] = [
       { title: 'Requester Mapping', description: 'Every ticket is mapped to its requester by email, feeding Customer 360, health scores, and churn signals like any other source.', icon: 'Users' },
       { title: 'Churn Risk Detection', description: 'AI flags frustrated customers from ticket tone and content before they cancel — so you can step in early.', icon: 'AlertTriangle' },
       { title: 'Exactly-Once Ingestion', description: 'Tickets are de-duplicated by ticket ID across polling and webhooks, so you never get duplicate feedback for the same ticket.', icon: 'Shield' },
+      { title: 'Status Sync (Poll + Real-Time)', description: 'Opt in and Rereflect keeps the feedback item\'s status in step with the Zendesk ticket — a 15-minute poll works behind any firewall, and an optional webhook trigger applies the change the moment an agent updates the ticket.', icon: 'RefreshCw' },
     ],
     useCases: [
       { persona: 'Head of Support', role: 'SaaS company, 100+ tickets/day', quote: 'We had thousands of Zendesk tickets and no way to see the big picture. Rereflect surfaced our top 3 recurring issues within a week — we fixed them and ticket volume dropped.', icon: 'Headphones' },
@@ -320,6 +322,7 @@ export const integrations: Integration[] = [
       { step: 4, title: 'Rereflect validates & starts ingesting', description: 'Rereflect verifies the token, encrypts it at rest, and creates a Zendesk feedback source so new tickets flow in. The token is never shown again.' },
       { step: 5, title: 'Optional: turn on real-time', description: 'Copy the webhook URL and signing secret from Rereflect, then create a Zendesk webhook and a "Ticket is created" trigger pointing at it. Otherwise Rereflect polls automatically.' },
       { step: 6, title: 'Watch tickets become feedback', description: 'New tickets appear within minutes — analyzed for sentiment and mapped to the requester in Customer 360.' },
+      { step: 7, title: 'Optional: turn on status-sync', description: 'Enable status-sync to keep feedback status matched to the ticket — via the 15-minute poll always, plus a second "Ticket updated" trigger on the same webhook (tagged "event": "ticket.status_changed") for instant updates.' },
     ],
   },
   {

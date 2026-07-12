@@ -1130,6 +1130,10 @@ class ZendeskIntegration(Base):
     last_synced_at = Column(DateTime, nullable=True)
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
+    status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    status_mapping = Column(JSON, nullable=True)
+    last_status_synced_at = Column(DateTime, nullable=True)
+    last_status_sync_error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -1137,6 +1141,21 @@ class ZendeskIntegration(Base):
         UniqueConstraint('organization_id', name='uq_zendesk_integrations_org_id'),
         Index('ix_zendesk_integrations_org_id', 'organization_id'),
     )
+
+
+class FeedbackZendeskSync(Base):
+    """Sidecar remembering the last-observed Zendesk ticket status per feedback item
+    (reconcile-core-and-model aspect) — no-FK mirror for worker read/write access.
+
+    Keep in sync with services/backend-api/src/models/feedback_zendesk_sync.py —
+    parity enforced by
+    test_zendesk_adapter.py::TestModelsAndMigration::test_worker_and_backend_feedback_zendesk_sync_columns_match.
+    """
+    __tablename__ = "feedback_zendesk_sync"
+
+    feedback_id = Column(Integer, primary_key=True)
+    last_ticket_status = Column(String(20), nullable=False)
+    last_status_synced_at = Column(DateTime, nullable=False)
 
 
 class JiraIntegration(Base):

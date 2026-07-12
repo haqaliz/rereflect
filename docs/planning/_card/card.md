@@ -1,64 +1,57 @@
-# Card — feat/asana-status-sync (freeform)
+# Card — feat/zendesk-status-sync (freeform)
 
 **Type:** feat
-**Slug:** asana-status-sync
-**Branch:** feat/asana-status-sync
-**Source:** freeform (no GitHub issue) — brief captured from the `rereflect-next` recommendation (2026-07-12) + user go-ahead.
+**Slug/id:** zendesk-status-sync
+**Branch:** feat/zendesk-status-sync
+**GitHub issue:** none (freeform — selected via `rereflect-next`)
 
-## Brief
+## Brief (source: rereflect-next recommendation)
 
-Build **inbound status-sync for the Asana integration** to close its loop, mirroring the
-`jira-status-sync` feature merged 2026-07-12. Today the Asana integration (shipped slice 1,
-2026-07-06) is **outbound-only**: it creates Asana tasks from feedback items. When the linked
-Asana task is later completed by an engineer, Rereflect's feedback item does not reflect it.
-This feature reconciles the Asana task's completion state back onto the linked feedback item's
-`workflow_status`.
+Build **inbound Zendesk status-sync** as the direct follow-on to the shipped Jira
+status-sync. Reuse the provider-agnostic reconcile core shipped with Jira
+(`services/{worker-service,backend-api}/src/services/status_sync_core.py`) to map a
+linked Zendesk ticket's current status back onto the feedback's `workflow_status`.
 
-### Core behavior (first testable slice)
-- A **Celery beat** polls Asana for the current status of tasks Rereflect created from feedback
-  (recorded in the existing Asana task link table).
-- Each completed task maps onto the linked feedback item's `workflow_status`
-  (`completed=true → resolved`).
-- **Opt-in per org, off by default** (mirror Jira status-sync).
-- **Non-destructive baseline-seed on first poll** — no retroactive bulk backfill.
-- Emit a `status_changed` timeline event tagged `source=asana` when a change is applied,
-  via the shared `apply_status_change` worker mirror.
-- Manual "Sync now" route.
+Mirror the Jira status-sync slice's shape exactly:
+- Poll-first Celery beat (15-min, per-org fan-out `sync_all_zendesk` → `sync_zendesk_org`),
+  mirroring the existing Zendesk incremental poller two-task pattern.
+- **Opt-in per org, off by default.**
+- Non-destructive first-poll baseline seed (no retroactive bulk backfill).
+- 429/`Retry-After` throttle; auth-error records (no disconnect); manual "Sync now" (`POST /sync`).
+- Status-sync toggle + last-synced/error indicator on the Zendesk integration tile.
+- Apply via `apply_status_change` (worker mirror) emitting one `status_changed` timeline
+  event tagged `source=zendesk`.
+- Strict TDD on the reconcile mapping + change-gate + no-op path.
 
-### Design constraints / decisions carried from the recommendation
-- **Reuse the provider-agnostic reconcile core** that `jira-status-sync` factored out
-  (`docs/planning/jira-status-sync/`) — it was built explicitly for "Zendesk/Asana reuse".
-- **Reuse the existing encrypted Asana PAT client** and the `feedback ⇄ asana_task` link.
-- **Poll-first.** Self-hosted instances are frequently behind NAT/firewalls, so inbound
-  webhooks are unreliable. Build polling first; an Asana webhook path is optional v2.
-- **Rate limits.** Respect Asana Cloud rate limits and `Retry-After` (the Jira/Zendesk pollers
-  already have a throttle precedent).
+## Key design decisions the dig must nail
 
-### Known caveat (must design around)
-- Asana has **no `statusCategory`** like Jira. A task's state is a `completed` boolean (plus
-  optional section membership / custom fields). So the reconcile core's 3-bucket category map
-  (`done`/`indeterminate`/`new`) can only be fed **`done` (completed=true) vs `new`** in slice 1
-  — there is no clean intermediate ("in_review"/"in_progress") state. Leave section-name /
-  custom-field mapping to v2.
-- The **current Asana client only creates tasks** — a get-task status fetch (`completed`,
-  `completed_at`, optionally `memberships` for section) must be added before the reconcile core
-  has anything to read.
+1. **Zendesk has no Jira-style 3-bucket `statusCategory`.** Zendesk ticket statuses are
+   `new / open / pending / hold / solved / closed`. The slice must define a status→category
+   mapping with a per-org `status_mapping` JSON override, mirroring Jira. Proposed default:
+   - `solved`, `closed` → `resolved`
+   - `open`, `pending`, `hold` → `in_review`
+   - `new` → `new`
 
-## Provenance (from AI-TRACKING.md / DEV-TRACKING.md)
-- Jira status-sync shipped 2026-07-12 (`AI-TRACKING.md:58`, `DEV-TRACKING.md:198`); its reconcile
-  core was **factored provider-agnostic for Zendesk/Asana reuse**.
-- Asana slice 1 shipped 2026-07-06 (`DEV-TRACKING.md:201`). **Deferred v2** explicitly includes
-  "inbound status-sync back to Rereflect" (`DEV-TRACKING.md:210`, `AI-TRACKING.md:60`).
-- **Linear** already does inbound sync (`linear_webhook.py`); **Jira** now does too — Asana is the
-  last outbound-only work-management integration.
+2. **The poll set.** Jira used a dedicated `feedback_jira_issues` link table. Zendesk stores
+   each ticket ID on `feedback.source_external_id` (deduped by ticket ID at ingest, `source='zendesk'`).
+   The existing Zendesk poller is **new-tickets-only** (incremental cursor) and does NOT re-poll
+   already-linked tickets' statuses. Status-sync needs a **new poll path over the existing
+   linked-ticket set** (feedback rows where `source='zendesk'`, keyed by `source_external_id`).
 
-## Open questions (for the deep dig / PRD)
-- What is the exact `workflow_status` enum on the feedback model, and does `completed → resolved`
-  suffice, or should un-completing a task revert `resolved → in_progress`/`new`?
-- Where does the `feedback ⇄ asana_task` link live, and what columns does it carry (task gid,
-  org, feedback id, last-synced state)?
-- What is the shape of the provider-agnostic reconcile core the Jira feature factored out — what
-  does an "Asana adapter" need to implement (category derivation from `completed`)?
-- Poll cadence (beat interval) and batching strategy for fetching many task statuses.
-- Where does per-org opt-in + status-mapping config live (reuse Jira's `status_mapping` pattern
-  / columns, or Asana-specific)?
+## Grounding (files)
+
+- Reconcile core (both mirrors): `services/{worker-service,backend-api}/src/services/status_sync_core.py`
+- Jira status-sync template: `services/worker-service/src/tasks/jira_sync.py`, `docs/planning/jira-status-sync/`
+- Jira PRD out-of-scope names Zendesk/Asana inbound-sync as the reconcile-core reuse targets:
+  `docs/planning/jira-status-sync/prd.md:193`
+- Zendesk deferred-v2 includes "write-back / bidirectional status sync to Zendesk": `DEV-TRACKING.md:221`
+- Zendesk models: `services/backend-api/src/models/zendesk_integration.py`; `feedback.source_external_id`
+  (`services/backend-api/src/models/feedback.py:17`)
+
+## Caveat (stated honestly for the dig)
+
+- Direction is **inbound** (Zendesk → Rereflect feedback status), matching the Jira status-sync
+  reuse target. Outbound write-back (Rereflect → Zendesk) is a separate deferred item — out of scope here.
+- `feat/asana-status-sync` has a worktree open in a parallel session (the *Asana* reuse of the same
+  core). This slice is the *Zendesk* reuse — no overlap, but the reconcile core is shared code; treat
+  any core changes as characterization-locked (Jira behavior must stay byte-identical).

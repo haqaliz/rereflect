@@ -43,7 +43,7 @@ import logging
 import secrets
 import socket
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -56,11 +56,13 @@ from src.models.feedback_source import FeedbackSource
 from src.models.organization import Organization
 from src.models.user import User
 from src.models.zendesk_integration import ZendeskIntegration
+from src.services.status_sync_core import VALID_STATUSES
 from src.services.zendesk_client import (
     ZendeskAuthError,
     ZendeskClient,
     ZendeskTransientError,
 )
+from src.services.zendesk_status_core import ZENDESK_STATUSES
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
 logger = logging.getLogger(__name__)
@@ -102,7 +104,23 @@ class ZendeskStatusResponse(BaseModel):
     last_error: Optional[str] = None
     connected_at: Optional[datetime] = None
     has_feedback_source: Optional[bool] = None
+    # Inbound status-sync fields (operator control surface). Distinct from
+    # the ingestion fields above (last_synced_at/last_sync_status/last_error)
+    # — never conflate the two.
+    status_sync_enabled: bool = False
+    status_mapping: Optional[Dict[str, str]] = None
+    last_status_synced_at: Optional[datetime] = None
+    last_status_sync_error: Optional[str] = None
     # api_token / webhook_secret are intentionally NEVER included
+
+
+class ZendeskStatusSyncUpdateRequest(BaseModel):
+    enabled: bool
+    status_mapping: Optional[Dict[str, str]] = None
+
+
+class ZendeskStatusSyncTriggerResponse(BaseModel):
+    status: str
 
 
 class ZendeskDisconnectResponse(BaseModel):
@@ -193,6 +211,56 @@ def _assert_host_not_ssrf(host: str) -> None:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="subdomain resolves to a disallowed address.",
             )
+
+
+def _validate_status_mapping(mapping: Optional[Dict[str, str]]) -> None:
+    """422 if any status_mapping key/value falls outside the valid sets.
+
+    Keys must be Zendesk ticket statuses (ZENDESK_STATUSES); values must be
+    Rereflect workflow statuses (VALID_STATUSES). Mirrors
+    jira_integration.py's _validate_status_mapping.
+    """
+    if mapping is None:
+        return
+    for key, value in mapping.items():
+        if key not in ZENDESK_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid status_mapping key '{key}'. Must be one of "
+                    f"{sorted(ZENDESK_STATUSES)}."
+                ),
+            )
+        if value not in VALID_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid status_mapping value '{value}' for key '{key}'. "
+                    f"Must be one of {sorted(VALID_STATUSES)}."
+                ),
+            )
+
+
+def _build_status_response(db: Session, org_id: int, row: ZendeskIntegration) -> ZendeskStatusResponse:
+    """Build the full ZendeskStatusResponse (connection + status-sync fields) for an existing row."""
+    return ZendeskStatusResponse(
+        connected=True,
+        subdomain=row.subdomain,
+        email=row.email,
+        token_hint=row.token_hint,
+        account_user_id=row.account_user_id,
+        display_name=row.display_name,
+        is_active=row.is_active,
+        last_synced_at=row.last_synced_at,
+        last_sync_status=row.last_sync_status,
+        last_error=row.last_error,
+        connected_at=row.connected_at,
+        has_feedback_source=_has_zendesk_source(db, org_id),
+        status_sync_enabled=bool(row.status_sync_enabled),
+        status_mapping=row.status_mapping,
+        last_status_synced_at=row.last_status_synced_at,
+        last_status_sync_error=row.last_status_sync_error,
+    )
 
 
 def _get_active_integration(db: Session, org_id: int) -> Optional[ZendeskIntegration]:
@@ -452,20 +520,7 @@ def zendesk_status(
     row = _get_active_integration(db, current_org.id)
     if not row:
         return ZendeskStatusResponse(connected=False)
-    return ZendeskStatusResponse(
-        connected=True,
-        subdomain=row.subdomain,
-        email=row.email,
-        token_hint=row.token_hint,
-        account_user_id=row.account_user_id,
-        display_name=row.display_name,
-        is_active=row.is_active,
-        last_synced_at=row.last_synced_at,
-        last_sync_status=row.last_sync_status,
-        last_error=row.last_error,
-        connected_at=row.connected_at,
-        has_feedback_source=_has_zendesk_source(db, current_org.id),
-    )
+    return _build_status_response(db, current_org.id, row)
 
 
 @router.delete(
@@ -563,6 +618,104 @@ def zendesk_trigger_sync(
         integ.id,
     )
     return ZendeskSyncResponse(status="queued", integration_id=integ.id)
+
+
+# ────────────────────── Inbound status-sync operator controls ─────────────────
+
+
+@router.patch(
+    "/status-sync",
+    response_model=ZendeskStatusResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def zendesk_update_status_sync(
+    payload: ZendeskStatusSyncUpdateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Toggle inbound Zendesk status sync and/or update the status_mapping override.
+
+    404 if the org has no Zendesk integration row at all (connected or not —
+    the setting is persisted on the integration row, so one must exist
+    first). 422 if status_mapping contains a key outside ZENDESK_STATUSES or
+    a value outside VALID_STATUSES.
+    """
+    row = _get_org_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Zendesk integration found. Connect Zendesk first.",
+        )
+
+    _validate_status_mapping(payload.status_mapping)
+
+    row.status_sync_enabled = payload.enabled
+    if payload.status_mapping is not None:
+        row.status_mapping = payload.status_mapping
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "Zendesk status-sync updated for org %s (enabled=%s)",
+        current_org.id,
+        row.status_sync_enabled,
+    )
+    return _build_status_response(db, current_org.id, row)
+
+
+@router.post(
+    "/status-sync/sync",
+    response_model=ZendeskStatusSyncTriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def zendesk_trigger_status_sync(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Manually enqueue an inbound Zendesk status-sync run for this org.
+
+    Distinct sub-path from the existing ingestion POST /sync (which pulls
+    tickets) — this dispatches sync_zendesk_status_org, which reconciles
+    workflow_status on already-linked feedback from ticket status.
+
+    Requires an ACTIVE Zendesk integration (400 if none — mirrors /test and
+    Jira's POST /sync). Never surfaces a 500 — a broker/dispatch failure is
+    reported as a clean 502.
+    """
+    integ = _get_active_integration(db, current_org.id)
+    if not integ:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No active Zendesk integration.",
+        )
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.zendesk_status_sync.sync_zendesk_status_org",
+            args=[integ.id],
+        )
+    except Exception as exc:  # noqa: BLE001 — must never surface as a 500
+        logger.error(
+            "Zendesk status sync could not be enqueued for org %s (integration_id=%s): %s",
+            current_org.id,
+            integ.id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Zendesk status sync could not be enqueued. Please try again shortly.",
+        ) from exc
+
+    logger.info(
+        "Zendesk status sync manually triggered for org %s (integration_id=%s)",
+        current_org.id,
+        integ.id,
+    )
+    return ZendeskStatusSyncTriggerResponse(status="queued")
 
 
 @router.post(

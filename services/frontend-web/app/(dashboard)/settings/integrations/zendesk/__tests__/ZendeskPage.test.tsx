@@ -41,6 +41,9 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: vi.fn(),
 }));
 
+const mockPatchZendeskStatusSync = vi.fn();
+const mockTriggerZendeskStatusSync = vi.fn();
+
 vi.mock('@/lib/api/zendesk', () => ({
   zendeskAPI: {
     getStatus: vi.fn(),
@@ -49,6 +52,8 @@ vi.mock('@/lib/api/zendesk', () => ({
     testConnection: vi.fn(),
     triggerSync: vi.fn(),
   },
+  patchZendeskStatusSync: (...args: unknown[]) => mockPatchZendeskStatusSync(...args),
+  triggerZendeskStatusSync: (...args: unknown[]) => mockTriggerZendeskStatusSync(...args),
 }));
 
 // ─── imports (after mocks) ───────────────────────────────────────────────────
@@ -89,6 +94,10 @@ const disconnectedStatus = {
   last_error: null,
   connected_at: null,
   has_feedback_source: false,
+  status_sync_enabled: false,
+  status_mapping: null,
+  last_status_synced_at: null,
+  last_status_sync_error: null,
 };
 
 const connectedStatus = {
@@ -104,6 +113,10 @@ const connectedStatus = {
   last_error: null,
   connected_at: '2026-07-05T12:00:00',
   has_feedback_source: true,
+  status_sync_enabled: false,
+  status_mapping: null,
+  last_status_synced_at: null,
+  last_status_sync_error: null,
 };
 
 // ─── API contract tests (original suite) ────────────────────────────────────
@@ -274,5 +287,53 @@ describe('ZendeskSettingsPage — component', () => {
     await waitFor(() => {
       expect(zendeskAPI.disconnect).toHaveBeenCalled();
     });
+  });
+
+  it('connected + admin: renders the ingestion "Sync tickets" button and the status-sync card\'s distinct "Sync Now" button', async () => {
+    (useAuth as any).mockReturnValue(makeAuthContext('admin'));
+    (zendeskAPI.getStatus as any).mockResolvedValue(connectedStatus);
+
+    render(<ZendeskSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sync tickets/i })).toBeInTheDocument();
+    });
+
+    // Status-sync card (Phase 3 mount) — distinct label from ingestion sync.
+    expect(screen.getByText('Inbound Status Sync')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^sync now$/i })).toBeInTheDocument();
+    expect(screen.getByRole('switch')).toBeInTheDocument();
+  });
+
+  it('clicking "Sync tickets" calls zendeskAPI.triggerSync (ingestion), not the status-sync trigger', async () => {
+    (useAuth as any).mockReturnValue(makeAuthContext('admin'));
+    (zendeskAPI.getStatus as any).mockResolvedValue(connectedStatus);
+    (zendeskAPI.triggerSync as any).mockResolvedValue({ status: 'queued', integration_id: 1 });
+
+    render(<ZendeskSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sync tickets/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /sync tickets/i }));
+
+    await waitFor(() => {
+      expect(zendeskAPI.triggerSync).toHaveBeenCalled();
+    });
+    expect(mockTriggerZendeskStatusSync).not.toHaveBeenCalled();
+  });
+
+  it('does not render the status-sync card when disconnected', async () => {
+    (useAuth as any).mockReturnValue(makeAuthContext('admin'));
+    (zendeskAPI.getStatus as any).mockResolvedValue(disconnectedStatus);
+
+    render(<ZendeskSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/api token/i)).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Inbound Status Sync')).not.toBeInTheDocument();
   });
 });

@@ -196,3 +196,47 @@ class ZendeskClient:
             next_url = next_page
 
         return {"tickets": tickets, "end_time": end_time}
+
+    # ------------------------------------------------------------------
+    # Batch ticket-status fetch (status-sync poll task)
+    # ------------------------------------------------------------------
+
+    # Zendesk's hard cap on ids per show_many.json request.
+    _SHOW_MANY_CHUNK = 100
+
+    def show_many(self, ids: list) -> Dict[str, str]:
+        """
+        Batch-fetch current status for the given ticket ids via
+        `GET /tickets/show_many.json?ids=...`, chunked to at most
+        `_SHOW_MANY_CHUNK` ids per request (Zendesk's cap), merging results
+        across chunks.
+
+        Ids requested but absent from the response (e.g. deleted/archived
+        tickets) are simply omitted from the result — not an error.
+
+        Args:
+            ids: ticket ids (int or str).
+
+        Returns:
+            {str(ticket_id): status} for every id Zendesk returned.
+
+        Raises:
+            ZendeskAuthError: on 401/403.
+            ZendeskTransientError: on 429 (after sleeping Retry-After
+                seconds) or 5xx.
+            ZendeskNotFoundError: on 404.
+        """
+        out: Dict[str, str] = {}
+        str_ids = [str(i) for i in ids]
+
+        for i in range(0, len(str_ids), self._SHOW_MANY_CHUNK):
+            chunk = str_ids[i : i + self._SHOW_MANY_CHUNK]
+            resp = self._client.get(
+                "/tickets/show_many.json", params={"ids": ",".join(chunk)}
+            )
+            resp = self._handle_response(resp)
+            data = resp.json()
+            for ticket in data.get("tickets", []):
+                out[str(ticket["id"])] = ticket.get("status")
+
+        return out
