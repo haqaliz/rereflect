@@ -810,9 +810,11 @@ feedback item follows without anyone updating it by hand.
 - **Non-destructive and bidirectional.** Turning it on does **not**
   retroactively rewrite feedback you already linked — the first poll records
   the task's current state as a baseline and only moves a feedback item when
-  the task *changes* afterward. If a task is later **re-opened** in Asana
-  (completed → not completed), the linked feedback reverts back toward
-  `new`, with a timeline entry recording the change (tagged `source=asana`).
+  the task *changes* afterward. It will not fight a status you set by hand
+  unless the linked Asana task genuinely changes. If a task is later
+  **re-opened** in Asana (completed → not completed), the linked feedback
+  reverts back toward `new`, with a timeline entry recording the change
+  (tagged `source=asana`).
   If a feedback item is linked to several Asana tasks, the most-advanced
   status wins.
 
