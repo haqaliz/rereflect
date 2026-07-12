@@ -25,8 +25,28 @@ Core (Celery-free, tested directly):
     plan Phase 1 for why polling introduces a same-row race two orgs'
     beats could otherwise hit).
 
-  reconcile_feedback / _sync_zendesk_status_org_body — added in later
-  phases of this module (see plan Phases 2-3).
+  reconcile_feedback(db, feedback, fetched_status, integ) -> "seed"|"noop"|"changed"
+    Given one feedback item's freshly-fetched Zendesk ticket status, reads
+    the `FeedbackZendeskSync` sidecar (last-observed status) and decides via
+    the pure `zendesk_status_core.decide_update`:
+      - 'seed'    -> first observation. Sidecar written, feedback
+                     workflow_status untouched (safety: first observation
+                     must never move a feedback item's workflow_status —
+                     mirrors jira_sync's link-seed behavior).
+      - 'noop'    -> fetched == stored. Nothing written at all (not even the
+                     sidecar timestamp) — this is what makes "poll twice,
+                     second poll is a no-op" hold at the DB-write level too.
+      - 'changed' -> resolve_target_status(fetched, integ.status_mapping);
+                     if not None, apply via apply_zendesk_status_worker
+                     (itself a no-op if the target equals the current
+                     status). Sidecar is ALWAYS updated to the new
+                     last-observed status regardless of whether the target
+                     resolved/applied, so an unknown/overridden-out status
+                     is still recorded and won't re-trigger 'changed' next
+                     poll.
+
+  _sync_zendesk_status_org_body — added in a later phase of this module
+  (see plan Phase 3).
 
 The worker cannot import backend-api — it uses its own copy of the pure
 reconcile core (src/services/zendesk_status_core.py, a verbatim copy of
@@ -42,6 +62,8 @@ status change only.
 from __future__ import annotations
 
 from datetime import datetime
+
+from src.services.zendesk_status_core import decide_update, resolve_target_status
 
 
 # ---------------------------------------------------------------------------
@@ -122,3 +144,66 @@ def apply_zendesk_status_worker(
     # runs with autoflush disabled).
     db.flush()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — per-feedback reconcile helper (shared shape with the webhook
+# aspect, which re-implements this in backend-api since it can't import
+# the worker — see this aspect's plan "Edge cases / notes")
+# ---------------------------------------------------------------------------
+
+
+def _upsert_sidecar(db, feedback_id: int, status: str) -> None:
+    """Write/update the FeedbackZendeskSync sidecar's last-observed status."""
+    from src.models import FeedbackZendeskSync
+
+    row = db.get(FeedbackZendeskSync, feedback_id)
+    now = datetime.utcnow()
+    if row is None:
+        db.add(
+            FeedbackZendeskSync(
+                feedback_id=feedback_id,
+                last_ticket_status=status,
+                last_status_synced_at=now,
+            )
+        )
+        # Flush immediately so a same-session db.get() lookup (e.g. a
+        # subsequent poll within the same request/session) sees the new
+        # row without relying on autoflush (disabled in test sessions).
+        db.flush()
+    else:
+        row.last_ticket_status = status
+        row.last_status_synced_at = now
+
+
+def reconcile_feedback(db, feedback, fetched_status: str, integ) -> str:
+    """
+    Reconcile one feedback item's freshly-fetched Zendesk ticket status.
+
+    Returns "seed" | "noop" | "changed" (see module docstring for the full
+    semantics of each).
+    """
+    from src.models import FeedbackZendeskSync
+
+    row = db.get(FeedbackZendeskSync, feedback.id)
+    stored = row.last_ticket_status if row else None
+
+    action = decide_update(fetched_status, stored)
+    if action == "noop":
+        return "noop"
+
+    if action == "changed":
+        target = resolve_target_status(fetched_status, integ.status_mapping)
+        if target is not None:
+            apply_zendesk_status_worker(
+                db,
+                feedback,
+                target,
+                organization_id=integ.organization_id,
+                ticket_id=feedback.source_external_id,
+                zendesk_status=fetched_status,
+            )
+
+    # seed AND changed both record the last-observed status.
+    _upsert_sidecar(db, feedback.id, fetched_status)
+    return action
