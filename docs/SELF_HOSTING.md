@@ -734,11 +734,78 @@ redelivery and repeated syncs are always de-duplicated by ticket ID.
   ingested (just without a `customer_email`); an unmatched subdomain or missing
   source is logged rather than silently dropped.
 
+### Syncing Zendesk ticket status back to feedback (opt-in)
+
+Once a support ticket has become a feedback item (via ingestion, above), Rereflect
+can keep that feedback item's status in step with the Zendesk ticket — so when an
+agent marks the ticket *Solved*, the feedback item follows without anyone updating
+it by hand.
+
+- **Off by default.** Turn it on with `PATCH /api/v1/integrations/zendesk/status-sync`
+  (admin/owner-only, JSON body `{"enabled": true}`) — the same endpoint also accepts
+  an optional `status_mapping` override (see below). This surfaces as a toggle on
+  **Settings → Integrations → Zendesk** as the in-app UI for it ships.
+- **Poll is the guaranteed path.** With status-sync on, a background job checks your
+  Zendesk-linked feedback every ~15 minutes over the same API token — no public URL
+  or inbound webhook required, so it works on a self-hosted box behind NAT. This is
+  always active once enabled, independent of whether you also configure the
+  real-time webhook below.
+- **Real-time webhook (additive, optional).** If you've already wired the ingestion
+  webhook (see "Optional: real-time via webhook" above), you can extend it for status
+  changes instead of waiting for the next poll:
+  1. In Zendesk, open **Admin Center → Apps and integrations → Triggers** (or Views →
+     Triggers) and create a **second** trigger — separate from the "Ticket is
+     created" one — that fires on **Ticket updated / Status changed**.
+  2. Point it at the **same webhook URL and signing secret** you already configured
+     (`POST <your-api-base>/api/v1/webhooks/zendesk/events` — the HMAC scheme is
+     identical, since both triggers deliver through the one webhook connection).
+  3. Set the trigger's JSON body to include the anti-spoof discriminator field
+     `"event": "ticket.status_changed"` — **required**, distinct from the ingestion
+     trigger's body — plus the ticket id and Zendesk's `{{ticket.status}}`
+     placeholder:
+     ```json
+     {
+       "event": "ticket.status_changed",
+       "subdomain": "your-subdomain",
+       "ticket": {
+         "id": "{{ticket.id}}",
+         "status": "{{ticket.status}}"
+       }
+     }
+     ```
+     Without the `"event": "ticket.status_changed"` field, Rereflect cannot tell a
+     status-change delivery apart from a ticket-creation one, so this field is what
+     routes the delivery to the status-sync path instead of feedback ingestion.
+  4. Rereflect reconciles that single ticket immediately on a verified delivery — no
+     apply happens if status-sync is off for the org, if the ticket isn't linked to a
+     feedback item, or if this is the first status ever observed for it (that first
+     observation is recorded as a baseline, not applied — see "Non-destructive"
+     below). Every delivery is ACKed 200 regardless, so Zendesk never retries a
+     well-formed, verified request.
+  5. **The 15-minute poll remains the fallback either way** — if the webhook is never
+     configured, misfires, or a delivery is missed, the next poll catches the ticket
+     up. Whichever path (poll or webhook) observes a given status change first
+     applies it; the other is a no-op, so you never get a duplicate status-change
+     event from having both enabled.
+- **Category-based mapping.** Rereflect maps Zendesk's ticket `status` field to a
+  feedback `workflow_status`:
+  - `new` → `new`
+  - `open` / `pending` / `hold` → `in_review`
+  - `solved` → `resolved`
+  - `closed` → `closed`
+  You can override this per-organization via the `status_mapping` field on the same
+  `PATCH .../status-sync` call.
+- **Non-destructive.** Turning it on does not retroactively rewrite the status of
+  feedback you already linked — the first status observed for each ticket (via poll
+  or webhook, whichever happens first) is recorded as a baseline only, and a feedback
+  item's `workflow_status` moves only when the Zendesk ticket's status genuinely
+  *changes* afterward.
+
 ### All features unlocked
 
 Because Rereflect is self-hosted and open-source, the Zendesk integration has no
-plan gate, seat limit, or usage cap — polling, webhooks, and Customer 360
-enrichment are available to every organization running the app.
+plan gate, seat limit, or usage cap — polling, webhooks, status-sync, and
+Customer 360 enrichment are available to every organization running the app.
 
 ## Connecting Asana
 
