@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from src.database.session import get_db
 from src.models import FeedbackSource, FeedbackSourceEvent
 from src.models.zendesk_integration import ZendeskIntegration
+from src.services.zendesk_status_reconcile import reconcile_ticket
 from src.utils.encryption import decrypt_api_key
 
 logger = logging.getLogger(__name__)
@@ -331,6 +332,16 @@ async def handle_intercom_webhook(request: Request):
 # Zendesk Webhook
 # ============================================================================
 
+# Anti-spoof discriminator (webhook-realtime aspect, design task #3): the
+# operator's Zendesk UPDATE-trigger body must include this exact
+# `"event": "..."` field/value (a literal in the trigger's JSON body,
+# alongside the existing `{{ticket.status}}` placeholder -- see
+# docs/SELF_HOSTING.md). It is NOT present in the ingestion (ticket.created)
+# trigger's payload shape, so the status-change branch can never be reached
+# via an ingestion delivery (or a payload that merely happens to look like
+# one), and the ingestion branch never runs for a status-change delivery.
+ZENDESK_STATUS_CHANGE_EVENT = "ticket.status_changed"
+
 
 def _resolve_zendesk_subdomain(payload: dict, headers: Mapping) -> Optional[str]:
     """
@@ -402,6 +413,39 @@ def _ignore(reason: str) -> dict:
     return {"status": "ignored", "reason": reason}
 
 
+def _handle_zendesk_status_change(db: Session, integration: ZendeskIntegration, payload: dict, subdomain: str) -> dict:
+    """
+    Reconcile a single verified Zendesk ticket status-change event onto its
+    linked feedback item's workflow_status (webhook-realtime aspect --
+    immediate path; the 15-min poll remains the guaranteed fallback).
+
+    Always ACKs 200 on a well-formed, verified event -- including when
+    status_sync_enabled is off, the ticket/status fields are absent, or no
+    feedback is linked -- mirroring the ingestion path's "log + 200 ignore"
+    shape for non-error conditions. Only signature/JSON validity failures
+    (handled by the caller before this is reached) return non-200.
+    """
+    # Gate: status_sync_enabled must be explicitly on (integration.is_active
+    # is already guaranteed by the query that resolved `integration`).
+    if not integration.status_sync_enabled:
+        logger.info(f"Zendesk status webhook: status_sync_enabled=false for subdomain '{subdomain}', ignoring")
+        return _ignore("status_sync_disabled")
+
+    ticket = payload.get("ticket") or {}
+    ticket_id = ticket.get("id")
+    status = ticket.get("status")
+    if not ticket_id or not status:
+        logger.warning(f"Zendesk status webhook: missing ticket id/status for subdomain '{subdomain}'")
+        return _ignore("missing_ticket_id_or_status")
+
+    result = reconcile_ticket(db, integration, ticket_id, status)
+    db.commit()
+    logger.info(
+        f"Zendesk status webhook: ticket {ticket_id} subdomain '{subdomain}' -> reconcile={result}"
+    )
+    return {"status": "ok", "reconcile": result}
+
+
 @router.post("/zendesk/events")
 async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)):
     """
@@ -462,6 +506,14 @@ async def handle_zendesk_webhook(request: Request, db: Session = Depends(get_db)
     signature = request.headers.get("X-Zendesk-Webhook-Signature", "")
     if not signature or not timestamp or not _verify_zendesk_signature(body, timestamp, signature, secret):
         raise HTTPException(status_code=401, detail="Invalid signature")
+
+    # webhook-realtime aspect: a distinct, explicitly-keyed branch for
+    # status-change events (design task #3, anti-spoof). This branch is
+    # reached ONLY when the verified payload carries the discriminator
+    # field/value below -- it never falls through to (or is reachable from)
+    # the ingestion/dedup/queue_source_event path below, and vice versa.
+    if payload.get("event") == ZENDESK_STATUS_CHANGE_EVENT:
+        return _handle_zendesk_status_change(db, integration, payload, subdomain)
 
     source = (
         db.query(FeedbackSource)
