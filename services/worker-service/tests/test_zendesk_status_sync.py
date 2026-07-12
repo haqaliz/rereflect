@@ -605,3 +605,25 @@ class TestFanOutTask:
 
         assert result["status"] == "no_integrations"
         assert result["queued"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — beat + include
+# ---------------------------------------------------------------------------
+
+
+class TestCeleryTaskRegistration:
+    def test_sync_all_zendesk_status_is_registered(self):
+        from src.celery_app import celery_app
+        assert "src.tasks.zendesk_status_sync.sync_all_zendesk_status" in celery_app.tasks
+
+    def test_sync_zendesk_status_org_is_registered(self):
+        from src.celery_app import celery_app
+        assert "src.tasks.zendesk_status_sync.sync_zendesk_status_org" in celery_app.tasks
+
+    def test_beat_schedule_has_zendesk_status_entry(self):
+        from src.celery_app import celery_app
+        schedule = celery_app.conf.beat_schedule
+        assert "sync-zendesk-status-every-15-min" in schedule
+        entry = schedule["sync-zendesk-status-every-15-min"]
+        assert entry["schedule"] == 900.0
