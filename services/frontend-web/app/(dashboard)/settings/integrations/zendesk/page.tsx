@@ -34,6 +34,7 @@ import {
 import { zendeskAPI, ZendeskConnectionStatus } from '@/lib/api/zendesk';
 import { useAuth } from '@/contexts/AuthContext';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
+import { ZendeskStatusSyncCard } from '@/components/settings/ZendeskStatusSyncCard';
 
 // The public API is served by the BACKEND, not the Next.js app — same
 // pattern as settings/api-keys/page.tsx.
@@ -125,6 +126,10 @@ export default function ZendeskSettingsPage() {
         last_error: null,
         connected_at: null,
         has_feedback_source: result.has_feedback_source,
+        status_sync_enabled: false,
+        status_mapping: null,
+        last_status_synced_at: null,
+        last_status_sync_error: null,
       });
       // Display-once: only ever present on the connect response.
       setWebhookSecret(result.webhook_secret ?? null);
@@ -363,7 +368,7 @@ export default function ZendeskSettingsPage() {
                       ) : (
                         <RefreshCw className="w-4 h-4 mr-2" />
                       )}
-                      Sync Now
+                      Sync tickets
                     </Button>
                     <Button
                       variant="outline"
@@ -503,6 +508,11 @@ export default function ZendeskSettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Inbound status sync (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <ZendeskStatusSyncCard status={status} onStatusChange={setStatus} />
+        )}
 
         {/* One-time webhook URL + secret reveal (new — no Jira equivalent).
             Only rendered once we actually have a plaintext secret in hand
