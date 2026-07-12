@@ -66,6 +66,7 @@ from celery import shared_task
 from src.clients.jira import JiraAuthError, JiraClient, JiraTransientError
 from src.database import get_db_session
 from src.services.status_sync_core import decide_link_update, most_advanced, resolve_target_status
+from src.services.status_writer import apply_status_change_worker
 
 logger = logging.getLogger(__name__)
 
@@ -123,62 +124,10 @@ def _persist_terminal_status(integration_id: int, status: str, error: str) -> No
 
 
 # ---------------------------------------------------------------------------
-# Status writer (worker cannot import backend-api's apply_status_change)
-# ---------------------------------------------------------------------------
-
-
-def apply_status_change_worker(
-    db,
-    feedback,
-    new_status: str,
-    *,
-    organization_id: int,
-    actor_label: str,
-    metadata: Optional[dict] = None,
-) -> bool:
-    """
-    Apply a workflow_status change driven by an automated source (no acting
-    user — actor_id is always None here) and write exactly ONE
-    FeedbackWorkflowEvent timeline row.
-
-    No-ops (returns False, writes nothing) when `new_status` already equals
-    the feedback's current workflow_status.
-
-    NOTE: this deliberately does NOT dispatch outbound `feedback.status_changed`
-    webhooks — see this module's docstring ("Outbound webhook dispatch ...
-    DEFERRED").
-    """
-    from src.models import FeedbackWorkflowEvent
-
-    if feedback.workflow_status == new_status:
-        return False
-
-    old_status = feedback.workflow_status
-    feedback.workflow_status = new_status
-
-    logger.info(
-        "jira_sync: %s changed feedback_id=%s org=%s %s -> %s",
-        actor_label,
-        feedback.id,
-        organization_id,
-        old_status,
-        new_status,
-    )
-
-    event = FeedbackWorkflowEvent(
-        feedback_id=feedback.id,
-        organization_id=organization_id,
-        actor_id=None,
-        event_type="status_changed",
-        old_value=old_status,
-        new_value=new_status,
-        metadata_=metadata,
-        created_at=datetime.utcnow(),
-    )
-    db.add(event)
-    return True
-
-
+# Status writer: apply_status_change_worker lifted to
+# src.services.status_writer (asana-status-sync/worker-sync-task aspect) so
+# both jira_sync.py and asana_sync.py share one provider-agnostic
+# implementation. Imported above; see status_writer.py's docstring.
 # ---------------------------------------------------------------------------
 # Core sync logic (Celery-free — tested directly)
 # ---------------------------------------------------------------------------
