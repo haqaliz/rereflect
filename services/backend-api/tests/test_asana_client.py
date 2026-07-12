@@ -354,6 +354,120 @@ class TestAsanaClientCreateTask:
                 })
 
 
+GET_TASK_COMPLETED = {
+    "data": {
+        "gid": "1300000000001",
+        "completed": True,
+        "completed_at": "2026-07-10T14:03:00.000Z",
+        "memberships": [{"section": {"name": "Done"}}],
+    }
+}
+
+GET_TASK_INCOMPLETE = {
+    "data": {
+        "gid": "1300000000001",
+        "completed": False,
+        "completed_at": None,
+        "memberships": [{"section": {"name": "In progress"}}],
+    }
+}
+
+GET_TASK_NO_MEMBERSHIPS = {
+    "data": {
+        "gid": "1300000000001",
+        "completed": True,
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# get_task() — asana-client-get-task aspect
+# ---------------------------------------------------------------------------
+class TestAsanaClientGetTask:
+    def test_get_task_calls_expected_endpoint_and_opt_fields(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(200, GET_TASK_COMPLETED)
+
+            client = AsanaClient(API_TOKEN)
+            client.get_task("1300000000001")
+
+        instance.get.assert_called_once_with(
+            "/tasks/1300000000001",
+            params={"opt_fields": "completed,completed_at,memberships.section.name"},
+        )
+
+    def test_get_task_parses_completed_task(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(200, GET_TASK_COMPLETED)
+
+            client = AsanaClient(API_TOKEN)
+            result = client.get_task("1300000000001")
+
+        assert result == {
+            "completed": True,
+            "completed_at": "2026-07-10T14:03:00.000Z",
+            "memberships": [{"section": {"name": "Done"}}],
+        }
+
+    def test_get_task_incomplete_has_none_completed_at(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(200, GET_TASK_INCOMPLETE)
+
+            client = AsanaClient(API_TOKEN)
+            result = client.get_task("1300000000001")
+
+        assert result["completed"] is False
+        assert result["completed_at"] is None
+
+    def test_get_task_missing_memberships_defaults_to_empty_list(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(200, GET_TASK_NO_MEMBERSHIPS)
+
+            client = AsanaClient(API_TOKEN)
+            result = client.get_task("1300000000001")
+
+        assert result["memberships"] == []
+
+    @pytest.mark.parametrize("status_code", [401, 403])
+    def test_get_task_auth_errors_raise_asana_auth_error(self, status_code):
+        from src.services.asana_client import AsanaAuthError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(status_code, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaAuthError):
+                client.get_task("1300000000001")
+
+    @pytest.mark.parametrize("status_code", [429, 500, 502, 503])
+    def test_get_task_transient_errors_raise_asana_transient_error(self, status_code):
+        from src.services.asana_client import AsanaTransientError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(status_code, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaTransientError):
+                client.get_task("1300000000001")
+
+    def test_get_task_not_found_raises_asana_not_found_error(self):
+        from src.services.asana_client import AsanaNotFoundError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = _make_resp(404, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaNotFoundError):
+                client.get_task("1300000000001")
+
+
 class TestAsanaClientConstantHostAssertion:
     """Defense-in-depth constant scheme/host assert — Asana has a fixed host,
     so there's no per-org SSRF surface to gate (unlike Jira/Zendesk), but the

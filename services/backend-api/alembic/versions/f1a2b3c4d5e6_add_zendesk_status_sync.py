@@ -9,17 +9,22 @@ last_ticket_status, last_status_synced_at) — mirrors the Jira precedent
 
 See docs/planning/zendesk-status-sync/reconcile-core-and-model/plan_20260712.md
 
-Revision ID: d5e6f7a8b9c0
-Revises: c4d5e6f7a8b9
+Revision ID: f1a2b3c4d5e6
+Revises: d5e6f7a8b9c0
 Create Date: 2026-07-12
+
+Note: re-chained from c4d5e6f7a8b9 onto d5e6f7a8b9c0 (asana-status-sync) when
+both inbound-status-sync branches merged — both had independently picked the
+next revision id d5e6f7a8b9c0 off the shared jira head. Renumbered to keep a
+single linear alembic head.
 """
 from alembic import op
 import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "d5e6f7a8b9c0"
-down_revision = "c4d5e6f7a8b9"
+revision = "f1a2b3c4d5e6"
+down_revision = "d5e6f7a8b9c0"
 branch_labels = None
 depends_on = None
 
