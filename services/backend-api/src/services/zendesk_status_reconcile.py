@@ -64,6 +64,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
+import sqlalchemy.exc
 from sqlalchemy.orm import Session
 
 from src.models.feedback import FeedbackItem
@@ -73,10 +74,28 @@ from src.services.zendesk_status_core import decide_update, resolve_target_statu
 
 
 def _upsert_sidecar(db: Session, feedback_id: int, status: str) -> None:
-    """Write/update the FeedbackZendeskSync sidecar's last-observed status."""
+    """Write/update the FeedbackZendeskSync sidecar's last-observed status.
+
+    First observation for a feedback_id is a plain INSERT (no existing row
+    to UPDATE). If a concurrent writer — the worker's poll task and this
+    webhook path both observing the SAME ticket for the first time —
+    reaches this at the same instant, both may see `row is None` here and
+    both attempt to INSERT the same feedback_id PK. The insert is isolated
+    in a SAVEPOINT (mirrors the race-safe insert pattern already used
+    elsewhere in this codebase, e.g. usage_webhooks.py) so the loser's
+    IntegrityError only unwinds this nested transaction, not the whole
+    request's session; the loser then treats the winner's already-committed
+    row as authoritative and does nothing further — equivalent to Postgres
+    `ON CONFLICT (feedback_id) DO NOTHING`, but dialect-agnostic (works
+    against both the sqlite dialect used in tests and Postgres in
+    production). This path is only ever reached on the "seed" action
+    (decide_update only returns "seed" when no sidecar row existed), so no
+    status change or event is ever at stake for the loser here.
+    """
     row = db.get(FeedbackZendeskSync, feedback_id)
     now = datetime.utcnow()
     if row is None:
+        sp = db.begin_nested()
         db.add(
             FeedbackZendeskSync(
                 feedback_id=feedback_id,
@@ -84,14 +103,13 @@ def _upsert_sidecar(db: Session, feedback_id: int, status: str) -> None:
                 last_status_synced_at=now,
             )
         )
-        # Flush immediately so a same-session db.get() lookup (e.g. the
-        # idempotency test's second reconcile_ticket call within one
-        # session) sees the new row without relying on autoflush (disabled
-        # in test sessions).
-        db.flush()
-    else:
-        row.last_ticket_status = status
-        row.last_status_synced_at = now
+        try:
+            sp.commit()  # flushes the row within the SAVEPOINT
+        except sqlalchemy.exc.IntegrityError:
+            sp.rollback()  # concurrent writer already inserted this PK — their row wins
+        return
+    row.last_ticket_status = status
+    row.last_status_synced_at = now
 
 
 def _apply_zendesk_status(

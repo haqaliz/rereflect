@@ -324,6 +324,50 @@ class TestReconcileFeedback:
         assert sidecar.last_status_synced_at == original_synced_at
 
 
+class TestUpsertSidecarConcurrentSeed:
+    """
+    Fix wave: the FeedbackZendeskSync sidecar row is INSERTed on first
+    observation ("seed"). If the poll task and the webhook both make the
+    first-ever observation of the same ticket in the same instant, both
+    would see `row is None` and both attempt to INSERT the same
+    feedback_id PK — the loser must not raise IntegrityError.
+    """
+
+    def test_concurrent_first_observation_insert_conflict_does_not_raise(
+        self, db, monkeypatch
+    ):
+        import src.tasks.zendesk_status_sync as zss
+        importlib.reload(zss)
+
+        org = _make_org(db)
+        feedback = _make_feedback(db, org.id, "123", workflow_status="new")
+
+        # The "winner" (e.g. the poll task, in a concurrent transaction)
+        # already committed the sidecar row for this feedback_id.
+        _make_sidecar(db, feedback.id, "open")
+
+        # Force this call's pre-insert existence check to report None —
+        # exactly what it would have seen a moment before the winner's
+        # commit landed.
+        monkeypatch.setattr(db, "get", lambda *a, **k: None)
+
+        # Must not raise IntegrityError.
+        zss._upsert_sidecar(db, feedback.id, "pending")
+
+        rows = (
+            db.query(FeedbackZendeskSync)
+            .filter(FeedbackZendeskSync.feedback_id == feedback.id)
+            .all()
+        )
+        assert len(rows) == 1
+        # Loser does nothing — winner's row remains authoritative (mirrors
+        # Postgres ON CONFLICT (feedback_id) DO NOTHING).
+        assert rows[0].last_ticket_status == "open"
+
+        # Session must remain usable after the swallowed IntegrityError.
+        assert db.query(Organization).filter(Organization.id == org.id).first() is not None
+
+
 # ---------------------------------------------------------------------------
 # Phase 3 — two-task fan-out + body
 # ---------------------------------------------------------------------------
