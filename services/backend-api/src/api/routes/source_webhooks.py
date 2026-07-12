@@ -434,7 +434,7 @@ def _handle_zendesk_status_change(db: Session, integration: ZendeskIntegration, 
     ticket = payload.get("ticket") or {}
     ticket_id = ticket.get("id")
     status = ticket.get("status")
-    if not ticket_id or not status:
+    if ticket_id is None or not status:
         logger.warning(f"Zendesk status webhook: missing ticket id/status for subdomain '{subdomain}'")
         return _ignore("missing_ticket_id_or_status")
 

@@ -973,6 +973,43 @@ class TestZendeskStatusChangeWebhook:
         assert feedback.workflow_status == "resolved"
         assert len(_events_for(db, feedback.id)) == 1
 
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_ticket_id_zero_boundary_not_treated_as_missing(
+        self, mock_queue, client: TestClient, zendesk_integration, db: Session
+    ):
+        """A literal ticket id of 0 is a valid (if unusual) Zendesk ticket id
+        and must NOT be treated as a missing ticket_id -- `not ticket_id`
+        is falsy for 0, so the guard must use `ticket_id is None` instead."""
+        zendesk_integration.status_sync_enabled = True
+        db.commit()
+        feedback = _make_linked_feedback(db, zendesk_integration.organization_id, 0, workflow_status="in_review")
+        _make_sidecar(db, feedback.id, "open")
+
+        payload = _status_change_payload(ticket_id=0, status="solved")
+        body = json.dumps(payload).encode()
+        timestamp = "2026-07-05T00:00:00Z"
+        sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
+
+        response = client.post(
+            "/api/v1/webhooks/zendesk/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Zendesk-Webhook-Signature": sig,
+                "X-Zendesk-Webhook-Signature-Timestamp": timestamp,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() != {"status": "ignored", "reason": "missing_ticket_id_or_status"}
+        mock_queue.assert_not_called()
+
+        db.refresh(feedback)
+        assert feedback.workflow_status == "resolved"
+        events = _events_for(db, feedback.id)
+        assert len(events) == 1
+        assert events[0].metadata_["zendesk_ticket_id"] == "0"
+
     @patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-zd-ingest")
     def test_ingestion_ticket_created_path_unchanged_characterization(
         self, mock_queue, client: TestClient, zendesk_integration, zendesk_source, db: Session
