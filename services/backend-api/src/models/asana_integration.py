@@ -9,7 +9,8 @@ Asana auth is a Bearer Personal Access Token against the fixed host
 https://app.asana.com/api/1.0 — unlike Jira/Zendesk there is no per-org
 site_url/subdomain and no separate email field.
 """
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, UniqueConstraint
+import sqlalchemy as sa
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index, UniqueConstraint, JSON
 from datetime import datetime
 from .base import Base
 
@@ -30,6 +31,8 @@ class AsanaIntegration(Base):
     last_synced_at = Column(DateTime, nullable=True)
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
+    status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=sa.false())
+    status_mapping = Column(JSON, nullable=True)  # {category_key: rereflect_status}, e.g. {"done": "resolved"}
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -54,6 +57,9 @@ class FeedbackAsanaTask(Base):
     asana_task_url = Column(Text, nullable=False)
     asana_task_name = Column(String(500), nullable=False)
     created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    asana_completed = Column(Boolean, nullable=True)          # Asana task.completed
+    asana_status_category = Column(String(20), nullable=True) # core category: new/done (fwd-compat: indeterminate)
+    last_status_synced_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
