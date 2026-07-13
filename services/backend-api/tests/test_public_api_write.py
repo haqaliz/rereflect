@@ -581,6 +581,138 @@ class TestPublicWriteUrgent:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# § is_urgent — urgency correction capture (capture-seam Phase 3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPublicWriteUrgentCorrection:
+    """PATCH is_urgent change records an AICorrection(correction_type="urgency",
+    user_id=None) training signal — the public API's write actor is an API key,
+    not a user."""
+
+    def test_is_urgent_true_records_urgency_correction(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id, is_urgent=False)
+
+        resp = client.patch(
+            f"/api/public/v1/feedback/{fb.id}",
+            json={"is_urgent": True},
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        corrections = (
+            db.query(AICorrection)
+            .filter(AICorrection.correction_type == "urgency")
+            .all()
+        )
+        assert len(corrections) == 1
+        c = corrections[0]
+        assert c.organization_id == org.id
+        assert c.user_id is None
+        assert c.entity_type == "feedback_item"
+        assert c.entity_id == fb.id
+        assert c.signal == "correction"
+        assert c.original_value == "not_urgent"
+        assert c.corrected_value == "urgent"
+        assert c.feedback_text == fb.text
+
+    def test_is_urgent_false_records_urgency_correction(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id, is_urgent=True)
+
+        resp = client.patch(
+            f"/api/public/v1/feedback/{fb.id}",
+            json={"is_urgent": False},
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        corrections = (
+            db.query(AICorrection)
+            .filter(AICorrection.correction_type == "urgency")
+            .all()
+        )
+        assert len(corrections) == 1
+        assert corrections[0].user_id is None
+        assert corrections[0].original_value == "urgent"
+        assert corrections[0].corrected_value == "not_urgent"
+
+    def test_is_urgent_unchanged_value_emits_no_correction(self, client, db, org):
+        """Explicitly PATCHing is_urgent to its current stored value is a no-op."""
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id, is_urgent=True)
+
+        resp = client.patch(
+            f"/api/public/v1/feedback/{fb.id}",
+            json={"is_urgent": True},
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        corrections = (
+            db.query(AICorrection)
+            .filter(AICorrection.correction_type == "urgency")
+            .all()
+        )
+        assert corrections == []
+
+    def test_is_urgent_omitted_emits_no_correction(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(db, org.id, is_urgent=True)
+
+        resp = client.patch(
+            f"/api/public/v1/feedback/{fb.id}",
+            json={"tags": ["x"]},
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        corrections = (
+            db.query(AICorrection)
+            .filter(AICorrection.correction_type == "urgency")
+            .all()
+        )
+        assert corrections == []
+
+    def test_correction_field_behavior_unaffected_by_is_urgent_capture(
+        self, client, db, org
+    ):
+        """The existing record-only `correction` field behavior stays green
+        alongside the new is_urgent capture — both can fire in one PATCH."""
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb = _feedback_in_org(
+            db, org.id, is_urgent=False, sentiment_label="negative"
+        )
+
+        resp = client.patch(
+            f"/api/public/v1/feedback/{fb.id}",
+            json={
+                "is_urgent": True,
+                "correction": {"field": "sentiment", "corrected_value": "neutral"},
+            },
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        sentiment_corrections = (
+            db.query(AICorrection)
+            .filter(AICorrection.correction_type == "sentiment")
+            .all()
+        )
+        assert len(sentiment_corrections) == 1
+        assert sentiment_corrections[0].original_value == "negative"
+        assert sentiment_corrections[0].corrected_value == "neutral"
+
+        urgency_corrections = (
+            db.query(AICorrection)
+            .filter(AICorrection.correction_type == "urgency")
+            .all()
+        )
+        assert len(urgency_corrections) == 1
+        assert urgency_corrections[0].corrected_value == "urgent"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # § Combined tags + is_urgent + status
 # ═══════════════════════════════════════════════════════════════════════════════
 

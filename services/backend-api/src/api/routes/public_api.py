@@ -473,8 +473,34 @@ async def public_update_feedback(
     # ── Tags / is_urgent (plain field mutation) ───────────────────────────────
     fields_touched = False
     if "is_urgent" in data.model_fields_set:
-        fb.is_urgent = bool(data.is_urgent)
+        from src.services.ai_correction_service import (
+            create_ai_correction,
+            urgency_label,
+        )
+
+        old_is_urgent = bool(fb.is_urgent)
+        new_is_urgent = bool(data.is_urgent)
+        fb.is_urgent = new_is_urgent
         fields_touched = True
+
+        # Record-only urgency training signal — same non-atomic note as the
+        # correction block above: this insert commits separately from the
+        # field-mutation commit below, so a crash between the two is not
+        # atomic. AICorrection is append-only, so a rare duplicate on client
+        # retry is low-harm.
+        if new_is_urgent != old_is_urgent:
+            create_ai_correction(
+                db,
+                organization_id=auth.organization_id,
+                user_id=None,
+                correction_type="urgency",
+                entity_type="feedback_item",
+                entity_id=fb.id,
+                signal="correction",
+                original_value=urgency_label(old_is_urgent),
+                corrected_value=urgency_label(new_is_urgent),
+                feedback_text=fb.text,
+            )
     if "tags" in data.model_fields_set:
         fb.tags = list(data.tags or [])  # rebind new list — JSON columns aren't
         fields_touched = True             # dirty-tracked on in-place mutation.
