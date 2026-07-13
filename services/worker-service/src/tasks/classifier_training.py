@@ -82,6 +82,42 @@ def _build_incumbent_predict() -> Callable[[str], str]:
     return _predict
 
 
+# Verbatim from the production urgency heuristic (worker analysis.py:559-566, identical
+# to backend feedback.py:107-112). Kept as a module constant so predict-seam / tests can
+# reference the exact same source rather than re-typing the list.
+_URGENT_KEYWORDS: tuple[str, ...] = (
+    "urgent", "critical", "broken", "crash", "bug", "error",
+    "failing", "down", "cannot", "can't", "won't", "doesn't",
+)
+
+
+def _build_urgency_incumbent_predict() -> Callable[[str], str]:
+    """Binary incumbent = the production keyword+sentiment urgency heuristic
+    (worker analysis.py:559-566 / backend feedback.py:107-112), wrapped as a
+    deterministic text -> "urgent" | "not_urgent" callable. Reuses the cached VADER
+    analyzer (tasks/analysis.py's get_sentiment_analyzer()) for the compound score,
+    exactly like _build_incumbent_predict() does for the sentiment incumbent.
+
+    Faithfulness note: the ingest path's `strong_negative_keywords` neutral->-0.1 nudge
+    (analysis.py:545-556) only ever lifts a score into the (-0.5, -0.1] band, which is
+    never "very negative" (< -0.5), so it can never flip the urgent decision either way
+    -- using the raw VADER compound score here (rather than reproducing the nudge) is
+    faithful to the production decision.
+    """
+    from src.tasks.analysis import get_sentiment_analyzer
+
+    analyzer = get_sentiment_analyzer("vader")
+
+    def _predict(text: str) -> str:
+        text_lower = (text or "").lower()
+        has_urgent_keyword = any(keyword in text_lower for keyword in _URGENT_KEYWORDS)
+        compound = analyzer.analyze(text)["compound"]
+        is_very_negative = compound < -0.5
+        return "urgent" if (has_urgent_keyword and is_very_negative) else "not_urgent"
+
+    return _predict
+
+
 _category_categorizer_cache = None
 
 

@@ -1168,3 +1168,132 @@ def test_sentiment_lock_held_does_not_block_category_retrain_same_org(db):
         result = tasks.retrain_org(org.id, db, classifier_type="category")
 
     assert result["decision"] == "retained"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13 (urgency-classifier-head / Phase 1) — binary urgency incumbent
+# ---------------------------------------------------------------------------
+#
+# Characterization table cross-checked against the REAL production heuristic
+# (worker analysis.py:559-566 / backend feedback.py:107-112):
+#   urgent_keywords = ['urgent','critical','broken','crash','bug','error',
+#                       'failing','down','cannot',"can't","won't","doesn't"]
+#   has_urgent_keyword = any(k in text_lower for k in urgent_keywords)
+#   is_very_negative   = vader_compound < -0.5
+#   is_urgent = has_urgent_keyword and is_very_negative
+#
+# Every (text, expected) pair below was probed against the REAL cached VADER
+# analyzer (get_sentiment_analyzer("vader")) to confirm its compound score and
+# then hand-checked against the literal keyword list + threshold, so this table
+# is a faithful characterization of today's heuristic, not a guess.
+
+_URGENCY_CHARACTERIZATION_TABLE = [
+    # (text, expected_label, why)
+    (
+        "This is urgent, the app keeps crashing and I am furious, this is "
+        "terrible and awful and I hate it",
+        "urgent",
+        "keyword ('urgent','crash') + very negative (compound -0.9136)",
+    ),
+    (
+        "The app crashed once but overall it is fine, thanks for the help, "
+        "great support",
+        "not_urgent",
+        "keyword ('crash') present but positive sentiment (compound +0.9628) "
+        "-- the `and` requires very-negative too",
+    ),
+    (
+        "I hate this, everything is terrible and awful and useless, worst "
+        "experience ever, disgusting and sad",
+        "not_urgent",
+        "very negative (compound -0.9726) but NO urgent keyword present",
+    ),
+    (
+        "This is a critical situation, I am so upset and disappointed, "
+        "absolutely terrible and awful",
+        "urgent",
+        "keyword ('critical') + very negative (compound -0.9402)",
+    ),
+    (
+        "The server is down and I am furious, this is disgusting, terrible, "
+        "awful, horrible",
+        "urgent",
+        "keyword ('down') + very negative (compound -0.9493)",
+    ),
+    (
+        "I can't find the settings page but it's not a big deal, thanks for "
+        "the great support",
+        "not_urgent",
+        "keyword (\"can't\") present but positive sentiment (compound +0.9331)",
+    ),
+    (
+        "This feature doesn't work at all, I am so angry and disgusted, "
+        "terrible, awful, horrible, hate it",
+        "urgent",
+        "keyword (\"doesn't\") + very negative (compound -0.9691)",
+    ),
+    (
+        "This app is amazing, wonderful, fantastic, I love it so much, best "
+        "thing ever",
+        "not_urgent",
+        "no urgent keyword, positive sentiment (compound +0.9673)",
+    ),
+    ("", "not_urgent", "empty text -- no keyword, neutral compound 0.0"),
+    ("   ", "not_urgent", "whitespace-only text -- no keyword, neutral compound 0.0"),
+]
+
+
+def test_build_urgency_incumbent_predict_urgent_keyword_and_very_negative():
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(
+        "This is urgent, the app keeps crashing and I am furious, this is "
+        "terrible and awful and I hate it"
+    ) == "urgent"
+
+
+def test_build_urgency_incumbent_predict_urgent_keyword_but_mild_sentiment():
+    """The `and` requires very-negative too -- an urgent keyword alone is not enough."""
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(
+        "The app crashed once but overall it is fine, thanks for the help, "
+        "great support"
+    ) == "not_urgent"
+
+
+def test_build_urgency_incumbent_predict_very_negative_but_no_keyword():
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(
+        "I hate this, everything is terrible and awful and useless, worst "
+        "experience ever, disgusting and sad"
+    ) == "not_urgent"
+
+
+@pytest.mark.parametrize("text,expected,why", _URGENCY_CHARACTERIZATION_TABLE)
+def test_build_urgency_incumbent_predict_characterization_table(text, expected, why):
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(text) == expected, why
+
+
+def test_build_urgency_incumbent_predict_returns_only_urgency_labels():
+    """The incumbent must emit exactly URGENCY_LABELS values, never anything else."""
+    from analyzer.corrections_classifier.labels import URGENCY_LABELS
+
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    for text, _, _ in _URGENCY_CHARACTERIZATION_TABLE:
+        assert predict(text) in URGENCY_LABELS
+
+
+def test_urgent_keywords_constant_matches_production_heuristic_verbatim():
+    """The module-level keyword constant must be the exact list/order from
+    analysis.py:559-566 / feedback.py:107-112 -- any drift makes the A/B bar a
+    strawman (spec 'Incumbent fidelity')."""
+    tasks = _get_tasks()
+    assert tuple(tasks._URGENT_KEYWORDS) == (
+        "urgent", "critical", "broken", "crash", "bug", "error",
+        "failing", "down", "cannot", "can't", "won't", "doesn't",
+    )
