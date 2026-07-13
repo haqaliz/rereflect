@@ -48,6 +48,7 @@ const CORRECTION_TYPE_LABELS: Record<string, string> = {
   copilot_response: 'Copilot Response',
   sentiment: 'Sentiment',
   category: 'Category',
+  urgency: 'Urgency',
   churn_risk: 'Churn Risk',
 };
 
@@ -486,6 +487,9 @@ function AISettingsContent() {
             </div>
             <div className="mt-6">
               <ClassifierAccuracyCard classifierType="category" isAdminOrOwner={isAdminOrOwner} />
+            </div>
+            <div className="mt-6">
+              <ClassifierAccuracyCard classifierType="urgency" isAdminOrOwner={isAdminOrOwner} />
             </div>
           </TabsContent>
           {/* Readiness Tab */}

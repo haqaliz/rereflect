@@ -234,3 +234,102 @@ describe('ClassifierAccuracyCard — category classifierType prop', () => {
     });
   });
 });
+
+describe('ClassifierAccuracyCard — urgency classifierType prop', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('fetches with classifierType="urgency" when the prop is passed', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(emptyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(getClassifierAccuracy).toHaveBeenCalledWith('urgency');
+    });
+  });
+
+  it('header copy reflects "Urgency" and never mentions "sentiment"', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(emptyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/urgency/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText(/sentiment/i)).toBeNull();
+  });
+
+  it('carries the required honesty disclosure: beats the keyword urgency heuristic', async () => {
+    // Fixture's classifier_type field is left 'sentiment' intentionally — the component
+    // never reads that field back, only the classifierType prop it was given.
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/beats the keyword urgency heuristic/i)).toBeInTheDocument();
+    });
+  });
+
+  it('discloses that auto mode is add-only (escalates, never de-escalates)', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/never de-escalates/i)).toBeInTheDocument();
+    });
+  });
+
+  it('renders the honest "no model yet" empty state for urgency with no fabricated numbers', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue({ ...emptyResponse, classifier_type: 'urgency' });
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no model/i)).toBeInTheDocument();
+    });
+    expect(screen.getAllByText(/urgency corrections/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it('renders the not-ready state identically for urgency (label_count/min_labels)', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(notReadyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/12\s*\/\s*20/)).toBeInTheDocument();
+    });
+  });
+
+  it('renders the populated state identically for urgency (macro-F1, decisions, runs)', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/71%/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText('Promoted')).toBeInTheDocument();
+      expect(screen.getByText('Retained')).toBeInTheDocument();
+    });
+  });
+
+  it('rollback with classifierType="urgency" calls rollbackClassifier("urgency")', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(populatedResponse);
+    vi.mocked(rollbackClassifier).mockResolvedValue(emptyResponse);
+    vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(emptyResponse);
+
+    render(<ClassifierAccuracyCard classifierType="urgency" isAdminOrOwner />);
+
+    const rollbackButton = await screen.findByRole('button', { name: /roll back/i });
+    await user.click(rollbackButton);
+
+    await waitFor(() => {
+      expect(rollbackClassifier).toHaveBeenCalledWith('urgency');
+    });
+  });
+});
