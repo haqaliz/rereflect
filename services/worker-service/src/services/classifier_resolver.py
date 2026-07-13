@@ -47,6 +47,7 @@ VALID_CLASSIFIER_MODES: frozenset = frozenset({"shadow", "auto"})
 MODE_COLUMN_BY_CLASSIFIER_TYPE: dict = {
     "sentiment": "classifier_mode",
     "category": "category_classifier_mode",
+    "urgency": "urgency_classifier_mode",
 }
 
 
