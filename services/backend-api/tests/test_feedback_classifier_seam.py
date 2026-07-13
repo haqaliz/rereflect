@@ -413,3 +413,174 @@ class TestCategoryAndSentimentIndependentControl:
         assert feedback_item.sentiment_score == pytest.approx(0.2023, abs=1e-4)
         assert feedback_item.sentiment_label == "positive"
         assert feedback_item.pain_point_category == before_pain
+
+
+# Deterministic urgency artifacts -- binary shape (coef=[[0.0]], very
+# negative intercept) collapses P(classes[1])->0 regardless of input text
+# (vocabulary token "neverseen" never matches), so argmax always picks
+# classes[0]. Same proven pattern as _ALWAYS_PAIN_VOCAB_LIKE_ARTIFACT above,
+# just with urgency class names.
+_ALWAYS_URGENT_ARTIFACT = {
+    "vectorizer": {
+        "vocabulary": {"neverseen": 0},
+        "idf": [1.0],
+        "token_pattern": r"(?u)\b\w\w+\b",
+        "lowercase": True,
+        "sublinear_tf": True,
+        "norm": "l2",
+    },
+    "logreg": {"coef": [[0.0]], "intercept": [-10.0]},
+    "classes": ["urgent", "not_urgent"],
+}
+_ALWAYS_NOT_URGENT_ARTIFACT = {
+    **_ALWAYS_URGENT_ARTIFACT,
+    "classes": ["not_urgent", "urgent"],  # swap order -> classes[0] now "not_urgent"
+}
+
+# Real-VADER text that pushes both has_urgent_keyword ("broken", "crash") AND
+# is_very_negative (compound < -0.5) True, so analyze_single_feedback's own
+# keyword heuristic sets is_urgent=True BEFORE the classifier override
+# call-site runs -- same text used in the worker-service ingest suite.
+_URGENT_HEURISTIC_TEXT = (
+    "URGENT: This is broken, terrible, and a complete failure. "
+    "Everything is crashing and awful, I hate it."
+)
+
+
+def _set_urgency_classifier_mode(db, org_id, mode):
+    config = OrgAIConfig(
+        organization_id=org_id, default_provider="openai",
+        model_categorization="gpt-4o-mini", model_analysis="gpt-4o-mini",
+        model_insights="gpt-4o-mini", urgency_classifier_mode=mode,
+    )
+    db.add(config); db.commit()
+
+
+def _add_active_urgency_model(db, org_id, artifact):
+    row = OrgClassifierModel(
+        organization_id=org_id, classifier_type="urgency",
+        model_json=artifact, label_count=10, is_active=True,
+    )
+    db.add(row); db.commit(); db.refresh(row)
+    return row
+
+
+class TestUrgencyOffByteStability:
+    """Reuses TestOffByteStability's SAMPLES (all is_urgent=False by the
+    heuristic): unset/off urgency mode is a pure no-op even with an active
+    urgency model present -- is_urgent must be byte-identical between the
+    two runs."""
+
+    SAMPLES = TestOffByteStability.SAMPLES
+
+    def test_no_config_row_vs_explicit_off_are_identical(
+        self, db: Session, test_organization: Organization
+    ):
+        from src.api.routes.feedback import analyze_single_feedback
+
+        no_config_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_organization.id)
+            db.add(feedback_item)
+            db.commit()
+            db.refresh(feedback_item)
+            analyze_single_feedback(feedback_item, db)
+            no_config_results.append(feedback_item.is_urgent)
+
+        _set_urgency_classifier_mode(db, test_organization.id, "off")
+        _add_active_urgency_model(db, test_organization.id, _ALWAYS_URGENT_ARTIFACT)
+
+        off_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_organization.id)
+            db.add(feedback_item)
+            db.commit()
+            db.refresh(feedback_item)
+            analyze_single_feedback(feedback_item, db)
+            off_results.append(feedback_item.is_urgent)
+
+        assert off_results == no_config_results
+        assert off_results == [expected for *_, expected in self.SAMPLES]
+
+
+class TestUrgencyShadowE2E:
+    def test_shadow_logs_and_never_mutates(self, db: Session, test_organization: Organization, caplog):
+        from src.api.routes.feedback import analyze_single_feedback
+
+        _set_urgency_classifier_mode(db, test_organization.id, "shadow")
+        _add_active_urgency_model(db, test_organization.id, _ALWAYS_URGENT_ARTIFACT)
+
+        feedback_item = _make_feedback("It's fine I guess.", test_organization.id)
+        db.add(feedback_item)
+        db.commit()
+        db.refresh(feedback_item)
+
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            analyze_single_feedback(feedback_item, db)
+
+        assert feedback_item.is_urgent is False  # heuristic incumbent, unchanged
+
+        urgency_records = [
+            r for r in caplog.records
+            if r.name == "rereflect.classifier.shadow" and getattr(r, "classifier_type", None) == "urgency"
+        ]
+        assert len(urgency_records) == 1
+        assert urgency_records[0].incumbent_label == "not_urgent"
+        assert urgency_records[0].challenger_label == "urgent"
+
+
+class TestUrgencyAutoIsShadowOnlyOnBackend:
+    """Ownership: backend inline path NEVER writes is_urgent via the
+    classifier, even in `auto` mode -- worker is the sole authoritative
+    writer, same split as sentiment/category. Covers BOTH directions: a
+    would-be escalation AND a would-be de-escalation, neither applied."""
+
+    def test_auto_never_escalates_on_backend(self, db: Session, test_organization: Organization, caplog):
+        from src.api.routes.feedback import analyze_single_feedback
+
+        _set_urgency_classifier_mode(db, test_organization.id, "auto")
+        _add_active_urgency_model(db, test_organization.id, _ALWAYS_URGENT_ARTIFACT)
+
+        feedback_item = _make_feedback("It's fine I guess.", test_organization.id)
+        db.add(feedback_item)
+        db.commit()
+        db.refresh(feedback_item)
+
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            analyze_single_feedback(feedback_item, db)
+
+        # Ownership: stays at the heuristic incumbent (False) even though
+        # classifier_mode="auto" and the model says "urgent".
+        assert feedback_item.is_urgent is False
+
+        urgency_records = [
+            r for r in caplog.records
+            if r.name == "rereflect.classifier.shadow" and getattr(r, "classifier_type", None) == "urgency"
+        ]
+        assert len(urgency_records) == 1
+
+    def test_auto_never_deescalates_on_backend(self, db: Session, test_organization: Organization, caplog):
+        from src.api.routes.feedback import analyze_single_feedback
+
+        _set_urgency_classifier_mode(db, test_organization.id, "auto")
+        _add_active_urgency_model(db, test_organization.id, _ALWAYS_NOT_URGENT_ARTIFACT)
+
+        feedback_item = _make_feedback(_URGENT_HEURISTIC_TEXT, test_organization.id)
+        db.add(feedback_item)
+        db.commit()
+        db.refresh(feedback_item)
+
+        with caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            analyze_single_feedback(feedback_item, db)
+
+        # Heuristic set is_urgent=True; backend ownership means the
+        # allow_override=False call-site can never touch it regardless of
+        # the challenger label (the add-only rule is moot here -- backend
+        # never mutates in auto at all).
+        assert feedback_item.is_urgent is True
+
+        urgency_records = [
+            r for r in caplog.records
+            if r.name == "rereflect.classifier.shadow" and getattr(r, "classifier_type", None) == "urgency"
+        ]
+        assert len(urgency_records) == 1

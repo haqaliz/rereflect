@@ -168,6 +168,20 @@ def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
             feedback, db, classifier_type="sentiment", allow_override=False,
         )
 
+        # Per-org corrections-classifier override (M5.2 predict-seam), urgency
+        # type. SHADOW-ONLY here (allow_override=False) — same ownership as
+        # sentiment/category above: the worker is the sole authoritative
+        # `auto` writer for is_urgent. Runs AFTER the keyword heuristic above
+        # has set the baseline feedback.is_urgent so a future auto-enabled
+        # worker pass and this shadow-only backend pass agree on what the
+        # "incumbent" was at create time. Even if allow_override were ever
+        # flipped True here, the add-only rule in apply_classifier_override
+        # would still forbid de-escalation — this call-site's False is a
+        # second, independent guard (defense in depth), not the only one.
+        apply_classifier_override(
+            feedback, db, classifier_type="urgency", allow_override=False,
+        )
+
         db.commit()
     except Exception as e:
         # If analysis fails, just continue without analysis
