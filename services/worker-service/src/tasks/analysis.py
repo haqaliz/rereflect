@@ -425,7 +425,10 @@ def _analyze_feedback_item(feedback, db=None) -> None:
         # double-call. Category override runs AFTER _apply_llm_result so a
         # promoted category model can override the LLM's own category guess
         # (feedback.pain_point_category / feature_request_category, set at
-        # _apply_llm_result L488/L494).
+        # _apply_llm_result L488/L494). Urgency override likewise runs AFTER
+        # _apply_llm_result has set the baseline feedback.is_urgent
+        # (L492) — auto is ADD-ONLY (see classifier_predict.py docstring):
+        # escalates False->True only, never de-escalates the LLM's own True.
         if db is not None:
             from src.services.classifier_predict import apply_classifier_override
             apply_classifier_override(
@@ -433,6 +436,9 @@ def _analyze_feedback_item(feedback, db=None) -> None:
             )
             apply_classifier_override(
                 feedback, db, classifier_type="category", allow_override=True,
+            )
+            apply_classifier_override(
+                feedback, db, classifier_type="urgency", allow_override=True,
             )
         # Also compute heuristic factors for explainability (LLM doesn't return factor breakdown)
         _, churn_factors = _compute_heuristic_churn_risk(feedback, db)
@@ -603,10 +609,13 @@ def _apply_keyword_analysis(feedback, db=None) -> None:
 
     # Per-org corrections-classifier override (M5.2 predict-seam-resolver).
     # Worker owns the authoritative `auto` override (allow_override=True) for
-    # BOTH types: sentiment overwrites sentiment_label/score before the
+    # ALL THREE types: sentiment overwrites sentiment_label/score before the
     # churn-risk heuristic below reads them; category overwrites
     # pain_point_category/feature_request_category by built-in-vocab routing
-    # (unambiguous-routing rule — see classifier_predict.py). Lazy import,
+    # (unambiguous-routing rule — see classifier_predict.py); urgency runs
+    # AFTER the keyword heuristic above has set the baseline feedback.is_urgent
+    # (`feedback.is_urgent = has_urgent_keyword and is_very_negative`), and is
+    # ADD-ONLY — escalates False->True only, never de-escalates. Lazy import,
     # never raises.
     if db is not None:
         from src.services.classifier_predict import apply_classifier_override
@@ -615,6 +624,9 @@ def _apply_keyword_analysis(feedback, db=None) -> None:
         )
         apply_classifier_override(
             feedback, db, classifier_type="category", allow_override=True,
+        )
+        apply_classifier_override(
+            feedback, db, classifier_type="urgency", allow_override=True,
         )
 
     # Keyword fallback: compute heuristic churn risk score (9-factor with db)

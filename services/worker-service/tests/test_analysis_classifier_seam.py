@@ -498,3 +498,155 @@ class TestCategoryLLMBranch:
 
         assert unanalyzed_feedback.llm_analyzed is True
         assert unanalyzed_feedback.pain_point_category == "security_breach"  # overridden post-LLM
+
+
+# Deterministic urgency artifacts -- binary shape (coef=[[0.0]], very
+# negative intercept) collapses P(classes[1])->0 regardless of input text
+# (vocabulary token "neverseen" never matches), so argmax always picks
+# classes[0]. Same proven pattern as _ALWAYS_NEGATIVE_ARTIFACT /
+# _ALWAYS_PAIN_VOCAB_ARTIFACT above, just with urgency class names.
+_ALWAYS_URGENT_ARTIFACT = {
+    "vectorizer": {
+        "vocabulary": {"neverseen": 0}, "idf": [1.0],
+        "token_pattern": r"(?u)\b\w\w+\b", "lowercase": True,
+        "sublinear_tf": True, "norm": "l2",
+    },
+    "logreg": {"coef": [[0.0]], "intercept": [-10.0]},
+    "classes": ["urgent", "not_urgent"],
+}
+_ALWAYS_NOT_URGENT_ARTIFACT = {
+    **_ALWAYS_URGENT_ARTIFACT,
+    "classes": ["not_urgent", "urgent"],  # swap order -> classes[0] now "not_urgent"
+}
+
+# Real-VADER text that pushes both has_urgent_keyword ("broken", "crash") AND
+# is_very_negative (compound < -0.5) True, so the base keyword heuristic sets
+# is_urgent=True BEFORE the classifier override call-site runs -- the correct
+# fixture for the no-de-escalation guard test.
+_URGENT_HEURISTIC_TEXT = (
+    "URGENT: This is broken, terrible, and a complete failure. "
+    "Everything is crashing and awful, I hate it."
+)
+
+
+def _set_urgency_classifier_mode(db, org_id: int, mode: str) -> None:
+    config = OrgAIConfig(
+        organization_id=org_id,
+        default_provider="openai",
+        model_categorization="gpt-4o-mini",
+        model_analysis="gpt-4o-mini",
+        model_insights="gpt-4o-mini",
+        urgency_classifier_mode=mode,
+    )
+    db.add(config)
+    db.commit()
+
+
+def _add_active_urgency_model(db, org_id, artifact) -> OrgClassifierModel:
+    row = OrgClassifierModel(
+        organization_id=org_id,
+        classifier_type="urgency",
+        model_json=artifact,
+        label_count=10,
+        is_active=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+class TestUrgencyOffByteStability:
+    """Reuses TestOffByteStability's SAMPLES (all is_urgent=False by the
+    heuristic): unset/off urgency mode is a pure no-op even with an active
+    urgency model present -- is_urgent must be byte-identical between the
+    two runs."""
+
+    SAMPLES = TestOffByteStability.SAMPLES
+
+    def test_no_config_row_vs_explicit_off_are_identical(self, db, test_org):
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        no_config_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_org.id)
+            _apply_keyword_analysis(feedback_item, db)
+            no_config_results.append(feedback_item.is_urgent)
+
+        _set_urgency_classifier_mode(db, test_org.id, "off")
+        _add_active_urgency_model(db, test_org.id, _ALWAYS_URGENT_ARTIFACT)
+
+        off_results = []
+        for text, *_ in self.SAMPLES:
+            feedback_item = _make_feedback(text, test_org.id)
+            _apply_keyword_analysis(feedback_item, db)
+            off_results.append(feedback_item.is_urgent)
+
+        assert off_results == no_config_results
+        # Byte-identical to today's pure heuristic -- none of these five
+        # samples trip the urgent-keyword + very-negative heuristic.
+        assert off_results == [expected for *_, expected in self.SAMPLES]
+
+
+class TestUrgencyAutoEscalates:
+    def test_auto_escalates_not_urgent_heuristic_to_urgent(self, db, test_org):
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        _set_urgency_classifier_mode(db, test_org.id, "auto")
+        _add_active_urgency_model(db, test_org.id, _ALWAYS_URGENT_ARTIFACT)
+
+        # Heuristic-not-urgent text (see TestOffByteStability.SAMPLES row 3).
+        feedback_item = _make_feedback("It's fine I guess.", test_org.id)
+        _apply_keyword_analysis(feedback_item, db)
+
+        assert feedback_item.is_urgent is True
+
+    def test_auto_never_deescalates_heuristic_urgent(self, db, test_org):
+        """MANDATORY add-only guard, ingest-level: heuristic already set
+        is_urgent=True; the promoted model predicts 'not_urgent' -> is_urgent
+        STAYS True (no de-escalation)."""
+        from src.tasks.analysis import _apply_keyword_analysis
+
+        _set_urgency_classifier_mode(db, test_org.id, "auto")
+        _add_active_urgency_model(db, test_org.id, _ALWAYS_NOT_URGENT_ARTIFACT)
+
+        feedback_item = _make_feedback(_URGENT_HEURISTIC_TEXT, test_org.id)
+        _apply_keyword_analysis(feedback_item, db)
+
+        assert feedback_item.is_urgent is True  # heuristic baseline, untouched
+
+
+class TestUrgencyLLMBranch:
+    def test_auto_escalates_on_llm_branch_too(self, db, ai_enabled_org, unanalyzed_feedback):
+        from src.tasks.analysis import _analyze_feedback_item
+
+        _set_urgency_classifier_mode(db, ai_enabled_org.id, "auto")
+        _add_active_urgency_model(db, ai_enabled_org.id, _ALWAYS_URGENT_ARTIFACT)
+
+        llm_result = {
+            "sentiment_label": "positive", "sentiment_score": 0.6, "is_urgent": False,
+            "confidence": 0.9,
+        }
+
+        with patch("src.tasks.analysis.categorize_feedback", return_value=llm_result):
+            _analyze_feedback_item(unanalyzed_feedback, db)
+
+        assert unanalyzed_feedback.llm_analyzed is True
+        assert unanalyzed_feedback.is_urgent is True  # escalated post-LLM
+
+    def test_auto_never_deescalates_on_llm_branch(self, db, ai_enabled_org, unanalyzed_feedback):
+        from src.tasks.analysis import _analyze_feedback_item
+
+        _set_urgency_classifier_mode(db, ai_enabled_org.id, "auto")
+        _add_active_urgency_model(db, ai_enabled_org.id, _ALWAYS_NOT_URGENT_ARTIFACT)
+
+        llm_result = {
+            "sentiment_label": "negative", "sentiment_score": -0.9, "is_urgent": True,
+            "confidence": 0.9,
+        }
+
+        with patch("src.tasks.analysis.categorize_feedback", return_value=llm_result):
+            _analyze_feedback_item(unanalyzed_feedback, db)
+
+        assert unanalyzed_feedback.llm_analyzed is True
+        assert unanalyzed_feedback.is_urgent is True  # LLM's own True, never de-escalated
