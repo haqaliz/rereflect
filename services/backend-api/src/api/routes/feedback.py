@@ -12,6 +12,7 @@ from src.models.user import User
 from src.api.dependencies import get_current_user, get_current_org, check_feedback_limit, track_feedback_usage, get_current_usage
 from src.models.usage import UsageRecord
 from src.services.event_emitter import emit_event
+from src.services.ai_correction_service import create_ai_correction, urgency_label
 from pydantic import BaseModel
 from datetime import datetime
 import sys
@@ -178,6 +179,10 @@ def analyze_single_feedback(feedback: FeedbackItem, db: Session) -> None:
 class FeedbackCreateRequest(BaseModel):
     text: str
     source: Optional[str] = "manual"
+
+
+class UrgentUpdateRequest(BaseModel):
+    is_urgent: bool
 
 
 class FeedbackResponse(BaseModel):
@@ -689,6 +694,57 @@ async def update_feedback(
         event_type="feedback:updated",
         data={"id": feedback.id},
     )
+
+    return feedback
+
+
+@router.patch("/{feedback_id}/urgent", response_model=FeedbackResponse)
+def set_feedback_urgent(
+    feedback_id: int,
+    body: UrgentUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Dashboard-user toggle of a single feedback item's urgent flag.
+
+    Dedicated, minimal endpoint — intentionally NOT entangled with the
+    text-edit-and-reanalyze flow in ``update_feedback``. On a *value change*
+    (new != stored), records an ``AICorrection(correction_type="urgency")``
+    training signal with the acting user's id. Same-value PATCH is a no-op
+    (no correction row). Cross-org id -> 404, no side effect.
+    """
+    feedback = db.query(FeedbackItem).filter(
+        FeedbackItem.id == feedback_id,
+        FeedbackItem.organization_id == current_org.id  # Multi-tenant isolation
+    ).first()
+
+    if not feedback:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feedback not found"
+        )
+
+    old = bool(feedback.is_urgent)
+    new = bool(body.is_urgent)
+
+    if new != old:
+        feedback.is_urgent = new
+        db.commit()
+        db.refresh(feedback)
+
+        create_ai_correction(
+            db,
+            organization_id=current_org.id,
+            user_id=current_user.id,
+            correction_type="urgency",
+            entity_type="feedback_item",
+            entity_id=feedback.id,
+            signal="correction",
+            original_value=urgency_label(old),
+            corrected_value=urgency_label(new),
+            feedback_text=feedback.text,
+        )
 
     return feedback
 
