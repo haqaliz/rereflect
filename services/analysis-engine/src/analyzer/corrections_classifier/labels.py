@@ -7,6 +7,10 @@ from __future__ import annotations
 
 SENTIMENT_LABELS: tuple[str, ...] = ("negative", "neutral", "positive")
 
+# Fixed binary urgency vocab (sorted so classes[0]="not_urgent", classes[1]="urgent" —
+# "urgent" is the positive class for predict()'s binary sigmoid branch, coef.shape==(1,n)).
+URGENCY_LABELS: tuple[str, ...] = ("not_urgent", "urgent")
+
 MIN_LABELS: int = 20
 HOLDOUT_FRAC: float = 0.2
 MIN_HOLDOUT: int = 8
