@@ -45,7 +45,7 @@ from src.models import Organization, OrgClassifierEvalRun, OrgClassifierModel
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CLASSIFIER_TYPE = "sentiment"
-_CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category")
+_CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category", "urgency")
 _PURGE_AFTER_DAYS = 90
 _LOCK_TIMEOUT_SECONDS = 600
 
@@ -269,7 +269,11 @@ def _dataset_and_incumbent_for(org_id: int, db: Session, classifier_type: str):
     """Per-type setup: (dataset, incumbent_predict, eval_labels). eval_labels is None for
     sentiment (evaluate() uses its own byte-stable SENTIMENT_LABELS default — this aspect
     never passes labels= for sentiment); a tuple (possibly empty) for category — the fair-A/B
-    subset (design decision #2 handles the empty case before evaluate() is ever called)."""
+    subset (design decision #2 handles the empty case before evaluate() is ever called); the
+    fixed, always-non-empty URGENCY_LABELS 2-tuple for urgency — unlike category's dynamic
+    vocab, the binary urgency vocab is closed and both the incumbent and any challenger can
+    emit both labels, so the empty-intersection guard above is structurally never triggered
+    for this branch."""
     if classifier_type == "category":
         from analyzer.corrections_classifier.dataset import build_category_dataset, derive_labels
 
@@ -278,6 +282,14 @@ def _dataset_and_incumbent_for(org_id: int, db: Session, classifier_type: str):
         full_labels = derive_labels(dataset)
         eval_labels = tuple(label for label in full_labels if label in _built_in_category_vocab())
         return dataset, incumbent_predict, eval_labels
+
+    if classifier_type == "urgency":
+        from analyzer.corrections_classifier.dataset import build_urgency_dataset
+        from analyzer.corrections_classifier.labels import URGENCY_LABELS
+
+        dataset = build_urgency_dataset(org_id, db)
+        incumbent_predict = _build_urgency_incumbent_predict()
+        return dataset, incumbent_predict, URGENCY_LABELS
 
     from analyzer.corrections_classifier.dataset import build_sentiment_dataset
 
