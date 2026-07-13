@@ -614,6 +614,10 @@ class OrgAIConfig(Base):
     # backend-api; M5.2 v2). 'off' | 'shadow' | 'auto'. Independent of
     # classifier_mode (sentiment).
     category_classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
+    # Per-org self-improving URGENCY-corrections classifier mode (mirrors
+    # backend-api; urgency-classifier-head). 'off' | 'shadow' | 'auto'.
+    # Independent of classifier_mode (sentiment) and category_classifier_mode.
+    urgency_classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)
