@@ -272,7 +272,9 @@ function FeedbackDetailContent() {
     setTogglingUrgent(true);
     try {
       const updated = await feedbackAPI.setUrgent(feedback.id, newValue);
-      setFeedback(updated);
+      // Merge only is_urgent — the /urgent endpoint returns a minimal item
+      // (source_name/assigned_to_email null), so don't clobber the loaded view.
+      setFeedback(prev => (prev ? { ...prev, is_urgent: updated.is_urgent } : updated));
       toast.success(newValue ? 'Marked as urgent' : 'Marked as not urgent');
     } catch {
       toast.error('Failed to update urgency. Please try again.');
