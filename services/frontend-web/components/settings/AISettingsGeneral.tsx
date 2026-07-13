@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Brain, Sparkles, Wand2, Tags } from 'lucide-react';
+import { Brain, Sparkles, Wand2, Tags, AlertTriangle } from 'lucide-react';
 import { aiSettingsAPI, type AISettings, type SentimentStatus } from '@/lib/api/ai-settings';
 
 const CLASSIFIER_MODE_LABELS: Record<string, string> = {
@@ -27,6 +27,8 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
   const [classifierError, setClassifierError] = useState<string | null>(null);
   const [categoryClassifierSaving, setCategoryClassifierSaving] = useState(false);
   const [categoryClassifierError, setCategoryClassifierError] = useState<string | null>(null);
+  const [urgencyClassifierSaving, setUrgencyClassifierSaving] = useState(false);
+  const [urgencyClassifierError, setUrgencyClassifierError] = useState<string | null>(null);
 
   useEffect(() => {
     aiSettingsAPI
@@ -92,6 +94,22 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
       );
     } finally {
       setCategoryClassifierSaving(false);
+    }
+  };
+
+  const handleUrgencyClassifierMode = async (urgency_classifier_mode: string) => {
+    if (urgency_classifier_mode === settings.urgency_classifier_mode) return;
+    setUrgencyClassifierSaving(true);
+    setUrgencyClassifierError(null);
+    try {
+      const updated = await aiSettingsAPI.update({ urgency_classifier_mode });
+      onUpdate(updated);
+    } catch (err: any) {
+      setUrgencyClassifierError(
+        err?.response?.data?.detail || 'Failed to update urgency classifier mode'
+      );
+    } finally {
+      setUrgencyClassifierSaving(false);
     }
   };
 
@@ -258,6 +276,54 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
           </div>
           {categoryClassifierError && (
             <p className="text-xs text-destructive">{categoryClassifierError}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Self-Improving Urgency Classifier Mode (urgency classifier head) */}
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex items-center space-x-2">
+            <div className="p-2 bg-secondary rounded-lg">
+              <AlertTriangle className="w-5 h-5 text-primary" />
+            </div>
+            <CardTitle>Self-Improving Urgency Classifier</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-foreground">Corrections-trained urgency model</p>
+              <p className="text-sm text-muted-foreground">
+                Your model, trained on your team&apos;s urgency corrections. <strong>Off</strong>{' '}
+                disables it. <strong>Shadow</strong> observes and scores in the background
+                without changing stored urgency &mdash; recommended until you have accumulated a
+                substantial number of corrections. <strong>Auto</strong> lets the trained model
+                override stored urgency, but only when it beats the keyword urgency heuristic on
+                held-out data, and it is <strong>add-only</strong>: it can escalate a feedback
+                item from not-urgent to urgent, but it never de-escalates an already-urgent item.
+              </p>
+            </div>
+            <Select
+              value={settings.urgency_classifier_mode ?? 'off'}
+              onValueChange={handleUrgencyClassifierMode}
+              disabled={urgencyClassifierSaving}
+            >
+              <SelectTrigger aria-label="Urgency classifier mode" className="w-32 shrink-0">
+                <SelectValue>
+                  {CLASSIFIER_MODE_LABELS[settings.urgency_classifier_mode ?? 'off'] ??
+                    settings.urgency_classifier_mode}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">Off</SelectItem>
+                <SelectItem value="shadow">Shadow</SelectItem>
+                <SelectItem value="auto">Auto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {urgencyClassifierError && (
+            <p className="text-xs text-destructive">{urgencyClassifierError}</p>
           )}
         </CardContent>
       </Card>
