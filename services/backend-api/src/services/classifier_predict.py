@@ -18,12 +18,14 @@ Three responsibilities, mirroring existing precedents:
      corrections_classifier package), imported lazily so this module stays
      importable in ML-wheel-less environments.
   3. `apply_classifier_override` — the single off/shadow/auto branching
-     helper invoked from both sentiment call-sites (worker
+     helper invoked from the sentiment/category/urgency call-sites (worker
      tasks/analysis.py, backend routes/feedback.py), mirroring
      resolve_sentiment_provider's never-raises posture. The ONLY difference
      between the two services' copies is which value each call-site passes
      for `allow_override` (worker: True/authoritative auto; backend inline:
-     False/shadow-only even in auto mode).
+     False/shadow-only even in auto mode). For classifier_type="urgency"
+     the auto-apply rule is ADD-ONLY (predict-seam spec's R-2 decision):
+     escalate `is_urgent` False->True only, NEVER de-escalate True->False.
 
 Per-org cache: module-level dict keyed (org_id, classifier_type) ->
 (model_id, fit_at, LoadedClassifier). A cheap active-pointer query (id,
@@ -262,6 +264,16 @@ def apply_classifier_override(
     or inside both, is shadow-logged only — never written (unambiguous-
     routing rule).
 
+    For classifier_type="urgency": score_from_proba is bypassed entirely
+    (binary label_only prediction, like category); the write target is
+    always feedback.is_urgent. The auto-apply rule is ADD-ONLY (predict-seam
+    spec's R-2 high-stakes decision): a challenger label of "urgent" sets
+    `is_urgent = True` (escalation); a challenger label of "not_urgent"
+    while the incumbent is already True is intentionally NOT applied — this
+    pass never de-escalates a real churn flag off. The shadow log still
+    fires for would-be de-escalations (both directions disclosed) so a
+    future higher-confidence phase can evaluate enabling de-escalation.
+
     Never raises: any internal failure (resolver, loader, or predict) is
     caught and swallowed, leaving `feedback` exactly as the caller left it.
     """
@@ -287,6 +299,12 @@ def apply_classifier_override(
             challenger_score = None
             target_field = _route_category_label(challenger_label)
             incumbent_label = getattr(feedback, target_field, None) if target_field else None
+            incumbent_score = None
+        elif classifier_type == "urgency":
+            challenger_label = loaded.predict_label_only(text)
+            challenger_score = None
+            target_field = None
+            incumbent_label = "urgent" if getattr(feedback, "is_urgent", False) else "not_urgent"
             incumbent_score = None
         else:
             challenger_label, challenger_score = loaded.predict(text)
@@ -316,6 +334,11 @@ def apply_classifier_override(
                     setattr(feedback, target_field, challenger_label)
                 # else: ambiguous (neither/both built-in vocab) — shadow-
                 # logged above, never guess-write a field.
+            elif classifier_type == "urgency":
+                # ADD-ONLY (PRD auto-mode decision): escalate only, never de-escalate.
+                if challenger_label == "urgent":
+                    feedback.is_urgent = True
+                # challenger "not_urgent" while incumbent urgent → intentionally NOT applied.
             else:
                 feedback.sentiment_label = challenger_label
                 feedback.sentiment_score = challenger_score

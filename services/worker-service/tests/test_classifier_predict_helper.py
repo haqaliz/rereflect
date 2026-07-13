@@ -363,3 +363,183 @@ class TestCategorySeamMatrix:
 
         shadow_records = [r for r in caplog.records if r.name == "rereflect.classifier.shadow"]
         assert len(shadow_records) == (1 if case["expected_logged"] else 0)
+
+
+# Urgency-branch cases (Phase 1: predict-seam, add-only auto). Fake feedback
+# carries only is_urgent (no target_field concept — binary label_only
+# prediction, like category, but the write target is always is_urgent and
+# the auto-apply rule is ADD-ONLY: escalate not_urgent->urgent, NEVER
+# de-escalate urgent->not_urgent).
+class _FakeUrgencyFeedback:
+    def __init__(self, is_urgent=False):
+        self.id = 44
+        self.organization_id = 1
+        self.text = "This is fine."
+        self.is_urgent = is_urgent
+
+
+class _FakeUrgencyLoadedClassifier:
+    model_id = 101
+    fit_at = None
+
+    def __init__(self, label):
+        self._label = label
+
+    def predict_label_only(self, text):
+        return self._label
+
+
+class TestUrgencySeamMatrix:
+    def test_off_is_a_pure_noop(self, caplog):
+        """off (resolver None) -> no-op, is_urgent unchanged, no shadow log
+        -- even though the model would (if consulted) say not_urgent while
+        is_urgent=True, off must never touch it."""
+        feedback = _FakeUrgencyFeedback(is_urgent=True)
+        loaded = _FakeUrgencyLoadedClassifier("not_urgent")
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("off"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=loaded,
+        ), caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is True
+        assert not any(r.name == "rereflect.classifier.shadow" for r in caplog.records)
+
+    def test_shadow_logs_but_never_mutates(self, caplog):
+        """shadow -> is_urgent unchanged; ONE shadow log line. Log fires for
+        would-be de-escalations too (model says not_urgent while incumbent
+        is_urgent=True)."""
+        feedback = _FakeUrgencyFeedback(is_urgent=True)
+        loaded = _FakeUrgencyLoadedClassifier("not_urgent")
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("shadow"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=loaded,
+        ), caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is True  # unchanged
+        shadow_records = [r for r in caplog.records if r.name == "rereflect.classifier.shadow"]
+        assert len(shadow_records) == 1
+        assert shadow_records[0].classifier_type == "urgency"
+        assert shadow_records[0].incumbent_label == "urgent"
+        assert shadow_records[0].challenger_label == "not_urgent"
+
+    def test_shadow_not_promoted_no_log(self):
+        feedback = _FakeUrgencyFeedback(is_urgent=False)
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("shadow"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=None,
+        ):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is False
+
+    def test_auto_escalates_not_urgent_to_urgent(self):
+        """auto + model predicts 'urgent' while is_urgent=False -> is_urgent
+        becomes True (escalation)."""
+        feedback = _FakeUrgencyFeedback(is_urgent=False)
+        loaded = _FakeUrgencyLoadedClassifier("urgent")
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("auto"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=loaded,
+        ):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is True
+
+    def test_auto_never_deescalates_urgent_to_not_urgent(self):
+        """MANDATORY add-only guard: auto + model predicts 'not_urgent' while
+        is_urgent=True -> is_urgent STAYS True. NO de-escalation this pass —
+        a thin/wrong model must never turn a real churn flag OFF."""
+        feedback = _FakeUrgencyFeedback(is_urgent=True)
+        loaded = _FakeUrgencyLoadedClassifier("not_urgent")
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("auto"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=loaded,
+        ):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is True
+
+    def test_auto_no_promoted_model_retains_incumbent(self):
+        """auto + no active model (loader None) -> incumbent retained, no
+        log (nothing to log; there is no challenger prediction)."""
+        feedback = _FakeUrgencyFeedback(is_urgent=True)
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("auto"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=None,
+        ):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is True
+
+    def test_auto_without_allow_override_never_mutates_but_logs(self, caplog):
+        """Backend-copy ownership test: with allow_override=False, auto never
+        mutates is_urgent via the classifier (shadow-log only) -- even when
+        the model would escalate."""
+        feedback = _FakeUrgencyFeedback(is_urgent=False)
+        loaded = _FakeUrgencyLoadedClassifier("urgent")
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            return_value=_resolved_for_mode("auto"),
+        ), patch(
+            "src.services.classifier_predict.load_active_classifier",
+            return_value=loaded,
+        ), caplog.at_level(logging.INFO, logger="rereflect.classifier.shadow"):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=False,
+            )
+
+        assert feedback.is_urgent is False
+        shadow_records = [r for r in caplog.records if r.name == "rereflect.classifier.shadow"]
+        assert len(shadow_records) == 1
+
+    def test_swallows_internal_exception_never_raises(self):
+        feedback = _FakeUrgencyFeedback(is_urgent=True)
+
+        with patch(
+            "src.services.classifier_resolver.resolve_classifier",
+            side_effect=RuntimeError("boom"),
+        ):
+            apply_classifier_override(
+                feedback, object(), classifier_type="urgency", allow_override=True,
+            )
+
+        assert feedback.is_urgent is True
