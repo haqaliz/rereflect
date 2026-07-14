@@ -450,3 +450,33 @@ class TestPublicDeleteCategory:
         )
         assert response.status_code == 204
         assert "X-Rereflect-Warning" not in response.headers
+
+    def test_delete_warning_header_sanitizes_crlf_in_category_and_rule_names(
+        self, client, db, org
+    ):
+        """F4: category/rule names are org-authored and get interpolated into
+        the X-Rereflect-Warning header — CR/LF (and other control chars) must
+        be stripped so a crafted name can't inject extra header lines."""
+        cat = _category_in_org(db, org.id, name="Billing\r\nX-Injected: evil")
+        rule = AutomationRule(
+            organization_id=org.id,
+            name="Billing escalation\r\nX-Injected: evil-rule",
+            trigger_type="feedback_category_match",
+            trigger_config={"categories": ["Billing\r\nX-Injected: evil"]},
+            actions=[{"type": "send_notification", "config": {"channel": "email"}}],
+            is_active=True,
+        )
+        db.add(rule)
+        db.commit()
+
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        response = client.delete(
+            f"/api/public/v1/categories/{cat.id}", headers=_auth(raw)
+        )
+        assert response.status_code == 204
+        assert "X-Rereflect-Warning" in response.headers
+        warning = response.headers["X-Rereflect-Warning"]
+        assert "\r" not in warning
+        assert "\n" not in warning
+        assert "Billing" in warning
+        assert "Billing escalation" in warning

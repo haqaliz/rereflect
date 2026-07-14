@@ -19,6 +19,7 @@ Tag:    public
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import List, Literal, Optional
 
@@ -552,6 +553,12 @@ async def public_bulk_update_feedback(
     for fid in unique_ids:
         fb = by_id.get(fid)
         if fb is None:
+            continue
+        # Skip the SAVEPOINT machinery entirely for status-only batches — no
+        # per-item field means nothing for _apply_bulk_item_fields to do, so
+        # opening (and flushing/releasing) a SAVEPOINT per id here would be
+        # pure overhead across a large batch.
+        if not (patch.model_fields_set & {"correction", "is_urgent", "tags"}):
             continue
         try:
             with db.begin_nested():
@@ -1211,6 +1218,16 @@ class PublicCustomCategoryUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+_HEADER_CONTROL_CHARS_RE = re.compile(r"[\r\n\x00-\x1f\x7f]")
+
+
+def _sanitize_header_value(value: str) -> str:
+    """Strip CR/LF and other control characters from an org-authored string
+    before it is interpolated into an HTTP header value — prevents header
+    injection via a category/rule name containing e.g. ``\\r\\n``."""
+    return _HEADER_CONTROL_CHARS_RE.sub(" ", value)
+
+
 @router.get(
     "/categories",
     response_model=List[PublicCustomCategory],
@@ -1323,9 +1340,11 @@ def public_delete_category(
     custom_category_service.delete_category(db, auth.organization_id, category_id)
 
     if referencing_rules:
-        rule_list = ", ".join(referencing_rules)
+        safe_name = _sanitize_header_value(name)
+        safe_rules = [_sanitize_header_value(r) for r in referencing_rules]
+        rule_list = ", ".join(safe_rules)
         response.headers["X-Rereflect-Warning"] = (
-            f"category '{name}' is referenced by {len(referencing_rules)} "
+            f"category '{safe_name}' is referenced by {len(referencing_rules)} "
             f"automation rule(s): {rule_list}"
         )
     return None
