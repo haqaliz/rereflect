@@ -13,6 +13,7 @@ default) treats every instance as fully featured.
 - [Local transformer sentiment model (opt-in, air-gap capable)](#local-transformer-sentiment-model-opt-in-air-gap-capable)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
 - [Send product-usage events](#send-product-usage-events)
+- [Public API — bulk feedback writes & taxonomy CRUD](#public-api--bulk-feedback-writes--taxonomy-crud)
 - [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment)
 - [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
 - [Connecting Jira](#connecting-jira)
@@ -428,6 +429,93 @@ a bulk action against it:
 
 Tags and the assigned CS owner are visible as chips/badges on both the customer list and the
 Customer 360 profile page.
+
+## Public API — bulk feedback writes & taxonomy CRUD
+
+Two additions to the `/api/public/v1` public API (see [docs/API.md](API.md) for the full public
+API reference): bulk-patching feedback in one request, and full CRUD over your custom
+categories. Both require a `write`-scoped API key (`rrf_...`, created in **Settings → API
+Keys**); listing categories only needs `read`.
+
+### Bulk feedback writes
+
+`POST /api/public/v1/feedback/bulk` applies one uniform `patch` to up to 500 feedback ids in a
+single request. The `patch` object accepts exactly the same fields as the single
+`PATCH /api/public/v1/feedback/{id}` (`workflow_status`, `resolution_note`, `correction`, `tags`,
+`is_urgent`) — see the [API docs](API.md) for their semantics.
+
+```bash
+curl -X POST http://localhost:8000/api/public/v1/feedback/bulk \
+  -H "Authorization: Bearer rrf_YOUR_WRITE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ids": [101, 102, 103],
+    "patch": { "workflow_status": "resolved", "tags": ["billing"] }
+  }'
+```
+
+Response:
+
+```json
+{
+  "matched": 3,
+  "updated": 2,
+  "skipped": 1,
+  "results": [
+    { "id": 101, "status": "updated" },
+    { "id": 102, "status": "noop" },
+    { "id": 103, "status": "skipped", "reason": "not_found" }
+  ]
+}
+```
+
+- `ids` accepts 1–500 entries; duplicates are deduped and `results` is returned in deduped
+  input order.
+- Ids that don't exist, or belong to a different organization, come back as `skipped` — they
+  are never treated as errors.
+- `tags` / `is_urgent` / `correction` are applied per item and are non-contagious: one item
+  failing doesn't roll back the rest of the batch (it comes back as `status: "error"`).
+  `workflow_status` is applied as one batched status change across all matched items.
+- Pass `?count_only=true` to dry-run the request — it returns `matched`/`skipped` counts with
+  `updated: 0` and an empty `results` list, and mutates nothing.
+- An empty `patch` (no recognized fields set) returns `400`, same as the single `PATCH`.
+
+### Custom-category (taxonomy) CRUD
+
+`GET/POST/PATCH/DELETE /api/public/v1/categories` manage the same custom
+pain-point/feature-request/urgency/general categories as **Settings → Categories**, over the
+API.
+
+```bash
+# List (optionally filter by category_type)
+curl http://localhost:8000/api/public/v1/categories?category_type=pain_point \
+  -H "Authorization: Bearer rrf_YOUR_READ_KEY"
+
+# Create
+curl -X POST http://localhost:8000/api/public/v1/categories \
+  -H "Authorization: Bearer rrf_YOUR_WRITE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Shipping delay", "category_type": "pain_point", "description": "Late deliveries"}'
+
+# Update (category_type is immutable — omit it, sending it 422s)
+curl -X PATCH http://localhost:8000/api/public/v1/categories/42 \
+  -H "Authorization: Bearer rrf_YOUR_WRITE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"is_active": false}'
+
+# Delete
+curl -X DELETE http://localhost:8000/api/public/v1/categories/42 \
+  -H "Authorization: Bearer rrf_YOUR_WRITE_KEY"
+```
+
+- Creating a duplicate `(category_type, name)` within your organization returns `409`.
+- An id that doesn't exist, or belongs to another organization, returns `404`.
+- `category_type` cannot be changed after creation — `PATCH` rejects it as an unknown field
+  (`422`, `extra="forbid"`).
+- `DELETE` hard-deletes the category and returns `204`. If the category's name is referenced
+  by an **active** automation rule (a `feedback_category_match` trigger), the response also
+  carries an `X-Rereflect-Warning` header naming the rule(s) — the delete still succeeds; this
+  is advisory only, there is no cascade to the rule.
 
 ## Connecting HubSpot CRM enrichment
 

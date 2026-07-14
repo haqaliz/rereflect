@@ -23,7 +23,7 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 **Open-Source Feature Batch — shipped 2026-06-22** (`PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md`):
 - ✅ **Local / Offline LLM** — Ollama / any OpenAI-compatible endpoint, keyless; VADER fallback with no model.
 - ✅ **Custom AI** — custom pain-point/feature-request/urgency taxonomies + configurable health-score weights.
-- ✅ **Public REST API** — API keys (read/ingest/write), reads + feedback ingestion + feedback mutation (`PATCH /feedback/{id}`: status + record-only corrections, shipped 2026-07-06) + webhooks + OpenAPI docs. See `docs/planning/public-api-write-crud/`.
+- ✅ **Public REST API** — API keys (read/ingest/write), reads + feedback ingestion + feedback mutation (`PATCH /feedback/{id}`: status + record-only corrections, shipped 2026-07-06; `tags`/`is_urgent` + `DELETE /feedback/{id}` shipped 2026-07-07) + bulk feedback writes (`POST /feedback/bulk`, ≤500 ids/request, uniform patch, per-id results, `?count_only=true` dry-run, shipped 2026-07-15) + custom-category (taxonomy) CRUD (`GET/POST/PATCH/DELETE /categories`, 409 on dup / 404 other-org, `X-Rereflect-Warning` header on delete when referenced by an active automation rule, shipped 2026-07-15) + webhooks + OpenAPI docs. See `docs/planning/public-api-write-crud/`, `docs/planning/public-api-write-v2/`, `docs/planning/public-api-crud-v3/`. **Deferred:** mutating the stored category/sentiment column; customer CRUD (resolved as incoherent — customers are a derived view over feedback + health scores, not a directly-authored entity).
 
 ---
 
