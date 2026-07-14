@@ -7,10 +7,12 @@ the key — no cross-tenant data access is possible.
 
 Scopes
 ------
-  read   — GET endpoints (feedback, customers, analytics, webhooks)
+  read   — GET endpoints (feedback, customers, analytics, webhooks, categories)
   ingest — POST /feedback (create + enqueue analysis)
-  write  — PATCH /feedback/{id} (workflow status, corrections, tags, is_urgent)
-           + DELETE /feedback/{id}
+  write  — PATCH /feedback/{id} + DELETE /feedback/{id} (workflow status,
+           corrections, tags, is_urgent); POST /feedback/bulk (uniform patch
+           applied to up to 500 ids in one request); custom categories CRUD
+           (POST/PATCH/DELETE /categories)
 
 Prefix: /api/public/v1
 Tag:    public
@@ -1366,9 +1368,12 @@ def public_openapi(request: Request) -> JSONResponse:
             "description": (
                 "Public REST API for Rereflect. Authenticate every request with an API key:\n\n"
                 "`Authorization: Bearer rrf_...`\n\n"
-                "Keys carry scopes: **read** (GET endpoints), **ingest** (POST /feedback), "
-                "and **write** (`PATCH /feedback/{id}` — workflow status, corrections, "
-                "tags replace, is_urgent — and `DELETE /feedback/{id}`). "
+                "Keys carry scopes: **read** (GET endpoints, incl. `GET /categories`), "
+                "**ingest** (POST /feedback), and **write** (`PATCH /feedback/{id}` — "
+                "workflow status, corrections, tags replace, is_urgent — "
+                "`DELETE /feedback/{id}`, `POST /feedback/bulk` — the same patch applied "
+                "to up to 500 ids in one request — and the custom-categories CRUD: "
+                "`POST`/`PATCH`/`DELETE /categories`). "
                 "All data is scoped to the organization that owns the key."
             ),
         },
