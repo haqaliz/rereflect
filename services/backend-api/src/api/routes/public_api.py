@@ -474,6 +474,9 @@ def _apply_bulk_item_fields(
 )
 async def public_bulk_update_feedback(
     data: PublicFeedbackBulkUpdate,
+    count_only: bool = Query(
+        False, description="Dry-run: return only the match count, mutate nothing."
+    ),
     auth: ApiKeyAuth = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ) -> PublicFeedbackBulkResponse:
@@ -499,6 +502,17 @@ async def public_bulk_update_feedback(
     )
     by_id = {fb.id: fb for fb in rows}
     matched = len(by_id)
+
+    if count_only:
+        # Dry-run: short-circuit before any mutation (status change, per-item
+        # fields, side effects) — just report how many of the deduped ids
+        # matched this org.
+        return PublicFeedbackBulkResponse(
+            matched=matched,
+            updated=0,
+            skipped=len(unique_ids) - matched,
+            results=[],
+        )
 
     key_label = f"api-key:{auth.key_row.name}"
 
