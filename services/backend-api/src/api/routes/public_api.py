@@ -387,6 +387,228 @@ def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str
     return "sentiment", fb.sentiment_label
 
 
+def _apply_bulk_item_fields(
+    db: Session,
+    fb: FeedbackItem,
+    patch: PublicFeedbackUpdate,
+    organization_id: int,
+) -> bool:
+    """Apply ``correction`` / ``is_urgent`` / ``tags`` to a single feedback item
+    for the bulk-write path. Mirrors the field-mutation block in the single
+    PATCH handler, except every ``create_ai_correction`` call passes
+    ``commit=False`` — the bulk caller does one final ``db.commit()`` for the
+    whole batch.
+
+    Returns ``True`` if this item's stored state actually changed (used to
+    decide ``updated`` vs ``noop``); a correction insert always counts as a
+    change (it's a record-only training signal, not a no-op).
+    """
+    fields_touched = False
+
+    if patch.correction is not None:
+        from src.services.ai_correction_service import create_ai_correction
+
+        correction_type, original_value = _resolve_correction(fb, patch.correction.field)
+        create_ai_correction(
+            db,
+            organization_id=organization_id,
+            user_id=None,
+            correction_type=correction_type,
+            entity_type="feedback_item",
+            entity_id=fb.id,
+            signal="correction",
+            original_value=original_value,
+            corrected_value=patch.correction.corrected_value,
+            feedback_text=fb.text,
+            commit=False,
+        )
+        fields_touched = True
+
+    if "is_urgent" in patch.model_fields_set:
+        from src.services.ai_correction_service import create_ai_correction, urgency_label
+
+        old_is_urgent = bool(fb.is_urgent)
+        new_is_urgent = bool(patch.is_urgent)
+        fb.is_urgent = new_is_urgent
+
+        if new_is_urgent != old_is_urgent:
+            fields_touched = True
+            create_ai_correction(
+                db,
+                organization_id=organization_id,
+                user_id=None,
+                correction_type="urgency",
+                entity_type="feedback_item",
+                entity_id=fb.id,
+                signal="correction",
+                original_value=urgency_label(old_is_urgent),
+                corrected_value=urgency_label(new_is_urgent),
+                feedback_text=fb.text,
+                commit=False,
+            )
+
+    if "tags" in patch.model_fields_set:
+        new_tags = list(patch.tags or [])
+        if new_tags != list(fb.tags or []):
+            fields_touched = True
+        fb.tags = new_tags  # rebind — JSON columns aren't dirty-tracked in-place
+
+    return fields_touched
+
+
+@router.post(
+    "/feedback/bulk",
+    response_model=PublicFeedbackBulkResponse,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Bulk-update feedback items (public API)",
+    description=(
+        "Apply a uniform patch (``workflow_status`` / ``tags`` / ``is_urgent`` / "
+        "``correction``) to up to 500 feedback ids in one request.  Requires the "
+        "``write`` scope.  Ids not owned by this org (or non-existent) are "
+        "``skipped`` — not errors.  ``workflow_status`` is applied via one "
+        "batched status-change call; ``tags``/``is_urgent``/``correction`` are "
+        "applied per item and are non-contagious — a per-item failure doesn't "
+        "roll back the other items in the batch.  Pass ``?count_only=true`` to "
+        "preview the match count without mutating anything."
+    ),
+)
+async def public_bulk_update_feedback(
+    data: PublicFeedbackBulkUpdate,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicFeedbackBulkResponse:
+    patch = data.patch
+    if not (patch.model_fields_set & {"workflow_status", "correction", "tags", "is_urgent"}):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+
+    # Dedupe ids, preserving first-seen order.
+    unique_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for i in data.ids:
+        if i not in seen_ids:
+            seen_ids.add(i)
+            unique_ids.append(i)
+
+    rows = (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.id.in_(unique_ids),
+            FeedbackItem.organization_id == auth.organization_id,
+        )
+        .all()
+    )
+    by_id = {fb.id: fb for fb in rows}
+    matched = len(by_id)
+
+    key_label = f"api-key:{auth.key_row.name}"
+
+    error_reasons: dict[int, str] = {}
+    field_changed_ids: set[int] = set()
+    changed_pairs: list[tuple[FeedbackItem, str]] = []
+    changed_ids: set[int] = set()
+
+    # ── Batched status change — one call on the whole matched set ────────────
+    if patch.workflow_status is not None:
+        from src.services.workflow_service import apply_status_change
+
+        changed_pairs = apply_status_change(
+            db,
+            list(by_id.values()),
+            patch.workflow_status,
+            organization_id=auth.organization_id,
+            actor_id=None,
+            actor_label=key_label,
+            resolution_note=patch.resolution_note,
+        )
+        changed_ids = {fb.id for fb, _ in changed_pairs}
+        # Not committed yet — folded into the single db.commit() below,
+        # together with the per-item field mutations.
+
+    # ── Per-item fields (non-contagious via SAVEPOINT) ────────────────────────
+    for fid in unique_ids:
+        fb = by_id.get(fid)
+        if fb is None:
+            continue
+        try:
+            with db.begin_nested():
+                item_changed = _apply_bulk_item_fields(db, fb, patch, auth.organization_id)
+                db.flush()
+            if item_changed:
+                field_changed_ids.add(fid)
+        except Exception:
+            logger.warning(
+                "public bulk PATCH: per-item field update failed for feedback %s",
+                fid,
+                exc_info=True,
+            )
+            error_reasons[fid] = "internal_error"
+
+    db.commit()
+
+    # ── Best-effort side effects — done once for the whole batch ─────────────
+    if changed_ids or field_changed_ids:
+        try:
+            from src.services.cache_service import cache_invalidate
+
+            cache_invalidate(f"dashboard:{auth.organization_id}:*")
+            cache_invalidate(f"analytics:{auth.organization_id}:*")
+        except Exception:
+            logger.warning("cache_invalidate failed on public bulk PATCH", exc_info=True)
+
+    if changed_pairs:
+        try:
+            from src.services.workflow_service import dispatch_status_webhooks
+
+            dispatch_status_webhooks(
+                db,
+                auth.organization_id,
+                changed_pairs,
+                patch.workflow_status,
+                changed_by_label=key_label,
+            )
+        except Exception:
+            logger.warning("webhook dispatch failed on public bulk PATCH", exc_info=True)
+
+    if changed_ids:
+        try:
+            from src.services.event_emitter import emit_event
+
+            await emit_event(
+                org_id=auth.organization_id,
+                event_type="workflow:status_changed",
+                data={"feedback_ids": sorted(changed_ids), "new_status": patch.workflow_status},
+            )
+        except Exception:
+            logger.warning("emit_event failed on public bulk PATCH", exc_info=True)
+
+    # ── Per-item results, in deduped input order ──────────────────────────────
+    results: list[PublicFeedbackBulkResultItem] = []
+    updated_count = 0
+    skipped_count = 0
+    for fid in unique_ids:
+        if fid not in by_id:
+            results.append(
+                PublicFeedbackBulkResultItem(id=fid, status="skipped", reason="not_found")
+            )
+            skipped_count += 1
+        elif fid in error_reasons:
+            results.append(
+                PublicFeedbackBulkResultItem(id=fid, status="error", reason=error_reasons[fid])
+            )
+        elif fid in changed_ids or fid in field_changed_ids:
+            results.append(PublicFeedbackBulkResultItem(id=fid, status="updated"))
+            updated_count += 1
+        else:
+            results.append(PublicFeedbackBulkResultItem(id=fid, status="noop"))
+
+    return PublicFeedbackBulkResponse(
+        matched=matched,
+        updated=updated_count,
+        skipped=skipped_count,
+        results=results,
+    )
+
+
 @router.patch(
     "/feedback/{feedback_id}",
     response_model=PublicFeedbackItem,
