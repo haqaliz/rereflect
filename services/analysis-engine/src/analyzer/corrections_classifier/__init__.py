@@ -25,10 +25,12 @@ from .labels import (
     MIN_LABELS,
     RANDOM_STATE,
     SENTIMENT_LABELS,
+    URGENCY_LABELS,
 )
 from .dataset import (
     build_category_dataset,
     build_sentiment_dataset,
+    build_urgency_dataset,
     derive_labels,
     fetch_correction_rows,
     fetch_sentiment_correction_rows,
@@ -40,6 +42,7 @@ from .trainer import train_classifier
 
 __all__ = [
     "SENTIMENT_LABELS",
+    "URGENCY_LABELS",
     "MIN_LABELS",
     "HOLDOUT_FRAC",
     "MIN_HOLDOUT",
@@ -47,6 +50,7 @@ __all__ = [
     "RANDOM_STATE",
     "build_sentiment_dataset",
     "build_category_dataset",
+    "build_urgency_dataset",
     "rows_to_dataset",
     "fetch_correction_rows",
     "fetch_sentiment_correction_rows",

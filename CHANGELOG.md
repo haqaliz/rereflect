@@ -6,6 +6,22 @@ Every feature is unlocked; the app runs on your own infrastructure with your own
 This is the first tagged release. Prior work lives in the git history and the tracking files
 (`AI-TRACKING.md`, `DEV-TRACKING.md`).
 
+## Unreleased
+
+### Self-improving on-device models (M5.2)
+
+- **Per-organization urgency classifier** — a third self-improving head (after sentiment and category),
+  trained on your own urgency corrections. It's a small, CPU-only, offline binary model
+  (`urgent` / `not_urgent`) whose challenger is promoted only when it beats the built-in
+  keyword+sentiment urgency heuristic on your held-out corrections (≥ +0.02 macro-F1), with one-click
+  rollback. Off by default; independent `off` / `shadow` / `auto` toggle in Settings → AI.
+- You now teach it by simply flipping a feedback item's **urgent flag** — from the new toggle on the
+  feedback detail page or via `PATCH /api/public/v1/feedback/{id}`; each user-driven change is recorded
+  as a training signal (the analyzer's own automatic flagging is not).
+- **Add-only in `auto`, by design.** Because the urgent flag drives churn alerts and the urgent queue,
+  the model in `auto` mode can only ever **escalate** an item to urgent — it never silently clears a
+  flag the built-in heuristic raised. `shadow` mode logs both directions so you can judge accuracy first.
+
 ## v0.1.0 — 2026-07-13
 
 First tagged release of the self-hosted edition. Headline theme: **close the integration loop**

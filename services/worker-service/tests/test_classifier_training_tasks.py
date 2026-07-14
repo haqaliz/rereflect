@@ -148,6 +148,80 @@ def _beatable_category_pairs(n_per_class: int = 20) -> list:
     return pairs
 
 
+def _seed_urgency_corrections(db, org_id: int, pairs: list) -> None:
+    """Seed AICorrection rows (correction_type='urgency') that build_urgency_dataset()
+    will pick up for real. pairs: list[(feedback_text, corrected_value)]."""
+    for text_, label in pairs:
+        db.add(
+            AICorrection(
+                organization_id=org_id,
+                correction_type="urgency",
+                entity_type="feedback_item",
+                entity_id=None,
+                signal="correction",
+                original_value="not_urgent",
+                corrected_value=label,
+                feedback_text=text_,
+            )
+        )
+    db.commit()
+
+
+def _beatable_urgency_pairs(n_per_class: int = 20) -> list:
+    """Synthetic (text, label) pairs for a REAL end-to-end urgency promote test. Labels are
+    drawn from the fixed binary URGENCY_LABELS vocab, but the marker tokens ('vexicorn' /
+    'blimtor') are deliberately absent from _URGENT_KEYWORDS AND carry no VADER sentiment
+    signal (neutral compound ~0.0) — so the REAL keyword+sentiment incumbent's
+    has_urgent_keyword is False for every row, and it deterministically predicts
+    'not_urgent' for every single row regardless of true label, i.e. its macro-F1 on this
+    2-class eval is a reliably beatable floor (mirrors _beatable_category_pairs)."""
+    pairs = []
+    for i in range(n_per_class):
+        pairs.append((f"vexicorn vexicorn plindash entry {i} vexicorn", "urgent"))
+        pairs.append((f"blimtor blimtor snuvwick entry {i} blimtor", "not_urgent"))
+    return pairs
+
+
+def _real_signal_urgency_pairs(n_per_class: int = 20) -> list:
+    """Synthetic (text, label) pairs with GENUINE urgency signal the real keyword+sentiment
+    incumbent gets right on every row (used by the R-3 majority-class-collapse guard test —
+    proves the guard rejects a collapsed challenger even when there IS real signal to learn,
+    not just when the incumbent is a strawman)."""
+    pairs = []
+    for i in range(n_per_class):
+        pairs.append((
+            f"This is urgent, the app keeps crashing entry {i}, I am furious, "
+            f"terrible awful hate it",
+            "urgent",
+        ))
+        pairs.append((
+            f"Thanks so much for the great support entry {i}, everything works "
+            f"wonderfully",
+            "not_urgent",
+        ))
+    return pairs
+
+
+def _collapsed_not_urgent_artifact() -> dict:
+    """A REAL, valid trainer.py-shaped JSON artifact (not a mock of predict()!) that the
+    pure-Python predict.py will genuinely decode to 'not_urgent' for ANY input text: an
+    empty TF-IDF vocabulary means every text maps to an all-zero feature vector, and a
+    large-magnitude negative intercept on the binary sigmoid branch (classes[1]='urgent'
+    is the positive class per labels.py) drives sigmoid(intercept) ~= 0 regardless of the
+    (empty) vector — i.e. a genuine majority-class-collapse challenger, exercised through
+    the real predict() code path."""
+    return {
+        "model_type": "tfidf_logreg",
+        "classifier_type": "urgency",
+        "classes": ["not_urgent", "urgent"],
+        "vectorizer": {"vocabulary": {}, "idf": [], "lowercase": True,
+                       "token_pattern": r"(?u)\b\w\w+\b", "ngram_range": [1, 1],
+                       "norm": "l2", "sublinear_tf": False, "smooth_idf": True},
+        "logreg": {"coef": [[]], "intercept": [-1000.0], "multi_class": "ovr"},
+        "label_count": 0,
+    }
+
+
 def _seed_corrections(db, org_id: int, count: int = 25) -> None:
     """Seed AICorrection rows that build_sentiment_dataset() will pick up for real."""
     labels = ["positive", "neutral", "negative"]
@@ -205,7 +279,7 @@ def _patch_core(decision: str, *, classifier_type: str = "sentiment", n: int = 2
                  incumbent_macro_f1=0.50, challenger_macro_f1=0.65, macro_f1_delta=0.15,
                  notes=None, dataset=None, artifact=None):
     """Patch the training-and-eval-core so retrain_org's decision is fully deterministic for
-    EITHER classifier_type, without needing sklearn to actually fit anything. The default
+    ANY classifier_type, without needing sklearn to actually fit anything. The default
     fake category dataset uses REAL built-in vocab labels ("performance"/"security_breach")
     so the fair-A/B eval_labels computation in retrain_org's category branch never hits the
     Phase-4 "no built-in overlap" guard by accident for these mocked-core tests."""
@@ -216,6 +290,8 @@ def _patch_core(decision: str, *, classifier_type: str = "sentiment", n: int = 2
     if dataset is None:
         if classifier_type == "category":
             labels = ["performance", "security_breach"]  # both built-in vocab members
+        elif classifier_type == "urgency":
+            labels = ["not_urgent", "urgent"]  # fixed binary URGENCY_LABELS vocab
         else:
             labels = ["positive", "neutral", "negative"]
         dataset = [(f"text {i}", labels[i % len(labels)]) for i in range(n)]
@@ -238,11 +314,12 @@ def _patch_core(decision: str, *, classifier_type: str = "sentiment", n: int = 2
         macro_f1_delta=macro_f1_delta, notes=notes,
     )
 
-    dataset_builder_target = (
-        "analyzer.corrections_classifier.dataset.build_category_dataset"
-        if classifier_type == "category"
-        else "analyzer.corrections_classifier.dataset.build_sentiment_dataset"
-    )
+    if classifier_type == "category":
+        dataset_builder_target = "analyzer.corrections_classifier.dataset.build_category_dataset"
+    elif classifier_type == "urgency":
+        dataset_builder_target = "analyzer.corrections_classifier.dataset.build_urgency_dataset"
+    else:
+        dataset_builder_target = "analyzer.corrections_classifier.dataset.build_sentiment_dataset"
     # NOTE: patch.object(module_obj, ...) here, NOT a dotted patch() string —
     # analyzer.corrections_classifier.__init__ re-exports the function "evaluate" under
     # the same name as the "evaluate" submodule, which breaks mock.patch's dotted-path getattr
@@ -731,119 +808,6 @@ def test_retrain_org_releases_lock_in_finally(db):
 # ---------------------------------------------------------------------------
 
 
-def test_retrain_all_orgs_iterates_all_orgs_and_both_types(db):
-    org1 = _make_org(db, "Org1")
-    org2 = _make_org(db, "Org2")
-    org3 = _make_org(db, "Org3")
-
-    with patch("src.tasks.classifier_training.retrain_org") as mock_retrain, \
-         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
-         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
-        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
-        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
-        mock_retrain.return_value = {"decision": "retained", "retained": True, "n": 25}
-        mock_purge.return_value = {"deleted": 0}
-
-        tasks = _get_tasks()
-        tasks.retrain_all_orgs()
-
-    assert mock_retrain.call_count == 6  # 3 orgs x 2 classifier types
-    called_pairs = {
-        (c.args[0], c.kwargs.get("classifier_type")) for c in mock_retrain.call_args_list
-    }
-    assert called_pairs == {
-        (org1.id, "sentiment"), (org1.id, "category"),
-        (org2.id, "sentiment"), (org2.id, "category"),
-        (org3.id, "sentiment"), (org3.id, "category"),
-    }
-
-
-def test_retrain_all_orgs_aggregates_counts_across_both_types(db):
-    org1 = _make_org(db, "Org1")
-    org2 = _make_org(db, "Org2")
-    org3 = _make_org(db, "Org3")
-
-    results_by_key = {
-        (org1.id, "sentiment"): {"decision": "promoted", "promoted": True, "n": 25},
-        (org1.id, "category"): {"decision": "retained", "retained": True, "n": 25},
-        (org2.id, "sentiment"): {"decision": "retained", "retained": True, "n": 25},
-        (org2.id, "category"): {"decision": "promoted", "promoted": True, "n": 25},
-        (org3.id, "sentiment"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
-        (org3.id, "category"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 2},
-    }
-
-    def side_effect(org_id, session, classifier_type="sentiment"):
-        return results_by_key[(org_id, classifier_type)]
-
-    with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
-         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
-         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
-        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
-        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
-        mock_purge.return_value = {"deleted": 0}
-
-        tasks = _get_tasks()
-        result = tasks.retrain_all_orgs()
-
-    # trained (promoted+retained) = 4 across both types (org1 both, org2 both); skipped = 2 (org3 both)
-    assert result == {"trained": 4, "promoted": 2, "skipped": 2}
-
-
-def test_retrain_all_orgs_isolates_per_org_exception_across_both_types(db):
-    """org2's failure (both type-iterations) must leave the SHARED session usable for org1/org3's
-    iterations. Mirrors the original single-type test's real-IntegrityError-and-rollback proof,
-    doubled across the type loop."""
-    org1 = _make_org(db, "Org1")
-    org2 = _make_org(db, "Org2")
-    org3 = _make_org(db, "Org3")
-
-    processed = []
-
-    def side_effect(org_id, session, classifier_type="sentiment"):
-        processed.append((org_id, classifier_type))
-        if org_id == org2.id:
-            bad_run = OrgClassifierEvalRun(
-                organization_id=org2.id,
-                classifier_type=None,  # NOT NULL violation
-                decision=None,  # NOT NULL violation
-                n=1,
-            )
-            session.add(bad_run)
-            session.flush()  # raises IntegrityError
-            return {"decision": "retained", "retained": True, "n": 25}  # unreachable
-        good_run = OrgClassifierEvalRun(
-            organization_id=org_id,
-            classifier_type=classifier_type,
-            decision="retained",
-            n=25,
-        )
-        session.add(good_run)
-        session.commit()
-        return {"decision": "retained", "retained": True, "n": 25}
-
-    with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
-         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
-         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
-        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
-        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
-        mock_purge.return_value = {"deleted": 0}
-
-        tasks = _get_tasks()
-        result = tasks.retrain_all_orgs()  # must not raise
-
-    assert set(processed) == {
-        (org1.id, "sentiment"), (org1.id, "category"),
-        (org2.id, "sentiment"), (org2.id, "category"),
-        (org3.id, "sentiment"), (org3.id, "category"),
-    }
-    assert result["trained"] == 4  # org1 x2 + org3 x2 succeeded; org2 x2 isolated-failed
-
-    org3_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org3.id).all()
-    assert len(org3_runs) == 2
-    org1_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org1.id).all()
-    assert len(org1_runs) == 2
-
-
 def test_retrain_all_orgs_runs_purge_once(db):
     _make_org(db, "Org1")
     _make_org(db, "Org2")
@@ -1168,3 +1132,464 @@ def test_sentiment_lock_held_does_not_block_category_retrain_same_org(db):
         result = tasks.retrain_org(org.id, db, classifier_type="category")
 
     assert result["decision"] == "retained"
+
+
+# ---------------------------------------------------------------------------
+# Phase 13 (urgency-classifier-head / Phase 1) — binary urgency incumbent
+# ---------------------------------------------------------------------------
+#
+# Characterization table cross-checked against the REAL production heuristic
+# (worker analysis.py:559-566 / backend feedback.py:107-112):
+#   urgent_keywords = ['urgent','critical','broken','crash','bug','error',
+#                       'failing','down','cannot',"can't","won't","doesn't"]
+#   has_urgent_keyword = any(k in text_lower for k in urgent_keywords)
+#   is_very_negative   = vader_compound < -0.5
+#   is_urgent = has_urgent_keyword and is_very_negative
+#
+# Every (text, expected) pair below was probed against the REAL cached VADER
+# analyzer (get_sentiment_analyzer("vader")) to confirm its compound score and
+# then hand-checked against the literal keyword list + threshold, so this table
+# is a faithful characterization of today's heuristic, not a guess.
+
+_URGENCY_CHARACTERIZATION_TABLE = [
+    # (text, expected_label, why)
+    (
+        "This is urgent, the app keeps crashing and I am furious, this is "
+        "terrible and awful and I hate it",
+        "urgent",
+        "keyword ('urgent','crash') + very negative (compound -0.9136)",
+    ),
+    (
+        "The app crashed once but overall it is fine, thanks for the help, "
+        "great support",
+        "not_urgent",
+        "keyword ('crash') present but positive sentiment (compound +0.9628) "
+        "-- the `and` requires very-negative too",
+    ),
+    (
+        "I hate this, everything is terrible and awful and useless, worst "
+        "experience ever, disgusting and sad",
+        "not_urgent",
+        "very negative (compound -0.9726) but NO urgent keyword present",
+    ),
+    (
+        "This is a critical situation, I am so upset and disappointed, "
+        "absolutely terrible and awful",
+        "urgent",
+        "keyword ('critical') + very negative (compound -0.9402)",
+    ),
+    (
+        "The server is down and I am furious, this is disgusting, terrible, "
+        "awful, horrible",
+        "urgent",
+        "keyword ('down') + very negative (compound -0.9493)",
+    ),
+    (
+        "I can't find the settings page but it's not a big deal, thanks for "
+        "the great support",
+        "not_urgent",
+        "keyword (\"can't\") present but positive sentiment (compound +0.9331)",
+    ),
+    (
+        "This feature doesn't work at all, I am so angry and disgusted, "
+        "terrible, awful, horrible, hate it",
+        "urgent",
+        "keyword (\"doesn't\") + very negative (compound -0.9691)",
+    ),
+    (
+        "This app is amazing, wonderful, fantastic, I love it so much, best "
+        "thing ever",
+        "not_urgent",
+        "no urgent keyword, positive sentiment (compound +0.9673)",
+    ),
+    ("", "not_urgent", "empty text -- no keyword, neutral compound 0.0"),
+    ("   ", "not_urgent", "whitespace-only text -- no keyword, neutral compound 0.0"),
+]
+
+
+def test_build_urgency_incumbent_predict_urgent_keyword_and_very_negative():
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(
+        "This is urgent, the app keeps crashing and I am furious, this is "
+        "terrible and awful and I hate it"
+    ) == "urgent"
+
+
+def test_build_urgency_incumbent_predict_urgent_keyword_but_mild_sentiment():
+    """The `and` requires very-negative too -- an urgent keyword alone is not enough."""
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(
+        "The app crashed once but overall it is fine, thanks for the help, "
+        "great support"
+    ) == "not_urgent"
+
+
+def test_build_urgency_incumbent_predict_very_negative_but_no_keyword():
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(
+        "I hate this, everything is terrible and awful and useless, worst "
+        "experience ever, disgusting and sad"
+    ) == "not_urgent"
+
+
+@pytest.mark.parametrize("text,expected,why", _URGENCY_CHARACTERIZATION_TABLE)
+def test_build_urgency_incumbent_predict_characterization_table(text, expected, why):
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    assert predict(text) == expected, why
+
+
+def test_build_urgency_incumbent_predict_returns_only_urgency_labels():
+    """The incumbent must emit exactly URGENCY_LABELS values, never anything else."""
+    from analyzer.corrections_classifier.labels import URGENCY_LABELS
+
+    tasks = _get_tasks()
+    predict = tasks._build_urgency_incumbent_predict()
+    for text, _, _ in _URGENCY_CHARACTERIZATION_TABLE:
+        assert predict(text) in URGENCY_LABELS
+
+
+def test_urgent_keywords_constant_matches_production_heuristic_verbatim():
+    """The module-level keyword constant must be the exact list/order from
+    analysis.py:559-566 / feedback.py:107-112 -- any drift makes the A/B bar a
+    strawman (spec 'Incumbent fidelity')."""
+    tasks = _get_tasks()
+    assert tuple(tasks._URGENT_KEYWORDS) == (
+        "urgent", "critical", "broken", "crash", "bug", "error",
+        "failing", "down", "cannot", "can't", "won't", "doesn't",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 14 (urgency-classifier-head / Phase 2) — wire urgency into
+# _dataset_and_incumbent_for + _CLASSIFIER_TYPES
+# ---------------------------------------------------------------------------
+
+
+def test_classifier_types_includes_urgency():
+    tasks = _get_tasks()
+    assert tasks._CLASSIFIER_TYPES == ("sentiment", "category", "urgency")
+
+
+def test_dataset_and_incumbent_for_urgency_returns_dataset_incumbent_and_labels(db):
+    org = _make_org(db)
+    from analyzer.corrections_classifier.labels import URGENCY_LABELS
+
+    sentinel_dataset = [("urgent text", "urgent"), ("calm text", "not_urgent")]
+    with patch("analyzer.corrections_classifier.dataset.build_urgency_dataset",
+               return_value=sentinel_dataset) as mock_build:
+        tasks = _get_tasks()
+        dataset, incumbent_predict, eval_labels = tasks._dataset_and_incumbent_for(
+            org.id, db, "urgency"
+        )
+
+    mock_build.assert_called_once_with(org.id, db)
+    assert dataset == sentinel_dataset
+    assert eval_labels == URGENCY_LABELS
+    # incumbent_predict is the REAL urgency heuristic wrapper, not a stub.
+    assert incumbent_predict(
+        "This is urgent, the app keeps crashing and I am furious, this is "
+        "terrible and awful and I hate it"
+    ) == "urgent"
+    assert incumbent_predict("Thanks so much, everything works wonderfully") == "not_urgent"
+
+
+def test_retrain_org_urgency_dispatches_to_build_urgency_dataset(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("promoted", classifier_type="urgency", n=25, challenger_macro_f1=0.70) as (_, artifact):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="urgency")
+
+    assert result["decision"] == "promoted"
+    model = db.query(OrgClassifierModel).filter_by(organization_id=org.id).one()
+    assert model.classifier_type == "urgency"
+    assert model.model_json == artifact
+
+
+def test_retrain_org_urgency_passes_urgency_labels_to_evaluate(db):
+    """The urgency branch must pass the fixed URGENCY_LABELS 2-tuple to evaluate() — proving
+    the empty-intersection guard (which only fires for category's dynamic subset) is a
+    structural non-issue here: URGENCY_LABELS is always non-empty."""
+    org = _make_org(db)
+    from analyzer.corrections_classifier.labels import URGENCY_LABELS
+
+    fake_r, _ = _fake_redis_lock_acquired()
+    captured_kwargs = {}
+    evaluate_module = importlib.import_module("analyzer.corrections_classifier.evaluate")
+
+    def spy_evaluate(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        from analyzer.corrections_classifier.evaluate import EvalResult
+        return EvalResult(decision="retained", n=10, incumbent_macro_f1=0.5,
+                           challenger_macro_f1=0.5, macro_f1_delta=0.0,
+                           notes="retained (delta=+0.0000, n=10)")
+
+    dataset = [(f"text {i}", URGENCY_LABELS[i % 2]) for i in range(20)]
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch("analyzer.corrections_classifier.dataset.build_urgency_dataset",
+               return_value=dataset), \
+         patch.object(evaluate_module, "evaluate", side_effect=spy_evaluate):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db, classifier_type="urgency")
+
+    assert captured_kwargs["labels"] == URGENCY_LABELS
+
+
+def test_retrain_org_urgency_below_gate_writes_skipped_eval_run(db):
+    org = _make_org(db)
+    _seed_urgency_corrections(db, org.id, _beatable_urgency_pairs(n_per_class=3))  # 6 rows
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="urgency")
+
+    assert result["decision"] == "skipped"
+    runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org.id).all()
+    assert len(runs) == 1
+    assert runs[0].classifier_type == "urgency"
+    assert runs[0].decision == "skipped"
+    assert runs[0].n == 6
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_urgency_majority_class_collapse_does_not_beat_incumbent(db):
+    """R-3 guard (mandatory): a challenger that collapses to predicting 'not_urgent' for
+    EVERY row must NOT beat the real keyword+sentiment incumbent on macro-F1, even against a
+    dataset with genuine urgency signal the incumbent gets right on every row -- proves
+    macro-F1 (not accuracy) protects the promotion gate against a degenerate model
+    overwriting the heuristic. Nothing here is mocked except train_classifier (which is
+    replaced with a fixed, REAL artifact that predict.py genuinely decodes to 'not_urgent'
+    for any text) -- the real build_urgency_dataset, real urgency incumbent, and real
+    evaluate()/metrics all run."""
+    org = _make_org(db)
+    _seed_urgency_corrections(db, org.id, _real_signal_urgency_pairs(n_per_class=20))  # 40 rows
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    collapsed_artifact = _collapsed_not_urgent_artifact()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         patch("analyzer.corrections_classifier.trainer.train_classifier",
+               return_value=collapsed_artifact):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="urgency")
+
+    assert result["decision"] != "promoted"
+    assert db.query(OrgClassifierModel).filter_by(
+        organization_id=org.id, classifier_type="urgency").count() == 0
+
+    run = db.query(OrgClassifierEvalRun).filter_by(
+        organization_id=org.id, classifier_type="urgency").one()
+    assert run.decision != "promoted"
+    # the real incumbent gets every row right on this dataset (high macro-F1); the collapsed
+    # challenger cannot possibly beat it (it never predicts 'urgent' at all).
+    assert run.challenger_macro_f1 < run.incumbent_macro_f1
+
+
+def test_retrain_org_urgency_real_end_to_end_promotes_with_beatable_incumbent(db):
+    """Spec acceptance criterion: synthetic urgency corrections (>=MIN_LABELS, both classes,
+    a deliberately-beatable incumbent) -> retrain_org(org_id, db, classifier_type="urgency")
+    promotes a model: one OrgClassifierModel row (classifier_type='urgency', is_active=True)
+    + one OrgClassifierEvalRun (decision='promoted'). Uses the REAL build_urgency_dataset,
+    REAL _build_urgency_incumbent_predict() (actual VADER + keyword heuristic), REAL
+    evaluate(), and REAL train_classifier() (actual sklearn fit) -- nothing in the core is
+    mocked, proving the whole pipeline end-to-end."""
+    org = _make_org(db)
+    _seed_urgency_corrections(db, org.id, _beatable_urgency_pairs(n_per_class=20))  # 40 rows
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="urgency")
+
+    assert result["decision"] == "promoted"
+
+    models = db.query(OrgClassifierModel).filter_by(
+        organization_id=org.id, classifier_type="urgency").all()
+    assert len(models) == 1
+    assert models[0].is_active is True
+    assert models[0].label_count == 40
+
+    runs = db.query(OrgClassifierEvalRun).filter_by(
+        organization_id=org.id, classifier_type="urgency").all()
+    assert len(runs) == 1
+    assert runs[0].decision == "promoted"
+    assert runs[0].classifier_model_id == models[0].id
+
+
+def test_retrain_org_urgency_lock_key_distinct_from_sentiment_and_category(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", classifier_type="urgency", n=25):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db, classifier_type="urgency")
+
+    fake_r.lock.assert_called_once_with(
+        f"lock:classifier_refit:urgency:{org.id}", timeout=600, blocking=False,
+    )
+
+
+def test_urgency_lock_held_does_not_block_sentiment_retrain_same_org(db):
+    """A held urgency-type lock must not block a concurrent sentiment retrain for the SAME
+    org -- distinct lock keys, no serialization across heads."""
+    org = _make_org(db)
+
+    def fake_lock_factory(key, **kwargs):
+        m = MagicMock()
+        m.acquire.return_value = "urgency" not in key  # urgency lock DENIED, sentiment GRANTED
+        return m
+
+    fake_r = MagicMock()
+    fake_r.lock.side_effect = fake_lock_factory
+
+    with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+         _patch_core("retained", classifier_type="sentiment", n=25):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db, classifier_type="sentiment")
+
+    assert result["decision"] == "retained"
+
+
+def test_urgency_and_category_and_sentiment_models_coexist_independently(db):
+    """Promoting an urgency model must not affect the sentiment or category models -- three
+    independent (org, classifier_type) rows, all simultaneously active."""
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_acquired()
+
+    for classifier_type, macro_f1 in (
+        ("sentiment", 0.65), ("category", 0.70), ("urgency", 0.75),
+    ):
+        with patch("src.tasks.classifier_training._get_redis", return_value=fake_r), \
+             _patch_core("promoted", classifier_type=classifier_type, n=25,
+                         challenger_macro_f1=macro_f1):
+            tasks = _get_tasks()
+            tasks.retrain_org(org.id, db, classifier_type=classifier_type)
+
+    active_rows = db.query(OrgClassifierModel).filter_by(
+        organization_id=org.id, is_active=True).all()
+    assert {row.classifier_type for row in active_rows} == {"sentiment", "category", "urgency"}
+    assert len(active_rows) == 3
+
+
+def test_retrain_all_orgs_iterates_all_orgs_and_all_three_types(db):
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+
+    with patch("src.tasks.classifier_training.retrain_org") as mock_retrain, \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_retrain.return_value = {"decision": "retained", "retained": True, "n": 25}
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        tasks.retrain_all_orgs()
+
+    assert mock_retrain.call_count == 9  # 3 orgs x 3 classifier types
+    called_pairs = {
+        (c.args[0], c.kwargs.get("classifier_type")) for c in mock_retrain.call_args_list
+    }
+    assert called_pairs == {
+        (org1.id, "sentiment"), (org1.id, "category"), (org1.id, "urgency"),
+        (org2.id, "sentiment"), (org2.id, "category"), (org2.id, "urgency"),
+        (org3.id, "sentiment"), (org3.id, "category"), (org3.id, "urgency"),
+    }
+
+
+def test_retrain_all_orgs_aggregates_counts_across_all_three_types(db):
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+
+    results_by_key = {
+        (org1.id, "sentiment"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org1.id, "category"): {"decision": "retained", "retained": True, "n": 25},
+        (org1.id, "urgency"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org2.id, "sentiment"): {"decision": "retained", "retained": True, "n": 25},
+        (org2.id, "category"): {"decision": "promoted", "promoted": True, "n": 25},
+        (org2.id, "urgency"): {"decision": "retained", "retained": True, "n": 25},
+        (org3.id, "sentiment"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+        (org3.id, "category"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 2},
+        (org3.id, "urgency"): {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 3},
+    }
+
+    def side_effect(org_id, session, classifier_type="sentiment"):
+        return results_by_key[(org_id, classifier_type)]
+
+    with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()
+
+    # trained (promoted+retained) = 6 across all 3 types (org1 all 3, org2 all 3); skipped = 3 (org3 all 3)
+    assert result == {"trained": 6, "promoted": 3, "skipped": 3}
+
+
+def test_retrain_all_orgs_isolates_per_org_exception_across_all_three_types(db):
+    """org2's failure (all three type-iterations) must leave the SHARED session usable for
+    org1/org3's iterations."""
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+
+    processed = []
+
+    def side_effect(org_id, session, classifier_type="sentiment"):
+        processed.append((org_id, classifier_type))
+        if org_id == org2.id:
+            bad_run = OrgClassifierEvalRun(
+                organization_id=org2.id,
+                classifier_type=None,  # NOT NULL violation
+                decision=None,  # NOT NULL violation
+                n=1,
+            )
+            session.add(bad_run)
+            session.flush()  # raises IntegrityError
+            return {"decision": "retained", "retained": True, "n": 25}  # unreachable
+        good_run = OrgClassifierEvalRun(
+            organization_id=org_id,
+            classifier_type=classifier_type,
+            decision="retained",
+            n=25,
+        )
+        session.add(good_run)
+        session.commit()
+        return {"decision": "retained", "retained": True, "n": 25}
+
+    with patch("src.tasks.classifier_training.retrain_org", side_effect=side_effect), \
+         patch("src.tasks.classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.classifier_training.purge_old_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()  # must not raise
+
+    assert set(processed) == {
+        (org1.id, "sentiment"), (org1.id, "category"), (org1.id, "urgency"),
+        (org2.id, "sentiment"), (org2.id, "category"), (org2.id, "urgency"),
+        (org3.id, "sentiment"), (org3.id, "category"), (org3.id, "urgency"),
+    }
+    assert result["trained"] == 6  # org1 x3 + org3 x3 succeeded; org2 x3 isolated-failed
+
+    org3_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org3.id).all()
+    assert len(org3_runs) == 3
+    org1_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org1.id).all()
+    assert len(org1_runs) == 3

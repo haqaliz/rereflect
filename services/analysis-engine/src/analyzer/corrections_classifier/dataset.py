@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .labels import SENTIMENT_LABELS
+from .labels import SENTIMENT_LABELS, URGENCY_LABELS
 
 
 def _normalize_label(raw: Any) -> str:
@@ -107,6 +107,15 @@ def build_category_dataset(org_id: int, db) -> list[tuple[str, str]]:
     so every distinct corrected_value the org has ever corrected TO becomes a class)."""
     return rows_to_dataset(
         fetch_correction_rows(org_id, db, correction_type="category"), allowed_labels=None
+    )
+
+
+def build_urgency_dataset(org_id: int, db) -> list[tuple[str, str]]:
+    """Composition: fetch + transform, urgency-scoped (fixed binary vocab URGENCY_LABELS —
+    unlike category's dynamic vocab; junk corrected_values dropped)."""
+    return rows_to_dataset(
+        fetch_correction_rows(org_id, db, correction_type="urgency"),
+        allowed_labels=URGENCY_LABELS,
     )
 
 

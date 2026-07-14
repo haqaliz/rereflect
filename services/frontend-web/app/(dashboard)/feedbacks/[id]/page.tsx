@@ -66,7 +66,8 @@ import {
   Reply,
   MoreHorizontal,
   GitBranch,
-  ThumbsDown
+  ThumbsDown,
+  Check
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -173,6 +174,7 @@ function FeedbackDetailContent() {
   const [correctingField, setCorrectingField] = useState<null | 'sentiment' | 'pain_point' | 'feature_request'>(null);
   const [correctedValue, setCorrectedValue] = useState('');
   const [submittingCorrection, setSubmittingCorrection] = useState(false);
+  const [togglingUrgent, setTogglingUrgent] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState('');
 
@@ -263,6 +265,23 @@ function FeedbackDetailContent() {
     );
   };
 
+
+  const handleToggleUrgent = async () => {
+    if (!feedback || togglingUrgent) return;
+    const newValue = !feedback.is_urgent;
+    setTogglingUrgent(true);
+    try {
+      const updated = await feedbackAPI.setUrgent(feedback.id, newValue);
+      // Merge only is_urgent — the /urgent endpoint returns a minimal item
+      // (source_name/assigned_to_email null), so don't clobber the loaded view.
+      setFeedback(prev => (prev ? { ...prev, is_urgent: updated.is_urgent } : updated));
+      toast.success(newValue ? 'Marked as urgent' : 'Marked as not urgent');
+    } catch {
+      toast.error('Failed to update urgency. Please try again.');
+    } finally {
+      setTogglingUrgent(false);
+    }
+  };
 
   const handleCorrectionSubmit = async () => {
     if (!feedback || !correctingField || !correctedValue.trim()) return;
@@ -503,9 +522,26 @@ function FeedbackDetailContent() {
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     Feedback #{feedback.id}
-                    {feedback.is_urgent && (
-                      <Badge variant="destructive">URGENT</Badge>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleToggleUrgent}
+                      disabled={togglingUrgent}
+                      aria-label={feedback.is_urgent ? 'Mark as not urgent' : 'Mark as urgent'}
+                      title={feedback.is_urgent ? 'Mark as not urgent' : 'Mark as urgent'}
+                      className="transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {feedback.is_urgent ? (
+                        <Badge variant="destructive" className="flex items-center gap-1 cursor-pointer">
+                          <AlertTriangle className="w-3 h-3" />
+                          URGENT
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="flex items-center gap-1 cursor-pointer">
+                          <Check className="w-3 h-3" />
+                          Normal
+                        </Badge>
+                      )}
+                    </button>
                   </CardTitle>
                   <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
                     <span className="flex items-center gap-1">

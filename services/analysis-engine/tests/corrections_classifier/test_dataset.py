@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from src.analyzer.corrections_classifier.dataset import rows_to_dataset
-from src.analyzer.corrections_classifier.labels import SENTIMENT_LABELS
+from src.analyzer.corrections_classifier.labels import SENTIMENT_LABELS, URGENCY_LABELS
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +115,43 @@ def test_default_allowed_labels_is_sentiment_labels_byte_stable():
         {"feedback_text": "b", "joined_text": None, "corrected_value": "positive"},
     ]
     assert rows_to_dataset(rows) == [("b", "positive")]
+
+
+# ---------------------------------------------------------------------------
+# urgency dataset — fixed binary vocab (rows_to_dataset(allowed_labels=URGENCY_LABELS))
+# ---------------------------------------------------------------------------
+
+def test_urgency_dataset_filters_to_binary_vocab():
+    rows = [
+        {"feedback_text": "a", "joined_text": None, "corrected_value": "urgent"},
+        {"feedback_text": "b", "joined_text": None, "corrected_value": "not_urgent"},
+        {"feedback_text": "c", "joined_text": None, "corrected_value": "maybe"},  # junk
+    ]
+    result = rows_to_dataset(rows, allowed_labels=URGENCY_LABELS)
+    assert result == [("a", "urgent"), ("b", "not_urgent")]
+
+
+def test_urgency_dataset_keeps_both_classes():
+    rows = [
+        {"feedback_text": "urgent one", "joined_text": None, "corrected_value": "urgent"},
+        {"feedback_text": "not urgent one", "joined_text": None, "corrected_value": "not_urgent"},
+    ]
+    result = rows_to_dataset(rows, allowed_labels=URGENCY_LABELS)
+    assert set(result) == {
+        ("urgent one", "urgent"),
+        ("not urgent one", "not_urgent"),
+    }
+
+
+def test_urgency_dataset_text_fallback():
+    rows = [
+        {"feedback_text": "", "joined_text": "joined urgent text", "corrected_value": "urgent"},
+        {"feedback_text": None, "joined_text": "joined not-urgent text", "corrected_value": "not_urgent"},
+    ]
+    assert rows_to_dataset(rows, allowed_labels=URGENCY_LABELS) == [
+        ("joined urgent text", "urgent"),
+        ("joined not-urgent text", "not_urgent"),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -347,3 +384,66 @@ def test_build_sentiment_dataset_still_scoped_to_sentiment_type(db):
         ("directly set text", "positive"),
         ("joined feedback text", "negative"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# build_urgency_dataset — fixed binary vocab, correction_type="urgency"
+# ---------------------------------------------------------------------------
+
+from src.analyzer.corrections_classifier.dataset import build_urgency_dataset  # noqa: E402
+
+
+def test_build_urgency_dataset_calls_fetch_with_urgency_correction_type(monkeypatch):
+    """Mirrors build_sentiment_dataset's fetch-composition guarding style: monkeypatch
+    fetch_correction_rows to assert build_urgency_dataset passes correction_type="urgency"
+    — no real DB needed."""
+    seen: dict = {}
+
+    def fake_fetch(org_id, db, *, correction_type):
+        seen["org_id"] = org_id
+        seen["correction_type"] = correction_type
+        return [
+            {"feedback_text": "server is down", "joined_text": None, "corrected_value": "urgent"},
+            {"feedback_text": "minor typo", "joined_text": None, "corrected_value": "not_urgent"},
+            {"feedback_text": "whatever", "joined_text": None, "corrected_value": "maybe"},
+        ]
+
+    monkeypatch.setattr(
+        "src.analyzer.corrections_classifier.dataset.fetch_correction_rows", fake_fetch
+    )
+
+    dataset = build_urgency_dataset(1, db=None)
+
+    assert seen == {"org_id": 1, "correction_type": "urgency"}
+    assert dataset == [("server is down", "urgent"), ("minor typo", "not_urgent")]
+
+
+def test_build_urgency_dataset_real_db_scoped_to_urgency_type(db):
+    """Real DB round-trip: urgency corrections are fetched, filtered to URGENCY_LABELS
+    (junk dropped), and sentiment/category rows of the same org do NOT leak in."""
+    _seed(db, org_id=1, other_org_id=2)
+    session_execute = db.execute
+    session_execute(
+        text(
+            "INSERT INTO ai_corrections "
+            "(id, organization_id, correction_type, entity_type, entity_id, signal, "
+            " original_value, corrected_value, feedback_text) "
+            "VALUES (:id, :org, 'urgency', 'feedback_item', NULL, 'correction', "
+            " 'not_urgent', 'urgent', 'the app is completely down')"
+        ),
+        {"id": 8, "org": 1},
+    )
+    session_execute(
+        text(
+            "INSERT INTO ai_corrections "
+            "(id, organization_id, correction_type, entity_type, entity_id, signal, "
+            " original_value, corrected_value, feedback_text) "
+            "VALUES (:id, :org, 'urgency', 'feedback_item', NULL, 'correction', "
+            " 'urgent', 'maybe', 'junk out-of-vocab label')"
+        ),
+        {"id": 9, "org": 1},
+    )
+    db.commit()
+
+    dataset = build_urgency_dataset(1, db)
+    assert dataset == [("the app is completely down", "urgent")]

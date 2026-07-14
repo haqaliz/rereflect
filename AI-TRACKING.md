@@ -61,6 +61,7 @@
 | AI-Drafted Issue/Task Content — "Draft with AI" in the create-work-item wizard (Jira + Asana branches) drafts issue/task **title + body** from the feedback item via the org's LLM; shared `POST /api/v1/feedback/{id}/issue-draft` (admin/owner), gated on `resolve_generation_llm().is_configured` (409 when no LLM); provider-agnostic (cloud BYOK + local Ollama/OpenAI-compatible), org tone/brand voice, `LLMUsageLog(task_type="issue_draft")`; **populates editable fields for review — never auto-creates**; button hidden when no LLM configured; prompt hardens against injection (feedback as delimited untrusted data) | Yes | "✨ Draft with AI" button in Jira + Asana wizard branches; overwrite-confirm if edited; degrades to manual fields when unconfigured | Unlocked (OSS) |
 | Per-Org Self-Improving Sentiment Classifier (M5.2) — CPU-only, offline TF-IDF + logistic regression trained on org's own feedback text + sentiment corrections; three modes (off/shadow/auto); auto-promotes challenger only when macro-F1 delta ≥ +0.02 on held-out set and correction volume ≥ 20 per type; weekly refit Mon 06:30 UTC; promoted model is reversible via one-click rollback | Yes | Settings → AI (General tab: mode toggle; Accuracy tab: incumbent-vs-challenger macro-F1 + delta + rollback) + endpoint GET `/api/v1/settings/ai/classifier/accuracy`, POST `/api/v1/settings/ai/classifier/rollback` | Unlocked (OSS) |
 | Per-Org Self-Improving **Category** Classifier (M5.2 v2) — same CPU-only offline spine trained on the org's `category` corrections; **dynamic labels from the org's own corrections** (built-ins + custom); independent `category_classifier_mode` (off/shadow/auto); in `auto` overrides `pain_point_category`/`feature_request_category` **only when the predicted label maps unambiguously to one built-in vocab** (else shadow-only); **fair-A/B** scores the challenger only over labels the keyword incumbent can emit; keyword categorizer is the incumbent; weekly refit + one-click rollback | Yes | Settings → AI (General tab: second **category** mode toggle; Accuracy tab: second incumbent-vs-challenger card) + the shared `classifier/accuracy` & `classifier/rollback` endpoints with `?classifier_type=category` | Unlocked (OSS) |
+| Per-Org Self-Improving **Urgency** Classifier (M5.2 v3) — same CPU-only offline spine trained on the org's `urgency` corrections; **binary** `not_urgent`/`urgent` head; incumbent = the built-in keyword+sentiment urgency heuristic, challenger promotes only on macro-F1 ≥ +0.02 (defeats majority-class collapse); independent `urgency_classifier_mode` (off/shadow/auto); in `auto` **add-only** — escalates `not_urgent→urgent`, never de-escalates a heuristic-raised flag (it drives churn alerts/urgent queue); capture seam = user-driven `is_urgent` change via internal `PATCH /api/v1/feedback/{id}/urgent` + dashboard toggle + public `PATCH /api/public/v1/feedback/{id}` (analyzer heuristic set/clear excluded) | Yes | Settings → AI (General tab: third **urgency** mode toggle; Accuracy tab: third card) + the shared `classifier/accuracy` & `classifier/rollback` endpoints with `?classifier_type=urgency` | Unlocked (OSS) |
 
 ---
 
@@ -295,7 +296,7 @@
 
 ---
 
-## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2 sentiment + category heads shipped 2026-07-11; M5.3–M5.4 planned)
+## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2 sentiment + category heads shipped 2026-07-11, urgency head shipped 2026-07-14; M5.3–M5.4 planned)
 
 > **Strategic framing.** For an OSS / self-hosted / BYOK product the moat is **not** a trained
 > foundation model, a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks
@@ -348,7 +349,7 @@
       verified correct. Per the plan's decision the spine ships regardless, model **off by default**,
       and the card states the honest result (incl. `n`).
 
-#### M5.2 — Corrections flywheel: per-org self-improving classifiers (Track A — flagship moat) — COMPLETE (sentiment shipped 2026-07-11; **category head shipped 2026-07-11**)
+#### M5.2 — Corrections flywheel: per-org self-improving classifiers (Track A — flagship moat) — COMPLETE (sentiment shipped 2026-07-11; **category head shipped 2026-07-11**; **urgency head shipped 2026-07-14**)
 > Spine + sentiment + **category head (v2)**; real-org auto-promotion is the later exit — spine proven on synthetic corrections.
 - [x] Train a small per-org model (TF-IDF + logistic regression via the installed `scikit-learn`) on the org's feedback + `AICorrection`s, on the worker, CPU, scheduled.
 - [x] Per-org **shadow A/B** on held-out corrections; **auto-promote only when the challenger beats the
@@ -363,8 +364,17 @@
       built-in vocabulary** (else shadow-log only — no silent mis-write); **fair-A/B** — the challenger is
       scored only over labels the keyword incumbent can emit ("evaluated on labels the baseline can
       produce"), so custom-only classes can't rig a promotion; same weekly refit + one-click rollback.
-      See `docs/planning/per-org-category-classifier/`. **Deferred (v3):** separate per-kind heads
-      (needs recording the corrected field on `AICorrection`), an urgency head, and multi-label per item.
+      See `docs/planning/per-org-category-classifier/`.
+- [x] **Urgency head (M5.2 v3) shipped 2026-07-14** — a third, binary (`not_urgent`/`urgent`) head on the
+      same spine, trained on the org's `urgency` corrections. New capture seam: a user-driven urgent-flag
+      change (internal `PATCH /api/v1/feedback/{id}/urgent` + dashboard toggle, and the public
+      `PATCH /api/public/v1/feedback/{id}` `is_urgent`) records an `AICorrection(correction_type="urgency")`
+      — the analyzer's own heuristic set/clear does NOT. Incumbent = the built-in keyword+sentiment urgency
+      heuristic; challenger promotes only on macro-F1 ≥ +0.02 (guards against a majority-class collapse).
+      Independent `urgency_classifier_mode` (off/shadow/auto). **`auto` is add-only** — it may escalate
+      `not_urgent→urgent` but never de-escalates a flag the heuristic raised (the urgent flag drives churn
+      alerts / the urgent queue). See `docs/planning/urgency-classifier-head/`. **Still deferred (v3):**
+      separate per-kind category heads (pain-point vs feature-request) and multi-label per item.
 - *Serves:* the self-improving data moat (flagship goal), accuracy, offline. **Exit:** spine proven on synthetic corrections (sentiment + category); real-org exit is deferred.
 
 #### M5.3 — Per-org churn ML model (Track C — data-gated)

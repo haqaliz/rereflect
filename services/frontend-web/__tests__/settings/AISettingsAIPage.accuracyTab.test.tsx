@@ -123,15 +123,16 @@ describe('AISettingsPage — Accuracy tab renders both classifier accuracy cards
     });
   });
 
-  it('renders exactly two ClassifierAccuracyCards, sentiment first then category', async () => {
+  it('renders exactly three ClassifierAccuracyCards, sentiment then category then urgency', async () => {
     render(<AISettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('classifier-card')).toHaveLength(2);
+      expect(screen.getAllByTestId('classifier-card')).toHaveLength(3);
     });
 
     const cards = screen.getAllByTestId('classifier-card');
     expect(cards[0]).toHaveAttribute('data-type', 'sentiment');
     expect(cards[1]).toHaveAttribute('data-type', 'category');
+    expect(cards[2]).toHaveAttribute('data-type', 'urgency');
   });
 });

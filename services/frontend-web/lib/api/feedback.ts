@@ -162,6 +162,13 @@ export const feedbackAPI = {
     return response.data;
   },
 
+  setUrgent: async (id: number, isUrgent: boolean): Promise<FeedbackItem> => {
+    const response = await apiClient.patch(`/api/v1/feedback/${id}/urgent`, {
+      is_urgent: isUrgent,
+    });
+    return response.data;
+  },
+
   delete: async (id: number): Promise<void> => {
     await apiClient.delete(`/api/v1/feedback/${id}`);
   },

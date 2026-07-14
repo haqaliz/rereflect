@@ -37,6 +37,15 @@ const TYPE_COPY: Record<string, { label: string; trainedOn: string; note?: strin
       'categorizer on your held-out data',
     note: 'Evaluated on labels the keyword categorizer can produce.',
   },
+  urgency: {
+    label: 'Urgency',
+    trainedOn:
+      "your org's urgency corrections; promoted only when it beats the keyword " +
+      'urgency heuristic on your held-out data',
+    note:
+      'In auto mode this model is add-only: it can escalate a feedback item from ' +
+      'not-urgent to urgent, but it never de-escalates an already-urgent item.',
+  },
 };
 
 interface ClassifierAccuracyCardProps {

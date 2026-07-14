@@ -11,6 +11,22 @@ from sqlalchemy.orm import Session
 
 from src.models.ai_correction import AICorrection
 
+# Urgency `corrected_value` vocabulary for AICorrection(correction_type="urgency").
+# MUST stay identical to analysis-engine's
+# `analyzer.corrections_classifier.labels.URGENCY_LABELS = ("not_urgent", "urgent")`
+# — a mismatch here silently drops all rows in build_urgency_dataset. See
+# tests/test_ai_correction_service_urgency.py for the cross-service equality guard.
+URGENCY_CORRECTED_VALUES = ("not_urgent", "urgent")
+
+
+def urgency_label(is_urgent: bool) -> str:
+    """Map a boolean ``is_urgent`` flag to the fixed URGENCY_CORRECTED_VALUES vocab.
+
+    Always returns a value from ``URGENCY_CORRECTED_VALUES`` — never trust
+    client-supplied casing/strings for ``corrected_value``.
+    """
+    return "urgent" if is_urgent else "not_urgent"
+
 
 def create_ai_correction(
     db: Session,

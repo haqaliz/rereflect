@@ -17,6 +17,7 @@ export interface AISettings {
   sentiment_provider: string;
   classifier_mode: string;
   category_classifier_mode: string;
+  urgency_classifier_mode: string;
   models: AIModels;
 }
 
@@ -29,6 +30,7 @@ export interface AISettingsUpdate {
   sentiment_provider?: string | null;
   classifier_mode?: string | null;
   category_classifier_mode?: string | null;
+  urgency_classifier_mode?: string | null;
   model_categorization?: string;
   model_analysis?: string;
   model_insights?: string;

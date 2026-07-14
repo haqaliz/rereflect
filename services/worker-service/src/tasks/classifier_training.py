@@ -45,7 +45,7 @@ from src.models import Organization, OrgClassifierEvalRun, OrgClassifierModel
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CLASSIFIER_TYPE = "sentiment"
-_CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category")
+_CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category", "urgency")
 _PURGE_AFTER_DAYS = 90
 _LOCK_TIMEOUT_SECONDS = 600
 
@@ -78,6 +78,42 @@ def _build_incumbent_predict() -> Callable[[str], str]:
 
     def _predict(text: str) -> str:
         return analyzer.analyze(text)["label"]
+
+    return _predict
+
+
+# Verbatim from the production urgency heuristic (worker analysis.py:559-566, identical
+# to backend feedback.py:107-112). Kept as a module constant so predict-seam / tests can
+# reference the exact same source rather than re-typing the list.
+_URGENT_KEYWORDS: tuple[str, ...] = (
+    "urgent", "critical", "broken", "crash", "bug", "error",
+    "failing", "down", "cannot", "can't", "won't", "doesn't",
+)
+
+
+def _build_urgency_incumbent_predict() -> Callable[[str], str]:
+    """Binary incumbent = the production keyword+sentiment urgency heuristic
+    (worker analysis.py:559-566 / backend feedback.py:107-112), wrapped as a
+    deterministic text -> "urgent" | "not_urgent" callable. Reuses the cached VADER
+    analyzer (tasks/analysis.py's get_sentiment_analyzer()) for the compound score,
+    exactly like _build_incumbent_predict() does for the sentiment incumbent.
+
+    Faithfulness note: the ingest path's `strong_negative_keywords` neutral->-0.1 nudge
+    (analysis.py:545-556) only ever lifts a score into the (-0.5, -0.1] band, which is
+    never "very negative" (< -0.5), so it can never flip the urgent decision either way
+    -- using the raw VADER compound score here (rather than reproducing the nudge) is
+    faithful to the production decision.
+    """
+    from src.tasks.analysis import get_sentiment_analyzer
+
+    analyzer = get_sentiment_analyzer("vader")
+
+    def _predict(text: str) -> str:
+        text_lower = (text or "").lower()
+        has_urgent_keyword = any(keyword in text_lower for keyword in _URGENT_KEYWORDS)
+        compound = analyzer.analyze(text)["compound"]
+        is_very_negative = compound < -0.5
+        return "urgent" if (has_urgent_keyword and is_very_negative) else "not_urgent"
 
     return _predict
 
@@ -233,7 +269,11 @@ def _dataset_and_incumbent_for(org_id: int, db: Session, classifier_type: str):
     """Per-type setup: (dataset, incumbent_predict, eval_labels). eval_labels is None for
     sentiment (evaluate() uses its own byte-stable SENTIMENT_LABELS default — this aspect
     never passes labels= for sentiment); a tuple (possibly empty) for category — the fair-A/B
-    subset (design decision #2 handles the empty case before evaluate() is ever called)."""
+    subset (design decision #2 handles the empty case before evaluate() is ever called); the
+    fixed, always-non-empty URGENCY_LABELS 2-tuple for urgency — unlike category's dynamic
+    vocab, the binary urgency vocab is closed and both the incumbent and any challenger can
+    emit both labels, so the empty-intersection guard above is structurally never triggered
+    for this branch."""
     if classifier_type == "category":
         from analyzer.corrections_classifier.dataset import build_category_dataset, derive_labels
 
@@ -242,6 +282,14 @@ def _dataset_and_incumbent_for(org_id: int, db: Session, classifier_type: str):
         full_labels = derive_labels(dataset)
         eval_labels = tuple(label for label in full_labels if label in _built_in_category_vocab())
         return dataset, incumbent_predict, eval_labels
+
+    if classifier_type == "urgency":
+        from analyzer.corrections_classifier.dataset import build_urgency_dataset
+        from analyzer.corrections_classifier.labels import URGENCY_LABELS
+
+        dataset = build_urgency_dataset(org_id, db)
+        incumbent_predict = _build_urgency_incumbent_predict()
+        return dataset, incumbent_predict, URGENCY_LABELS
 
     from analyzer.corrections_classifier.dataset import build_sentiment_dataset
 
