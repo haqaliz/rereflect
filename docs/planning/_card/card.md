@@ -1,64 +1,72 @@
-# Card — feat/urgency-classifier-head (freeform, no GitHub issue)
+# Card — feat/public-api-crud-v3 (freeform, no GitHub issue)
 
 **Type:** feat
-**Slug:** urgency-classifier-head
-**Branch:** feat/urgency-classifier-head
-**Source:** `rereflect-next` handoff (2026-07-13). No GitHub issue — freeform.
+**Slug:** public-api-crud-v3
+**Branch:** feat/public-api-crud-v3
+**Source:** `rereflect-next` handoff (2026-07-14). No GitHub issue — freeform.
 
 ## Brief (from rereflect-next handoff)
 
-Extend the **M5.2 per-org corrections flywheel** with an **urgency classifier head** — the
-next head after the shipped **sentiment + category** heads (AI-TRACKING M5.2, v3 deferral at
-line 366–367: *"separate per-kind heads (needs recording the corrected field on `AICorrection`),
-an urgency head, and multi-label per item."*).
+Extend the shipped public write API with the remaining v2 deferrals that are clean under
+self-hosting. Two shipped predecessors define the lineage:
 
-The classifier spine is already generic and proven — reuse it rather than build greenfield:
-- `services/analysis-engine/src/analyzer/corrections_classifier/dataset.py` — `fetch_correction_rows(org_id, db, *, correction_type=...)` is generic; sentiment/category are two callers.
-- `corrections_classifier/trainer.py` — `train_classifier(..., classifier_type=...)` (default `"sentiment"`, byte-stable), writes `classifier_type` into the serialized model.
-- 3-tier predict loader + per-org Redis advisory lock (worker retrain orchestration).
-- Type-aware `ClassifierAccuracyCard` (frontend, `classifierType` prop) + independent mode toggle on the AI Settings tab.
+- `docs/planning/public-api-write-crud/` — added the `write` scope + `PATCH /api/public/v1/feedback/{id}`
+  (workflow_status change via shared `apply_status_change`; record-only category/sentiment
+  `AICorrection` training signals). Shipped 2026-07-06.
+- `docs/planning/public-api-write-v2/` — `PATCH` also accepts `tags` + `is_urgent`; added
+  `DELETE /api/public/v1/feedback/{id}`. Shipped 2026-07-07.
 
-The **category head shipped 2026-07-11** by threading exactly this `classifier_type` pattern
-end-to-end. Urgency is the same shape.
+Both explicitly park the remainder (AI-TRACKING.md:292):
+> **Deferred (v2):** mutating the stored category/sentiment column, **customer/taxonomy CRUD, bulk writes**.
 
-## Slice 1 is the capture seam (the named prerequisite / caveat)
+This feature builds the **bulk writes** and **custom-taxonomy CRUD** slices.
 
-Urgency corrections are **not captured as a training signal today**. `AICorrection.correction_type`
-enumerates `copilot_response | sentiment | category | churn_risk | response_suggestion` — **no
-`urgency`**. Toggling `is_urgent` writes nothing to `ai_corrections`:
-- `services/backend-api/src/api/routes/feedback.py` sets `is_urgent` heuristically
-  (`has_urgent_keyword and is_very_negative`, ~line 112) and clears it (~line 665) without recording a correction.
-- Public API `PATCH /api/public/v1/feedback/{id}` accepts `is_urgent` but records no urgency signal.
+## Why this, why now (moat grounding)
 
-So **slice 1 = the capture seam**: when a user overrides `is_urgent` (dashboard flag toggle +
-public-API PATCH), record an `AICorrection(correction_type="urgency", signal=...)`, mirroring how
-sentiment/category corrections are recorded (`src/services/ai_correction_service.py`,
-`src/api/routes/ai_corrections.py`). Small and well-precedented — **not** a hard data gate — but the
-head has zero training signal until it lands, so it must come first.
+- The public API / developer surface is an explicitly-named moat pillar (the self-host
+  programmability story). It fits OSS/self-hosted/BYOK and is single-tenant-clean.
+- It's a clean, unblocked follow-on to shipped work with a crisp testable first slice —
+  unlike M5.3 churn ML (hard-blocked at ~500 labels) or the narrow flywheel per-kind split.
 
-## Then: add `"urgency"` as a `classifier_type` end-to-end
+## Scope (slices)
 
-- dataset builder → train → predict override at the ingest seam, with off/shadow/auto mode
-  (mirror `category_classifier_mode`).
-- Keep it local/sklearn and BYOK-agnostic.
-- Honest UI copy ("your model, trained on your corrections").
+**Slice 1 (first): bulk feedback writes.**
+- Bulk status/tag/urgent writes over `/api/public/v1`, under the existing `write` scope,
+  org-scoped (cross-org → 404 / skipped-per-item).
+- Reuse the shared `apply_status_change` helper **per item**.
+- Return a **per-item results array** (id → ok/error). The single-item `PATCH` is explicitly
+  best-effort / non-atomic (AI-TRACKING.md:292), so the bulk endpoint must report partial
+  failure rather than pretend to be transactional.
+
+**Slice 2: custom-taxonomy (custom-category) CRUD.**
+- CRUD over the org's custom pain-point / feature-request / urgency categories, backed by
+  the existing per-org custom-taxonomy config (OrgAIConfig custom categories — verify exact
+  model in the dig).
+
+## Open questions / caveats (carry into PRD)
+
+- **Customer-record CRUD is NOT a commitment.** Customers are implicit via `customer_email`
+  on feedback + a derived `customer_health_scores` row — there may be nothing coherent to
+  "create." Treat as an open question in the dig; confirm before speccing.
+- **Bulk atomicity:** decide per-item best-effort vs all-or-nothing. Lean per-item + explicit
+  results (matches the shipped non-atomic single PATCH). Define the cap (existing bulk
+  precedents cap at 500 — e.g. segment-actions cohort).
+- **Taxonomy CRUD blast radius:** custom categories feed the analyzer prompt + keyword
+  categorizers + (now) the per-org category classifier's label vocab (M5.2). Editing/deleting
+  a category mid-flight must not corrupt those. Understand the consumers before allowing delete.
 
 ## Guardrails / out of scope
 
-- **Avoid the `churn_risk` head** — that one is gated on the M5.3 ~500-label requirement (different head).
-- Fits OSS/self-hosted/BYOK; single-tenant-clean; gets better as corrections accumulate.
-- Multi-label per item and per-kind head splitting remain deferred (M5.2 v3).
+- Fits OSS/self-hosted/BYOK; single-tenant-clean; no hosted-SaaS / plan-gating assumptions.
+- No new scope beyond the existing `write` scope unless the dig shows a real need.
+- Mutating the *stored* category/sentiment column (vs record-only correction) remains deferred
+  unless the dig surfaces a strong reason.
 
 ## Relevant files (dig starting points)
 
-- `services/analysis-engine/src/analyzer/corrections_classifier/{dataset,trainer,__init__}.py`
-- `services/analysis-engine/src/analyzer/categorizer.py` (urgency category entries ~line 483)
-- `services/analysis-engine/src/analyzer/core.py` (urgency sort ~line 310)
-- `services/backend-api/src/models/ai_correction.py`
-- `services/backend-api/src/services/ai_correction_service.py`
-- `services/backend-api/src/api/routes/ai_corrections.py`
-- `services/backend-api/src/api/routes/feedback.py` (is_urgent set/clear)
-- `services/backend-api/src/api/routes/public_api.py` (PATCH is_urgent)
-- `services/worker-service/src/tasks/` (per-org classifier retrain orchestration)
-- `services/frontend-web/` — AI Settings tab, `ClassifierAccuracyCard`, mode toggle
-- Reference shipped precedent: `docs/planning/per-org-category-classifier/`, `docs/planning/per-org-corrections-classifier/`
+- `services/backend-api/src/api/routes/public_api.py` — public v1 router (PATCH/DELETE feedback, API-key scopes)
+- `services/backend-api/src/api/routes/feedback.py` — internal status/tags/urgent + `apply_status_change`
+- `services/backend-api/src/services/` — `apply_status_change` helper, ai_correction_service
+- `services/backend-api/src/models/` — API key / scopes model, OrgAIConfig (custom categories), feedback, customer_health_scores
+- `services/backend-api/src/api/routes/segment_actions` or `customers` bulk endpoints — bulk cohort precedent (500 cap, per-item shape)
+- Reference shipped precedent: `docs/planning/public-api-write-crud/`, `docs/planning/public-api-write-v2/`, `docs/planning/segment-actions/`
