@@ -352,6 +352,31 @@ class PublicFeedbackUpdate(BaseModel):
         return cleaned
 
 
+class PublicFeedbackBulkUpdate(BaseModel):
+    """Request body for ``POST /feedback/bulk`` — a uniform patch applied to
+    every id in ``ids`` (deduped, order-preserving)."""
+
+    model_config = {"extra": "forbid"}
+
+    ids: list[int] = Field(..., min_length=1, max_length=500)
+    patch: PublicFeedbackUpdate
+
+
+class PublicFeedbackBulkResultItem(BaseModel):
+    """Per-id result entry in the bulk response, ordered by deduped input order."""
+
+    id: int
+    status: Literal["updated", "noop", "skipped", "error"]
+    reason: Optional[str] = None
+
+
+class PublicFeedbackBulkResponse(BaseModel):
+    matched: int
+    updated: int
+    skipped: int
+    results: list[PublicFeedbackBulkResultItem]
+
+
 def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str]]:
     """Map a public correction ``field`` → (correction_type, current stored value)."""
     if field == "pain_point":
