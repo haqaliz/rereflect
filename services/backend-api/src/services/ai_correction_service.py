@@ -40,11 +40,16 @@ def create_ai_correction(
     original_value: Optional[str] = None,
     corrected_value: Optional[str] = None,
     feedback_text: Optional[str] = None,
+    commit: bool = True,
 ) -> AICorrection:
     """Persist an ``AICorrection`` and return the refreshed row.
 
     ``user_id`` may be ``None`` for API-key writes (the FK is nullable).
-    Commits internally, mirroring the original route behavior.
+    Commits internally by default (``commit=True``), mirroring the original
+    route behavior byte-for-byte — this default must never change.  Pass
+    ``commit=False`` to flush-only (row visible in-session, not yet durable)
+    so a caller can batch multiple corrections into one final ``db.commit()``
+    (used by the bulk-write handler).
     """
     correction = AICorrection(
         organization_id=organization_id,
@@ -58,6 +63,9 @@ def create_ai_correction(
         feedback_text=feedback_text,
     )
     db.add(correction)
-    db.commit()
-    db.refresh(correction)
+    if commit:
+        db.commit()
+        db.refresh(correction)
+    else:
+        db.flush()
     return correction
