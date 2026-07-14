@@ -35,6 +35,7 @@ from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
 from src.models.feedback import FeedbackItem
 from src.models.webhook_endpoint import WebhookEndpoint
+from src.services import custom_category_service
 
 logger = logging.getLogger(__name__)
 
@@ -1129,6 +1130,81 @@ def public_churn_customers(
         page_size=page_size,
         total_pages=total_pages,
     )
+
+
+# ─── Custom categories (public CRUD) ─────────────────────────────────────────
+#
+# Mirrors the internal ``/api/v1/categories/custom`` CRUD (see
+# src/api/routes/categories.py) via the shared src/services/custom_category_service
+# module — identical create/update/delete/list semantics, gated by API-key
+# scopes (``read`` for GET, ``write`` for POST/PATCH/DELETE) instead of JWT
+# role. Static collection route (``/categories``) is registered before the
+# parametric ``/categories/{id}`` route, per public-router convention.
+
+
+class PublicCustomCategory(BaseModel):
+    """Custom category exposed on the public surface."""
+
+    id: int
+    name: str
+    description: Optional[str] = None
+    category_type: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PublicCustomCategoryCreate(BaseModel):
+    """Request body for ``POST /categories``."""
+
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    category_type: Literal["pain_point", "feature_request", "urgency", "general"]
+
+
+@router.get(
+    "/categories",
+    response_model=List[PublicCustomCategory],
+    dependencies=[Depends(require_scope("read"))],
+    summary="List custom categories (public API)",
+    description="Org-scoped list of custom categories, optionally filtered by `category_type`.",
+)
+def public_list_categories(
+    category_type: Optional[str] = Query(None),
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> List[PublicCustomCategory]:
+    rows = custom_category_service.list_categories(db, auth.organization_id, category_type)
+    return [PublicCustomCategory.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/categories",
+    response_model=PublicCustomCategory,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Create a custom category (public API)",
+    description="409 on a duplicate (organization, category_type, name).",
+)
+def public_create_category(
+    data: PublicCustomCategoryCreate,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicCustomCategory:
+    try:
+        row = custom_category_service.create_category(
+            db,
+            auth.organization_id,
+            name=data.name,
+            description=data.description,
+            category_type=data.category_type,
+        )
+    except custom_category_service.DuplicateCategoryError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return PublicCustomCategory.model_validate(row)
 
 
 # ─── Dedicated OpenAPI docs for the public surface ───────────────────────────
