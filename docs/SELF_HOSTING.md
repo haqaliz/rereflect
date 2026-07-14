@@ -251,6 +251,27 @@ Two things specific to the category head, both chosen for honesty:
   the card) — so a custom-only category the baseline could never guess can't inflate
   the challenger's win and trigger a promotion.
 
+### Urgency classifier (M5.2 v3)
+
+Rereflect also trains a per-org **urgency** classifier on your `urgency` corrections
+(when you flip a feedback item's urgent flag from the dashboard or the public API).
+It shares the same spine and Settings surface, with its own independent
+`urgency_classifier_mode` toggle (off/shadow/auto) and its own accuracy card.
+
+Two things specific to the urgency head, both chosen for safety:
+
+- **Binary, keyword-baseline incumbent.** It's a two-class model (`urgent` /
+  `not_urgent`) whose challenger must beat the built-in keyword+sentiment urgency
+  heuristic on your held-out corrections before it can promote — the same
+  ≥ +0.02 macro-F1 bar. Macro-F1 (not accuracy) is the gate, so a lazy model that
+  just predicts "not urgent" for everything can never win.
+- **Add-only in `auto` (no silent de-escalation).** In `auto`, the model may
+  **escalate** an item to urgent (`not_urgent → urgent`) but will **never** clear an
+  urgent flag the heuristic raised. Because the urgent flag drives churn alerts and
+  the urgent queue, a thin per-org model can only ever add urgency, never hide it.
+  `shadow` still logs both directions (including would-be de-escalations) so you can
+  evaluate accuracy before trusting `auto`.
+
 ### Known limitation
 
 The category head is a **single unified model**, so it predicts one category per
