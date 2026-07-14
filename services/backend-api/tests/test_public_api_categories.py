@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from src.api.main import app
 from src.database.session import get_db
 from src.models.api_key import ApiKey
+from src.models.automation_rule import AutomationRule
 from src.models.custom_category import CustomCategory
 from src.models.organization import Organization
 from src.models.base import Base
@@ -264,3 +265,188 @@ class TestPublicCreateCategory:
             json={"name": "", "category_type": "pain_point"},
         )
         assert response.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# § PATCH /categories/{id}
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPublicUpdateCategory:
+    def test_requires_write_scope(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        cat = _category_in_org(db, org.id)
+        response = client.patch(
+            f"/api/public/v1/categories/{cat.id}",
+            headers=_auth(raw),
+            json={"name": "renamed"},
+        )
+        assert response.status_code == 403
+
+    def test_update_name(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        cat = _category_in_org(db, org.id)
+        response = client.patch(
+            f"/api/public/v1/categories/{cat.id}",
+            headers=_auth(raw),
+            json={"name": "updated_name"},
+        )
+        assert response.status_code == 200
+        assert response.json()["name"] == "updated_name"
+
+    def test_toggle_active(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        cat = _category_in_org(db, org.id)
+        response = client.patch(
+            f"/api/public/v1/categories/{cat.id}",
+            headers=_auth(raw),
+            json={"is_active": False},
+        )
+        assert response.status_code == 200
+        assert response.json()["is_active"] is False
+
+    def test_not_found(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        response = client.patch(
+            "/api/public/v1/categories/9999",
+            headers=_auth(raw),
+            json={"name": "new_name"},
+        )
+        assert response.status_code == 404
+
+    def test_other_org_404(self, client, db, org, org_b):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        other_cat = _category_in_org(db, org_b.id, name="other_org_cat")
+        response = client.patch(
+            f"/api/public/v1/categories/{other_cat.id}",
+            headers=_auth(raw),
+            json={"name": "hacked"},
+        )
+        assert response.status_code == 404
+
+    def test_rename_collision_409(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        _category_in_org(db, org.id, name="billing_issues")
+        other = _category_in_org(db, org.id, name="shipping_issues")
+
+        response = client.patch(
+            f"/api/public/v1/categories/{other.id}",
+            headers=_auth(raw),
+            json={"name": "billing_issues"},
+        )
+        assert response.status_code == 409
+
+    def test_category_type_not_editable_422(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        cat = _category_in_org(db, org.id)
+        response = client.patch(
+            f"/api/public/v1/categories/{cat.id}",
+            headers=_auth(raw),
+            json={"category_type": "feature_request"},
+        )
+        assert response.status_code == 422
+
+    def test_unknown_field_422(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        cat = _category_in_org(db, org.id)
+        response = client.patch(
+            f"/api/public/v1/categories/{cat.id}",
+            headers=_auth(raw),
+            json={"not_a_real_field": "oops"},
+        )
+        assert response.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# § DELETE /categories/{id}
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPublicDeleteCategory:
+    def test_requires_write_scope(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="read")
+        cat = _category_in_org(db, org.id)
+        response = client.delete(
+            f"/api/public/v1/categories/{cat.id}", headers=_auth(raw)
+        )
+        assert response.status_code == 403
+
+    def test_delete_success_no_warning_header(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        cat = _category_in_org(db, org.id, name="onboarding_issues")
+
+        response = client.delete(
+            f"/api/public/v1/categories/{cat.id}", headers=_auth(raw)
+        )
+        assert response.status_code == 204
+        assert "X-Rereflect-Warning" not in response.headers
+
+        remaining = (
+            db.query(CustomCategory).filter(CustomCategory.id == cat.id).first()
+        )
+        assert remaining is None
+
+    def test_not_found(self, client, db, org):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        response = client.delete(
+            "/api/public/v1/categories/9999", headers=_auth(raw)
+        )
+        assert response.status_code == 404
+
+    def test_other_org_404(self, client, db, org, org_b):
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        other_cat = _category_in_org(db, org_b.id, name="other_org_cat")
+        response = client.delete(
+            f"/api/public/v1/categories/{other_cat.id}", headers=_auth(raw)
+        )
+        assert response.status_code == 404
+        # Not actually deleted (belongs to org_b, not the caller's org)
+        still_there = (
+            db.query(CustomCategory).filter(CustomCategory.id == other_cat.id).first()
+        )
+        assert still_there is not None
+
+    def test_delete_with_active_rule_reference_sets_warning_header(
+        self, client, db, org
+    ):
+        cat = _category_in_org(db, org.id, name="Billing")
+        rule = AutomationRule(
+            organization_id=org.id,
+            name="Billing escalation",
+            trigger_type="feedback_category_match",
+            trigger_config={"categories": ["Billing"]},
+            actions=[{"type": "send_notification", "config": {"channel": "email"}}],
+            is_active=True,
+        )
+        db.add(rule)
+        db.commit()
+
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        response = client.delete(
+            f"/api/public/v1/categories/{cat.id}", headers=_auth(raw)
+        )
+        assert response.status_code == 204
+        assert "X-Rereflect-Warning" in response.headers
+        warning = response.headers["X-Rereflect-Warning"]
+        assert "Billing" in warning
+        assert "Billing escalation" in warning
+
+    def test_delete_with_inactive_rule_reference_no_warning_header(
+        self, client, db, org
+    ):
+        cat = _category_in_org(db, org.id, name="Billing")
+        rule = AutomationRule(
+            organization_id=org.id,
+            name="Inactive billing rule",
+            trigger_type="feedback_category_match",
+            trigger_config={"categories": ["Billing"]},
+            actions=[{"type": "send_notification", "config": {"channel": "email"}}],
+            is_active=False,
+        )
+        db.add(rule)
+        db.commit()
+
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        response = client.delete(
+            f"/api/public/v1/categories/{cat.id}", headers=_auth(raw)
+        )
+        assert response.status_code == 204
+        assert "X-Rereflect-Warning" not in response.headers

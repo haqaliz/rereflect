@@ -22,7 +22,7 @@ import logging
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -33,6 +33,7 @@ from src.api.public.auth import ApiKeyAuth, require_scope, verify_api_key
 from src.background import queue_analyze_feedback
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
+from src.models.custom_category import CustomCategory
 from src.models.feedback import FeedbackItem
 from src.models.webhook_endpoint import WebhookEndpoint
 from src.services import custom_category_service
@@ -1165,6 +1166,21 @@ class PublicCustomCategoryCreate(BaseModel):
     category_type: Literal["pain_point", "feature_request", "urgency", "general"]
 
 
+class PublicCustomCategoryUpdate(BaseModel):
+    """Request body for ``PATCH /categories/{id}``.
+
+    ``category_type`` is intentionally not a field here — it is immutable on
+    update, mirroring the internal route; passing it is an unknown field and
+    422s via ``extra="forbid"``.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 @router.get(
     "/categories",
     response_model=List[PublicCustomCategory],
@@ -1205,6 +1221,84 @@ def public_create_category(
     except custom_category_service.DuplicateCategoryError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return PublicCustomCategory.model_validate(row)
+
+
+@router.patch(
+    "/categories/{category_id}",
+    response_model=PublicCustomCategory,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Update a custom category (public API)",
+    description=(
+        "Update name/description/is_active. `category_type` is not editable "
+        "(sending it 422s — unknown field). 404 on missing/other-org id, 409 "
+        "on rename collision."
+    ),
+)
+def public_update_category(
+    category_id: int,
+    data: PublicCustomCategoryUpdate,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicCustomCategory:
+    try:
+        row = custom_category_service.update_category(
+            db,
+            auth.organization_id,
+            category_id,
+            name=data.name,
+            description=data.description,
+            is_active=data.is_active,
+        )
+    except custom_category_service.CategoryNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    except custom_category_service.DuplicateCategoryError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return PublicCustomCategory.model_validate(row)
+
+
+@router.delete(
+    "/categories/{category_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Delete a custom category (public API)",
+    description=(
+        "Hard delete (204). 404 on missing/other-org id. If the category's "
+        "name is referenced by an active `feedback_category_match` automation "
+        "rule, the response carries an `X-Rereflect-Warning` header — the "
+        "delete still succeeds (advisory only, no cascade)."
+    ),
+)
+def public_delete_category(
+    category_id: int,
+    response: Response,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(CustomCategory)
+        .filter(
+            CustomCategory.id == category_id,
+            CustomCategory.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    name = row.name
+    referencing_rules = custom_category_service.rules_referencing_category(
+        db, auth.organization_id, name
+    )
+
+    custom_category_service.delete_category(db, auth.organization_id, category_id)
+
+    if referencing_rules:
+        rule_list = ", ".join(referencing_rules)
+        response.headers["X-Rereflect-Warning"] = (
+            f"category '{name}' is referenced by {len(referencing_rules)} "
+            f"automation rule(s): {rule_list}"
+        )
+    return None
 
 
 # ─── Dedicated OpenAPI docs for the public surface ───────────────────────────
