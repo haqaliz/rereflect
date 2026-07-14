@@ -14,6 +14,7 @@ from src.models.custom_category import CustomCategory
 from src.models.organization import Organization
 from src.models.org_ai_config import OrgAIConfig
 from src.api.dependencies import get_current_user, get_current_org, require_admin_or_owner
+from src.services import custom_category_service as category_service
 
 router = APIRouter(prefix="/api/v1/categories", tags=["categories"])
 
@@ -53,13 +54,7 @@ def list_custom_categories(
     db: Session = Depends(get_db),
 ):
     """List custom categories for the current organization."""
-    query = db.query(CustomCategory).filter(
-        CustomCategory.organization_id == current_org.id,
-    )
-    if category_type:
-        query = query.filter(CustomCategory.category_type == category_type)
-
-    return query.order_by(CustomCategory.name).all()
+    return category_service.list_categories(db, current_org.id, category_type)
 
 
 @router.post(
@@ -74,28 +69,16 @@ def create_custom_category(
     db: Session = Depends(get_db),
 ):
     """Create a new custom category. Admin or Owner only."""
-    # Check for duplicate name within org + type
-    existing = db.query(CustomCategory).filter(
-        CustomCategory.organization_id == current_org.id,
-        CustomCategory.name == data.name,
-        CustomCategory.category_type == data.category_type,
-    ).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A {data.category_type} category named '{data.name}' already exists",
+    try:
+        return category_service.create_category(
+            db,
+            current_org.id,
+            name=data.name,
+            description=data.description,
+            category_type=data.category_type,
         )
-
-    category = CustomCategory(
-        organization_id=current_org.id,
-        name=data.name,
-        description=data.description,
-        category_type=data.category_type,
-    )
-    db.add(category)
-    db.commit()
-    db.refresh(category)
-    return category
+    except category_service.DuplicateCategoryError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.patch(
@@ -110,36 +93,19 @@ def update_custom_category(
     db: Session = Depends(get_db),
 ):
     """Update a custom category. Admin or Owner only."""
-    category = db.query(CustomCategory).filter(
-        CustomCategory.id == category_id,
-        CustomCategory.organization_id == current_org.id,
-    ).first()
-    if not category:
+    try:
+        return category_service.update_category(
+            db,
+            current_org.id,
+            category_id,
+            name=data.name,
+            description=data.description,
+            is_active=data.is_active,
+        )
+    except category_service.CategoryNotFoundError:
         raise HTTPException(status_code=404, detail="Category not found")
-
-    if data.name is not None:
-        # Check for duplicate name
-        existing = db.query(CustomCategory).filter(
-            CustomCategory.organization_id == current_org.id,
-            CustomCategory.name == data.name,
-            CustomCategory.category_type == category.category_type,
-            CustomCategory.id != category_id,
-        ).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"A category named '{data.name}' already exists",
-            )
-        category.name = data.name
-
-    if data.description is not None:
-        category.description = data.description
-    if data.is_active is not None:
-        category.is_active = data.is_active
-
-    db.commit()
-    db.refresh(category)
-    return category
+    except category_service.DuplicateCategoryError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
 
 @router.delete(
@@ -153,15 +119,10 @@ def delete_custom_category(
     db: Session = Depends(get_db),
 ):
     """Delete a custom category. Admin or Owner only."""
-    category = db.query(CustomCategory).filter(
-        CustomCategory.id == category_id,
-        CustomCategory.organization_id == current_org.id,
-    ).first()
-    if not category:
+    try:
+        category_service.delete_category(db, current_org.id, category_id)
+    except category_service.CategoryNotFoundError:
         raise HTTPException(status_code=404, detail="Category not found")
-
-    db.delete(category)
-    db.commit()
 
 
 # ── Health weights ──────────────────────────────────────────────────────────

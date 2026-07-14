@@ -215,6 +215,55 @@ class TestUpdateCustomCategory:
         )
         assert response.status_code == 404
 
+    def test_rejects_duplicate_rename(
+        self, client: TestClient, owner_headers: dict, sample_category, db, test_organization
+    ):
+        """Renaming to a name already used by another category (same org+type) -> 409.
+
+        Characterization test locking existing behavior before extracting the
+        shared custom_category_service.
+        """
+        other = CustomCategory(
+            organization_id=test_organization.id,
+            name="billing_issues",
+            category_type="pain_point",
+        )
+        db.add(other)
+        db.commit()
+        db.refresh(other)
+
+        response = client.patch(
+            f"/api/v1/categories/custom/{other.id}",
+            headers=owner_headers,
+            json={"name": sample_category.name},
+        )
+        assert response.status_code == 409
+
+    def test_other_org_returns_404(
+        self, client: TestClient, owner_headers: dict, db
+    ):
+        """PATCHing a category belonging to a different org -> 404 (not leaked)."""
+        other_org = Organization(name="Other Org", plan="pro")
+        db.add(other_org)
+        db.commit()
+        db.refresh(other_org)
+
+        other_cat = CustomCategory(
+            organization_id=other_org.id,
+            name="other_org_cat",
+            category_type="pain_point",
+        )
+        db.add(other_cat)
+        db.commit()
+        db.refresh(other_cat)
+
+        response = client.patch(
+            f"/api/v1/categories/custom/{other_cat.id}",
+            headers=owner_headers,
+            json={"name": "hacked"},
+        )
+        assert response.status_code == 404
+
     def test_member_cannot_update(self, client: TestClient, member_headers: dict, sample_category):
         """Members should not be able to update categories."""
         response = client.patch(
