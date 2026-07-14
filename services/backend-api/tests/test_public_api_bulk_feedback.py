@@ -16,12 +16,13 @@ Self-contained in-memory SQLite engine, mirroring tests/test_public_api_write.py
 
 import hashlib
 import secrets
+from contextlib import contextmanager
 from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -509,6 +510,126 @@ class TestBulkUpdateNonContagion:
         assert fb_ok1.id in corrected_ids
         assert fb_ok2.id in corrected_ids
         assert fb_bad.id not in corrected_ids
+
+    def test_first_item_flush_time_failure_does_not_lose_other_status_changes(
+        self, client, db, org, monkeypatch
+    ):
+        """F1 regression: the batched apply_status_change(...) call only mutates
+        the session -- it doesn't flush. With autoflush=False, those pending
+        status UPDATEs stay unflushed until the FIRST per-item begin_nested()
+        block's own flush flushes them -- inside that savepoint. If that first
+        item's flush then fails, ROLLBACK TO SAVEPOINT silently undoes the
+        whole batch's status writes, even though the other items are reported
+        as 'updated'.
+
+        Modern SQLAlchemy's ``SessionTransaction._take_snapshot`` already
+        flushes pending state *before* a real ``begin_nested()`` opens its
+        SAVEPOINT, which incidentally masks this exact scenario. To exercise
+        the route's *own* explicit-flush ordering contract (rather than an ORM
+        implementation detail we shouldn't rely on), we swap in a raw-SQL
+        SAVEPOINT stand-in for ``db.begin_nested`` that has no such protective
+        autoflush -- matching plain DBAPI-level savepoint semantics.
+        """
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb1 = _feedback_in_org(db, org.id, workflow_status="new")
+        fb2 = _feedback_in_org(db, org.id, workflow_status="new")
+        fb3 = _feedback_in_org(db, org.id, workflow_status="new")
+
+        savepoint_counter = {"n": 0}
+
+        @contextmanager
+        def raw_savepoint():
+            savepoint_counter["n"] += 1
+            name = f"raw_sp_{savepoint_counter['n']}"
+            db.execute(text(f"SAVEPOINT {name}"))
+            try:
+                yield
+            except Exception:
+                db.execute(text(f"ROLLBACK TO SAVEPOINT {name}"))
+                raise
+            else:
+                db.execute(text(f"RELEASE SAVEPOINT {name}"))
+
+        monkeypatch.setattr(db, "begin_nested", raw_savepoint)
+
+        import src.api.routes.public_api as public_api_module
+
+        real_apply_bulk_item_fields = public_api_module._apply_bulk_item_fields
+
+        def flaky_apply_bulk_item_fields(db_, fb, patch_, organization_id):
+            result = real_apply_bulk_item_fields(db_, fb, patch_, organization_id)
+            if fb.id == fb1.id:
+                # Force the flush now (inside the first item's savepoint) --
+                # this is the moment the still-pending batched status UPDATEs
+                # get flushed pre-fix -- then blow up.
+                db_.flush()
+                raise RuntimeError("simulated flush-time failure")
+            return result
+
+        monkeypatch.setattr(
+            public_api_module,
+            "_apply_bulk_item_fields",
+            flaky_apply_bulk_item_fields,
+        )
+
+        resp = client.post(
+            "/api/public/v1/feedback/bulk",
+            json={
+                "ids": [fb1.id, fb2.id, fb3.id],
+                "patch": {"workflow_status": "resolved", "tags": ["reviewed"]},
+            },
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        results_by_id = {r["id"]: r for r in body["results"]}
+        assert results_by_id[fb1.id]["status"] == "error"
+        assert results_by_id[fb2.id]["status"] == "updated"
+        assert results_by_id[fb3.id]["status"] == "updated"
+
+        db.refresh(fb2)
+        db.refresh(fb3)
+        assert fb2.workflow_status == "resolved"
+        assert fb3.workflow_status == "resolved"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# § F2 — field-only bulk changes emit a live event
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBulkUpdateFieldOnlyEmitsEvent:
+    def test_tags_only_two_ids_emits_feedback_updated_event(
+        self, client, db, org, monkeypatch
+    ):
+        """Items changed via tags/is_urgent/correction ONLY (no workflow_status)
+        currently fire no live event at all, unlike the single PATCH path (which
+        emits 'feedback:updated' for the same case). The bulk handler should
+        emit a 'feedback:updated' event covering the field-only-changed ids."""
+        from unittest.mock import AsyncMock
+
+        raw, _ = _make_api_key(db, org.id, scopes="write")
+        fb1 = _feedback_in_org(db, org.id, workflow_status="new")
+        fb2 = _feedback_in_org(db, org.id, workflow_status="new")
+
+        mock_emit = AsyncMock()
+        monkeypatch.setattr("src.services.event_emitter.emit_event", mock_emit)
+
+        resp = client.post(
+            "/api/public/v1/feedback/bulk",
+            json={
+                "ids": [fb1.id, fb2.id],
+                "patch": {"tags": ["priority"]},
+            },
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+        assert resp.status_code == 200, resp.text
+
+        assert mock_emit.await_count == 1
+        _, kwargs = mock_emit.call_args
+        assert kwargs["event_type"] == "feedback:updated"
+        emitted_ids = kwargs["data"].get("feedback_ids") or kwargs["data"].get("ids")
+        assert sorted(emitted_ids) == sorted([fb1.id, fb2.id])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

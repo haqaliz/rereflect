@@ -537,6 +537,14 @@ async def public_bulk_update_feedback(
             resolution_note=patch.resolution_note,
         )
         changed_ids = {fb.id for fb, _ in changed_pairs}
+        # Flush now, in the OUTER transaction — before any per-item SAVEPOINT
+        # is opened below. Without this, these status UPDATEs stay pending
+        # (autoflush=False) until the first per-item begin_nested() block
+        # flushes them *inside* that savepoint; a flush-time failure on that
+        # first item would then ROLLBACK TO SAVEPOINT and silently discard
+        # the whole batch's status writes even though we report them (and
+        # dispatch webhooks for them) below as updated.
+        db.flush()
         # Not committed yet — folded into the single db.commit() below,
         # together with the per-item field mutations.
 
@@ -557,6 +565,10 @@ async def public_bulk_update_feedback(
                 fid,
                 exc_info=True,
             )
+            # NB: this item's per-item field write was rolled back by the
+            # SAVEPOINT, but a batched status change for this same id (above)
+            # may already be flushed/committed and have fired its webhook —
+            # that part is retry-safe (same-status re-apply is a no-op).
             error_reasons[fid] = "internal_error"
 
     db.commit()
@@ -596,6 +608,24 @@ async def public_bulk_update_feedback(
             )
         except Exception:
             logger.warning("emit_event failed on public bulk PATCH", exc_info=True)
+
+    # Items changed via tags/is_urgent/correction only (no workflow_status)
+    # would otherwise fire no live event at all — the single PATCH path
+    # emits 'feedback:updated' for the equivalent case, so mirror that here
+    # with one batch event covering the field-only-changed ids.
+    if field_changed_ids:
+        try:
+            from src.services.event_emitter import emit_event
+
+            await emit_event(
+                org_id=auth.organization_id,
+                event_type="feedback:updated",
+                data={"feedback_ids": sorted(field_changed_ids)},
+            )
+        except Exception:
+            logger.warning(
+                "emit_event (feedback:updated) failed on public bulk PATCH", exc_info=True
+            )
 
     # ── Per-item results, in deduped input order ──────────────────────────────
     results: list[PublicFeedbackBulkResultItem] = []
