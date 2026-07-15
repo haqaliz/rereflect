@@ -527,3 +527,175 @@ def test_reject_on_non_pending_is_skipped_idempotent(client: TestClient, db: Ses
     # must not flip it to rejected.
     db.refresh(suggestion)
     assert suggestion.status == "confirmed"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/customers/churn-suggestions/bulk — AC7, AC8, R-C (cap)
+# ---------------------------------------------------------------------------
+
+BULK_URL = "/api/v1/customers/churn-suggestions/bulk"
+
+
+def test_bulk_confirm_42_pendings_one_collides(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    emails = [f"user{i}@example.com" for i in range(41)] + ["collide@example.com"]
+    for i, email in enumerate(emails[:-1]):
+        _make_suggestion(
+            db, org, email, ext_id=f"d{i}", suggested_churned_at=datetime(2026, 1, 1) + timedelta(days=i)
+        )
+    collide_at = datetime(2026, 5, 1)
+    _make_churn_event(db, org, "collide@example.com", churned_at=collide_at)
+    _make_suggestion(db, org, "collide@example.com", ext_id="d-collide", suggested_churned_at=collide_at)
+
+    resp = client.post(
+        BULK_URL,
+        json={"action": "confirm", "cohort": {"emails": emails}, "reason_code": "price"},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["matched"] == 42
+    assert body["confirmed"] == 41
+    assert body["skipped"] == 1
+    assert len(body["results"]) == 42
+    # Deduped input order preserved.
+    result_emails_order = []
+    for r in body["results"]:
+        row = db.query(ChurnLabelSuggestion).filter_by(id=r["id"]).first()
+        result_emails_order.append(row.customer_email)
+    assert result_emails_order == emails
+
+    assert db.query(CustomerChurnEvent).filter_by(organization_id=org.id).count() == 41 + 1  # +1 pre-existing collide event
+
+
+def test_bulk_duplicate_email_deduped_matched_once(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(
+        BULK_URL,
+        json={
+            "action": "confirm",
+            "cohort": {"emails": ["alice@example.com", "alice@example.com", "Alice@Example.com"]},
+            "reason_code": "price",
+        },
+        headers=_headers(user),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["matched"] == 1
+    assert body["confirmed"] == 1
+
+
+def test_bulk_both_emails_and_filter_is_422(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    resp = client.post(
+        BULK_URL,
+        json={
+            "action": "confirm",
+            "cohort": {"emails": ["a@example.com"], "filter": {}},
+            "reason_code": "price",
+        },
+        headers=_headers(user),
+    )
+    assert resp.status_code == 422
+
+
+def test_bulk_neither_emails_nor_filter_is_422(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    resp = client.post(
+        BULK_URL,
+        json={"action": "confirm", "cohort": {}, "reason_code": "price"},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 422
+
+
+def test_bulk_confirm_without_reason_code_is_422_and_writes_nothing(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(
+        BULK_URL,
+        json={"action": "confirm", "cohort": {"emails": ["alice@example.com"]}},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 422
+    assert db.query(CustomerChurnEvent).count() == 0
+
+
+def test_bulk_filter_cohort_touches_only_own_org_pending(client: TestClient, db: Session):
+    org_a = _make_org(db)
+    org_b = _make_org(db)
+    user_a = _make_user(db, org_a, role="owner")
+
+    _make_suggestion(db, org_a, "pending-a@example.com", ext_id="a1", status="pending")
+    _make_suggestion(db, org_a, "confirmed-a@example.com", ext_id="a2", status="confirmed")
+    _make_suggestion(db, org_b, "pending-b@example.com", ext_id="b1", status="pending")
+
+    resp = client.post(
+        BULK_URL,
+        json={"action": "reject", "cohort": {"filter": {}}},
+        headers=_headers(user_a),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["matched"] == 1
+    assert len(body["results"]) == 1
+
+    org_b_suggestion = (
+        db.query(ChurnLabelSuggestion).filter_by(organization_id=org_b.id).first()
+    )
+    assert org_b_suggestion.status == "pending"
+
+
+def test_bulk_emails_cohort_over_cap_is_422(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    emails = [f"user{i}@example.com" for i in range(501)]
+
+    resp = client.post(
+        BULK_URL,
+        json={"action": "confirm", "cohort": {"emails": emails}, "reason_code": "price"},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 422
+    assert db.query(CustomerChurnEvent).count() == 0
+
+
+def test_bulk_filter_cohort_over_cap_is_capped_not_silent(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    for i in range(501):
+        _make_suggestion(
+            db, org, f"user{i}@example.com", ext_id=f"d{i}",
+            suggested_churned_at=datetime(2026, 1, 1) + timedelta(days=i),
+        )
+
+    resp = client.post(
+        BULK_URL,
+        json={"action": "reject", "cohort": {"filter": {}}},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["matched"] == 501
+    assert body["capped"] is True
+    assert body["cap"] == 500
+    assert len(body["results"]) == 500
+    assert body["confirmed"] == 500
+
+    still_pending = (
+        db.query(ChurnLabelSuggestion)
+        .filter_by(organization_id=org.id, status="pending")
+        .count()
+    )
+    assert still_pending == 1

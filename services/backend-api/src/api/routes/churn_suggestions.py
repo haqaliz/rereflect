@@ -11,8 +11,9 @@ from churn_events.py's role-less routes — not fixed here, see plan §7), and
 require_feature("advanced_churn_prediction").
 """
 
+import logging
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
@@ -34,12 +35,18 @@ from src.models.churn_label_suggestion import (
 from src.models.organization import Organization
 from src.models.user import User
 from src.schemas.churn_suggestion import (
+    BulkReviewRequest,
+    BulkReviewResponse,
+    BulkReviewResultItem,
     ChurnSuggestionListResponse,
     ChurnSuggestionResponse,
     ConfirmRequest,
     RejectRequest,
     SuggestionActionResponse,
+    SuggestionCohort,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/customers",
@@ -49,6 +56,10 @@ router = APIRouter(
         Depends(require_feature("advanced_churn_prediction")),
     ],
 )
+
+# House precedent: matches public_api.py's `ids: Field(..., max_length=500)`
+# and the PRD's never-built 500/day figure.
+BULK_REVIEW_CAP = 500
 
 
 class _Collision(Exception):
@@ -152,14 +163,76 @@ def _get_suggestion_or_404(
     return row
 
 
+def _dedupe_emails(emails: List[str]) -> List[str]:
+    """Lowercase + dedupe, preserving first-seen order (public_api.py:492-497
+    idiom)."""
+    seen: set = set()
+    normalized: List[str] = []
+    for e in emails:
+        le = e.strip().lower()
+        if le not in seen:
+            seen.add(le)
+            normalized.append(le)
+    return normalized
+
+
+def _resolve_cohort(
+    db: Session, org: Organization, cohort: SuggestionCohort, normalized_emails: Optional[List[str]] = None
+) -> List[ChurnLabelSuggestion]:
+    """Resolve a SuggestionCohort to this org's PENDING suggestions.
+
+    `emails`: `normalized_emails` (already deduped/lowercased by the
+    caller — see BULK_REVIEW_CAP enforcement) resolved to this org's
+    pending suggestions, returned in input order, then by id.
+    `filter`: this org's pending (or filter.status) rows matching
+    provider/search, ordered suggested_churned_at DESC, id DESC.
+    """
+    if cohort.emails is not None:
+        normalized = normalized_emails if normalized_emails is not None else _dedupe_emails(cohort.emails)
+
+        rows = (
+            db.query(ChurnLabelSuggestion)
+            .filter(
+                ChurnLabelSuggestion.organization_id == org.id,
+                ChurnLabelSuggestion.status == CHURN_SUGGESTION_STATUSES[0],
+                ChurnLabelSuggestion.customer_email.in_(normalized),
+            )
+            .all()
+        )
+        by_email: dict = {}
+        for row in rows:
+            by_email.setdefault(row.customer_email, []).append(row)
+        for bucket in by_email.values():
+            bucket.sort(key=lambda r: r.id)
+
+        ordered: List[ChurnLabelSuggestion] = []
+        for email in normalized:
+            ordered.extend(by_email.get(email, []))
+        return ordered
+
+    # filter arm
+    f = cohort.filter
+    query = db.query(ChurnLabelSuggestion).filter(
+        ChurnLabelSuggestion.organization_id == org.id,
+        ChurnLabelSuggestion.status == (f.status or CHURN_SUGGESTION_STATUSES[0]),
+    )
+    if f.provider:
+        query = query.filter(ChurnLabelSuggestion.provider == f.provider)
+    if f.search:
+        query = query.filter(ChurnLabelSuggestion.customer_email.ilike(f"%{f.search}%"))
+
+    return query.order_by(
+        ChurnLabelSuggestion.suggested_churned_at.desc(), ChurnLabelSuggestion.id.desc()
+    ).all()
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 # NOTE: static paths (/churn-suggestions/bulk) MUST be registered before
 # parametric paths (/churn-suggestions/{id}/...) — churn_events.py:157-159
-# warns about exactly this FastAPI path-matching pitfall. (No parametric
-# path exists yet in Phase 1.)
+# warns about exactly this FastAPI path-matching pitfall.
 
 
 @router.get("/churn-suggestions", response_model=ChurnSuggestionListResponse)
@@ -207,6 +280,116 @@ def list_churn_suggestions(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post("/churn-suggestions/bulk", response_model=BulkReviewResponse)
+def bulk_review_suggestions(
+    body: BulkReviewRequest,
+    current_org: Organization = Depends(get_current_org),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BulkReviewResponse:
+    """Bulk confirm/reject over a suggestion cohort. Best-effort per item —
+    one collision must not roll back the other items (public_api.py:554-583
+    SAVEPOINT idiom). Capped at BULK_REVIEW_CAP (non-silent — see `capped`).
+
+    For `action='reject'`, `confirmed` counts rejections (name kept for
+    bulk-contract parity with `action='confirm'` — spec §6).
+    """
+    normalized_emails: Optional[List[str]] = None
+    if body.cohort.emails is not None:
+        normalized_emails = _dedupe_emails(body.cohort.emails)
+        if len(normalized_emails) > BULK_REVIEW_CAP:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"cohort exceeds BULK_REVIEW_CAP ({BULK_REVIEW_CAP}); "
+                    "narrow the selection"
+                ),
+            )
+
+    resolved = _resolve_cohort(db, current_org, body.cohort, normalized_emails)
+    matched = len(resolved)
+
+    capped = matched > BULK_REVIEW_CAP
+    to_process = resolved[:BULK_REVIEW_CAP] if capped else resolved
+
+    results: List[BulkReviewResultItem] = []
+    confirmed_count = 0
+    skipped_count = 0
+    confirmed_emails: set = set()
+
+    for suggestion in to_process:
+        try:
+            with db.begin_nested():
+                if body.action == "confirm":
+                    item_status, reason, _ev_id = _confirm_one(
+                        db,
+                        current_org,
+                        current_user,
+                        suggestion,
+                        body.reason_code,
+                        body.reason_text,
+                    )
+                else:
+                    item_status, reason, _ev_id = _reject_one(db, current_user, suggestion)
+                db.flush()
+            if item_status in ("confirmed", "rejected"):
+                confirmed_count += 1
+                if body.action == "confirm":
+                    confirmed_emails.add(suggestion.customer_email)
+                results.append(
+                    BulkReviewResultItem(id=suggestion.id, status="confirmed", reason=reason)
+                )
+            else:
+                skipped_count += 1
+                # Confirm MUST call _invalidate_probability on every write
+                # path — including a precheck-resolved "already_marked"
+                # skip, where a real (pre-existing) event now backs this
+                # customer even though this action didn't create it.
+                if body.action == "confirm" and reason == "already_marked":
+                    confirmed_emails.add(suggestion.customer_email)
+                results.append(
+                    BulkReviewResultItem(id=suggestion.id, status="skipped", reason=reason)
+                )
+        except _Collision:
+            # SAVEPOINT already rolled back; the pre-existing event is
+            # visible again on the outer session -> resolve to skipped,
+            # same as the single-confirm route's collision handling.
+            existing = _get_active_churn_event(db, current_org.id, suggestion.customer_email)
+            suggestion.status = "confirmed"
+            suggestion.churn_event_id = existing.id if existing else None
+            suggestion.reviewed_by_user_id = current_user.id
+            suggestion.reviewed_at = datetime.utcnow()
+            db.add(suggestion)
+            skipped_count += 1
+            confirmed_emails.add(suggestion.customer_email)
+            results.append(
+                BulkReviewResultItem(id=suggestion.id, status="skipped", reason="already_marked")
+            )
+        except Exception:
+            logger.warning(
+                "bulk_review_suggestions: per-item failure for suggestion %s",
+                suggestion.id,
+                exc_info=True,
+            )
+            results.append(
+                BulkReviewResultItem(id=suggestion.id, status="error", reason="internal_error")
+            )
+
+    db.commit()
+
+    for email in confirmed_emails:
+        _invalidate_probability(db, current_org.id, email)
+
+    return BulkReviewResponse(
+        matched=matched,
+        confirmed=confirmed_count,
+        skipped=skipped_count,
+        results=results,
+        capped=capped,
+        cap=BULK_REVIEW_CAP if capped else None,
     )
 
 
