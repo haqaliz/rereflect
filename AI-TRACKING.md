@@ -54,6 +54,7 @@
 | Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
 | Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
 | Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
+| CRM-sourced churn label **suggestions** (HubSpot, Salesforce) — opt-in, default-deny, never auto-applied | Yes | Settings → Integrations churn-labels card (toggle, renewal picker, on-demand backfill) + Customers → CRM churn suggestions review queue (confirm/reject/bulk) + readiness `pending_suggestions` counter | Unlocked (OSS) |
 | CRM Enrichment (HubSpot + Salesforce) — company/ARR/renewal/deal, provider-tagged, feeds health `crm_component`, CRM timeline events, health-score writeback to **both** HubSpot (contact property) and Salesforce (Contact field) | Yes | CrmCompanyCard on Customer 360, Settings > Integrations (HubSpot token / Salesforce OAuth), HubSpot + Salesforce writeback toggle cards, one-CRM-per-org guard | Unlocked (OSS) |
 | Jira Cloud Integration — connect via Atlassian API token (Basic auth, encrypted), create issue from feedback (project/issue-type, ADF, duplicate guard), `jira` selectable source type; SSRF-hardened. **Inbound status-sync shipped 2026-07-12** (`jira-status-sync`) — poll-first Celery beat (15-min) maps a linked issue's Jira `statusCategory` (`done→resolved`, `indeterminate→in_review`, `new→new`; per-org `status_mapping` override) back onto the feedback's `workflow_status`; **opt-in per org (off by default)**, non-destructive first-poll baseline-seed (no bulk backfill), most-advanced-category-wins across multi-issue links, 429/`Retry-After` throttle, manual "Sync now"; applies via `apply_status_change` (worker mirror) with a `status_changed` timeline event tagged `source=jira`. Reconcile core is provider-agnostic (Zendesk/Asana reuse). See `docs/planning/jira-status-sync/`. | Yes | Settings > Integrations (Jira token-paste page + tile, **status-sync toggle + last-synced/error indicator + Sync now**), create-issue wizard Jira branch, landing page + `SELF_HOSTING.md`; **inbound webhook (real-time)** / OAuth 3LO / Server-DC / per-status-name mapping editor / outbound webhook-on-jira-change deferred v2 | Unlocked (OSS) |
 | Zendesk Integration — inbound feedback source via agent email + API token (Basic auth, encrypted); tickets → feedback (one item/ticket, deduped by ticket ID, requester → `customer_email`); dual ingestion (incremental **pull** beat + optional HMAC **webhook**) through a shared dedup core; `zendesk` selectable source type; SSRF-hardened; auto-provisions a default source on connect. **Inbound status-sync shipped 2026-07-12** (`zendesk-status-sync`) — maps a linked ticket's Zendesk `status` (`new→new`, `open`/`pending`/`hold`→`in_review`, `solved→resolved`, `closed→closed`; per-org `status_mapping` override) back onto the feedback's `workflow_status` via **both** a poll-first Celery beat (15-min, guaranteed/NAT-safe fallback) and an additive real-time branch on the same ingestion webhook, keyed on an explicit anti-spoof discriminator (`"event":"ticket.status_changed"`, kept distinct from the `ticket.created` payload so it can never reach/be reached by the ingestion path); **opt-in per org (off by default)**, non-destructive first-observation baseline-seed, race-safe conditional-`UPDATE` apply (poll and webhook can never double-apply the same change), manual "Sync now". Applies via a source-tagged writer with one `status_changed` timeline event (`source=zendesk`); reconcile core shares its shape with Jira's. See `docs/planning/zendesk-status-sync/`. | Yes | Settings > Integrations (Zendesk token-paste page + tile), source-wizard branch, landing page + `SELF_HOSTING.md`; status-sync currently API-only (`PATCH /status-sync`) — **in-app toggle UI**, OAuth, per-comment ingestion, backfill, filters, per-status-name mapping editor, outbound webhook-on-zendesk-change deferred v2 | Unlocked (OSS) |
@@ -383,6 +384,37 @@
       remains the fallback below the gate. Reuse the existing precision/recall/F1/AUC churn dashboard.
 - *Serves:* churn credibility. **Exit:** for a qualifying org, ML beats the heuristic on backtest with
       the auto-fallback preserved.
+
+> **Note — label supply now has a CRM source (shipped 2026-07-15, `crm-churn-labels`).**
+> Churn labels previously came from manual entry (Customer 360 → **Mark as churned**) and CSV
+> import only. Orgs with HubSpot or Salesforce connected can now opt in to harvest **lost renewals**
+> as **suggestions**, with an optional on-demand backfill over up to 60 months of closed-lost
+> history. Suggestions are **not labels**: they enter a review queue and become `source='manual'`
+> churn events only when an operator confirms one with a reason code. Nothing is auto-applied, and
+> the feature is **default-deny** — an org that names no renewal pipelines/opportunity types
+> produces nothing. `pending_suggestions` is reported separately on the readiness card and is
+> deliberately excluded from `churn_labels_ready`.
+>
+> **This makes no claim about churn-prediction quality.** It changes label *supply*; whether more
+> labels are sufficient for a per-org model is exactly this milestone's open question. And **no org
+> is promised it will reach the gate** — an org's real lost-renewal count is whatever it is.
+>
+> **The 500-label gate is not settled — treat it as under review (PRD R8).** `CHURN_LABEL_TARGET =
+> 500` comes from `PRD-ADVANCED-CHURN-PREDICTION.md:463` — "labels ≥ 500/org **or ≥ 5,000
+> globally**" — and `config/readiness_thresholds.py:8`'s own comment records that it was copied
+> "verbatim". Two problems. First, the "≥ 5,000 globally" half is **meaningless post-OSS-pivot**:
+> single-tenant self-hosting has no cross-org pool (the same reason M4.3 benchmarks were dropped),
+> so half the original criterion cannot be evaluated at all. Second, the surviving per-org half was
+> calibrated for a **hosted multi-tenant product that no longer exists**, and **nobody has re-derived
+> what a per-org logistic/GBM churn model actually needs single-tenant** — it could be 100, 200, or
+> more than 500. **Never present 500 as a settled target; do not restate it without this caveat.**
+> **Recommended follow-up:** an M5.3-scoped re-derivation of the gate from single-tenant data before
+> anyone builds against the number. This does not block: more human-confirmed labels help under any
+> threshold.
+>
+> **Not viable as label sources**, so not planned: **Stripe** (dead post-OSS-pivot) and
+> **Segment/product-usage drop** (blocked — `customer_usage` keeps no history to detect a drop
+> against).
 
 #### M5.4 — Local embedding quality (Track D) — parked / nice-to-have
 - [ ] Better local embedding model for copilot/template matching (incremental; fully offline).
