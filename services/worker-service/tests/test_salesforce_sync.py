@@ -90,11 +90,14 @@ def _make_customer(db: Session, org_id: int, email: str) -> CustomerHealth:
     return ch
 
 
-def _make_mock_client(contacts=None, account=None, opportunities=None) -> MagicMock:
+def _make_mock_client(
+    contacts=None, account=None, opportunities=None, lost_opportunities=None
+) -> MagicMock:
     mc = MagicMock()
     mc.list_contacts.return_value = contacts or []
     mc.get_account.return_value = account
     mc.get_open_opportunities.return_value = opportunities or []
+    mc.get_lost_opportunities.return_value = lost_opportunities or []
     return mc
 
 
@@ -966,3 +969,164 @@ class TestEnrichmentCharacterizationLock:
         }
         assert actual == expected
         assert actual["deal_stage"] not in ("Closed Won", "Closed Lost")
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: churn-suggestion harvest wiring (harvester-core aspect)
+# ---------------------------------------------------------------------------
+
+
+_LOST_RENEWAL_OPP = {
+    "Id": "006lost1",
+    "Name": "Lost Renewal",
+    "StageName": "Closed Lost",
+    "Amount": 1000,
+    "CloseDate": "2026-06-15",
+    "IsClosed": True,
+    "IsWon": False,
+    "Type": "Renewal",
+}
+
+
+class TestChurnSuggestionHarvestWiring:
+    def _make_salesforce_integration(self, db, org_id, *, enabled=False, config=None):
+        integ = SalesforceIntegration(
+            organization_id=org_id,
+            instance_url="https://test.my.salesforce.com",
+            refresh_token="enc-refresh",
+            connected_at=datetime.utcnow(), is_active=True,
+            contacts_synced=0, contacts_matched=0,
+            churn_labels_enabled=enabled, churn_label_config=config,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+        return integ
+
+    def _matched_contact(self):
+        return {"Id": "003c1", "Email": "alice@example.com", "AccountId": "001a1"}
+
+    def test_churn_labels_disabled_by_default_yields_zero_rows_and_baseline_result(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_salesforce_integration(db, org.id)  # churn_labels_enabled defaults False
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+            lost_opportunities=[_LOST_RENEWAL_OPP],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_churn_labels_enabled_with_matching_config_creates_pending_suggestion(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_salesforce_integration(
+            db, org.id, enabled=True,
+            config={"renewal_opportunity_types": ["Renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+            lost_opportunities=[_LOST_RENEWAL_OPP],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        rows = db.query(ChurnLabelSuggestion).all()
+        assert len(rows) == 1
+        assert rows[0].status == "pending"
+        assert rows[0].customer_email == "alice@example.com"
+        assert rows[0].provider == "salesforce"
+        assert rows[0].external_opportunity_id == "006lost1"
+
+    def test_churn_labels_enabled_but_config_empty_yields_zero_rows(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_salesforce_integration(db, org.id, enabled=True, config={})
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+            lost_opportunities=[_LOST_RENEWAL_OPP],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_churn_labels_enabled_but_config_absent_yields_zero_rows(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_salesforce_integration(db, org.id, enabled=True, config=None)
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+            lost_opportunities=[_LOST_RENEWAL_OPP],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_raising_lost_opportunities_accessor_leaves_enrichment_and_result_intact(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_salesforce_integration(
+            db, org.id, enabled=True,
+            config={"renewal_opportunity_types": ["Renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+        )
+        client.get_lost_opportunities.side_effect = RuntimeError("boom")
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_enrichment_row_unaffected_by_harvest_wiring(self, db):
+        """Enrichment characterization holds even when harvest is enabled and firing."""
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_salesforce_integration(
+            db, org.id, enabled=True,
+            config={"renewal_opportunity_types": ["Renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+            opportunities=CHARACTERIZATION_OPPS,
+            lost_opportunities=[_LOST_RENEWAL_OPP],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        assert row.deal_name == "Open High"
+        assert row.deal_stage == "Negotiation"
+        assert row.deal_amount == 900.0
