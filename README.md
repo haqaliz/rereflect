@@ -42,6 +42,9 @@ all behind a multi-tenant dashboard you host yourself.
 
 - 🔓 **100% open source (MIT).** No "open core", no locked features.
 - 🏠 **Self-hosted — your data never leaves your box.** Ships with Docker Compose.
+- 🛰️ **Zero telemetry.** No usage analytics, no crash reporting, no phone-home. A default
+  install makes no outbound calls of its own — only the LLM/integration endpoints you
+  configure yourself. See [Telemetry](docs/SELF_HOSTING.md#telemetry-there-isnt-any).
 - 🔑 **Bring your own LLM key.** OpenAI, Anthropic or Google, encrypted at rest. There is no vendor key and nothing is proxied.
 - 💸 **Free by default.** Runs end-to-end on a local VADER + keyword pipeline with **no API key and zero cost**. Add a key only when you want LLM-grade analysis.
 - ✅ **Everything unlocked.** No tiers, seat caps, or feedback quotas — advanced churn, cohorts, analytics, integrations and the API are all included.

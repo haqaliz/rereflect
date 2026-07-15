@@ -23,11 +23,24 @@ ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ARG NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_MIXPANEL_TOKEN
+# Optional browser-side error tracking. Empty (the default) => Sentry is never
+# initialized and the built app makes no calls to it.
+ARG NEXT_PUBLIC_SENTRY_DSN
+ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT
+ARG NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
 
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
 ENV NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=$NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_MIXPANEL_TOKEN=$NEXT_PUBLIC_MIXPANEL_TOKEN
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN
+ENV NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
+ENV NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE=$NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+
+# Next.js collects anonymous build-time telemetry and sends it to Vercel by
+# default. Rereflect ships zero telemetry, so opt out at build and at runtime.
+# https://nextjs.org/telemetry
+ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app/services/frontend-web
 RUN pnpm build
@@ -37,6 +50,8 @@ FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+# ENV does not cross build stages — opt out of Next.js telemetry at runtime too.
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs

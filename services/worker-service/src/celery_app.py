@@ -12,16 +12,25 @@ if analysis_engine_path not in sys.path:
     sys.path.insert(0, analysis_engine_path)
 
 # ---------------------------------------------------------------------------
-# Sentry error tracking (free tier)
+# Sentry error tracking — opt-in only.
+# Disabled unless the operator sets SENTRY_DSN, so a self-hosted install makes
+# no outbound calls by default.
 # ---------------------------------------------------------------------------
 import sentry_sdk
 
-sentry_sdk.init(
-    dsn="https://2b2ca3ad26940c13fbf60d94b877505a@o4511048843788288.ingest.us.sentry.io/4511050724737024",
-    send_default_pii=True,
-    traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
-    environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
-)
+_sentry_dsn = os.getenv("SENTRY_DSN", "").strip()
+_sentry_initialized = bool(_sentry_dsn)
+
+if _sentry_initialized:
+    from sentry_sdk.integrations.celery import CeleryIntegration
+
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        send_default_pii=False,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
+        integrations=[CeleryIntegration()],
+    )
 
 from celery import Celery
 from celery.schedules import crontab

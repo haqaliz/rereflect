@@ -80,6 +80,39 @@ opt-in upgrade to a transformer-based sentiment model is also available — see
 [Local transformer sentiment model](#local-transformer-sentiment-model-opt-in-air-gap-capable)
 below.
 
+## Telemetry (there isn't any)
+
+Rereflect collects **no telemetry, no usage analytics, and no crash reports**. A default
+install makes no outbound network calls of its own — nothing is sent to the maintainers
+or to any third party. There is no opt-out to find, because there is nothing running.
+
+The only outbound calls a Rereflect instance ever makes are ones you configure yourself:
+
+| Call | When |
+|---|---|
+| Your LLM provider (OpenAI / Anthropic / Google) | Only if you add a BYOK key **and** set `ai_analysis_enabled=true`. Omit the key and nothing is contacted. |
+| Your local model endpoint (Ollama, etc.) | Only if you point Settings → AI at one. Stays on your network. |
+| Integrations (Slack, Jira, Zendesk, Asana, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
+| Your Sentry project | Only if you set `SENTRY_DSN` — see below. |
+
+### Optional error tracking (Sentry), off by default
+
+If you want crash reports for your own instance, set `SENTRY_DSN` to **your own** Sentry
+project's DSN. Leave it unset (the default) and the Sentry SDK is never initialized.
+
+```bash
+# .env — all optional, all default to off/empty
+SENTRY_DSN=                      # empty => Sentry never initializes
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0.1
+```
+
+When enabled, Rereflect sets `send_default_pii=False`, so the SDK does not attach user
+emails, usernames or IP addresses to events. The same variable controls the backend, the
+Celery worker and the Next.js frontend (the frontend's browser-side reporting reads
+`NEXT_PUBLIC_SENTRY_DSN`, which is baked in at build time — rebuild the frontend image
+after changing it).
+
 ## Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)
 
 You can run **every** AI feature — LLM analysis, the AI Copilot (natural-language

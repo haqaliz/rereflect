@@ -43,16 +43,22 @@ import os
 import subprocess
 
 # ---------------------------------------------------------------------------
-# Sentry error tracking (free tier — 5K errors/mo)
+# Sentry error tracking — opt-in only.
+# Disabled unless the operator sets SENTRY_DSN, so a self-hosted install makes
+# no outbound calls by default.
 # ---------------------------------------------------------------------------
 import sentry_sdk
 
-sentry_sdk.init(
-    dsn="https://6b7b81ce181d7a0cad75dbd92f9a49d0@o4511048843788288.ingest.us.sentry.io/4511050543005696",
-    send_default_pii=True,
-    traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
-    environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
-)
+_sentry_dsn = os.getenv("SENTRY_DSN", "").strip()
+_sentry_initialized = bool(_sentry_dsn)
+
+if _sentry_initialized:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        send_default_pii=False,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        environment=os.getenv("SENTRY_ENVIRONMENT", "development"),
+    )
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

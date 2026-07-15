@@ -8,6 +8,30 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Fixed — telemetry: Sentry is now opt-in and off by default
+
+Earlier builds initialized Sentry unconditionally with a **hardcoded DSN pointing at the
+maintainer's Sentry project**, and with `send_default_pii=True` — in the backend, the Celery
+worker, and the Next.js server/edge/browser runtimes. A self-hosted install therefore sent
+crash reports (and, on the browser side, session replays) off-box with no disclosure and no way
+to turn it off short of editing source. That contradicted the project's core claim that your
+data never leaves your box.
+
+- **Sentry now initializes only when you set `SENTRY_DSN`** (and `NEXT_PUBLIC_SENTRY_DSN` for
+  browser-side reporting). Unset — the default — means the SDK is never initialized and the
+  instance makes no outbound calls of its own.
+- **`send_default_pii` is now `False`** everywhere, so no user emails, usernames or IPs are
+  attached to events even when you do enable it.
+- **No DSN is hardcoded anywhere.** If you enable Sentry, it reports to *your* project.
+- Removed the Sentry wizard's leftover `/sentry-example-page` and `/api/sentry-example-api`
+  routes, which shipped in the app and existed only to throw test errors.
+- Telemetry is now documented in `docs/SELF_HOSTING.md` and guarded by regression tests
+  (`services/backend-api/tests/test_sentry.py`), which previously passed vacuously — they
+  asserted against logic copied into the test body instead of the real module.
+
+**If you ran an earlier build:** rebuild your images (`docker compose -f docker-compose.prod.yml
+build`) — a stale frontend image has the old DSN baked in at build time.
+
 ### CRM-sourced churn label suggestions (opt-in, human-confirmed)
 
 - **Lost renewals from your CRM become churn *suggestions*** — if you've connected HubSpot or
