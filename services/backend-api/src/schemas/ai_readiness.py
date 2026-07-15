@@ -42,6 +42,11 @@ class AIReadinessResponse(BaseModel):
     churn_labels_by_reason: Dict[str, int]
     churn_labels_by_source: Dict[str, int]
 
+    # CRM-sourced churn label suggestions awaiting operator review
+    # (churn_label_suggestions, M4 table). A SEPARATE count — never folded
+    # into churn_labels_total, churn_labels_trainable, or churn_labels_ready.
+    pending_suggestions: int
+
     # Activation thresholds this report exists to inform (M5.0 exit criterion)
     correction_volume_target: int
     churn_label_target: int

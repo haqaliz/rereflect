@@ -19,6 +19,7 @@ from src.config.readiness_thresholds import CHURN_LABEL_TARGET, CORRECTION_VOLUM
 from src.database.session import get_db
 from src.models.ai_correction import AICorrection
 from src.models.churn_event import CustomerChurnEvent
+from src.models.churn_label_suggestion import CHURN_SUGGESTION_STATUSES, ChurnLabelSuggestion
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.schemas.ai_readiness import AIReadinessResponse
@@ -124,6 +125,27 @@ def _churn_label_counts(org_id: int, db: Session) -> dict:
     }
 
 
+def _pending_suggestion_count(org_id: int, db: Session) -> int:
+    """Count of the org's ChurnLabelSuggestion rows awaiting review.
+
+    A SEPARATE number — never added to `total`, `trainable`, or
+    `churn_labels_ready`. Status is derived from CHURN_SUGGESTION_STATUSES
+    (the model's single source of truth: `["pending", "confirmed",
+    "rejected"]`, "pending" is index 0 — the model's own default) rather
+    than a hardcoded string here.
+    """
+    pending_status = CHURN_SUGGESTION_STATUSES[0]
+    return (
+        db.query(func.count(ChurnLabelSuggestion.id))
+        .filter(
+            ChurnLabelSuggestion.organization_id == org_id,
+            ChurnLabelSuggestion.status == pending_status,
+        )
+        .scalar()
+        or 0
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/analytics/ai-readiness
 # ---------------------------------------------------------------------------
@@ -159,6 +181,7 @@ def get_ai_readiness(
     feedback_volume = _feedback_volume(org_id, db)
     corrections_total, corrections_by_type = _correction_counts(org_id, db)
     churn = _churn_label_counts(org_id, db)
+    pending_suggestions = _pending_suggestion_count(org_id, db)
     return AIReadinessResponse(
         organization_id=org_id,
         generated_at=datetime.utcnow(),
@@ -170,6 +193,7 @@ def get_ai_readiness(
         churn_labels_recovered=churn["recovered"],
         churn_labels_by_reason=churn["by_reason"],
         churn_labels_by_source=churn["by_source"],
+        pending_suggestions=pending_suggestions,
         correction_volume_target=CORRECTION_VOLUME_TARGET,
         churn_label_target=CHURN_LABEL_TARGET,
         correction_volume_ready=corrections_total >= CORRECTION_VOLUME_TARGET,
