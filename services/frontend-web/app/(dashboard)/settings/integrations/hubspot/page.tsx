@@ -31,6 +31,7 @@ import {
 import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 import { useAuth } from '@/contexts/AuthContext';
 import { HubSpotWritebackCard } from '@/components/settings/HubSpotWritebackCard';
+import { HubSpotChurnLabelsCard } from '@/components/settings/HubSpotChurnLabelsCard';
 
 export default function HubSpotSettingsPage() {
   const router = useRouter();
@@ -400,6 +401,11 @@ export default function HubSpotSettingsPage() {
         {/* Health-score writeback (connected state only) */}
         {status?.connected && isAdminOrOwner && (
           <HubSpotWritebackCard status={status} onStatusChange={setStatus} />
+        )}
+
+        {/* CRM churn-label suggestions (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <HubSpotChurnLabelsCard status={status} onStatusChange={setStatus} />
         )}
 
         {/* Help card */}

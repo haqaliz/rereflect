@@ -27,6 +27,7 @@ import {
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { SalesforceWritebackCard } from '@/components/settings/SalesforceWritebackCard';
+import { SalesforceChurnLabelsCard } from '@/components/settings/SalesforceChurnLabelsCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { getOauthErrorMessage } from '@/lib/oauthErrors';
 
@@ -371,6 +372,11 @@ function SalesforceSettingsContent() {
         {/* Health-score writeback (connected state only) */}
         {status?.connected && isAdminOrOwner && (
           <SalesforceWritebackCard status={status} onStatusChange={setStatus} />
+        )}
+
+        {/* CRM churn-label suggestions (connected state only) */}
+        {status?.connected && isAdminOrOwner && (
+          <SalesforceChurnLabelsCard status={status} onStatusChange={setStatus} />
         )}
 
         {/* Help card */}
