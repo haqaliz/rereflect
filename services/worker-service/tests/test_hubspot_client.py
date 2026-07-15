@@ -6,7 +6,9 @@ No real HTTP. Uses unittest.mock.patch on httpx.Client methods.
 
 from __future__ import annotations
 
+import logging
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -855,3 +857,56 @@ class TestListDealPipelines:
                     client.list_deal_pipelines()
 
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 (provider-churn-fetch): token & is_active safety sweep
+# ---------------------------------------------------------------------------
+
+
+class TestNewClientCallsNeverLeakTokenOrTouchIsActive:
+    TOKEN = "s3cr3t"
+
+    def _drive_all_new_methods(self, resp):
+        from src.clients.hubspot import HubSpotClient
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+            instance.post.return_value = resp
+
+            with HubSpotClient(self.TOKEN) as client:
+                for fn in (
+                    lambda: client.get_closed_lost_deals_for_company("c1"),
+                    lambda: client.list_deal_pipelines(),
+                ):
+                    try:
+                        fn()
+                    except Exception:
+                        pass
+
+    @pytest.mark.parametrize("status", [200, 429, 403, 404, 500])
+    def test_token_never_appears_in_logs(self, status, caplog):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {"Retry-After": "1"} if status == 429 else {}
+        resp.json.return_value = {"results": []}
+
+        with caplog.at_level(logging.DEBUG), patch("time.sleep"):
+            self._drive_all_new_methods(resp)
+
+        assert self.TOKEN not in caplog.text
+
+    def test_token_never_in_repr_or_str(self):
+        from src.clients.hubspot import HubSpotClient
+
+        with patch("httpx.Client"):
+            client = HubSpotClient(self.TOKEN)
+
+        assert self.TOKEN not in repr(client)
+        assert self.TOKEN not in str(client)
+
+    def test_no_new_method_references_is_active(self):
+        src_path = Path(__file__).resolve().parents[1] / "src" / "clients" / "hubspot.py"
+        content = src_path.read_text()
+        assert "is_active" not in content

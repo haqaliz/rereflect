@@ -7,6 +7,8 @@ Mirrors test_hubspot_client.py structure.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -783,3 +785,60 @@ class TestGetOpportunityTypeValues:
             with pytest.raises(SalesforceTransientError):
                 with SalesforceClient(**_client_kwargs()) as client:
                     client.get_opportunity_type_values()
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 (provider-churn-fetch): token & is_active safety sweep
+# ---------------------------------------------------------------------------
+
+
+class TestNewClientCallsNeverLeakTokenOrTouchIsActive:
+    REFRESH_TOKEN = "refresh-token-123"
+    ACCESS_TOKEN = "test-access-token"
+
+    def _drive_all_new_methods(self, resp):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp(self.ACCESS_TOKEN)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp
+
+            with SalesforceClient(**_client_kwargs(refresh_token=self.REFRESH_TOKEN)) as client:
+                for fn in (
+                    lambda: client.get_lost_opportunities("001xxxxxxxxxxxxxxx"),
+                    lambda: client.get_opportunity_type_values(),
+                ):
+                    try:
+                        fn()
+                    except Exception:
+                        pass
+
+    @pytest.mark.parametrize("status", [200, 429, 403, 401, 500])
+    def test_token_never_appears_in_logs(self, status, caplog):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {"Retry-After": "1"} if status == 429 else {}
+        resp.json.return_value = {"records": [], "done": True, "fields": []}
+
+        with caplog.at_level(logging.DEBUG), patch("time.sleep"):
+            self._drive_all_new_methods(resp)
+
+        assert self.REFRESH_TOKEN not in caplog.text
+        assert self.ACCESS_TOKEN not in caplog.text
+
+    def test_token_never_in_repr_or_str(self):
+        from src.clients.salesforce import SalesforceClient
+
+        with patch("httpx.Client"):
+            client = SalesforceClient(**_client_kwargs(refresh_token=self.REFRESH_TOKEN))
+
+        assert self.REFRESH_TOKEN not in repr(client)
+        assert self.REFRESH_TOKEN not in str(client)
+
+    def test_no_new_method_references_is_active(self):
+        src_path = Path(__file__).resolve().parents[1] / "src" / "clients" / "salesforce.py"
+        content = src_path.read_text()
+        assert "is_active" not in content
