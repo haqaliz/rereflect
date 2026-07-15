@@ -91,11 +91,12 @@ def _make_customer(db: Session, org_id: int, email: str) -> CustomerHealth:
     return ch
 
 
-def _make_mock_client(contacts=None, company=None, deals=None) -> MagicMock:
+def _make_mock_client(contacts=None, company=None, deals=None, closed_lost_deals=None) -> MagicMock:
     mc = MagicMock()
     mc.list_contacts.return_value = contacts or []
     mc.get_company.return_value = company
     mc.get_open_deals_for_company.return_value = deals or []
+    mc.get_closed_lost_deals_for_company.return_value = closed_lost_deals or []
     return mc
 
 
@@ -1111,3 +1112,169 @@ class TestHardeningEdgeCases:
                 hs._sync_hubspot_org_body(task_self, integ.id)
 
         task_self.retry.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: churn-suggestion harvest wiring (harvester-core aspect)
+# ---------------------------------------------------------------------------
+
+
+_LOST_RENEWAL_DEAL = {
+    "id": "d1",
+    "properties": {
+        "dealname": "Lost Renewal",
+        "dealstage": "closedlost",
+        "amount": "1000",
+        "closedate": "2026-06-15T00:00:00Z",
+        "pipeline": "renewal",
+    },
+}
+
+
+class TestChurnSuggestionHarvestWiring:
+    def _make_hubspot_integration(self, db, org_id, *, enabled=False, config=None):
+        integ = HubSpotIntegration(
+            organization_id=org_id, access_token="enc", is_active=True,
+            connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            churn_labels_enabled=enabled, churn_label_config=config,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+        return integ
+
+    def _matched_contact(self):
+        return {
+            "id": "c1",
+            "properties": {
+                "email": "alice@example.com",
+                "lifecyclestage": "customer",
+                "associatedcompanyid": "co1",
+            },
+        }
+
+    def test_churn_labels_disabled_by_default_yields_zero_rows_and_baseline_result(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(db, org.id)  # churn_labels_enabled defaults False
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_churn_labels_enabled_with_matching_config_creates_pending_suggestion(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(
+            db, org.id, enabled=True,
+            config={"renewal_pipeline_ids": ["renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        rows = db.query(ChurnLabelSuggestion).all()
+        assert len(rows) == 1
+        assert rows[0].status == "pending"
+        assert rows[0].customer_email == "alice@example.com"
+        assert rows[0].provider == "hubspot"
+        assert rows[0].external_opportunity_id == "d1"
+
+    def test_churn_labels_enabled_but_config_empty_yields_zero_rows(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(db, org.id, enabled=True, config={})
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_churn_labels_enabled_but_config_absent_yields_zero_rows(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(db, org.id, enabled=True, config=None)
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_raising_closed_lost_accessor_leaves_enrichment_and_result_intact(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(
+            db, org.id, enabled=True,
+            config={"renewal_pipeline_ids": ["renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+        )
+        client.get_closed_lost_deals_for_company.side_effect = RuntimeError("boom")
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_enrichment_row_unaffected_by_harvest_wiring(self, db):
+        """Enrichment characterization holds even when harvest is enabled and firing."""
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(
+            db, org.id, enabled=True,
+            config={"renewal_pipeline_ids": ["renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            deals=CHARACTERIZATION_PAYLOAD,
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        assert row.deal_name == "Open High"
+        assert row.deal_stage == "contractsent"
+        assert row.deal_amount == 900.0
+        assert row.hubspot_deal_id == "d1"
