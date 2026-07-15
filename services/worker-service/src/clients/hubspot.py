@@ -393,3 +393,40 @@ class HubSpotClient:
             )
 
         return resp.json()
+
+    def list_deal_pipelines(self) -> list[dict]:
+        """
+        Fetch the portal's deal pipelines (id, label, stages) — used to
+        populate the M3 renewal-pipeline config picker.
+
+        Returns the parsed `results` list on 200; returns `[]` on 404.
+
+        Raises:
+            HubSpotTransientError: on 429 or 5xx.
+            HubSpotScopeError: on 403.
+        """
+        resp = self._client.get("/crm/v3/pipelines/deals")
+
+        if resp.status_code == 404:
+            return []
+
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "10"))
+            logger.warning(
+                "hubspot_client: 429 rate limited fetching deal pipelines; sleeping %ss",
+                retry_after,
+            )
+            time.sleep(retry_after)
+            raise HubSpotTransientError(
+                f"HubSpot rate limited fetching deal pipelines, retry after {retry_after}s"
+            )
+
+        if resp.status_code >= 500:
+            raise HubSpotTransientError(
+                f"HubSpot server error {resp.status_code} fetching deal pipelines"
+            )
+
+        if resp.status_code == 403:
+            raise HubSpotScopeError("HubSpot scope error fetching deal pipelines")
+
+        return resp.json().get("results", [])

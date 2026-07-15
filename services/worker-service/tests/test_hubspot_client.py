@@ -740,3 +740,118 @@ class TestDealPipelineProperty:
                 deals = client.get_open_deals_for_company("c1")
 
         assert deals == [deal]
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 (provider-churn-fetch): HubSpotClient.list_deal_pipelines
+# ---------------------------------------------------------------------------
+
+
+class TestListDealPipelines:
+    def test_returns_parsed_results(self):
+        from src.clients.hubspot import HubSpotClient
+
+        pipelines_data = {
+            "results": [
+                {
+                    "id": "default",
+                    "label": "Sales Pipeline",
+                    "stages": [{"id": "appointmentscheduled", "label": "Appointment Scheduled"}],
+                }
+            ]
+        }
+        resp = _make_resp(200, pipelines_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with HubSpotClient("test-token") as client:
+                pipelines = client.list_deal_pipelines()
+
+        assert pipelines == pipelines_data["results"]
+        called_url = instance.get.call_args[0][0]
+        assert called_url == "/crm/v3/pipelines/deals"
+
+    def test_404_returns_empty_list(self):
+        from src.clients.hubspot import HubSpotClient
+
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_404
+
+            with HubSpotClient("test-token") as client:
+                pipelines = client.list_deal_pipelines()
+
+        assert pipelines == []
+
+    def test_403_raises_scope_error(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotScopeError
+
+        resp_403 = MagicMock()
+        resp_403.status_code = 403
+        resp_403.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_403
+
+            with pytest.raises(HubSpotScopeError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+    def test_429_with_retry_after_sleeps_and_raises_transient(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "7"}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+        mock_sleep.assert_called_once_with(7)
+
+    def test_429_without_retry_after_defaults_to_10(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+        mock_sleep.assert_called_once_with(10)
+
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_5xx_raises_transient_without_sleep(self, status):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+        mock_sleep.assert_not_called()
