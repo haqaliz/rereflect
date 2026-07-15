@@ -7,6 +7,10 @@ kombu==5.3.4
 sqlalchemy==2.0.32
 psycopg2-binary==2.9.9
 
+# Date arithmetic (churn_backfill month-window floor). Already a transitive
+# dep of celery, but declared explicitly since we import it directly.
+python-dateutil==2.9.0.post0
+
 # Analysis engine dependencies (shared)
 vaderSentiment==3.3.2
 nltk==3.9.1
