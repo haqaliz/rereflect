@@ -29,6 +29,13 @@ export interface SalesforceConnectionStatus {
   last_harvest_status?: string | null;
   last_harvest_error?: string | null;
   suggestions_created?: number;
+  // Historical churn-label backfill (historical-backfill aspect). Optional
+  // for the same reason as the harvest fields above — additive, never
+  // required by existing call sites/fixtures.
+  backfill_status?: BackfillStatus | null;
+  backfill_progress?: BackfillProgress | null;
+  backfill_last_run_at?: string | null;
+  backfill_error?: string | null;
 }
 
 export interface SalesforceConnectUrlResponse {
@@ -86,6 +93,37 @@ export interface ChurnLabelsResponse {
   last_harvest_status: string | null;
   last_harvest_error: string | null;
   suggestions_created: number;
+  backfill_status?: BackfillStatus | null;
+  backfill_progress?: BackfillProgress | null;
+  backfill_last_run_at?: string | null;
+  backfill_error?: string | null;
+}
+
+// Historical churn-label backfill (historical-backfill aspect)
+
+export type BackfillStatus =
+  | 'idle'
+  | 'running'
+  | 'cancelling'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface BackfillProgress {
+  scanned?: number;
+  suggested?: number;
+  skipped_existing?: number;
+  denied?: number;
+  dropped_by_cap?: number;
+  since?: string;
+}
+
+export interface BackfillActionResponse {
+  status: string;
+  backfill_status: BackfillStatus | null;
+  backfill_progress: BackfillProgress | null;
+  backfill_last_run_at: string | null;
+  backfill_error: string | null;
 }
 
 // ---- API ----
@@ -156,6 +194,21 @@ export const salesforceAPI = {
   getChurnLabelOptions: async (): Promise<ChurnLabelOptionsResponse> => {
     const response = await apiClient.get(
       '/api/v1/integrations/salesforce/churn-labels/options',
+    );
+    return response.data;
+  },
+
+  triggerChurnBackfill: async (months: number): Promise<BackfillActionResponse> => {
+    const response = await apiClient.post(
+      '/api/v1/integrations/salesforce/churn-labels/backfill',
+      { months },
+    );
+    return response.data;
+  },
+
+  cancelChurnBackfill: async (): Promise<BackfillActionResponse> => {
+    const response = await apiClient.post(
+      '/api/v1/integrations/salesforce/churn-labels/backfill/cancel',
     );
     return response.data;
   },

@@ -8,12 +8,16 @@ import React from 'react';
 const mockUpdateChurnLabels = vi.fn();
 const mockGetChurnLabelOptions = vi.fn();
 const mockGetStatus = vi.fn();
+const mockTriggerChurnBackfill = vi.fn();
+const mockCancelChurnBackfill = vi.fn();
 
 vi.mock('@/lib/api/hubspot', () => ({
   hubspotAPI: {
     updateChurnLabels: (...args: unknown[]) => mockUpdateChurnLabels(...args),
     getChurnLabelOptions: (...args: unknown[]) => mockGetChurnLabelOptions(...args),
     getStatus: (...args: unknown[]) => mockGetStatus(...args),
+    triggerChurnBackfill: (...args: unknown[]) => mockTriggerChurnBackfill(...args),
+    cancelChurnBackfill: (...args: unknown[]) => mockCancelChurnBackfill(...args),
   },
 }));
 
@@ -261,5 +265,180 @@ describe('HubSpotChurnLabelsCard', () => {
     expect(screen.getByText('47')).toBeInTheDocument();
     expect(screen.getByText(/insufficient scopes/i)).toBeInTheDocument();
     expect(screen.getByText(/missing read permission/i)).toBeInTheDocument();
+  });
+
+  describe('Backfill history (historical-backfill aspect)', () => {
+    const enabledStatus: HubSpotConnectionStatus = {
+      ...baseStatus,
+      churn_labels_enabled: true,
+      churn_label_config: { renewal_pipeline_ids: ['default'] },
+    };
+
+    it('renders the backfill section with a 24-month default and a Run button', () => {
+      render(<HubSpotChurnLabelsCard status={enabledStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByText(/Backfill history/i)).toBeInTheDocument();
+      expect(screen.getByText('24')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^run$/i })).toBeInTheDocument();
+    });
+
+    it('Run is disabled when churn labels are disabled', () => {
+      render(<HubSpotChurnLabelsCard status={baseStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByRole('button', { name: /^run$/i })).toBeDisabled();
+    });
+
+    it('Run is disabled when the renewal set is empty even if enabled', () => {
+      const emptyEnabled: HubSpotConnectionStatus = {
+        ...baseStatus,
+        churn_labels_enabled: true,
+        churn_label_config: { renewal_pipeline_ids: [] },
+      };
+      render(<HubSpotChurnLabelsCard status={emptyEnabled} onStatusChange={vi.fn()} />);
+      expect(screen.getByRole('button', { name: /^run$/i })).toBeDisabled();
+    });
+
+    it('clicking Run triggers a backfill with the default 24-month window', async () => {
+      const user = userEvent.setup();
+      const onStatusChange = vi.fn();
+      mockTriggerChurnBackfill.mockResolvedValue({
+        status: 'queued',
+        backfill_status: 'running',
+        backfill_progress: { scanned: 0, suggested: 0 },
+        backfill_last_run_at: null,
+        backfill_error: null,
+      });
+      mockGetStatus.mockResolvedValue({ ...enabledStatus, backfill_status: 'running' });
+
+      render(<HubSpotChurnLabelsCard status={enabledStatus} onStatusChange={onStatusChange} />);
+      await user.click(screen.getByRole('button', { name: /^run$/i }));
+
+      await waitFor(() => {
+        expect(mockTriggerChurnBackfill).toHaveBeenCalledWith(24);
+      });
+    });
+
+    it('selecting a different window and clicking Run passes that value', async () => {
+      const user = userEvent.setup();
+      mockTriggerChurnBackfill.mockResolvedValue({
+        status: 'queued',
+        backfill_status: 'running',
+        backfill_progress: {},
+        backfill_last_run_at: null,
+        backfill_error: null,
+      });
+      mockGetStatus.mockResolvedValue({ ...enabledStatus, backfill_status: 'running' });
+
+      render(<HubSpotChurnLabelsCard status={enabledStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByLabelText(/backfill window/i));
+      await user.click(screen.getByText('60'));
+      await user.click(screen.getByRole('button', { name: /^run$/i }));
+
+      await waitFor(() => {
+        expect(mockTriggerChurnBackfill).toHaveBeenCalledWith(60);
+      });
+    });
+
+    it('shows Cancel instead of Run while a backfill is running', () => {
+      const runningStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'running',
+        backfill_progress: { scanned: 10, suggested: 2, skipped_existing: 1 },
+      };
+      render(<HubSpotChurnLabelsCard status={runningStatus} onStatusChange={vi.fn()} />);
+      expect(screen.queryByRole('button', { name: /^run$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
+    });
+
+    it('clicking Cancel calls cancelChurnBackfill and refreshes status', async () => {
+      const user = userEvent.setup();
+      const onStatusChange = vi.fn();
+      const runningStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'running',
+        backfill_progress: { scanned: 10, suggested: 2 },
+      };
+      mockCancelChurnBackfill.mockResolvedValue({
+        status: 'cancelling',
+        backfill_status: 'cancelling',
+        backfill_progress: { scanned: 10, suggested: 2 },
+        backfill_last_run_at: null,
+        backfill_error: null,
+      });
+      mockGetStatus.mockResolvedValue({ ...runningStatus, backfill_status: 'cancelling' });
+
+      render(<HubSpotChurnLabelsCard status={runningStatus} onStatusChange={onStatusChange} />);
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+      await waitFor(() => {
+        expect(mockCancelChurnBackfill).toHaveBeenCalled();
+        expect(onStatusChange).toHaveBeenCalled();
+      });
+    });
+
+    it('renders scanned/suggested/skipped progress numbers', () => {
+      const runningStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'running',
+        backfill_progress: { scanned: 40, suggested: 12, skipped_existing: 5 },
+      };
+      render(<HubSpotChurnLabelsCard status={runningStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByText('40')).toBeInTheDocument();
+      expect(screen.getByText('12')).toBeInTheDocument();
+      expect(screen.getByText('5')).toBeInTheDocument();
+    });
+
+    it('renders backfill_error', () => {
+      const failedStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'failed',
+        backfill_error: 'missing_encryption_key',
+      };
+      render(<HubSpotChurnLabelsCard status={failedStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByText(/missing_encryption_key/i)).toBeInTheDocument();
+    });
+
+    it('shows an explicit dropped-by-cap warning naming the count and covered window — no silent caps', () => {
+      const cappedStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'completed',
+        backfill_progress: {
+          scanned: 3000,
+          suggested: 2000,
+          dropped_by_cap: 137,
+          since: '2024-07-15T00:00:00',
+        },
+      };
+      render(<HubSpotChurnLabelsCard status={cappedStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByText(/137/)).toBeInTheDocument();
+      expect(screen.getByText(/dropped by the per-run cap/i)).toBeInTheDocument();
+      expect(screen.getByText(/covered window/i)).toBeInTheDocument();
+    });
+
+    it('does not show the dropped-by-cap warning when nothing was dropped', () => {
+      const okStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'completed',
+        backfill_progress: { scanned: 10, suggested: 10, dropped_by_cap: 0 },
+      };
+      render(<HubSpotChurnLabelsCard status={okStatus} onStatusChange={vi.fn()} />);
+      expect(screen.queryByText(/dropped by the per-run cap/i)).not.toBeInTheDocument();
+    });
+
+    it('polls status while running and stops once no longer running', async () => {
+      vi.useFakeTimers();
+      const onStatusChange = vi.fn();
+      const runningStatus: HubSpotConnectionStatus = {
+        ...enabledStatus,
+        backfill_status: 'running',
+        backfill_progress: { scanned: 1, suggested: 0 },
+      };
+      mockGetStatus.mockResolvedValue({ ...runningStatus, backfill_status: 'completed' });
+
+      render(<HubSpotChurnLabelsCard status={runningStatus} onStatusChange={onStatusChange} />);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockGetStatus).toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
   });
 });

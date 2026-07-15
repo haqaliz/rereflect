@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import {
@@ -14,6 +15,17 @@ import {
   type SalesforceConnectionStatus,
   type ChurnLabelOption,
 } from '@/lib/api/salesforce';
+
+const BACKFILL_MONTH_OPTIONS = [12, 24, 36, 60];
+const DEFAULT_BACKFILL_MONTHS = 24;
+const BACKFILL_POLL_INTERVAL_MS = 5000;
+
+function formatWindowSince(since: string | undefined): string {
+  if (!since) return '';
+  const parsed = new Date(since);
+  if (Number.isNaN(parsed.getTime())) return since;
+  return parsed.toLocaleDateString();
+}
 
 // Friendly copy for machine-readable validation reasons returned by the
 // backend (PATCH .../churn-labels 422/502 body).
@@ -63,6 +75,27 @@ export function SalesforceChurnLabelsCard({
   const [options, setOptions] = useState<ChurnLabelOption[] | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState<string | null>(null);
+
+  // Historical churn-label backfill (historical-backfill aspect)
+  const [backfillMonths, setBackfillMonths] = useState<number>(DEFAULT_BACKFILL_MONTHS);
+  const [backfillActionLoading, setBackfillActionLoading] = useState(false);
+  const [backfillActionError, setBackfillActionError] = useState<string | null>(null);
+
+  const isBackfillRunning = status.backfill_status === 'running';
+
+  useEffect(() => {
+    if (!isBackfillRunning) return;
+    const interval = setInterval(async () => {
+      try {
+        const refreshed = await salesforceAPI.getStatus();
+        onStatusChange(refreshed);
+      } catch {
+        // Polling failures are non-fatal — the next tick retries.
+      }
+    }, BACKFILL_POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBackfillRunning]);
 
   if (!status.connected) {
     return null;
@@ -130,10 +163,46 @@ export function SalesforceChurnLabelsCard({
     }
   };
 
+  const handleRunBackfill = async () => {
+    setBackfillActionError(null);
+    setBackfillActionLoading(true);
+    try {
+      await salesforceAPI.triggerChurnBackfill(backfillMonths);
+      const refreshed = await salesforceAPI.getStatus();
+      onStatusChange(refreshed);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : 'Failed to start backfill. Please try again.';
+      setBackfillActionError(message);
+    } finally {
+      setBackfillActionLoading(false);
+    }
+  };
+
+  const handleCancelBackfill = async () => {
+    setBackfillActionError(null);
+    setBackfillActionLoading(true);
+    try {
+      await salesforceAPI.cancelChurnBackfill();
+      const refreshed = await salesforceAPI.getStatus();
+      onStatusChange(refreshed);
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : 'Failed to cancel backfill. Please try again.';
+      setBackfillActionError(message);
+    } finally {
+      setBackfillActionLoading(false);
+    }
+  };
+
   const knownIds = new Set((options ?? []).map((opt) => opt.id));
   const staleSelectedIds = selected.filter((id) => !knownIds.has(id));
 
   const showEmptyStateWarning = Boolean(status.churn_labels_enabled) && selected.length === 0;
+
+  const runDisabled =
+    backfillActionLoading || !status.churn_labels_enabled || selected.length === 0;
+  const droppedByCap = status.backfill_progress?.dropped_by_cap ?? 0;
 
   return (
     <Card className="animate-slide-up">
@@ -265,6 +334,101 @@ export function SalesforceChurnLabelsCard({
             <AlertDescription>{friendlyReason(status.last_harvest_error)}</AlertDescription>
           </Alert>
         )}
+
+        {/* Historical churn-label backfill (historical-backfill aspect) */}
+        <div className="space-y-3 pt-2 border-t border-border">
+          <div>
+            <p className="font-semibold text-foreground">Backfill history</p>
+            <p className="text-sm text-muted-foreground">
+              Run a one-time pass over closed-lost Opportunities from up to 5 years back — years
+              of lost renewals land in the review queue as suggestions, never labels.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Select
+              value={String(backfillMonths)}
+              onValueChange={(value) => setBackfillMonths(Number(value))}
+              disabled={isBackfillRunning || backfillActionLoading}
+            >
+              <SelectTrigger aria-label="Backfill window" className="w-28 shrink-0">
+                <SelectValue>{backfillMonths}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {BACKFILL_MONTH_OPTIONS.map((m) => (
+                  <SelectItem key={m} value={String(m)}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-sm text-muted-foreground">months back</span>
+
+            {isBackfillRunning ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelBackfill}
+                disabled={backfillActionLoading}
+              >
+                {backfillActionLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Cancel
+              </Button>
+            ) : (
+              <Button size="sm" onClick={handleRunBackfill} disabled={runDisabled}>
+                {backfillActionLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Run
+              </Button>
+            )}
+          </div>
+
+          {status.backfill_status && (
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide mb-1">
+                  Scanned
+                </p>
+                <p className="text-foreground">{status.backfill_progress?.scanned ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide mb-1">
+                  Suggested
+                </p>
+                <p className="text-foreground">{status.backfill_progress?.suggested ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide mb-1">
+                  Skipped
+                </p>
+                <p className="text-foreground">{status.backfill_progress?.skipped_existing ?? 0}</p>
+              </div>
+            </div>
+          )}
+
+          {droppedByCap > 0 && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                {droppedByCap} dropped by the per-run cap; covered window: since{' '}
+                {formatWindowSince(status.backfill_progress?.since)}.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {status.backfill_error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{status.backfill_error}</AlertDescription>
+            </Alert>
+          )}
+
+          {backfillActionError && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{backfillActionError}</AlertDescription>
+            </Alert>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
