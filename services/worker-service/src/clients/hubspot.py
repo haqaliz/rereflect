@@ -186,15 +186,14 @@ class HubSpotClient:
     # Deals
     # ------------------------------------------------------------------
 
-    def get_open_deals_for_company(self, company_id: str) -> list[dict]:
+    def _fetch_deals_for_company(self, company_id: str) -> list[dict]:
         """
-        Return open deals associated with a company (not closedwon / closedlost).
+        Return ALL deals associated with a company, unfiltered by stage.
 
         Step 1: GET /crm/v3/objects/companies/{company_id}/associations/deals
                 — retrieves deal IDs scoped to this company (paginated).
         Step 2: POST /crm/v3/objects/deals/batch/read
                 — fetches deal properties for those IDs in one call.
-        Step 3: Filter open stages client-side (exclude closedwon / closedlost).
         """
         # ------------------------------------------------------------------
         # Step 1: Collect deal IDs via the company-scoped associations endpoint
@@ -272,7 +271,15 @@ class HubSpotClient:
                 f"HubSpot server error {resp.status_code} batch-reading deals"
             )
 
-        all_deals = resp.json().get("results", [])
+        return resp.json().get("results", [])
+
+    def get_open_deals_for_company(self, company_id: str) -> list[dict]:
+        """
+        Return open deals associated with a company (not closedwon / closedlost).
+
+        Step 3: Filter open stages client-side (exclude closedwon / closedlost).
+        """
+        all_deals = self._fetch_deals_for_company(company_id)
 
         # ------------------------------------------------------------------
         # Step 3: Filter open deals (exclude closedwon / closedlost)
