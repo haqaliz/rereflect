@@ -1003,6 +1003,55 @@ class TestEnrichmentCharacterizationLock:
         assert actual == expected
         assert actual["deal_stage"] != "closedlost"
 
+    def test_enrichment_row_unchanged_when_pipeline_present_on_every_deal(self, db):
+        """Phase 6 lock extension: adding `pipeline` to every deal's properties
+        must not change the enrichment row — the sync reads named keys only."""
+        import copy
+        from datetime import datetime
+        from src.models import CrmEnrichment
+
+        payload_with_pipeline = copy.deepcopy(CHARACTERIZATION_PAYLOAD)
+        for deal in payload_with_pipeline:
+            deal["properties"]["pipeline"] = "default"
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+
+        client = _make_mock_client(
+            contacts=[
+                {
+                    "id": "c1",
+                    "properties": {
+                        "email": "alice@example.com",
+                        "lifecyclestage": "customer",
+                        "associatedcompanyid": "co1",
+                    },
+                }
+            ],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            deals=payload_with_pipeline,
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        actual = {
+            "deal_name": row.deal_name,
+            "deal_stage": row.deal_stage,
+            "deal_amount": row.deal_amount,
+            "renewal_date": row.renewal_date,
+            "hubspot_deal_id": row.hubspot_deal_id,
+        }
+        expected = {
+            "deal_name": "Open High",
+            "deal_stage": "contractsent",
+            "deal_amount": 900.0,
+            "renewal_date": datetime(2026, 9, 1),
+            "hubspot_deal_id": "d1",
+        }
+        assert actual == expected
+        assert not hasattr(row, "pipeline")
+
 
 class TestHardeningEdgeCases:
     def test_sync_hubspot_org_missing_encryption_key(self, db):

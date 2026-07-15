@@ -248,7 +248,7 @@ class HubSpotClient:
         # ------------------------------------------------------------------
         batch_payload = {
             "inputs": [{"id": did} for did in deal_ids],
-            "properties": ["dealname", "dealstage", "amount", "closedate"],
+            "properties": ["dealname", "dealstage", "amount", "closedate", "pipeline"],
         }
         resp = self._client.post(
             "/crm/v3/objects/deals/batch/read",
