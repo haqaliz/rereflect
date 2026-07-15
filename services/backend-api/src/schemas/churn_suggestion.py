@@ -99,6 +99,23 @@ class ConfirmRequest(BaseModel):
         return v
 
 
+class SuggestionActionResponse(BaseModel):
+    """Response for the single confirm/reject routes — the ACTION outcome
+    on the wire (spec §2: `{id, status: confirmed|skipped, churn_event_id,
+    reason?}`), not the raw persisted row. This matters because a collided
+    confirm always persists `suggestion.status == 'confirmed'` in the DB
+    (R-B — it resolves out of the queue) while the wire must say
+    `'skipped'` so the operator knows an event wasn't created by their
+    action. Reject's wire status is 'rejected' on success, 'skipped' when
+    the target wasn't pending.
+    """
+
+    id: int
+    status: Literal["confirmed", "rejected", "skipped"]
+    churn_event_id: Optional[int] = None
+    reason: Optional[str] = None
+
+
 class RejectRequest(BaseModel):
     """Body for POST .../{id}/reject.
 

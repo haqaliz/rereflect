@@ -11,6 +11,7 @@ from typing import Optional
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.api.auth import create_access_token, hash_password
@@ -274,3 +275,255 @@ def test_list_item_includes_evidence_and_churn_event_id(client: TestClient, db: 
     item = resp.json()["items"][0]
     assert item["evidence"] == {"deal_name": "Acme Renewal", "amount": 5000}
     assert item["churn_event_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/customers/churn-suggestions/{id}/confirm — AC3, AC4, AC5
+# ---------------------------------------------------------------------------
+
+
+def _confirm_url(suggestion_id: int) -> str:
+    return f"/api/v1/customers/churn-suggestions/{suggestion_id}/confirm"
+
+
+def _reject_url(suggestion_id: int) -> str:
+    return f"/api/v1/customers/churn-suggestions/{suggestion_id}/reject"
+
+
+def test_confirm_creates_trainable_churn_event(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org, role="admin")
+    churned_at = datetime(2026, 5, 1, 10, 0, 0)
+    suggestion = _make_suggestion(
+        db, org, "alice@example.com", suggested_churned_at=churned_at
+    )
+
+    resp = client.post(
+        _confirm_url(suggestion.id),
+        json={"reason_code": "price"},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "confirmed"
+    assert body["churn_event_id"] is not None
+
+    events = db.query(CustomerChurnEvent).filter_by(organization_id=org.id).all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.source == "manual"
+    assert event.marked_by_user_id == user.id
+    assert event.churned_at == churned_at
+    assert event.customer_email == "alice@example.com"
+
+    db.refresh(suggestion)
+    assert suggestion.status == "confirmed"
+    assert suggestion.churn_event_id == event.id
+
+
+def test_confirm_leaves_probability_computed_at_null(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    _make_health(db, org, "alice@example.com")
+    suggestion = _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(_confirm_url(suggestion.id), json={"reason_code": "price"}, headers=_headers(user))
+    assert resp.status_code == 200
+
+    health = (
+        db.query(CustomerHealth)
+        .filter_by(organization_id=org.id, customer_email="alice@example.com")
+        .first()
+    )
+    assert health.probability_computed_at is None
+
+
+def test_confirm_without_reason_code_is_422_and_writes_nothing(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    suggestion = _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(_confirm_url(suggestion.id), json={}, headers=_headers(user))
+    assert resp.status_code == 422
+
+    assert db.query(CustomerChurnEvent).count() == 0
+    db.refresh(suggestion)
+    assert suggestion.status == "pending"
+
+
+def test_confirm_with_invalid_reason_code_is_422_and_writes_nothing(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    suggestion = _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(
+        _confirm_url(suggestion.id),
+        json={"reason_code": "crm_lost"},
+        headers=_headers(user),
+    )
+    assert resp.status_code == 422
+
+    assert db.query(CustomerChurnEvent).count() == 0
+    db.refresh(suggestion)
+    assert suggestion.status == "pending"
+
+
+def test_confirm_precheck_collision_resolves_to_skipped(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    existing_event = _make_churn_event(db, org, "alice@example.com")
+    suggestion = _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(_confirm_url(suggestion.id), json={"reason_code": "price"}, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "skipped"
+    assert body["churn_event_id"] == existing_event.id
+
+    assert db.query(CustomerChurnEvent).filter_by(organization_id=org.id).count() == 1
+    db.refresh(suggestion)
+    assert suggestion.status == "confirmed"
+    assert suggestion.churn_event_id == existing_event.id
+
+
+def test_confirm_race_path_never_500_and_session_stays_usable(
+    client: TestClient, db: Session, monkeypatch
+):
+    """AC5 race path: pre-check patched to miss the collision, backstop
+    IntegrityError catch must still resolve to skipped — not 500 — and the
+    session must remain usable for a subsequent write."""
+    import src.api.routes.churn_suggestions as churn_suggestions
+
+    org = _make_org(db)
+    user = _make_user(db, org)
+    # Same churned_at on both rows so the INSERT actually collides on the
+    # (org, email, churned_at) UNIQUE constraint once the pre-check is
+    # patched to miss it — otherwise the two `datetime.utcnow()` calls
+    # would differ by microseconds and never collide.
+    shared_churned_at = datetime(2026, 6, 1, 12, 0, 0)
+    existing_event = _make_churn_event(db, org, "alice@example.com", churned_at=shared_churned_at)
+    suggestion = _make_suggestion(
+        db, org, "alice@example.com", suggested_churned_at=shared_churned_at
+    )
+
+    monkeypatch.setattr(churn_suggestions, "_get_active_churn_event", lambda *a, **k: None)
+
+    resp = client.post(_confirm_url(suggestion.id), json={"reason_code": "price"}, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "skipped"
+
+    assert db.query(CustomerChurnEvent).filter_by(organization_id=org.id).count() == 1
+
+    # Session must still be usable — a later write in the same session succeeds.
+    other_suggestion = _make_suggestion(db, org, "bob@example.com", ext_id="d-bob")
+    resp2 = client.post(
+        _confirm_url(other_suggestion.id), json={"reason_code": "price"}, headers=_headers(user)
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["status"] == "confirmed"
+
+
+def test_confirm_on_non_pending_suggestion_is_skipped_idempotent(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    suggestion = _make_suggestion(db, org, "alice@example.com", status="rejected")
+
+    resp = client.post(_confirm_url(suggestion.id), json={"reason_code": "price"}, headers=_headers(user))
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "skipped"
+    assert db.query(CustomerChurnEvent).count() == 0
+
+
+def test_confirm_cross_org_id_is_404(client: TestClient, db: Session):
+    org_a = _make_org(db)
+    org_b = _make_org(db)
+    user_a = _make_user(db, org_a)
+    suggestion_b = _make_suggestion(db, org_b, "bob@example.com")
+
+    resp = client.post(
+        _confirm_url(suggestion_b.id), json={"reason_code": "price"}, headers=_headers(user_a)
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/customers/churn-suggestions/{id}/reject — AC5 (reject path), AC6
+# ---------------------------------------------------------------------------
+
+
+def test_reject_writes_no_event_and_clears_from_pending(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    suggestion = _make_suggestion(db, org, "alice@example.com")
+
+    resp = client.post(_reject_url(suggestion.id), json={}, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "rejected"
+    assert body["churn_event_id"] is None
+
+    assert db.query(CustomerChurnEvent).count() == 0
+
+    list_resp = client.get(f"{LIST_URL}?status=pending", headers=_headers(user))
+    assert list_resp.json()["total"] == 0
+
+
+def test_reject_then_reharvest_natural_key_stays_rejected(client: TestClient, db: Session):
+    """Asserts wave-1 behaviour rather than building it: the harvester
+    (worker-service, a separate service/package — not importable here)
+    pre-checks the same (org, provider, external_opportunity_id) natural
+    key this test queries directly, and its INSERT is backstopped by the
+    model's own UNIQUE constraint (churn_label_suggestion.py:85-90). A
+    re-harvest attempt on this key must find the existing (now rejected)
+    row rather than resurrecting it to pending."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+    suggestion = _make_suggestion(
+        db, org, "alice@example.com", provider="hubspot", ext_id="deal-42"
+    )
+
+    resp = client.post(_reject_url(suggestion.id), json={"note": "not a real churn"}, headers=_headers(user))
+    assert resp.status_code == 200
+
+    # Same natural-key lookup the harvester's `_existing_suggestion_row`
+    # performs before every insert.
+    found = (
+        db.query(ChurnLabelSuggestion)
+        .filter_by(organization_id=org.id, provider="hubspot", external_opportunity_id="deal-42")
+        .first()
+    )
+    assert found is not None
+    assert found.status == "rejected"
+
+    # The UNIQUE constraint is the real backstop: attempting to insert a
+    # fresh "pending" row for the same natural key must fail, not silently
+    # resurrect the rejected suggestion.
+    dupe = ChurnLabelSuggestion(
+        organization_id=org.id,
+        customer_email="alice@example.com",
+        provider="hubspot",
+        external_opportunity_id="deal-42",
+        suggested_churned_at=datetime.utcnow(),
+        status="pending",
+    )
+    db.add(dupe)
+    with pytest.raises(IntegrityError):
+        db.flush()
+    db.rollback()
+
+    list_resp = client.get(f"{LIST_URL}?status=pending", headers=_headers(user))
+    assert list_resp.json()["total"] == 0
+
+
+def test_reject_on_non_pending_is_skipped_idempotent(client: TestClient, db: Session):
+    org = _make_org(db)
+    user = _make_user(db, org)
+    suggestion = _make_suggestion(db, org, "alice@example.com", status="confirmed")
+
+    resp = client.post(_reject_url(suggestion.id), json={}, headers=_headers(user))
+    assert resp.status_code == 200
+    # Non-pending target is idempotent: reject on an already-confirmed row
+    # must not flip it to rejected.
+    db.refresh(suggestion)
+    assert suggestion.status == "confirmed"
