@@ -33,6 +33,11 @@ class AIReadinessResponse(BaseModel):
 
     # Churn labels (M4.1 CustomerChurnEvent)
     churn_labels_total: int
+    # Excludes source='auto_suggested', mirroring the calibrator's own filter
+    # (worker-service tasks/churn_calibration.py:50,125,
+    # services/calibration_refit.py:64,191). `churn_labels_ready` gates on
+    # this field, never on `churn_labels_total`.
+    churn_labels_trainable: int
     churn_labels_recovered: int
     churn_labels_by_reason: Dict[str, int]
     churn_labels_by_source: Dict[str, int]
