@@ -19,9 +19,11 @@ const populatedResponse = {
   corrections_total: 45,
   corrections_by_type: { sentiment: 30, category: 10, churn_risk: 5 },
   churn_labels_total: 120,
+  churn_labels_trainable: 100,
   churn_labels_recovered: 8,
   churn_labels_by_reason: { price: 60, competitor: 40, other: 20 },
   churn_labels_by_source: { manual: 70, csv_import: 50 },
+  pending_suggestions: 47,
   correction_volume_target: 200,
   churn_label_target: 500,
   correction_volume_ready: false,
@@ -32,6 +34,7 @@ const readyResponse = {
   ...populatedResponse,
   corrections_total: 200,
   churn_labels_total: 500,
+  churn_labels_trainable: 500,
   correction_volume_ready: true,
   churn_labels_ready: true,
 };
@@ -43,9 +46,11 @@ const zeroResponse = {
   corrections_total: 0,
   corrections_by_type: {},
   churn_labels_total: 0,
+  churn_labels_trainable: 0,
   churn_labels_recovered: 0,
   churn_labels_by_reason: {},
   churn_labels_by_source: {},
+  pending_suggestions: 0,
   correction_volume_target: 200,
   churn_label_target: 500,
   correction_volume_ready: false,
@@ -128,5 +133,41 @@ describe('AIReadinessCard', () => {
     await waitFor(() => {
       expect(screen.getByText(/failed to load/i)).toBeInTheDocument();
     });
+  });
+
+  it('renders trainable (not total) as the churn-labels progress number', async () => {
+    vi.mocked(aiReadinessAPI.get).mockResolvedValue(populatedResponse);
+
+    render(<AIReadinessCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Churn labels:\s*100\s*\/\s*500/i)).toBeInTheDocument();
+    });
+    // Never the total (120), and never trainable+pending (147)
+    expect(screen.queryByText(/Churn labels:\s*120\s*\/\s*500/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Churn labels:\s*147\s*\/\s*500/i)).not.toBeInTheDocument();
+  });
+
+  it('renders pending CRM suggestions as a separate, non-gating line linking to /customers', async () => {
+    vi.mocked(aiReadinessAPI.get).mockResolvedValue(populatedResponse);
+
+    render(<AIReadinessCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/47 CRM suggestions awaiting review/i)).toBeInTheDocument();
+    });
+    const link = screen.getByRole('link', { name: /47 CRM suggestions awaiting review/i });
+    expect(link).toHaveAttribute('href', '/customers');
+  });
+
+  it('omits the pending-suggestions line when there are zero pending suggestions', async () => {
+    vi.mocked(aiReadinessAPI.get).mockResolvedValue(zeroResponse);
+
+    render(<AIReadinessCard />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no data yet/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/CRM suggestions awaiting review/i)).not.toBeInTheDocument();
   });
 });

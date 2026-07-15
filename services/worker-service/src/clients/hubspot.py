@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -186,15 +187,14 @@ class HubSpotClient:
     # Deals
     # ------------------------------------------------------------------
 
-    def get_open_deals_for_company(self, company_id: str) -> list[dict]:
+    def _fetch_deals_for_company(self, company_id: str) -> list[dict]:
         """
-        Return open deals associated with a company (not closedwon / closedlost).
+        Return ALL deals associated with a company, unfiltered by stage.
 
         Step 1: GET /crm/v3/objects/companies/{company_id}/associations/deals
                 — retrieves deal IDs scoped to this company (paginated).
         Step 2: POST /crm/v3/objects/deals/batch/read
                 — fetches deal properties for those IDs in one call.
-        Step 3: Filter open stages client-side (exclude closedwon / closedlost).
         """
         # ------------------------------------------------------------------
         # Step 1: Collect deal IDs via the company-scoped associations endpoint
@@ -249,7 +249,7 @@ class HubSpotClient:
         # ------------------------------------------------------------------
         batch_payload = {
             "inputs": [{"id": did} for did in deal_ids],
-            "properties": ["dealname", "dealstage", "amount", "closedate"],
+            "properties": ["dealname", "dealstage", "amount", "closedate", "pipeline"],
         }
         resp = self._client.post(
             "/crm/v3/objects/deals/batch/read",
@@ -272,7 +272,15 @@ class HubSpotClient:
                 f"HubSpot server error {resp.status_code} batch-reading deals"
             )
 
-        all_deals = resp.json().get("results", [])
+        return resp.json().get("results", [])
+
+    def get_open_deals_for_company(self, company_id: str) -> list[dict]:
+        """
+        Return open deals associated with a company (not closedwon / closedlost).
+
+        Step 3: Filter open stages client-side (exclude closedwon / closedlost).
+        """
+        all_deals = self._fetch_deals_for_company(company_id)
 
         # ------------------------------------------------------------------
         # Step 3: Filter open deals (exclude closedwon / closedlost)
@@ -282,6 +290,44 @@ class HubSpotClient:
             d for d in all_deals
             if d.get("properties", {}).get("dealstage") not in closed_stages
         ]
+
+    def get_closed_lost_deals_for_company(
+        self, company_id: str, *, since: Optional[datetime] = None
+    ) -> list[dict]:
+        """
+        Return closedlost deals associated with a company — the sibling
+        accessor that retains what get_open_deals_for_company drops.
+
+        `since` (historical-backfill aspect) is an optional window floor,
+        applied client-side against `closedate` (the batch-read already
+        requests it). Default `None` preserves today's unfiltered behavior
+        — only the backfill task passes a floor. Parsing reuses
+        `churn_harvest_adapters._parse_close_date` semantics (ISO-8601,
+        "Z" -> "+00:00"); a deal with no/unparseable closedate is dropped
+        once a floor is supplied (nothing to compare).
+        """
+        all_deals = self._fetch_deals_for_company(company_id)
+        lost = [
+            d for d in all_deals
+            if d.get("properties", {}).get("dealstage") == "closedlost"
+        ]
+        if since is None:
+            return lost
+
+        from src.services.churn_harvest_adapters import _parse_close_date
+
+        floor = since if since.tzinfo else since
+        filtered = []
+        for d in lost:
+            close_dt = _parse_close_date(d.get("properties", {}).get("closedate"))
+            if close_dt is None:
+                continue
+            # Compare naive-to-naive / aware-to-aware; strip tzinfo from the
+            # parsed value if the floor is naive (callers pass naive UTC).
+            compare_dt = close_dt.replace(tzinfo=None) if floor.tzinfo is None else close_dt
+            if compare_dt >= floor:
+                filtered.append(d)
+        return filtered
 
     # ------------------------------------------------------------------
     # Writeback (contact property updates)
@@ -375,3 +421,40 @@ class HubSpotClient:
             )
 
         return resp.json()
+
+    def list_deal_pipelines(self) -> list[dict]:
+        """
+        Fetch the portal's deal pipelines (id, label, stages) — used to
+        populate the M3 renewal-pipeline config picker.
+
+        Returns the parsed `results` list on 200; returns `[]` on 404.
+
+        Raises:
+            HubSpotTransientError: on 429 or 5xx.
+            HubSpotScopeError: on 403.
+        """
+        resp = self._client.get("/crm/v3/pipelines/deals")
+
+        if resp.status_code == 404:
+            return []
+
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "10"))
+            logger.warning(
+                "hubspot_client: 429 rate limited fetching deal pipelines; sleeping %ss",
+                retry_after,
+            )
+            time.sleep(retry_after)
+            raise HubSpotTransientError(
+                f"HubSpot rate limited fetching deal pipelines, retry after {retry_after}s"
+            )
+
+        if resp.status_code >= 500:
+            raise HubSpotTransientError(
+                f"HubSpot server error {resp.status_code} fetching deal pipelines"
+            )
+
+        if resp.status_code == 403:
+            raise HubSpotScopeError("HubSpot scope error fetching deal pipelines")
+
+        return resp.json().get("results", [])

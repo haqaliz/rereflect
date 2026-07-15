@@ -10,6 +10,9 @@ Core (Celery-free, tested directly):
   _pick_renewal_deal — select highest-amount open deal with a closedate
   _upsert_enrichment — Python-level upsert (no PG ON CONFLICT; SQLite-safe)
   _call_update_health — guarded health recompute (tolerates ImportError)
+  _maybe_harvest      — additive, exception-isolated churn-suggestion harvest
+                        (harvester-core aspect); default-deny, never touches
+                        _sync_org's return dict (see churn_suggestion_harvester.py)
 
 R3: access_token is never logged. Log messages use integration_id / org_id only.
 R6: missing LLM_ENCRYPTION_KEY returns {"status": "error", "reason": "missing_encryption_key"}
@@ -153,6 +156,65 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
         )
 
 
+def _maybe_harvest(
+    org_id: int,
+    db,
+    client: HubSpotClient,
+    company_ids: dict,
+    known_emails: set,
+) -> None:
+    """
+    Best-effort churn-suggestion harvest, run after the enrichment loop.
+
+    Default-deny: skipped unless the org's HubSpotIntegration has
+    churn_labels_enabled=True AND a non-empty renewal_pipeline_ids config AND
+    at least one matched company. Exception-isolated (R4) — any failure here,
+    including one raised by the harvest itself, is caught and logged, never
+    propagated, so this can never break the shipped enrichment loop above.
+    Harvest stats go to a log line only; _sync_org's return dict is never
+    touched (AC 7 holds in both toggle states).
+    """
+    try:
+        from src.models import HubSpotIntegration
+        from src.services.churn_suggestion_harvester import harvest_org_suggestions
+
+        integ = (
+            db.query(HubSpotIntegration)
+            .filter(HubSpotIntegration.organization_id == org_id)
+            .first()
+        )
+        if not integ or not integ.churn_labels_enabled:
+            return
+
+        config = integ.churn_label_config or {}
+        renewal_set = frozenset(config.get("renewal_pipeline_ids") or [])
+        if not renewal_set or not company_ids:
+            return
+
+        result = harvest_org_suggestions(
+            org_id, db, client,
+            provider="hubspot",
+            renewal_set=renewal_set,
+            known_emails=known_emails,
+            company_ids=company_ids,
+        )
+        logger.info(
+            "hubspot_sync: churn harvest org=%s status=%s scanned=%s suggested=%s "
+            "skipped_existing=%s denied=%s dropped_by_cap=%s",
+            org_id,
+            result.get("status"),
+            result.get("scanned"),
+            result.get("suggested"),
+            result.get("skipped_existing"),
+            result.get("denied"),
+            result.get("dropped_by_cap"),
+        )
+    except Exception:
+        logger.exception(
+            "hubspot_sync: churn suggestion harvest failed for org=%s", org_id,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Core sync logic (Celery-free — tested directly)
 # ---------------------------------------------------------------------------
@@ -191,6 +253,11 @@ def _sync_org(org_id: int, db, client: HubSpotClient) -> dict:
     contacts_matched = 0
     now = datetime.utcnow()
 
+    # harvester-core aspect: email -> HubSpot company id, for a best-effort
+    # churn-suggestion harvest after this loop (additive; never touches the
+    # loop's own enrichment behavior).
+    company_ids: dict[str, str] = {}
+
     for contact in contacts:
         props = contact.get("properties", {})
         raw_email = props.get("email") or ""
@@ -201,6 +268,8 @@ def _sync_org(org_id: int, db, client: HubSpotClient) -> dict:
 
         contacts_matched += 1
         company_id = props.get("associatedcompanyid")
+        if company_id:
+            company_ids[email_lower] = company_id
 
         # Fetch company info
         company_data = None
@@ -265,6 +334,8 @@ def _sync_org(org_id: int, db, client: HubSpotClient) -> dict:
 
         _upsert_enrichment(db, org_id, email_lower, fields, now)
         _call_update_health(org_id, email_lower, db)
+
+    _maybe_harvest(org_id, db, client, company_ids, known_emails)
 
     return {
         "contacts_synced": contacts_synced,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Database } from 'lucide-react';
 import { aiReadinessAPI, type AIReadiness } from '@/lib/api/ai-readiness';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -198,11 +199,18 @@ export function AIReadinessCard() {
             ready={data.correction_volume_ready}
           />
           <ThresholdRow
-            label="Churn labels"
-            current={data.churn_labels_total}
+            label="Trainable churn labels"
+            current={data.churn_labels_trainable}
             target={data.churn_label_target}
             ready={data.churn_labels_ready}
           />
+          {data.pending_suggestions > 0 && (
+            <p className="text-sm text-muted-foreground pt-1">
+              <Link href="/customers" className="underline hover:text-foreground">
+                {data.pending_suggestions.toLocaleString()} CRM suggestions awaiting review
+              </Link>
+            </p>
+          )}
         </div>
 
         <p className="text-xs text-muted-foreground italic">

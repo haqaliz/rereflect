@@ -91,11 +91,12 @@ def _make_customer(db: Session, org_id: int, email: str) -> CustomerHealth:
     return ch
 
 
-def _make_mock_client(contacts=None, company=None, deals=None) -> MagicMock:
+def _make_mock_client(contacts=None, company=None, deals=None, closed_lost_deals=None) -> MagicMock:
     mc = MagicMock()
     mc.list_contacts.return_value = contacts or []
     mc.get_company.return_value = company
     mc.get_open_deals_for_company.return_value = deals or []
+    mc.get_closed_lost_deals_for_company.return_value = closed_lost_deals or []
     return mc
 
 
@@ -202,6 +203,99 @@ class TestModelsAndMigration:
         sys.path.insert(0, backend_src)
         try:
             from src.models.hubspot_integration import HubSpotIntegration as BackendModel
+            backend_cols = {c.name for c in BackendModel.__table__.columns}
+        finally:
+            sys.path.remove(backend_src)
+            for k in list(sys.modules.keys()):
+                if k == "src" or k.startswith("src."):
+                    del sys.modules[k]
+            sys.modules.update(saved_mods)
+
+        assert worker_cols == backend_cols, (
+            f"Column mismatch!\n"
+            f"  Worker only:  {worker_cols - backend_cols}\n"
+            f"  Backend only: {backend_cols - worker_cols}"
+        )
+
+    def test_churn_label_suggestions_table_creates_on_sqlite(self):
+        """ChurnLabelSuggestion table must be creatable (already done in _fresh_db fixture)."""
+        from src.models import ChurnLabelSuggestion  # noqa: F401
+        assert "churn_label_suggestions" in Base.metadata.tables
+
+    def test_worker_and_backend_churn_label_suggestion_columns_match(self):
+        """Worker ChurnLabelSuggestion mirror columns must exactly match
+        backend-api model columns (crm-churn-labels aspect, data-model).
+
+        Same sys.path/sys.modules swap technique as the crm_enrichment parity
+        test above.
+        """
+        import os
+
+        # Worker mirror (available in current sys.path)
+        from src.models import ChurnLabelSuggestion as WorkerModel
+        worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+        worktree = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        backend_src = os.path.join(worktree, "services", "backend-api")
+
+        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
+        for k in saved_mods:
+            del sys.modules[k]
+
+        sys.path.insert(0, backend_src)
+        try:
+            from src.models.churn_label_suggestion import ChurnLabelSuggestion as BackendModel
+            backend_cols = {c.name for c in BackendModel.__table__.columns}
+        finally:
+            sys.path.remove(backend_src)
+            for k in list(sys.modules.keys()):
+                if k == "src" or k.startswith("src."):
+                    del sys.modules[k]
+            sys.modules.update(saved_mods)
+
+        assert worker_cols == backend_cols, (
+            f"Column mismatch!\n"
+            f"  Worker only:  {worker_cols - backend_cols}\n"
+            f"  Backend only: {backend_cols - worker_cols}"
+        )
+
+    def test_worker_suggestion_mirror_has_no_foreign_keys(self):
+        """Worker mirror carries no FKs — the worker cannot import backend code."""
+        from src.models import ChurnLabelSuggestion as WorkerModel
+
+        assert not [
+            c for c in WorkerModel.__table__.columns if c.foreign_keys
+        ]
+
+    def test_worker_and_backend_salesforce_integration_columns_match(self):
+        """Worker SalesforceIntegration mirror columns must exactly match
+        backend-api model columns (crm-churn-labels aspect, data-model —
+        new coverage; HubSpot is already covered above and auto-guards the
+        two new opt-in columns since it diffs full column-name sets).
+
+        Same sys.path/sys.modules swap technique as the crm_enrichment parity
+        test above.
+        """
+        import os
+
+        # Worker mirror (available in current sys.path)
+        from src.models import SalesforceIntegration as WorkerModel
+        worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+        worktree = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        backend_src = os.path.join(worktree, "services", "backend-api")
+
+        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
+        for k in saved_mods:
+            del sys.modules[k]
+
+        sys.path.insert(0, backend_src)
+        try:
+            from src.models.salesforce_integration import SalesforceIntegration as BackendModel
             backend_cols = {c.name for c in BackendModel.__table__.columns}
         finally:
             sys.path.remove(backend_src)
@@ -803,6 +897,163 @@ class TestCeleryTaskRegistration:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 (provider-churn-fetch): characterization lock — pins the EXISTING
+# enrichment output byte-identical before any client edit in this aspect.
+# ---------------------------------------------------------------------------
+
+
+# Fixed payload: 4 deals — open/high-amount, open/low, closedwon, closedlost.
+# Amounts are chosen so a broken filter (e.g. closed_stages flipped to set())
+# would pick a *different* deal than d1.
+CHARACTERIZATION_PAYLOAD = [
+    {
+        "id": "d1",
+        "properties": {
+            "dealname": "Open High",
+            "dealstage": "contractsent",
+            "amount": "900",
+            "closedate": "2026-09-01T00:00:00Z",
+        },
+    },
+    {
+        "id": "d2",
+        "properties": {
+            "dealname": "Open Low",
+            "dealstage": "appointmentscheduled",
+            "amount": "100",
+            "closedate": "2026-08-01T00:00:00Z",
+        },
+    },
+    {
+        "id": "d3",
+        "properties": {
+            "dealname": "Won Big",
+            "dealstage": "closedwon",
+            "amount": "5000",
+            "closedate": "2026-05-01T00:00:00Z",
+        },
+    },
+    {
+        "id": "d4",
+        "properties": {
+            "dealname": "Lost Big",
+            "dealstage": "closedlost",
+            "amount": "4000",
+            "closedate": "2026-01-15T00:00:00Z",
+        },
+    },
+]
+
+
+class TestEnrichmentCharacterizationLock:
+    def test_pick_renewal_deal_picks_d1(self):
+        from src.tasks.hubspot_sync import _pick_renewal_deal
+
+        assert _pick_renewal_deal(CHARACTERIZATION_PAYLOAD) is CHARACTERIZATION_PAYLOAD[0]
+
+    def test_pick_renewal_deal_ignores_closed_and_dateless(self):
+        from src.tasks.hubspot_sync import _pick_renewal_deal
+
+        winner = _pick_renewal_deal(CHARACTERIZATION_PAYLOAD)
+        assert winner["id"] != "d3"
+        assert winner["id"] != "d4"
+        # d3/d4 have higher raw amounts (5000, 4000) than the winner (900) —
+        # proves the closed-stage exclusion, not just amount ranking.
+        assert winner["properties"]["amount"] == "900"
+
+    def test_enrichment_row_fields_are_exact(self, db):
+        from datetime import datetime
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+
+        client = _make_mock_client(
+            contacts=[
+                {
+                    "id": "c1",
+                    "properties": {
+                        "email": "alice@example.com",
+                        "lifecyclestage": "customer",
+                        "associatedcompanyid": "co1",
+                    },
+                }
+            ],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            deals=CHARACTERIZATION_PAYLOAD,
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        actual = {
+            "deal_name": row.deal_name,
+            "deal_stage": row.deal_stage,
+            "deal_amount": row.deal_amount,
+            "renewal_date": row.renewal_date,
+            "hubspot_deal_id": row.hubspot_deal_id,
+        }
+        expected = {
+            "deal_name": "Open High",
+            "deal_stage": "contractsent",
+            "deal_amount": 900.0,
+            "renewal_date": datetime(2026, 9, 1),
+            "hubspot_deal_id": "d1",
+        }
+        assert actual == expected
+        assert actual["deal_stage"] != "closedlost"
+
+    def test_enrichment_row_unchanged_when_pipeline_present_on_every_deal(self, db):
+        """Phase 6 lock extension: adding `pipeline` to every deal's properties
+        must not change the enrichment row — the sync reads named keys only."""
+        import copy
+        from datetime import datetime
+        from src.models import CrmEnrichment
+
+        payload_with_pipeline = copy.deepcopy(CHARACTERIZATION_PAYLOAD)
+        for deal in payload_with_pipeline:
+            deal["properties"]["pipeline"] = "default"
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+
+        client = _make_mock_client(
+            contacts=[
+                {
+                    "id": "c1",
+                    "properties": {
+                        "email": "alice@example.com",
+                        "lifecyclestage": "customer",
+                        "associatedcompanyid": "co1",
+                    },
+                }
+            ],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            deals=payload_with_pipeline,
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        actual = {
+            "deal_name": row.deal_name,
+            "deal_stage": row.deal_stage,
+            "deal_amount": row.deal_amount,
+            "renewal_date": row.renewal_date,
+            "hubspot_deal_id": row.hubspot_deal_id,
+        }
+        expected = {
+            "deal_name": "Open High",
+            "deal_stage": "contractsent",
+            "deal_amount": 900.0,
+            "renewal_date": datetime(2026, 9, 1),
+            "hubspot_deal_id": "d1",
+        }
+        assert actual == expected
+        assert not hasattr(row, "pipeline")
+
+
 class TestHardeningEdgeCases:
     def test_sync_hubspot_org_missing_encryption_key(self, db):
         """Task returns error dict without raising when LLM_ENCRYPTION_KEY unset."""
@@ -861,3 +1112,169 @@ class TestHardeningEdgeCases:
                 hs._sync_hubspot_org_body(task_self, integ.id)
 
         task_self.retry.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: churn-suggestion harvest wiring (harvester-core aspect)
+# ---------------------------------------------------------------------------
+
+
+_LOST_RENEWAL_DEAL = {
+    "id": "d1",
+    "properties": {
+        "dealname": "Lost Renewal",
+        "dealstage": "closedlost",
+        "amount": "1000",
+        "closedate": "2026-06-15T00:00:00Z",
+        "pipeline": "renewal",
+    },
+}
+
+
+class TestChurnSuggestionHarvestWiring:
+    def _make_hubspot_integration(self, db, org_id, *, enabled=False, config=None):
+        integ = HubSpotIntegration(
+            organization_id=org_id, access_token="enc", is_active=True,
+            connected_at=datetime.utcnow(), contacts_synced=0, contacts_matched=0,
+            churn_labels_enabled=enabled, churn_label_config=config,
+            created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+        return integ
+
+    def _matched_contact(self):
+        return {
+            "id": "c1",
+            "properties": {
+                "email": "alice@example.com",
+                "lifecyclestage": "customer",
+                "associatedcompanyid": "co1",
+            },
+        }
+
+    def test_churn_labels_disabled_by_default_yields_zero_rows_and_baseline_result(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(db, org.id)  # churn_labels_enabled defaults False
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_churn_labels_enabled_with_matching_config_creates_pending_suggestion(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(
+            db, org.id, enabled=True,
+            config={"renewal_pipeline_ids": ["renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        rows = db.query(ChurnLabelSuggestion).all()
+        assert len(rows) == 1
+        assert rows[0].status == "pending"
+        assert rows[0].customer_email == "alice@example.com"
+        assert rows[0].provider == "hubspot"
+        assert rows[0].external_opportunity_id == "d1"
+
+    def test_churn_labels_enabled_but_config_empty_yields_zero_rows(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(db, org.id, enabled=True, config={})
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_churn_labels_enabled_but_config_absent_yields_zero_rows(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(db, org.id, enabled=True, config=None)
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_raising_closed_lost_accessor_leaves_enrichment_and_result_intact(self, db):
+        from src.models import ChurnLabelSuggestion
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(
+            db, org.id, enabled=True,
+            config={"renewal_pipeline_ids": ["renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+        )
+        client.get_closed_lost_deals_for_company.side_effect = RuntimeError("boom")
+
+        result, _ = _run_sync_org(org.id, db, client)
+
+        assert result == {"contacts_synced": 1, "contacts_matched": 1, "unmatched": 0}
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+    def test_enrichment_row_unaffected_by_harvest_wiring(self, db):
+        """Enrichment characterization holds even when harvest is enabled and firing."""
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+        self._make_hubspot_integration(
+            db, org.id, enabled=True,
+            config={"renewal_pipeline_ids": ["renewal"]},
+        )
+
+        client = _make_mock_client(
+            contacts=[self._matched_contact()],
+            company={"name": "Acme", "annualrevenue": "5000"},
+            deals=CHARACTERIZATION_PAYLOAD,
+            closed_lost_deals=[_LOST_RENEWAL_DEAL],
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        assert row.deal_name == "Open High"
+        assert row.deal_stage == "contractsent"
+        assert row.deal_amount == 900.0
+        assert row.hubspot_deal_id == "d1"

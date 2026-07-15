@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -301,6 +302,31 @@ class SalesforceClient:
         )
         return self.query(soql)
 
+    def get_lost_opportunities(
+        self, account_id: str, *, since: Optional[datetime] = None
+    ) -> list[dict]:
+        """
+        Return all lost (closed, not-won) Opportunities for the given Account.
+
+        Sibling of get_open_opportunities — additive only, does not alter
+        the open-opportunity query used by the renewal-proxy enrichment.
+        Records are returned verbatim (no filtering, no normalization).
+
+        `since` (historical-backfill aspect) is an optional window floor,
+        appended as `AND CloseDate >= {since:%Y-%m-%d}` — formatted, never
+        interpolated raw. Default `None` preserves today's SOQL exactly
+        (no clause added); `_validate_sf_id` on `account_id` is unchanged.
+        """
+        account_id = self._validate_sf_id(account_id)
+        soql = (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed, IsWon, Type "
+            f"FROM Opportunity WHERE AccountId = '{account_id}' "
+            "AND IsClosed = true AND IsWon = false"
+        )
+        if since is not None:
+            soql += f" AND CloseDate >= {since:%Y-%m-%d}"
+        return self.query(soql)
+
     # ------------------------------------------------------------------
     # Writeback (Contact field updates)
     # ------------------------------------------------------------------
@@ -411,3 +437,20 @@ class SalesforceClient:
             )
 
         return resp.json()
+
+    def get_opportunity_type_values(self) -> list[dict]:
+        """
+        Return the picklistValues of Opportunity.Type (the discriminator that
+        separates a lost renewal from a lost new-business deal), `[]` when the
+        Type field is absent or has no picklist.
+
+        Reuses describe_object (401-refresh-once / 429 / 403 taxonomy) —
+        no hand-rolled describe call.
+        """
+        data = self.describe_object("Opportunity")
+        field = next(
+            (f for f in data.get("fields") or [] if f.get("name") == "Type"), None
+        )
+        if field is None:
+            return []
+        return field.get("picklistValues") or []

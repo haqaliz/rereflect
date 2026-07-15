@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowRight, ChevronRight, ChevronDown, Users, DollarSign, TrendingUp, BarChart3, RefreshCw, Sparkles, Rocket, MessageSquare, Settings as SettingsIcon, Github } from 'lucide-react';
+import { ArrowRight, ChevronRight, ChevronDown, Users, DollarSign, TrendingUp, BarChart3, RefreshCw, ClipboardCheck, Sparkles, Rocket, MessageSquare, Settings as SettingsIcon, Github } from 'lucide-react';
 import { HubSpotIcon } from '@/components/icons/HubSpotIcon';
 import { getIntegration } from '@/lib/integrations';
 
@@ -19,6 +19,7 @@ const featureIconMap: Record<string, React.ComponentType<{ className?: string }>
   TrendingUp,
   BarChart3,
   RefreshCw,
+  ClipboardCheck,
 };
 
 export default function HubSpotIntegrationPage() {

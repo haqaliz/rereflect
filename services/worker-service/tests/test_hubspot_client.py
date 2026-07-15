@@ -6,7 +6,9 @@ No real HTTP. Uses unittest.mock.patch on httpx.Client methods.
 
 from __future__ import annotations
 
+import logging
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -436,3 +438,566 @@ class TestHubSpotClientGetDeals:
         requested_ids = {inp["id"] for inp in body.get("inputs", [])}
         assert "d1" in requested_ids
         assert "d2" not in requested_ids
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (provider-churn-fetch): characterization lock — pins the EXISTING
+# get_open_deals_for_company output byte-identical before any client edit.
+# ---------------------------------------------------------------------------
+
+
+class TestOpenDealsCharacterizationLock:
+    def test_get_open_deals_returns_exact_list_same_order(self):
+        """Fixed 4-deal payload (open-high, open-low, closedwon, closedlost):
+        get_open_deals_for_company must return exactly [d1, d2], in order,
+        with the same dicts — untouched by this aspect's later phases."""
+        from src.clients.hubspot import HubSpotClient
+
+        d1 = {
+            "id": "d1",
+            "properties": {
+                "dealname": "Open High",
+                "dealstage": "contractsent",
+                "amount": "900",
+                "closedate": "2026-09-01T00:00:00Z",
+            },
+        }
+        d2 = {
+            "id": "d2",
+            "properties": {
+                "dealname": "Open Low",
+                "dealstage": "appointmentscheduled",
+                "amount": "100",
+                "closedate": "2026-08-01T00:00:00Z",
+            },
+        }
+        d3 = {
+            "id": "d3",
+            "properties": {
+                "dealname": "Won Big",
+                "dealstage": "closedwon",
+                "amount": "5000",
+                "closedate": "2026-05-01T00:00:00Z",
+            },
+        }
+        d4 = {
+            "id": "d4",
+            "properties": {
+                "dealname": "Lost Big",
+                "dealstage": "closedlost",
+                "amount": "4000",
+                "closedate": "2026-01-15T00:00:00Z",
+            },
+        }
+
+        assoc_resp = _make_resp(
+            200,
+            {"results": [{"id": did, "type": "company_to_deal"} for did in ["d1", "d2", "d3", "d4"]]},
+        )
+        batch_resp = _make_resp(200, {"results": [d1, d2, d3, d4], "status": "COMPLETE"})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("c1")
+
+        assert deals == [d1, d2]
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 (provider-churn-fetch): HubSpotClient.get_closed_lost_deals_for_company
+# ---------------------------------------------------------------------------
+
+
+class TestGetClosedLostDealsForCompany:
+    _D1 = {
+        "id": "d1",
+        "properties": {
+            "dealname": "Open High",
+            "dealstage": "contractsent",
+            "amount": "900",
+            "closedate": "2026-09-01T00:00:00Z",
+        },
+    }
+    _D2 = {
+        "id": "d2",
+        "properties": {
+            "dealname": "Open Low",
+            "dealstage": "appointmentscheduled",
+            "amount": "100",
+            "closedate": "2026-08-01T00:00:00Z",
+        },
+    }
+    _D3 = {
+        "id": "d3",
+        "properties": {
+            "dealname": "Won Big",
+            "dealstage": "closedwon",
+            "amount": "5000",
+            "closedate": "2026-05-01T00:00:00Z",
+        },
+    }
+    _D4 = {
+        "id": "d4",
+        "properties": {
+            "dealname": "Lost Big",
+            "dealstage": "closedlost",
+            "amount": "4000",
+            "closedate": "2026-01-15T00:00:00Z",
+        },
+    }
+
+    def _mock_transport(self, deals):
+        assoc_resp = _make_resp(
+            200,
+            {"results": [{"id": d["id"], "type": "company_to_deal"} for d in deals]},
+        )
+        batch_resp = _make_resp(200, {"results": deals, "status": "COMPLETE"})
+        return assoc_resp, batch_resp
+
+    def test_returns_only_closedlost_deals(self):
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._D1, self._D2, self._D3, self._D4]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company("c1")
+
+        assert lost == [self._D4]
+
+    def test_disjoint_with_open_deals(self):
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._D1, self._D2, self._D3, self._D4]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                open_deals = client.get_open_deals_for_company("c1")
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost_deals = client.get_closed_lost_deals_for_company("c1")
+
+        open_ids = {d["id"] for d in open_deals}
+        lost_ids = {d["id"] for d in lost_deals}
+        assert open_ids & lost_ids == set()
+        assert "d4" in lost_ids
+
+    def test_404_on_associations_returns_empty_list(self):
+        from src.clients.hubspot import HubSpotClient
+
+        assoc_404 = MagicMock()
+        assoc_404.status_code = 404
+        assoc_404.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_404
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company("c1")
+
+        assert lost == []
+        instance.post.assert_not_called()
+
+    def test_429_on_associations_raises_transient(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "1"}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep"):
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.get_closed_lost_deals_for_company("c1")
+
+    def test_429_on_batch_read_raises_transient(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        assoc_resp = self._mock_transport([self._D4])[0]
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "1"}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep"):
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.get_closed_lost_deals_for_company("c1")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (historical-backfill): since-floor on get_closed_lost_deals_for_company
+# ---------------------------------------------------------------------------
+
+
+class TestGetClosedLostDealsSinceFloor:
+    _OLD = {
+        "id": "d-old",
+        "properties": {
+            "dealname": "Old Lost",
+            "dealstage": "closedlost",
+            "amount": "500",
+            "closedate": "2024-01-15T00:00:00Z",
+        },
+    }
+    _NEW = {
+        "id": "d-new",
+        "properties": {
+            "dealname": "New Lost",
+            "dealstage": "closedlost",
+            "amount": "700",
+            "closedate": "2026-06-15T00:00:00Z",
+        },
+    }
+
+    def _mock_transport(self, deals):
+        assoc_resp = _make_resp(
+            200,
+            {"results": [{"id": d["id"], "type": "company_to_deal"} for d in deals]},
+        )
+        batch_resp = _make_resp(200, {"results": deals, "status": "COMPLETE"})
+        return assoc_resp, batch_resp
+
+    def test_since_none_returns_all_closed_lost_deals(self):
+        """Default (since=None) preserves today's behavior — no filtering."""
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._OLD, self._NEW]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company("c1")
+
+        assert {d["id"] for d in lost} == {"d-old", "d-new"}
+
+    def test_since_floor_excludes_deals_closed_before_floor(self):
+        from datetime import datetime
+
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._OLD, self._NEW]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company(
+                    "c1", since=datetime(2025, 1, 1)
+                )
+
+        assert {d["id"] for d in lost} == {"d-new"}
+
+    def test_since_floor_includes_deal_closed_exactly_at_floor(self):
+        from datetime import datetime
+
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._NEW]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company(
+                    "c1", since=datetime(2026, 6, 15, 0, 0, 0)
+                )
+
+        assert {d["id"] for d in lost} == {"d-new"}
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 (provider-churn-fetch): request `pipeline` on both deal accessors
+# ---------------------------------------------------------------------------
+
+
+class TestDealPipelineProperty:
+    def test_open_deals_batch_read_requests_pipeline(self):
+        from src.clients.hubspot import HubSpotClient
+
+        assoc_resp = _make_resp(200, {"results": [{"id": "d1"}]})
+        batch_resp = _make_resp(200, {"results": [], "status": "COMPLETE"})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                client.get_open_deals_for_company("c1")
+
+        body = instance.post.call_args.kwargs["json"]
+        assert body["properties"] == ["dealname", "dealstage", "amount", "closedate", "pipeline"]
+
+    def test_closed_lost_deals_batch_read_requests_pipeline(self):
+        from src.clients.hubspot import HubSpotClient
+
+        assoc_resp = _make_resp(200, {"results": [{"id": "d1"}]})
+        batch_resp = _make_resp(200, {"results": [], "status": "COMPLETE"})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                client.get_closed_lost_deals_for_company("c1")
+
+        body = instance.post.call_args.kwargs["json"]
+        assert body["properties"] == ["dealname", "dealstage", "amount", "closedate", "pipeline"]
+
+    def test_deal_with_none_pipeline_returned_unaltered(self):
+        from src.clients.hubspot import HubSpotClient
+
+        deal = {
+            "id": "d1",
+            "properties": {
+                "dealname": "Open High",
+                "dealstage": "contractsent",
+                "amount": "900",
+                "closedate": "2026-09-01T00:00:00Z",
+                "pipeline": None,
+            },
+        }
+        assoc_resp = _make_resp(200, {"results": [{"id": "d1"}]})
+        batch_resp = _make_resp(200, {"results": [deal], "status": "COMPLETE"})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("c1")
+
+        assert deals == [deal]
+
+    def test_deal_with_pipeline_key_absent_returned_unaltered(self):
+        from src.clients.hubspot import HubSpotClient
+
+        deal = {
+            "id": "d1",
+            "properties": {
+                "dealname": "Open High",
+                "dealstage": "contractsent",
+                "amount": "900",
+                "closedate": "2026-09-01T00:00:00Z",
+                # no "pipeline" key at all
+            },
+        }
+        assoc_resp = _make_resp(200, {"results": [{"id": "d1"}]})
+        batch_resp = _make_resp(200, {"results": [deal], "status": "COMPLETE"})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("c1")
+
+        assert deals == [deal]
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 (provider-churn-fetch): HubSpotClient.list_deal_pipelines
+# ---------------------------------------------------------------------------
+
+
+class TestListDealPipelines:
+    def test_returns_parsed_results(self):
+        from src.clients.hubspot import HubSpotClient
+
+        pipelines_data = {
+            "results": [
+                {
+                    "id": "default",
+                    "label": "Sales Pipeline",
+                    "stages": [{"id": "appointmentscheduled", "label": "Appointment Scheduled"}],
+                }
+            ]
+        }
+        resp = _make_resp(200, pipelines_data)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with HubSpotClient("test-token") as client:
+                pipelines = client.list_deal_pipelines()
+
+        assert pipelines == pipelines_data["results"]
+        called_url = instance.get.call_args[0][0]
+        assert called_url == "/crm/v3/pipelines/deals"
+
+    def test_404_returns_empty_list(self):
+        from src.clients.hubspot import HubSpotClient
+
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_404
+
+            with HubSpotClient("test-token") as client:
+                pipelines = client.list_deal_pipelines()
+
+        assert pipelines == []
+
+    def test_403_raises_scope_error(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotScopeError
+
+        resp_403 = MagicMock()
+        resp_403.status_code = 403
+        resp_403.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_403
+
+            with pytest.raises(HubSpotScopeError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+    def test_429_with_retry_after_sleeps_and_raises_transient(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "7"}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+        mock_sleep.assert_called_once_with(7)
+
+    def test_429_without_retry_after_defaults_to_10(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+        mock_sleep.assert_called_once_with(10)
+
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_5xx_raises_transient_without_sleep(self, status):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.list_deal_pipelines()
+
+        mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 (provider-churn-fetch): token & is_active safety sweep
+# ---------------------------------------------------------------------------
+
+
+class TestNewClientCallsNeverLeakTokenOrTouchIsActive:
+    TOKEN = "s3cr3t"
+
+    def _drive_all_new_methods(self, resp):
+        from src.clients.hubspot import HubSpotClient
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp
+            instance.post.return_value = resp
+
+            with HubSpotClient(self.TOKEN) as client:
+                for fn in (
+                    lambda: client.get_closed_lost_deals_for_company("c1"),
+                    lambda: client.list_deal_pipelines(),
+                ):
+                    try:
+                        fn()
+                    except Exception:
+                        pass
+
+    @pytest.mark.parametrize("status", [200, 429, 403, 404, 500])
+    def test_token_never_appears_in_logs(self, status, caplog):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {"Retry-After": "1"} if status == 429 else {}
+        resp.json.return_value = {"results": []}
+
+        with caplog.at_level(logging.DEBUG), patch("time.sleep"):
+            self._drive_all_new_methods(resp)
+
+        assert self.TOKEN not in caplog.text
+
+    def test_token_never_in_repr_or_str(self):
+        from src.clients.hubspot import HubSpotClient
+
+        with patch("httpx.Client"):
+            client = HubSpotClient(self.TOKEN)
+
+        assert self.TOKEN not in repr(client)
+        assert self.TOKEN not in str(client)
+
+    def test_no_new_method_references_is_active(self):
+        src_path = Path(__file__).resolve().parents[1] / "src" / "clients" / "hubspot.py"
+        content = src_path.read_text()
+        assert "is_active" not in content

@@ -19,6 +19,7 @@ from src.config.readiness_thresholds import CHURN_LABEL_TARGET, CORRECTION_VOLUM
 from src.database.session import get_db
 from src.models.ai_correction import AICorrection
 from src.models.churn_event import CustomerChurnEvent
+from src.models.churn_label_suggestion import CHURN_SUGGESTION_STATUSES, ChurnLabelSuggestion
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.schemas.ai_readiness import AIReadinessResponse
@@ -77,6 +78,23 @@ def _churn_label_counts(org_id: int, db: Session) -> dict:
         .scalar()
         or 0
     )
+    # `trainable` mirrors the calibrator's own filter verbatim — the four sites
+    # that exclude source='auto_suggested' when fitting: worker-service's
+    # tasks/churn_calibration.py:50 (per-org gate count), :125 (global fit —
+    # auto rows are dropped, not just uncounted), and
+    # services/calibration_refit.py:64 (_MIN_LABELS gate), :191 (label join).
+    # The worker cannot import backend code, so this is coupling by convention,
+    # not by shared constant — if a fifth copy of this filter appears anywhere
+    # and disagrees with `!= "auto_suggested"`, that drift is the bug to catch.
+    trainable = (
+        db.query(func.count(CustomerChurnEvent.id))
+        .filter(
+            CustomerChurnEvent.organization_id == org_id,
+            CustomerChurnEvent.source != "auto_suggested",
+        )
+        .scalar()
+        or 0
+    )
     recovered = (
         db.query(func.count(CustomerChurnEvent.id))
         .filter(
@@ -100,10 +118,32 @@ def _churn_label_counts(org_id: int, db: Session) -> dict:
     )
     return {
         "total": total,
+        "trainable": trainable,
         "recovered": recovered,
         "by_reason": {code: cnt for code, cnt in reason_rows},
         "by_source": {src: cnt for src, cnt in source_rows},
     }
+
+
+def _pending_suggestion_count(org_id: int, db: Session) -> int:
+    """Count of the org's ChurnLabelSuggestion rows awaiting review.
+
+    A SEPARATE number — never added to `total`, `trainable`, or
+    `churn_labels_ready`. Status is derived from CHURN_SUGGESTION_STATUSES
+    (the model's single source of truth: `["pending", "confirmed",
+    "rejected"]`, "pending" is index 0 — the model's own default) rather
+    than a hardcoded string here.
+    """
+    pending_status = CHURN_SUGGESTION_STATUSES[0]
+    return (
+        db.query(func.count(ChurnLabelSuggestion.id))
+        .filter(
+            ChurnLabelSuggestion.organization_id == org_id,
+            ChurnLabelSuggestion.status == pending_status,
+        )
+        .scalar()
+        or 0
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -124,15 +164,24 @@ def get_ai_readiness(
     Thresholds (`correction_volume_target`, `churn_label_target`) are v1 planning
     targets, not validated ML requirements — see
     docs/planning/local-analyzer-sentiment-model/m5.0-readiness-report/spec.md.
-    `correction_volume_ready`/`churn_labels_ready` are v1 proxies using the
-    *total* count, not a per-type gate; `corrections_by_type` is exposed
-    precisely so a human can see whether the total is concentrated in one type
-    or spread thin.
+    `correction_volume_ready` is a v1 proxy using the *total* correction count,
+    not a per-type gate; `corrections_by_type` is exposed precisely so a human
+    can see whether the total is concentrated in one type or spread thin.
+
+    `churn_labels_total` is what exists: every `CustomerChurnEvent` regardless
+    of source (the `by_source`/`by_reason` breakdowns keep showing
+    `auto_suggested`). `churn_labels_trainable` is what trains: the same count
+    with `source == 'auto_suggested'` excluded, mirroring the calibrator's own
+    filter (see the comment in `_churn_label_counts`). `churn_labels_ready`
+    gates on `trainable`, not `total` — the gap between the two numbers is the
+    honesty; a report that gated on `total` could say "ready" on rows the fit
+    drops or trains as negatives.
     """
     org_id = current_org.id
     feedback_volume = _feedback_volume(org_id, db)
     corrections_total, corrections_by_type = _correction_counts(org_id, db)
     churn = _churn_label_counts(org_id, db)
+    pending_suggestions = _pending_suggestion_count(org_id, db)
     return AIReadinessResponse(
         organization_id=org_id,
         generated_at=datetime.utcnow(),
@@ -140,11 +189,13 @@ def get_ai_readiness(
         corrections_total=corrections_total,
         corrections_by_type=corrections_by_type,
         churn_labels_total=churn["total"],
+        churn_labels_trainable=churn["trainable"],
         churn_labels_recovered=churn["recovered"],
         churn_labels_by_reason=churn["by_reason"],
         churn_labels_by_source=churn["by_source"],
+        pending_suggestions=pending_suggestions,
         correction_volume_target=CORRECTION_VOLUME_TARGET,
         churn_label_target=CHURN_LABEL_TARGET,
         correction_volume_ready=corrections_total >= CORRECTION_VOLUME_TARGET,
-        churn_labels_ready=churn["total"] >= CHURN_LABEL_TARGET,
+        churn_labels_ready=churn["trainable"] >= CHURN_LABEL_TARGET,
     )

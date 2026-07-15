@@ -7,6 +7,8 @@ Mirrors test_hubspot_client.py structure.
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -455,3 +457,457 @@ class TestSalesforceClientTypedHelpers:
                     client.get_open_opportunities("x' OR Name!='")
 
         instance.get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (provider-churn-fetch): characterization lock — pins the EXISTING
+# get_open_opportunities SOQL + returned records byte-identical before any
+# client edit in this aspect.
+# ---------------------------------------------------------------------------
+
+
+class TestOpenOppsCharacterizationLock:
+    def test_soql_and_records_unchanged(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        stub_records = [
+            {
+                "Id": "006o1",
+                "Name": "Open High",
+                "StageName": "Negotiation",
+                "Amount": 900,
+                "CloseDate": "2026-09-01",
+                "IsClosed": False,
+            }
+        ]
+        page = _make_resp(200, {"records": stub_records, "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                records = client.get_open_opportunities("001xxxxxxxxxxxxxxx")
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert soql == (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed "
+            "FROM Opportunity WHERE AccountId = '001xxxxxxxxxxxxxxx' AND IsClosed = false"
+        )
+        assert records == stub_records
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (provider-churn-fetch): SalesforceClient.get_lost_opportunities
+# ---------------------------------------------------------------------------
+
+
+class TestGetLostOpportunities:
+    def test_soql_is_exact(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        page = _make_resp(200, {"records": [], "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert soql == (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed, IsWon, Type "
+            "FROM Opportunity WHERE AccountId = '001xxxxxxxxxxxxxxx' "
+            "AND IsClosed = true AND IsWon = false"
+        )
+
+    @pytest.mark.parametrize("bad_id", ["'; DROP--", "", "x" * 14])
+    def test_malformed_id_raises_no_http_call(self, bad_id):
+        from src.clients.salesforce import SalesforceClient, SalesforceQueryError
+
+        token_resp = _make_token_resp()
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                with pytest.raises(SalesforceQueryError):
+                    client.get_lost_opportunities(bad_id)
+
+        instance.get.assert_not_called()
+
+    def test_records_returned_verbatim_including_type_none(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        stub_records = [
+            {
+                "Id": "006o9",
+                "Name": "Lost Renewal",
+                "StageName": "Closed Lost",
+                "Amount": 4000,
+                "CloseDate": "2026-01-15",
+                "IsClosed": True,
+                "IsWon": False,
+                "Type": None,
+            }
+        ]
+        page = _make_resp(200, {"records": stub_records, "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                records = client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        assert records == stub_records
+
+    def test_429_with_retry_after_sleeps_and_raises_transient(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp_429 = _make_resp(429, {}, headers={"Retry-After": "7"})
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_429
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        mock_sleep.assert_called_once_with(7)
+
+    def test_429_without_retry_after_defaults_to_10(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp_429 = _make_resp(429, {})
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_429
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        mock_sleep.assert_called_once_with(10)
+
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_5xx_raises_transient_without_sleep(self, status):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp = _make_resp(status, {})
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep") as mock_sleep:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (historical-backfill): since-floor on get_lost_opportunities
+# ---------------------------------------------------------------------------
+
+
+class TestGetLostOpportunitiesSinceFloor:
+    def test_since_none_omits_close_date_clause(self):
+        """Default (since=None) preserves today's SOQL — no CloseDate filter."""
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        page = _make_resp(200, {"records": [], "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert "CloseDate >=" not in soql
+
+    def test_since_appends_close_date_floor_formatted_not_interpolated_raw(self):
+        from datetime import datetime
+
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        page = _make_resp(200, {"records": [], "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_lost_opportunities(
+                    "001xxxxxxxxxxxxxxx", since=datetime(2024, 3, 1)
+                )
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert soql == (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed, IsWon, Type "
+            "FROM Opportunity WHERE AccountId = '001xxxxxxxxxxxxxxx' "
+            "AND IsClosed = true AND IsWon = false AND CloseDate >= 2024-03-01"
+        )
+
+    def test_malformed_id_with_since_still_raises_no_http_call(self):
+        from datetime import datetime
+
+        from src.clients.salesforce import SalesforceClient, SalesforceQueryError
+
+        token_resp = _make_token_resp()
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                with pytest.raises(SalesforceQueryError):
+                    client.get_lost_opportunities(
+                        "'; DROP--", since=datetime(2024, 3, 1)
+                    )
+
+        instance.get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 (provider-churn-fetch): SalesforceClient.get_opportunity_type_values
+# ---------------------------------------------------------------------------
+
+
+class TestGetOpportunityTypeValues:
+    def test_returns_picklist_values_for_type_field(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(
+            200,
+            {
+                "fields": [
+                    {
+                        "name": "Type",
+                        "picklistValues": [
+                            {"label": "Renewal", "value": "Renewal", "active": True}
+                        ],
+                    }
+                ]
+            },
+        )
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == [{"label": "Renewal", "value": "Renewal", "active": True}]
+
+    def test_type_field_absent_returns_empty_list(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": [{"name": "StageName"}]})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == []
+
+    def test_type_field_present_with_no_picklist_returns_empty_list(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": [{"name": "Type"}]})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == []
+
+    def test_type_field_present_with_empty_picklist_returns_empty_list(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": [{"name": "Type", "picklistValues": []}]})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == []
+
+    def test_describes_opportunity_sobject(self):
+        """Must call describe_object("Opportunity"), not Contact (the default)."""
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": []})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_opportunity_type_values()
+
+        url = instance.get.call_args[0][0]
+        assert "sobjects/Opportunity/describe" in url
+
+    def test_403_raises_scope_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceScopeError
+
+        token_resp = _make_token_resp()
+        resp = _make_resp(403, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp
+
+            with pytest.raises(SalesforceScopeError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+    def test_401_refreshes_once_then_raises_auth_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceAuthError
+
+        token_resp = _make_token_resp()
+        resp_401 = _make_resp(401, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_401
+
+            with pytest.raises(SalesforceAuthError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+        # __enter__'s initial refresh + the retry-after-401 refresh = 2 posts
+        assert instance.post.call_count == 2
+
+    def test_429_raises_transient_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp_429 = _make_resp(429, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_429
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+    def test_5xx_raises_transient_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp_500 = _make_resp(500, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_500
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 (provider-churn-fetch): token & is_active safety sweep
+# ---------------------------------------------------------------------------
+
+
+class TestNewClientCallsNeverLeakTokenOrTouchIsActive:
+    REFRESH_TOKEN = "refresh-token-123"
+    ACCESS_TOKEN = "test-access-token"
+
+    def _drive_all_new_methods(self, resp):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp(self.ACCESS_TOKEN)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp
+
+            with SalesforceClient(**_client_kwargs(refresh_token=self.REFRESH_TOKEN)) as client:
+                for fn in (
+                    lambda: client.get_lost_opportunities("001xxxxxxxxxxxxxxx"),
+                    lambda: client.get_opportunity_type_values(),
+                ):
+                    try:
+                        fn()
+                    except Exception:
+                        pass
+
+    @pytest.mark.parametrize("status", [200, 429, 403, 401, 500])
+    def test_token_never_appears_in_logs(self, status, caplog):
+        resp = MagicMock()
+        resp.status_code = status
+        resp.headers = {"Retry-After": "1"} if status == 429 else {}
+        resp.json.return_value = {"records": [], "done": True, "fields": []}
+
+        with caplog.at_level(logging.DEBUG), patch("time.sleep"):
+            self._drive_all_new_methods(resp)
+
+        assert self.REFRESH_TOKEN not in caplog.text
+        assert self.ACCESS_TOKEN not in caplog.text
+
+    def test_token_never_in_repr_or_str(self):
+        from src.clients.salesforce import SalesforceClient
+
+        with patch("httpx.Client"):
+            client = SalesforceClient(**_client_kwargs(refresh_token=self.REFRESH_TOKEN))
+
+        assert self.REFRESH_TOKEN not in repr(client)
+        assert self.REFRESH_TOKEN not in str(client)
+
+    def test_no_new_method_references_is_active(self):
+        src_path = Path(__file__).resolve().parents[1] / "src" / "clients" / "salesforce.py"
+        content = src_path.read_text()
+        assert "is_active" not in content

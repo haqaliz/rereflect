@@ -46,12 +46,13 @@ import secrets
 import time
 import urllib.parse
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import (
@@ -64,6 +65,11 @@ from src.database.session import get_db
 from src.models.organization import Organization
 from src.models.salesforce_integration import SalesforceIntegration
 from src.models.user import User
+from src.services.crm_churn_label_options import (
+    _extract_requested_ids,
+    _validate_churn_label_config,
+    fetch_renewal_options,
+)
 from src.services.crm_integration_common import another_crm_active, purge_crm_enrichment
 from src.services.salesforce_writeback_validation import validate_writeback_field
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
@@ -139,6 +145,18 @@ class SalesforceStatusResponse(BaseModel):
     last_writeback_status: Optional[str] = None
     last_writeback_error: Optional[str] = None
     contacts_written: int = 0
+    # CRM-sourced churn labels (org-config-api-and-ui aspect)
+    churn_labels_enabled: bool = False
+    churn_label_config: Optional[Dict] = None
+    last_harvest_at: Optional[datetime] = None
+    last_harvest_status: Optional[str] = None
+    last_harvest_error: Optional[str] = None
+    suggestions_created: int = 0
+    # Historical churn-label backfill (historical-backfill aspect)
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
     # refresh_token / access_token are intentionally NEVER included
 
 
@@ -173,6 +191,49 @@ class SalesforceWritebackTestRequest(BaseModel):
 class SalesforceWritebackTestResponse(BaseModel):
     ok: bool
     reason: Optional[str] = None
+
+
+class SalesforceChurnLabelsUpdateRequest(BaseModel):
+    enabled: bool
+    config: Optional[Dict] = None
+
+
+class SalesforceChurnLabelOption(BaseModel):
+    id: str
+    label: str
+
+
+class SalesforceChurnLabelOptionsResponse(BaseModel):
+    options: List[SalesforceChurnLabelOption]
+    provider: str
+
+
+class SalesforceChurnLabelsResponse(BaseModel):
+    churn_labels_enabled: bool
+    churn_label_config: Optional[Dict] = None
+    last_harvest_at: Optional[datetime] = None
+    last_harvest_status: Optional[str] = None
+    last_harvest_error: Optional[str] = None
+    suggestions_created: int = 0
+    # Historical churn-label backfill (historical-backfill aspect)
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
+    # refresh_token / access_token are intentionally NEVER included
+
+
+class SalesforceBackfillTriggerRequest(BaseModel):
+    """Operator-chosen window in months. Out-of-range -> 422 for free."""
+    months: int = Field(default=24, ge=1, le=60)
+
+
+class SalesforceBackfillActionResponse(BaseModel):
+    status: str
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
 
 
 # CRM writeback (writeback-task-trigger aspect): bound on backfill-on-enable
@@ -253,6 +314,58 @@ def _get_active_integration(org_id: int, db: Session) -> Optional[SalesforceInte
             SalesforceIntegration.is_active.is_(True),
         )
         .first()
+    )
+
+
+def _get_org_integration(org_id: int, db: Session) -> Optional[SalesforceIntegration]:
+    """Return the Salesforce integration row for an org regardless of
+    is_active (the churn-labels setting is persisted on the row, so 404 vs
+    400 can be distinguished — mirrors jira_integration.py's
+    _get_org_integration and hubspot_integration.py's symmetric helper)."""
+    return (
+        db.query(SalesforceIntegration)
+        .filter(SalesforceIntegration.organization_id == org_id)
+        .first()
+    )
+
+
+def _suggestions_created(db: Session, org_id: int, provider: str) -> int:
+    """COUNT of ChurnLabelSuggestion rows for this org+provider (mirrors
+    jira_integration.py:255 _last_status_synced_at)."""
+    from src.models.churn_label_suggestion import ChurnLabelSuggestion
+
+    return (
+        db.query(func.count(ChurnLabelSuggestion.id))
+        .filter(
+            ChurnLabelSuggestion.organization_id == org_id,
+            ChurnLabelSuggestion.provider == provider,
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _build_churn_labels_response(
+    db: Session, org_id: int, row: SalesforceIntegration
+) -> SalesforceChurnLabelsResponse:
+    """
+    Build the ChurnLabelsResponse for an existing row.
+
+    last_harvest_at/status/error columns do not exist yet (owned by the
+    harvester aspect) — read via getattr(..., None) so this route needs no
+    edit when that migration lands (D1).
+    """
+    return SalesforceChurnLabelsResponse(
+        churn_labels_enabled=bool(row.churn_labels_enabled),
+        churn_label_config=row.churn_label_config,
+        last_harvest_at=getattr(row, "last_harvest_at", None),
+        last_harvest_status=getattr(row, "last_harvest_status", None),
+        last_harvest_error=getattr(row, "last_harvest_error", None),
+        suggestions_created=_suggestions_created(db, org_id, "salesforce"),
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
@@ -416,6 +529,16 @@ def salesforce_status(
         last_writeback_status=row.last_writeback_status,
         last_writeback_error=row.last_writeback_error,
         contacts_written=row.contacts_written,
+        churn_labels_enabled=bool(row.churn_labels_enabled),
+        churn_label_config=row.churn_label_config,
+        last_harvest_at=getattr(row, "last_harvest_at", None),
+        last_harvest_status=getattr(row, "last_harvest_status", None),
+        last_harvest_error=getattr(row, "last_harvest_error", None),
+        suggestions_created=_suggestions_created(db, current_org.id, "salesforce"),
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
@@ -860,6 +983,251 @@ def salesforce_writeback_test(
         plain_refresh, integration.instance_url, field_name
     )
     return SalesforceWritebackTestResponse(ok=ok, reason=reason)
+
+
+@router.patch(
+    "/churn-labels",
+    response_model=SalesforceChurnLabelsResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_configure_churn_labels(
+    payload: SalesforceChurnLabelsUpdateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Configure per-org CRM-sourced churn-label suggestions (default-deny).
+
+    Symmetric with hubspot_integration.py's PATCH /churn-labels — 404 if no
+    Salesforce integration row exists at all; 400 if the row exists but is
+    not active (validation needs a live token). Shape is validated
+    unconditionally; the live Opportunity.Type describe call — and the
+    id-existence check — only runs when the payload's
+    renewal_opportunity_types list is non-empty: `{enabled: true}` with an
+    empty/absent list is 200, never a 422, and NEVER invents an "all types"
+    default. Nothing is mutated until every check has passed.
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Salesforce integration found. Connect Salesforce first.",
+        )
+    if not row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Salesforce integration is not active.",
+        )
+
+    _validate_churn_label_config(payload.config, "salesforce")
+
+    requested_ids = _extract_requested_ids(payload.config, "salesforce")
+    if requested_ids:
+        live_options, reason = fetch_renewal_options("salesforce", row)
+        if reason:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "reason": reason,
+                    "message": f"Could not validate renewal opportunity types: {reason}.",
+                },
+            )
+        _validate_churn_label_config(payload.config, "salesforce", live_options)
+
+    row.churn_labels_enabled = payload.enabled
+    if payload.config is not None:
+        row.churn_label_config = payload.config
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "Salesforce churn-labels updated for org %s (enabled=%s)",
+        current_org.id,
+        row.churn_labels_enabled,
+    )
+    return _build_churn_labels_response(db, current_org.id, row)
+
+
+@router.get(
+    "/churn-labels/options",
+    response_model=SalesforceChurnLabelOptionsResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_churn_label_options(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Live Opportunity.Type picklist for the renewal-set picker. 404 if no
+    active integration (needs a live token); 502 on CRM fetch failure."""
+    row = _get_active_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Salesforce integration found.",
+        )
+
+    options, reason = fetch_renewal_options("salesforce", row)
+    if reason:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "reason": reason,
+                "message": f"Could not fetch Salesforce opportunity types: {reason}.",
+            },
+        )
+    return SalesforceChurnLabelOptionsResponse(
+        options=[SalesforceChurnLabelOption(**opt) for opt in options],
+        provider="salesforce",
+    )
+
+
+# ──────────────────────── Historical churn-label backfill ───────────────────
+# historical-backfill aspect (PRD M7). Distinct, cancellable Celery task —
+# never inside the daily salesforce sync beat (03:45 UTC). See
+# docs/planning/crm-churn-labels/historical-backfill/spec.md.
+
+
+@router.post(
+    "/churn-labels/backfill",
+    response_model=SalesforceBackfillActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_trigger_churn_backfill(
+    payload: SalesforceBackfillTriggerRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger an on-demand historical backfill of closed-lost Salesforce
+    Opportunities into churn-label suggestions, over an operator-chosen
+    window (months, default 24, hard max 60 — enforced by the request
+    schema, so an out-of-range value 422s before this body runs).
+
+    Guards, in order: admin/owner + feature (route dependencies) -> no
+    integration row -> 404; disabled or unconfigured churn labels -> 400;
+    already running -> 409. Dispatch failure (broker down) rolls the status
+    back to "failed" and returns 502 — never a 500 (deliberate divergence
+    from the unguarded /sync endpoint above).
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Salesforce integration found. Connect Salesforce first.",
+        )
+
+    renewal_types = (row.churn_label_config or {}).get("renewal_opportunity_types") or []
+    if not row.churn_labels_enabled or not renewal_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "CRM-sourced churn labels are not enabled or configured for "
+                "Salesforce. Enable them with at least one renewal opportunity "
+                "type first."
+            ),
+        )
+
+    if row.backfill_status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A churn-label backfill is already running for this integration.",
+        )
+
+    row.backfill_status = "running"
+    row.backfill_progress = {
+        "scanned": 0, "suggested": 0, "skipped_existing": 0,
+        "denied": 0, "dropped_by_cap": 0,
+    }
+    row.backfill_error = None
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.churn_backfill_task.backfill_churn_suggestions",
+            args=[row.id, payload.months, "salesforce"],
+        )
+    except Exception as exc:
+        row.backfill_status = "failed"
+        row.backfill_error = f"Failed to enqueue backfill task: {exc}"[:500]
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not enqueue the churn-label backfill task.",
+        )
+
+    logger.info(
+        "Salesforce churn-label backfill triggered for org %s (integration_id=%s, months=%s)",
+        current_org.id, row.id, payload.months,
+    )
+    return SalesforceBackfillActionResponse(
+        status="queued",
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
+    )
+
+
+@router.post(
+    "/churn-labels/backfill/cancel",
+    response_model=SalesforceBackfillActionResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_cancel_churn_backfill(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Request cancellation of a running backfill. Celery `revoke` cannot stop
+    a running task body, so the DB `backfill_status` flag is the mechanism:
+    the task polls it before each fetch unit (account) and stops at the next
+    boundary, persisting "cancelled" + whatever partial progress had already
+    been committed.
+
+    409 if there is no running backfill to cancel.
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Salesforce integration found.",
+        )
+
+    if row.backfill_status != "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No running churn-label backfill to cancel.",
+        )
+
+    row.backfill_status = "cancelling"
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    return SalesforceBackfillActionResponse(
+        status="cancelling",
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
+    )
 
 
 # ──────────────────────── Exported helper for salesforce-sync ────────────────

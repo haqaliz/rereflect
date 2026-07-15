@@ -25,6 +25,7 @@ import {
   PlaySquare,
   ChevronDown,
   CheckSquare,
+  Inbox,
 } from 'lucide-react';
 import {
   customersAPI,
@@ -33,6 +34,7 @@ import {
   Cohort,
   CohortFilter,
 } from '@/lib/api/customers';
+import { listChurnSuggestions } from '@/lib/api/churn-suggestions';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { SegmentBadge } from '@/components/customers/SegmentBadge';
 import { TagChips } from '@/components/customers/TagChips';
@@ -138,6 +140,7 @@ function TrendCell({ trend, isBlurred }: TrendCellProps) {
 export default function CustomersPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [searchQuery, setSearchQuery] = useState('');
@@ -207,6 +210,21 @@ export default function CustomersPage() {
     gcTime: 30 * 60 * 1000,
   });
 
+  // CRM churn suggestions StatCard count — same predicate as
+  // ai_readiness.py's pending_suggestions (org + status=='pending', no
+  // other filter) so the two surfaces can never contradict. A 403/error
+  // (e.g. member role, or Pro/Free plan) is treated as 0 — never a broken
+  // card (plan §Phase 4.3).
+  const { data: pendingSuggestionsData } = useQuery({
+    queryKey: ['churn-suggestions-pending-count'],
+    queryFn: () => listChurnSuggestions({ status: 'pending', page_size: 1 }),
+    enabled: isAdminOrOwner,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  const pendingSuggestionsCount = pendingSuggestionsData?.total ?? 0;
+
   const handleRiskFilterFromBar = useCallback((level: string) => {
     setRiskFilter(prev => (prev === level ? '' : level));
     setCurrentPage(1);
@@ -255,8 +273,6 @@ export default function CustomersPage() {
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / pageSize) || 1;
-
-  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
   // Filter-mode cohort: the same filter vocabulary as GET /api/v1/customers/
   // (key names identical to the backend CohortFilter — segment, risk_level,
@@ -632,7 +648,7 @@ export default function CustomersPage() {
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-slide-up stagger-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 animate-slide-up stagger-1">
           <StatCard
             title="Total Customers"
             value={summary?.total_customers ?? 0}
@@ -657,6 +673,15 @@ export default function CustomersPage() {
             icon={UserPlus}
             color="red"
           />
+          {isAdminOrOwner && pendingSuggestionsCount > 0 && (
+            <StatCard
+              title="CRM churn suggestions"
+              value={pendingSuggestionsCount}
+              icon={Inbox}
+              color="yellow"
+              href="/customers/churn-suggestions"
+            />
+          )}
         </div>
 
         {/* Risk Distribution Bar */}

@@ -20,6 +20,7 @@ from src.api.auth import create_access_token, hash_password
 from src.config.readiness_thresholds import CHURN_LABEL_TARGET, CORRECTION_VOLUME_TARGET
 from src.models.ai_correction import AICorrection
 from src.models.churn_event import CustomerChurnEvent
+from src.models.churn_label_suggestion import ChurnLabelSuggestion
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.models.user import User
@@ -114,6 +115,29 @@ def _make_churn_event(
     db.commit()
     db.refresh(event)
     return event
+
+
+def _make_suggestion(
+    db: Session,
+    org: Organization,
+    *,
+    status: str = "pending",
+    email: str = None,
+    churn_event_id: int = None,
+) -> ChurnLabelSuggestion:
+    suggestion = ChurnLabelSuggestion(
+        organization_id=org.id,
+        customer_email=email or f"sugg-{datetime.utcnow().timestamp()}@example.com",
+        provider="hubspot",
+        external_opportunity_id=f"opp-{datetime.utcnow().timestamp()}",
+        suggested_churned_at=datetime.utcnow(),
+        status=status,
+        churn_event_id=churn_event_id,
+    )
+    db.add(suggestion)
+    db.commit()
+    db.refresh(suggestion)
+    return suggestion
 
 
 # ---------------------------------------------------------------------------
@@ -369,3 +393,196 @@ def test_member_role_can_view(client: TestClient, db: Session):
     body = resp.json()
     assert body["feedback_volume"] == 2
     assert body["corrections_total"] == 1
+
+
+# ---------------------------------------------------------------------------
+# readiness-honesty (crm-churn-labels, wave 2) — churn_labels_trainable
+#
+# The calibrator excludes source='auto_suggested' in four places
+# (worker-service/src/tasks/churn_calibration.py:50,125,
+# worker-service/src/services/calibration_refit.py:64,191). These tests pin
+# the report to agree with the fit: `churn_labels_ready` must gate on
+# `churn_labels_trainable`, never on `churn_labels_total`.
+# ---------------------------------------------------------------------------
+
+
+def test_trainable_excludes_auto_suggested_at_boundary(client: TestClient, db: Session):
+    """AC-1 (the regression test). 499 manual + 5 auto_suggested must NOT be ready."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    for i in range(CHURN_LABEL_TARGET - 1):
+        _make_churn_event(
+            db, org, reason_code="other", source="manual", email=f"m{i}@example.com"
+        )
+    for i in range(5):
+        _make_churn_event(
+            db, org, reason_code="other", source="auto_suggested", email=f"a{i}@example.com"
+        )
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["churn_labels_total"] == CHURN_LABEL_TARGET - 1 + 5
+    assert body["churn_labels_trainable"] == CHURN_LABEL_TARGET - 1
+    assert body["churn_labels_ready"] is False
+
+
+def test_trainable_ready_at_target_with_auto_present(client: TestClient, db: Session):
+    """AC-1. 500 manual + 1 auto_suggested -> trainable==500, ready True."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    for i in range(CHURN_LABEL_TARGET):
+        _make_churn_event(
+            db, org, reason_code="other", source="manual", email=f"m{i}@example.com"
+        )
+    _make_churn_event(db, org, reason_code="other", source="auto_suggested", email="a@example.com")
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["churn_labels_trainable"] == CHURN_LABEL_TARGET
+    assert body["churn_labels_ready"] is True
+
+
+def test_trainable_counts_manual_and_csv_import(client: TestClient, db: Session):
+    """AC-3. manual and csv_import both count as trainable; only auto_suggested excluded."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    _make_churn_event(db, org, reason_code="price", source="manual", email="m@example.com")
+    _make_churn_event(db, org, reason_code="price", source="csv_import", email="c@example.com")
+    _make_churn_event(db, org, reason_code="price", source="auto_suggested", email="au@example.com")
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["churn_labels_total"] == 3
+    assert body["churn_labels_trainable"] == 2
+
+
+def test_recovered_event_still_trainable(client: TestClient, db: Session):
+    """AC-4. A recovered event with a trainable source counts in total, its bucket, AND trainable."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    _make_churn_event(
+        db,
+        org,
+        reason_code="price",
+        source="manual",
+        recovered=True,
+        email="recovered@example.com",
+    )
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["churn_labels_total"] == 1
+    assert body["churn_labels_by_source"] == {"manual": 1}
+    assert body["churn_labels_trainable"] == 1
+
+
+def test_trainable_org_scoped(client: TestClient, db: Session):
+    """AC-7. Another org's trainable events contribute 0."""
+    org_a = _make_org(db, name="TrainA")
+    org_b = _make_org(db, name="TrainB")
+    user_a = _make_user(db, org_a)
+    user_b = _make_user(db, org_b)
+
+    _make_churn_event(db, org_a, reason_code="price", source="manual", email="a@example.com")
+    _make_churn_event(db, org_b, reason_code="price", source="manual", email="b1@example.com")
+    _make_churn_event(db, org_b, reason_code="price", source="csv_import", email="b2@example.com")
+
+    resp_a = client.get(URL, headers=_headers(user_a))
+    assert resp_a.json()["churn_labels_trainable"] == 1
+
+    resp_b = client.get(URL, headers=_headers(user_b))
+    assert resp_b.json()["churn_labels_trainable"] == 2
+
+
+# ---------------------------------------------------------------------------
+# readiness-honesty (crm-churn-labels, wave 2) — pending_suggestions
+#
+# `pending_suggestions` (churn_label_suggestions WHERE status='pending') is
+# surfaced as a SEPARATE number. It must never count toward
+# churn_labels_total, churn_labels_trainable, or churn_labels_ready.
+# ---------------------------------------------------------------------------
+
+
+def test_pending_suggestions_counted_separately(client: TestClient, db: Session):
+    """AC-5. 47 pending + 3 confirmed + 2 rejected -> pending_suggestions == 47;
+    total/trainable unchanged by any suggestion row; 499 trainable + 47 pending
+    is still not ready."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    for i in range(CHURN_LABEL_TARGET - 1):
+        _make_churn_event(
+            db, org, reason_code="other", source="manual", email=f"m{i}@example.com"
+        )
+    for i in range(47):
+        _make_suggestion(db, org, status="pending", email=f"p{i}@example.com")
+    for i in range(3):
+        _make_suggestion(db, org, status="confirmed", email=f"c{i}@example.com")
+    for i in range(2):
+        _make_suggestion(db, org, status="rejected", email=f"r{i}@example.com")
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pending_suggestions"] == 47
+    assert body["churn_labels_total"] == CHURN_LABEL_TARGET - 1
+    assert body["churn_labels_trainable"] == CHURN_LABEL_TARGET - 1
+    assert body["churn_labels_ready"] is False
+
+
+def test_confirmed_suggestion_counts_via_its_event_only(client: TestClient, db: Session):
+    """AC-6. A confirmed suggestion plus its CustomerChurnEvent(source='manual')
+    counts trainable +1 via the event; the suggestion itself is not counted
+    (no double count), and it does not appear in pending_suggestions."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    event = _make_churn_event(
+        db, org, reason_code="price", source="manual", email="confirmed@example.com"
+    )
+    _make_suggestion(
+        db, org, status="confirmed", email="confirmed@example.com", churn_event_id=event.id
+    )
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["churn_labels_total"] == 1
+    assert body["churn_labels_trainable"] == 1
+    assert body["pending_suggestions"] == 0
+
+
+def test_pending_suggestions_zero_when_unconfigured(client: TestClient, db: Session):
+    """AC-5. No suggestion rows -> pending_suggestions == 0."""
+    org = _make_org(db)
+    user = _make_user(db, org)
+
+    resp = client.get(URL, headers=_headers(user))
+    assert resp.status_code == 200
+    assert resp.json()["pending_suggestions"] == 0
+
+
+def test_pending_suggestions_org_scoped(client: TestClient, db: Session):
+    """AC-7. Another org's suggestions contribute 0."""
+    org_a = _make_org(db, name="PendA")
+    org_b = _make_org(db, name="PendB")
+    user_a = _make_user(db, org_a)
+    user_b = _make_user(db, org_b)
+
+    _make_suggestion(db, org_a, status="pending", email="a1@example.com")
+    _make_suggestion(db, org_b, status="pending", email="b1@example.com")
+    _make_suggestion(db, org_b, status="pending", email="b2@example.com")
+
+    resp_a = client.get(URL, headers=_headers(user_a))
+    assert resp_a.json()["pending_suggestions"] == 1
+
+    resp_b = client.get(URL, headers=_headers(user_b))
+    assert resp_b.json()["pending_suggestions"] == 2

@@ -723,6 +723,31 @@ class CustomerChurnEvent(Base):
     )
 
 
+class ChurnLabelSuggestion(Base):
+    """CRM-sourced lost-renewal suggestion awaiting operator review — mirrors backend-api model."""
+    __tablename__ = "churn_label_suggestions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    provider = Column(String(50), nullable=False)
+    external_opportunity_id = Column(String(64), nullable=False)
+    suggested_churned_at = Column(DateTime, nullable=False)
+    evidence = Column(JSON, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    reviewed_by_user_id = Column(Integer, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    churn_event_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "provider", "external_opportunity_id", name="uq_churn_label_suggestion_org_provider_ext"),
+        Index("ix_churn_label_suggestion_org_status", "organization_id", "status"),
+        Index("ix_churn_label_suggestion_org_email", "organization_id", "customer_email"),
+    )
+
+
 class LLMModelPrice(Base):
     """System-wide model pricing table."""
     __tablename__ = "llm_model_prices"
@@ -1057,6 +1082,18 @@ class HubSpotIntegration(Base):
     last_writeback_error = Column(Text, nullable=True)
     contacts_written = Column(Integer, nullable=False, default=0)
 
+    # CRM-sourced churn labels (crm-churn-labels aspect): default-deny opt-in
+    churn_labels_enabled = Column(Boolean, nullable=False, default=False)
+    churn_label_config = Column(JSON, nullable=True)
+
+    # Historical churn-label backfill (historical-backfill aspect) — mirrors
+    # src/models/hubspot_integration.py on the backend; no FK (worker no-FK
+    # pattern). The backfill task reads/writes these fields directly.
+    backfill_status = Column(String(20), nullable=True)
+    backfill_progress = Column(JSON, nullable=True)
+    backfill_last_run_at = Column(DateTime, nullable=True)
+    backfill_error = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -1098,6 +1135,18 @@ class SalesforceIntegration(Base):
     last_writeback_status = Column(String(50), nullable=True)
     last_writeback_error = Column(Text, nullable=True)
     contacts_written = Column(Integer, nullable=False, default=0)
+
+    # CRM-sourced churn labels (crm-churn-labels aspect): default-deny opt-in
+    churn_labels_enabled = Column(Boolean, nullable=False, default=False)
+    churn_label_config = Column(JSON, nullable=True)
+
+    # Historical churn-label backfill (historical-backfill aspect) — mirrors
+    # src/models/salesforce_integration.py on the backend; no FK (worker
+    # no-FK pattern). The backfill task reads/writes these fields directly.
+    backfill_status = Column(String(20), nullable=True)
+    backfill_progress = Column(JSON, nullable=True)
+    backfill_last_run_at = Column(DateTime, nullable=True)
+    backfill_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)

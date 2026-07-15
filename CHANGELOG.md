@@ -8,6 +8,40 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### CRM-sourced churn label suggestions (opt-in, human-confirmed)
+
+- **Lost renewals from your CRM become churn *suggestions*** — if you've connected HubSpot or
+  Salesforce, Rereflect can read closed-lost deals/opportunities and propose them as churn
+  labels. **Off by default**, and **default-deny**: nothing is suggested until you enable it
+  *and* name your **Renewal pipelines** (HubSpot) / **Renewal opportunity types** (Salesforce);
+  a deal whose pipeline/type is null or unrecognised produces no suggestion, ever. An
+  organization that ignores this feature sees no change anywhere. The harvest runs inside the
+  existing daily CRM sync (03:15 / 03:45 UTC) — no new schedule.
+- **Nothing is auto-applied.** Suggestions land in a review queue at **Customers → CRM churn
+  suggestions** (admin/owner) and become labels only when a human clicks **Confirm** with a
+  required reason code. Confirming writes a normal `source='manual'` churn event stamped with
+  your user id and linked back to the suggestion; rejecting writes nothing. Bulk confirm/reject
+  is capped at 500 per action. No suggestion is ever confirmed automatically, by design: **a lost
+  renewal is not always a churn**, which is exactly why a person decides.
+- **Optional on-demand backfill** — a one-time pass over closed-lost history with an
+  operator-chosen window (12/24/36/60 months, default 24, hard max 60). It is never automatic
+  and is not triggered by enabling the feature; it is resumable, idempotent, cancellable, and
+  live-progress-reported. Runs are capped at 2,000 suggestions and truncation is **surfaced,
+  not silent** — the card names the dropped count and how far back the run actually covered.
+  Like everything here, it produces **suggestions, not labels**.
+- **Fix — AI readiness now counts only *trainable* labels, so your number may go *down*.**
+  `churn_labels_ready` previously gated on the unfiltered `churn_labels_total`; it now gates on
+  the new `churn_labels_trainable`, which excludes `source='auto_suggested'` events the
+  calibrator never trains on. If your organization has such events, the readiness figure on
+  **Settings → AI → Readiness** will drop after this release. **The old number was overcounting;
+  the new, lower one is the honest one.** A separate `pending_suggestions` field reports queued
+  CRM suggestions and is deliberately **not** counted toward readiness — a pending suggestion is
+  not a label.
+- **No claim is made about churn-prediction quality.** This feature produces labels. Whether more
+  labels change the model is M5.3's open question (see `AI-TRACKING.md`), and churn prediction
+  remains a calibrated heuristic. See
+  [CRM churn-label suggestions](docs/SELF_HOSTING.md#crm-churn-label-suggestions-opt-in) for setup.
+
 ### Public API: bulk feedback writes + custom-category CRUD (v3)
 
 - **Bulk feedback writes** — `POST /api/public/v1/feedback/bulk` (`write` scope) applies one
