@@ -269,9 +269,10 @@ def _backfill_body(
                 on_progress=_on_progress,
             )
 
-        integ.backfill_progress = {
-            k: v for k, v in result.items() if k not in ("status", "since")
-        }
+        # Keep "since" in the persisted progress (not just the log line) —
+        # house rule: no silent caps, the covered window must be SURFACED
+        # to the operator (spec §6), not just logged.
+        integ.backfill_progress = {k: v for k, v in result.items() if k != "status"}
         integ.backfill_last_run_at = datetime.utcnow()
         integ.backfill_status = (
             "cancelled" if result["status"] == "cancelled" else "completed"

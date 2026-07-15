@@ -254,6 +254,10 @@ class TestHappyPath:
         db.refresh(integ)
         assert integ.backfill_status == "completed"
         assert integ.backfill_progress["suggested"] == 1
+        # "since" (the covered window) must be surfaced in progress, not just
+        # logged — house rule: no silent caps, dropped count AND window both
+        # surfaced to the operator (spec §6).
+        assert "since" in integ.backfill_progress
         assert integ.backfill_last_run_at is not None
         assert integ.backfill_error is None
         assert db.query(ChurnLabelSuggestion).count() == 1
