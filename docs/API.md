@@ -99,15 +99,17 @@ Authorization: Bearer rrf_xxxxxxxx        # or:  X-API-Key: rrf_xxxxxxxx
 Keys carry scopes; each endpoint below notes the scope it requires (the read endpoints
 require `read`). As always, data is scoped to the key's organization.
 
-- `read` — read feedback, customers, and analytics
+- `read` — read feedback, customers, analytics, and custom categories
 - `ingest` — submit new feedback for AI analysis
-- `write` — update or delete existing feedback (status, category/sentiment corrections,
-  tags, urgency, delete); see **Feedback (write)** below
+- `write` — update, bulk-update, or delete existing feedback (status, category/sentiment
+  corrections, tags, urgency, delete) and manage custom categories; see
+  **Feedback (write)** and **Custom categories** below
 
 ### Feedback (write)
 
 ```
 PATCH  /api/public/v1/feedback/{id}   # Update an existing feedback item (scope: write)
+POST   /api/public/v1/feedback/bulk   # Bulk-update up to 500 feedback items (scope: write)
 DELETE /api/public/v1/feedback/{id}   # Delete a feedback item (scope: write)
 ```
 
@@ -148,6 +150,52 @@ change applied without the tags/`is_urgent` change (or vice versa). This is a kn
 limitation carried from the initial write-scope release; retries are safe since each group
 is idempotent given the same input.
 
+#### `POST /api/public/v1/feedback/bulk`
+
+Requires the `write` scope. Applies the same patch shape as the single `PATCH` above to up
+to 500 ids in one request:
+
+```json
+{ "ids": [101, 102, 103], "patch": { "workflow_status": "resolved", "tags": ["billing"] } }
+```
+
+- `ids` — 1–500 ids (deduped, order preserved). Ids not owned by this org (or non-existent)
+  are `skipped`, not errors.
+- `patch` — same body shape as the single `PATCH` (`workflow_status`/`resolution_note`,
+  `correction`, `tags`, `is_urgent`); at least one recognized field is required (`400`
+  otherwise).
+- `workflow_status` is applied via one batched call; `tags`/`is_urgent`/`correction` are
+  applied per item inside a `SAVEPOINT` each — a per-item failure is non-contagious and
+  doesn't roll back the rest of the batch.
+- Pass `?count_only=true` to dry-run: returns only the match count and mutates nothing.
+
+Response:
+
+```json
+{
+  "matched": 3,
+  "updated": 2,
+  "skipped": 1,
+  "results": [
+    { "id": 101, "status": "updated" },
+    { "id": 102, "status": "noop" },
+    { "id": 103, "status": "skipped", "reason": "not_found" }
+  ]
+}
+```
+
+`results[].status` is one of `updated`, `noop` (matched but nothing changed), `skipped`
+(not owned by this org / doesn't exist), or `error` (per-item field write failed — retry-safe,
+since re-applying the same patch is idempotent). Fires the same webhooks/events as the single
+`PATCH` for the ids that actually changed.
+
+```bash
+curl -X POST https://<host>/api/public/v1/feedback/bulk \
+  -H "Authorization: Bearer rrf_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"ids": [101, 102, 103], "patch": {"workflow_status": "resolved"}}'
+```
+
 #### `DELETE /api/public/v1/feedback/{id}`
 
 Requires the `write` scope (there is no separate `delete` scope). Permanently deletes the
@@ -161,6 +209,33 @@ success, returns `204 No Content` with an empty body.
 ```bash
 curl -X DELETE https://<host>/api/public/v1/feedback/123 \
   -H "Authorization: Bearer rrf_xxxxxxxx"
+```
+
+### Custom categories
+
+```
+GET    /api/public/v1/categories             # List custom categories (scope: read)
+POST   /api/public/v1/categories             # Create a custom category (scope: write)
+PATCH  /api/public/v1/categories/{id}        # Update name/description/is_active (scope: write)
+DELETE /api/public/v1/categories/{id}        # Delete a custom category (scope: write)
+```
+
+Mirrors the internal `/api/v1/categories/custom` CRUD. `GET` accepts an optional
+`category_type` filter. `POST` requires `name` and `category_type`
+(`pain_point`/`feature_request`/`urgency`/`general`); a duplicate `(org, category_type, name)`
+returns `409`. `PATCH` accepts `name`/`description`/`is_active` — `category_type` is
+immutable (sending it returns `422`, unknown field); a rename collision returns `409`. Both
+`PATCH` and `DELETE` return `404` for a missing or other-org id.
+
+`DELETE` hard-deletes the category (`204`, no cascade). If the category's name is referenced
+by an *active* `feedback_category_match` automation rule, the response carries an advisory
+`X-Rereflect-Warning` header naming the category and the referencing rule(s) — the delete
+still succeeds either way.
+
+```bash
+curl -X DELETE https://<host>/api/public/v1/categories/42 \
+  -H "Authorization: Bearer rrf_xxxxxxxx"
+# → 204, X-Rereflect-Warning: category 'Billing' is referenced by 1 automation rule(s): Billing escalation
 ```
 
 ### Customer 360

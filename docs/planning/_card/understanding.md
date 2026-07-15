@@ -1,98 +1,82 @@
-# Understanding — feat/urgency-classifier-head
+# Understanding — feat/public-api-crud-v3
 
-Synthesized from four parallel read-only digs (analysis-engine, backend, worker, frontend) against the
-shipped **category head** precedent (`docs/planning/per-org-category-classifier/`).
+**Phase 2 deep-dig synthesis (3 read-only agents).** Backend-only feature on `services/backend-api`.
 
-## What this is really asking
+## What the task is really asking
 
-Add a **third self-improving classifier head — "urgency"** — to the M5.2 per-org corrections flywheel,
-mirroring how the **category** head was added after **sentiment**. The flywheel: users correct the AI →
-corrections stored as `AICorrection` rows → weekly per-org retrain trains a challenger → promoted only if
-it beats the incumbent on held-out data → predictions optionally override the analyzer at ingest
-(off/shadow/auto). Urgency mirrors the boolean `FeedbackItem.is_urgent` as a **binary** classifier
-(`not_urgent` / `urgent`).
+Close the two remaining "public write API v2" deferrals (AI-TRACKING.md:292): **bulk feedback writes**
+and **custom-taxonomy CRUD** over `/api/public/v1`, under the existing `write` scope. Deepens the
+developer-surface moat pillar for OSS self-hosters. No new DB tables required — both build on shipped
+models.
 
-## Why it's tractable (the spine is already generic)
+## Ground truth from the dig
 
-The classifier spine was deliberately built type-generic. Confirmed per layer:
+### Public write surface (mirror this)
+- **Auth**: `src/models/api_key.py` (`ApiKey`, scopes = comma-delimited string `"read,ingest,write"`).
+  `src/api/public/auth.py`: `verify_api_key` → `ApiKeyAuth{organization_id, scopes, key_row}`;
+  `require_scope("write")` dependency (403 if missing). Cross-org access → **404** (org-scoped re-query;
+  no 403 leak).
+- **Existing single PATCH** `PATCH /api/public/v1/feedback/{id}` (`public_api.py:365-532`): request model
+  `PublicFeedbackUpdate` with `extra="forbid"`; fields `workflow_status | resolution_note | correction |
+  tags | is_urgent`. Tag caps: ≤20 tags, ≤50 chars each, trim+dedupe. Records category/sentiment/**urgency**
+  `AICorrection`s (record-only — stored column unchanged). **Non-atomic: 3+ separate commits per call**
+  (documented, tolerated because AICorrection is append-only).
+- **`apply_status_change`** (`src/services/workflow_service.py:15-50`): already a **batch primitive** — takes
+  a `List[FeedbackItem]`, no-op-skips same-status, does NOT commit/webhook/invalidate (caller does). The
+  internal bulk endpoint `POST /api/v1/workflow/status` (`workflow.py:141-199`) passes the whole list in
+  one call + single commit + one webhook/cache/emit pass. **→ Bulk should do the same: one list call, one
+  commit — not a Python per-item loop.**
+- **No per-item error envelope exists** in the public router today. Internal bulk endpoints just return
+  aggregate counts (`{"updated": n}`, `{"deleted_count": n}`). New convention needed.
 
-- **analysis-engine** (`corrections_classifier/`): `classifier_type` is a plain string, never branched on.
-  `fetch_correction_rows(..., correction_type=)`, `train_classifier(..., classifier_type=)`, `predict()`
-  (already has a **binary sigmoid path** for 2-class), and `evaluate(..., labels=)` all parameterized.
-  **New code = 3 tiny edits**: add `URGENCY_LABELS=("not_urgent","urgent")` to `labels.py`, add
-  `build_urgency_dataset()` to `dataset.py`, export both from `__init__.py`. Simpler than category —
-  fixed closed vocab, so **no `derive_labels`, no fair-A/B intersection**.
-- **worker** (`tasks/classifier_training.py`): retrain loop already iterates
-  `_CLASSIFIER_TYPES=("sentiment","category")` × orgs. Redis lock is **per-type+per-org**
-  (`lock:classifier_refit:{type}:{org}`) → urgency never deadlocks against the others. `_promote`,
-  `_insert_eval_run`, purge, beat schedule (Mondays 06:30 UTC), include — all untouched. Changes:
-  append `"urgency"` to `_CLASSIFIER_TYPES` + add an urgency branch in `_dataset_and_incumbent_for`
-  (wire `build_urgency_dataset`, a new binary incumbent predictor, `eval_labels` policy).
-- **backend** (`ai_correction.py`, `ai_settings.py`, `org_ai_config.py`, `public_api.py`): `correction_type`
-  is a free `String(50)` — `"urgency"` needs **no schema change to store**. The classifier-mode plumbing
-  is a mechanical copy of the `category_classifier_mode` block (model column + migration + GET/PATCH +
-  resolver map `MODE_COLUMN_BY_CLASSIFIER_TYPE`).
-- **frontend** (`AISettingsGeneral.tsx`, `ClassifierAccuracyCard.tsx`, `ai-settings.ts`,
-  `classifier-accuracy.ts`): accuracy/rollback API client is **already type-generic** (pass `"urgency"`,
-  zero change). Add `urgency_classifier_mode` to the TS types, a 4th `<Select>` card (copy category),
-  a `TYPE_COPY.urgency` entry, and one `<ClassifierAccuracyCard classifierType="urgency" />`.
+### Bulk precedent (segment-actions) — the shape to reuse
+- `src/schemas/cohort.py`: `Cohort` = **exactly one of** `emails[]` XOR `filter{segment,risk_level,search,include_archived}`
+  (422 if both/neither); `BulkActionSummary{matched, updated, skipped, errors[]}`.
+- `src/services/cohort_service.py`: `resolve_cohort` (org-scoped; unknown/cross-org emails **skipped**, not
+  errors); `count_cohort` for previews.
+- Per-item best-effort within **one commit** (`/customers/bulk/tags`, `/customers/bulk/assign-owner`).
+- **500 cap** (`RUN_BATCH_MAX_CUSTOMERS`) only on **async-queuing** run-batch (hard 422); `count_only=true`
+  dry-run. Static bulk routes must be registered **before** parametric `/{id}` routes (FastAPI ordering trap).
 
-## The one real open question (must resolve in PRD) — the CAPTURE SEAM
+### Custom taxonomy (mirror internal CRUD)
+- Dedicated table `custom_categories` (`src/models/custom_category.py`): `{name(≤100), description?,
+  category_type ∈ pain_point|feature_request|urgency|general, is_active}`. **No keyword field** (keywords
+  derived from `description` in the keyword categorizer). **No unique constraint / no max-count** in DB.
+- Internal CRUD `src/api/routes/categories.py` (`/api/v1/categories/custom`): `GET /custom` (org-scoped,
+  no admin), `POST` (201, **409 on dup (org,type,name)**), `PATCH` (name/description/is_active; type not
+  editable; 409 on rename collision), `DELETE` (204 hard delete). `require_admin_or_owner` on writes.
+- **Blast radius of edit/delete** (categories are free-text strings, **no FK** from feedback/corrections):
+  - Delete/rename → existing feedback keeps the old string (orphaned, not broken).
+  - **Automation rules `feedback_category_match` key on the category string** → a rename silently breaks
+    matching rules. This is the one real hazard → surface as a caveat / consider a warning, don't block.
+  - M5.2 category classifier vocab is **decoupled** (derives from `AICorrection.corrected_value`, not this
+    table) → renaming/deleting a category does NOT corrupt the classifier. Safe.
+- Frontend ref: `settings/ai/page.tsx` "Custom Categories" card → `lib/api/categories.ts` (not in scope; API-only).
 
-The head is worthless without training signal, and **urgency corrections are not captured today**:
+### Customer CRUD — NOT coherent (open question resolved)
+- The only "customer" entity is `CustomerHealth` (`customer_health_scores`, unique `(org, email)`), a
+  **derived aggregate**. Only constructor is inside `update_customer_health` (analysis upsert), triggered
+  by feedback analysis. **No create endpoint exists anywhere**; customer surface is read + tag/owner/action
+  mutations only. Created implicitly on first feedback; archived when last feedback deleted.
+- **Decision: drop customer create/delete.** If a customer write slice is wanted at all, it's only **bulk
+  tag / owner update** mirroring `/customers/bulk/*` via the `Cohort` contract. Recommend deferring even
+  that unless explicitly desired — the two headline deferrals (bulk feedback + taxonomy) are the priority.
 
-- The **only** user/actor-driven `is_urgent` mutation in the whole backend is the **public-API**
-  `PATCH /api/public/v1/feedback/{id}` (`public_api.py:476`) — and it currently records **nothing**.
-- There is **no internal (JWT) urgent-toggle endpoint** and **no frontend urgent-toggle control**. The
-  feedback detail page emits sentiment/category corrections, but has no urgency control. The internal
-  `PATCH /feedback/{id}` only edits text/source and re-analyzes (it clears `is_urgent` then recomputes
-  via the analyzer heuristic — that reset is analyzer-driven and must **not** be captured as a correction).
+## Ambiguities to resolve in the interview
+1. **Bulk feedback shape**: uniform patch over an explicit `ids[]` (simplest, mirrors internal
+   `POST /workflow/status`) vs heterogeneous per-item patches vs a Cohort-style filter selector. Recommend
+   **uniform patch over `ids[]`** with a `BulkActionSummary`-style per-item results envelope.
+2. **Which fields bulk-editable**: status only, or status + tags + is_urgent (full parity with single PATCH)?
+3. **Bulk cap + sync vs async**: sync single-commit with a hard cap (e.g. 200–500) → 422 over cap, matching
+   run-batch's reject-don't-truncate stance. Any `count_only` preview needed?
+4. **Response envelope**: `BulkActionSummary{matched,updated,skipped,errors[]}` (aggregate) vs a richer
+   `{results:[{id,status,error}]}` per-item array. Public API consumers usually want per-item.
+5. **Taxonomy public parity**: `extra="forbid"` on public create/update? enforce a max-count now (internal
+   has none)? expose a delete-safety warning for rules keyed on the name?
+6. **Customer bulk**: in or out for this feature? (Recommend out / separate.)
 
-So the sentiment/category flywheel is fed by **dashboard** corrections, but urgency has no dashboard
-surface. **Decision needed:**
-
-- **Option A — public-API only (minimal):** emit `AICorrection(correction_type="urgency")` at
-  `public_api.py:476` when `is_urgent` changes. Small, but only API-integrated orgs ever feed the head;
-  dashboard-only operators get no urgency flywheel. Weak.
-- **Option B — add the dashboard seam too (recommended, matches sentiment/category):** add an internal
-  urgent-toggle (endpoint + a control on the feedback detail / urgent-feedbacks page) that emits the
-  urgency correction, **plus** the public-API capture. This makes the flywheel actually turn for the
-  primary (dashboard) user, consistent with how every other head gets its signal.
-
-Recommendation: **Option B**, since the moat rationale (self-improving on the operator's own corrections)
-depends on the dashboard producing signal.
-
-## Incumbent predictor (design note for the plan)
-
-The current urgency signal is a keyword/rule scorer (`analyzer/core.py` ~line 310, `categorizer.py` ~483,
-worker `tasks/analysis.py:663-708` emitting "Not urgent"/"Marked as urgent"). The urgency head's
-**incumbent** must wrap that existing heuristic as a binary predictor emitting `not_urgent`/`urgent`, so
-the challenger is only promoted when it beats the keyword heuristic on the org's held-out corrections —
-the honest bar to state in the UI copy.
-
-## Affected areas (services)
-
-- `services/analysis-engine/src/analyzer/corrections_classifier/` — core (labels, dataset, export)
-- `services/worker-service/src/tasks/classifier_training.py` + `services/analysis-engine` incumbent
-- `services/backend-api/src/{models/org_ai_config.py, api/routes/ai_settings.py, api/routes/public_api.py,
-  api/routes/feedback.py (new internal toggle?), services/ai_correction_service.py}` + Alembic migration
-  (heads-check: repo has multiple alembic heads)
-- `services/frontend-web/` — AI settings toggle + accuracy card (+ feedback-detail urgent control if Option B)
-
-## Aspects (natural decomposition, mirrors category head)
-
-1. **urgency-core** (analysis-engine): `URGENCY_LABELS` + `build_urgency_dataset` + exports.
-2. **capture-seam** (backend + frontend): record `correction_type="urgency"` on urgent-flag override
-   (public API always; internal endpoint + dashboard control if Option B).
-3. **data-and-config** (backend): `urgency_classifier_mode` column + migration + GET/PATCH + resolver map.
-4. **worker-trainer** (worker): `_CLASSIFIER_TYPES += "urgency"` + `_dataset_and_incumbent_for` branch +
-   binary incumbent.
-5. **predict-seam** (worker/analysis): urgency `resolve_classifier` call site overriding `feedback.is_urgent`
-   at ingest under shadow/auto.
-6. **settings-frontend** (frontend): mode toggle + `ClassifierAccuracyCard classifierType="urgency"`.
-
-## Contradictions / flags
-
-- Brief said "dashboard flag toggle + public-API PATCH" as the capture surface, but the **dashboard toggle
-  does not exist yet** — building it is in scope only if Option B is chosen. Flagged, not papered over.
-- `churn_risk` head explicitly **out of scope** (M5.3 data-gated at ~500 labels).
+## Affected areas (all backend-api)
+- `src/api/routes/public_api.py` (+ maybe a new `src/api/public/` module), `src/schemas/` (new bulk +
+  taxonomy public schemas), reuse `src/services/workflow_service.py`, `src/services/cohort_service.py`,
+  `src/services/ai_correction_service.py`, `src/models/custom_category.py`. Public OpenAPI/Swagger picks up
+  new routes automatically. **No new migration** anticipated.

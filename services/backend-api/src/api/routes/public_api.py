@@ -7,10 +7,12 @@ the key — no cross-tenant data access is possible.
 
 Scopes
 ------
-  read   — GET endpoints (feedback, customers, analytics, webhooks)
+  read   — GET endpoints (feedback, customers, analytics, webhooks, categories)
   ingest — POST /feedback (create + enqueue analysis)
-  write  — PATCH /feedback/{id} (workflow status, corrections, tags, is_urgent)
-           + DELETE /feedback/{id}
+  write  — PATCH /feedback/{id} + DELETE /feedback/{id} (workflow status,
+           corrections, tags, is_urgent); POST /feedback/bulk (uniform patch
+           applied to up to 500 ids in one request); custom categories CRUD
+           (POST/PATCH/DELETE /categories)
 
 Prefix: /api/public/v1
 Tag:    public
@@ -19,10 +21,11 @@ Tag:    public
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
@@ -33,8 +36,10 @@ from src.api.public.auth import ApiKeyAuth, require_scope, verify_api_key
 from src.background import queue_analyze_feedback
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
+from src.models.custom_category import CustomCategory
 from src.models.feedback import FeedbackItem
 from src.models.webhook_endpoint import WebhookEndpoint
+from src.services import custom_category_service
 
 logger = logging.getLogger(__name__)
 
@@ -352,6 +357,31 @@ class PublicFeedbackUpdate(BaseModel):
         return cleaned
 
 
+class PublicFeedbackBulkUpdate(BaseModel):
+    """Request body for ``POST /feedback/bulk`` — a uniform patch applied to
+    every id in ``ids`` (deduped, order-preserving)."""
+
+    model_config = {"extra": "forbid"}
+
+    ids: list[int] = Field(..., min_length=1, max_length=500)
+    patch: PublicFeedbackUpdate
+
+
+class PublicFeedbackBulkResultItem(BaseModel):
+    """Per-id result entry in the bulk response, ordered by deduped input order."""
+
+    id: int
+    status: Literal["updated", "noop", "skipped", "error"]
+    reason: Optional[str] = None
+
+
+class PublicFeedbackBulkResponse(BaseModel):
+    matched: int
+    updated: int
+    skipped: int
+    results: list[PublicFeedbackBulkResultItem]
+
+
 def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str]]:
     """Map a public correction ``field`` → (correction_type, current stored value)."""
     if field == "pain_point":
@@ -360,6 +390,278 @@ def _resolve_correction(fb: FeedbackItem, field: str) -> tuple[str, Optional[str
         return "category", fb.feature_request_category
     # field == "sentiment"
     return "sentiment", fb.sentiment_label
+
+
+def _apply_bulk_item_fields(
+    db: Session,
+    fb: FeedbackItem,
+    patch: PublicFeedbackUpdate,
+    organization_id: int,
+) -> bool:
+    """Apply ``correction`` / ``is_urgent`` / ``tags`` to a single feedback item
+    for the bulk-write path. Mirrors the field-mutation block in the single
+    PATCH handler, except every ``create_ai_correction`` call passes
+    ``commit=False`` — the bulk caller does one final ``db.commit()`` for the
+    whole batch.
+
+    Returns ``True`` if this item's stored state actually changed (used to
+    decide ``updated`` vs ``noop``); a correction insert always counts as a
+    change (it's a record-only training signal, not a no-op).
+    """
+    fields_touched = False
+
+    if patch.correction is not None:
+        from src.services.ai_correction_service import create_ai_correction
+
+        correction_type, original_value = _resolve_correction(fb, patch.correction.field)
+        create_ai_correction(
+            db,
+            organization_id=organization_id,
+            user_id=None,
+            correction_type=correction_type,
+            entity_type="feedback_item",
+            entity_id=fb.id,
+            signal="correction",
+            original_value=original_value,
+            corrected_value=patch.correction.corrected_value,
+            feedback_text=fb.text,
+            commit=False,
+        )
+        fields_touched = True
+
+    if "is_urgent" in patch.model_fields_set:
+        from src.services.ai_correction_service import create_ai_correction, urgency_label
+
+        old_is_urgent = bool(fb.is_urgent)
+        new_is_urgent = bool(patch.is_urgent)
+        fb.is_urgent = new_is_urgent
+
+        if new_is_urgent != old_is_urgent:
+            fields_touched = True
+            create_ai_correction(
+                db,
+                organization_id=organization_id,
+                user_id=None,
+                correction_type="urgency",
+                entity_type="feedback_item",
+                entity_id=fb.id,
+                signal="correction",
+                original_value=urgency_label(old_is_urgent),
+                corrected_value=urgency_label(new_is_urgent),
+                feedback_text=fb.text,
+                commit=False,
+            )
+
+    if "tags" in patch.model_fields_set:
+        new_tags = list(patch.tags or [])
+        if new_tags != list(fb.tags or []):
+            fields_touched = True
+        fb.tags = new_tags  # rebind — JSON columns aren't dirty-tracked in-place
+
+    return fields_touched
+
+
+@router.post(
+    "/feedback/bulk",
+    response_model=PublicFeedbackBulkResponse,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Bulk-update feedback items (public API)",
+    description=(
+        "Apply a uniform patch (``workflow_status`` / ``tags`` / ``is_urgent`` / "
+        "``correction``) to up to 500 feedback ids in one request.  Requires the "
+        "``write`` scope.  Ids not owned by this org (or non-existent) are "
+        "``skipped`` — not errors.  ``workflow_status`` is applied via one "
+        "batched status-change call; ``tags``/``is_urgent``/``correction`` are "
+        "applied per item and are non-contagious — a per-item failure doesn't "
+        "roll back the other items in the batch.  Pass ``?count_only=true`` to "
+        "preview the match count without mutating anything."
+    ),
+)
+async def public_bulk_update_feedback(
+    data: PublicFeedbackBulkUpdate,
+    count_only: bool = Query(
+        False, description="Dry-run: return only the match count, mutate nothing."
+    ),
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicFeedbackBulkResponse:
+    patch = data.patch
+    if not (patch.model_fields_set & {"workflow_status", "correction", "tags", "is_urgent"}):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+
+    # Dedupe ids, preserving first-seen order.
+    unique_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for i in data.ids:
+        if i not in seen_ids:
+            seen_ids.add(i)
+            unique_ids.append(i)
+
+    rows = (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.id.in_(unique_ids),
+            FeedbackItem.organization_id == auth.organization_id,
+        )
+        .all()
+    )
+    by_id = {fb.id: fb for fb in rows}
+    matched = len(by_id)
+
+    if count_only:
+        # Dry-run: short-circuit before any mutation (status change, per-item
+        # fields, side effects) — just report how many of the deduped ids
+        # matched this org.
+        return PublicFeedbackBulkResponse(
+            matched=matched,
+            updated=0,
+            skipped=len(unique_ids) - matched,
+            results=[],
+        )
+
+    key_label = f"api-key:{auth.key_row.name}"
+
+    error_reasons: dict[int, str] = {}
+    field_changed_ids: set[int] = set()
+    changed_pairs: list[tuple[FeedbackItem, str]] = []
+    changed_ids: set[int] = set()
+
+    # ── Batched status change — one call on the whole matched set ────────────
+    if patch.workflow_status is not None:
+        from src.services.workflow_service import apply_status_change
+
+        changed_pairs = apply_status_change(
+            db,
+            list(by_id.values()),
+            patch.workflow_status,
+            organization_id=auth.organization_id,
+            actor_id=None,
+            actor_label=key_label,
+            resolution_note=patch.resolution_note,
+        )
+        changed_ids = {fb.id for fb, _ in changed_pairs}
+        # Flush now, in the OUTER transaction — before any per-item SAVEPOINT
+        # is opened below. Without this, these status UPDATEs stay pending
+        # (autoflush=False) until the first per-item begin_nested() block
+        # flushes them *inside* that savepoint; a flush-time failure on that
+        # first item would then ROLLBACK TO SAVEPOINT and silently discard
+        # the whole batch's status writes even though we report them (and
+        # dispatch webhooks for them) below as updated.
+        db.flush()
+        # Not committed yet — folded into the single db.commit() below,
+        # together with the per-item field mutations.
+
+    # ── Per-item fields (non-contagious via SAVEPOINT) ────────────────────────
+    for fid in unique_ids:
+        fb = by_id.get(fid)
+        if fb is None:
+            continue
+        # Skip the SAVEPOINT machinery entirely for status-only batches — no
+        # per-item field means nothing for _apply_bulk_item_fields to do, so
+        # opening (and flushing/releasing) a SAVEPOINT per id here would be
+        # pure overhead across a large batch.
+        if not (patch.model_fields_set & {"correction", "is_urgent", "tags"}):
+            continue
+        try:
+            with db.begin_nested():
+                item_changed = _apply_bulk_item_fields(db, fb, patch, auth.organization_id)
+                db.flush()
+            if item_changed:
+                field_changed_ids.add(fid)
+        except Exception:
+            logger.warning(
+                "public bulk PATCH: per-item field update failed for feedback %s",
+                fid,
+                exc_info=True,
+            )
+            # NB: this item's per-item field write was rolled back by the
+            # SAVEPOINT, but a batched status change for this same id (above)
+            # may already be flushed/committed and have fired its webhook —
+            # that part is retry-safe (same-status re-apply is a no-op).
+            error_reasons[fid] = "internal_error"
+
+    db.commit()
+
+    # ── Best-effort side effects — done once for the whole batch ─────────────
+    if changed_ids or field_changed_ids:
+        try:
+            from src.services.cache_service import cache_invalidate
+
+            cache_invalidate(f"dashboard:{auth.organization_id}:*")
+            cache_invalidate(f"analytics:{auth.organization_id}:*")
+        except Exception:
+            logger.warning("cache_invalidate failed on public bulk PATCH", exc_info=True)
+
+    if changed_pairs:
+        try:
+            from src.services.workflow_service import dispatch_status_webhooks
+
+            dispatch_status_webhooks(
+                db,
+                auth.organization_id,
+                changed_pairs,
+                patch.workflow_status,
+                changed_by_label=key_label,
+            )
+        except Exception:
+            logger.warning("webhook dispatch failed on public bulk PATCH", exc_info=True)
+
+    if changed_ids:
+        try:
+            from src.services.event_emitter import emit_event
+
+            await emit_event(
+                org_id=auth.organization_id,
+                event_type="workflow:status_changed",
+                data={"feedback_ids": sorted(changed_ids), "new_status": patch.workflow_status},
+            )
+        except Exception:
+            logger.warning("emit_event failed on public bulk PATCH", exc_info=True)
+
+    # Items changed via tags/is_urgent/correction only (no workflow_status)
+    # would otherwise fire no live event at all — the single PATCH path
+    # emits 'feedback:updated' for the equivalent case, so mirror that here
+    # with one batch event covering the field-only-changed ids.
+    if field_changed_ids:
+        try:
+            from src.services.event_emitter import emit_event
+
+            await emit_event(
+                org_id=auth.organization_id,
+                event_type="feedback:updated",
+                data={"feedback_ids": sorted(field_changed_ids)},
+            )
+        except Exception:
+            logger.warning(
+                "emit_event (feedback:updated) failed on public bulk PATCH", exc_info=True
+            )
+
+    # ── Per-item results, in deduped input order ──────────────────────────────
+    results: list[PublicFeedbackBulkResultItem] = []
+    updated_count = 0
+    skipped_count = 0
+    for fid in unique_ids:
+        if fid not in by_id:
+            results.append(
+                PublicFeedbackBulkResultItem(id=fid, status="skipped", reason="not_found")
+            )
+            skipped_count += 1
+        elif fid in error_reasons:
+            results.append(
+                PublicFeedbackBulkResultItem(id=fid, status="error", reason=error_reasons[fid])
+            )
+        elif fid in changed_ids or fid in field_changed_ids:
+            results.append(PublicFeedbackBulkResultItem(id=fid, status="updated"))
+            updated_count += 1
+        else:
+            results.append(PublicFeedbackBulkResultItem(id=fid, status="noop"))
+
+    return PublicFeedbackBulkResponse(
+        matched=matched,
+        updated=updated_count,
+        skipped=skipped_count,
+        results=results,
+    )
 
 
 @router.patch(
@@ -870,6 +1172,186 @@ def public_churn_customers(
     )
 
 
+# ─── Custom categories (public CRUD) ─────────────────────────────────────────
+#
+# Mirrors the internal ``/api/v1/categories/custom`` CRUD (see
+# src/api/routes/categories.py) via the shared src/services/custom_category_service
+# module — identical create/update/delete/list semantics, gated by API-key
+# scopes (``read`` for GET, ``write`` for POST/PATCH/DELETE) instead of JWT
+# role. Static collection route (``/categories``) is registered before the
+# parametric ``/categories/{id}`` route, per public-router convention.
+
+
+class PublicCustomCategory(BaseModel):
+    """Custom category exposed on the public surface."""
+
+    id: int
+    name: str
+    description: Optional[str] = None
+    category_type: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PublicCustomCategoryCreate(BaseModel):
+    """Request body for ``POST /categories``."""
+
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    category_type: Literal["pain_point", "feature_request", "urgency", "general"]
+
+
+class PublicCustomCategoryUpdate(BaseModel):
+    """Request body for ``PATCH /categories/{id}``.
+
+    ``category_type`` is intentionally not a field here — it is immutable on
+    update, mirroring the internal route; passing it is an unknown field and
+    422s via ``extra="forbid"``.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+_HEADER_CONTROL_CHARS_RE = re.compile(r"[\r\n\x00-\x1f\x7f]")
+
+
+def _sanitize_header_value(value: str) -> str:
+    """Strip CR/LF and other control characters from an org-authored string
+    before it is interpolated into an HTTP header value — prevents header
+    injection via a category/rule name containing e.g. ``\\r\\n``."""
+    return _HEADER_CONTROL_CHARS_RE.sub(" ", value)
+
+
+@router.get(
+    "/categories",
+    response_model=List[PublicCustomCategory],
+    dependencies=[Depends(require_scope("read"))],
+    summary="List custom categories (public API)",
+    description="Org-scoped list of custom categories, optionally filtered by `category_type`.",
+)
+def public_list_categories(
+    category_type: Optional[str] = Query(None),
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> List[PublicCustomCategory]:
+    rows = custom_category_service.list_categories(db, auth.organization_id, category_type)
+    return [PublicCustomCategory.model_validate(r) for r in rows]
+
+
+@router.post(
+    "/categories",
+    response_model=PublicCustomCategory,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Create a custom category (public API)",
+    description="409 on a duplicate (organization, category_type, name).",
+)
+def public_create_category(
+    data: PublicCustomCategoryCreate,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicCustomCategory:
+    try:
+        row = custom_category_service.create_category(
+            db,
+            auth.organization_id,
+            name=data.name,
+            description=data.description,
+            category_type=data.category_type,
+        )
+    except custom_category_service.DuplicateCategoryError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return PublicCustomCategory.model_validate(row)
+
+
+@router.patch(
+    "/categories/{category_id}",
+    response_model=PublicCustomCategory,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Update a custom category (public API)",
+    description=(
+        "Update name/description/is_active. `category_type` is not editable "
+        "(sending it 422s — unknown field). 404 on missing/other-org id, 409 "
+        "on rename collision."
+    ),
+)
+def public_update_category(
+    category_id: int,
+    data: PublicCustomCategoryUpdate,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+) -> PublicCustomCategory:
+    try:
+        row = custom_category_service.update_category(
+            db,
+            auth.organization_id,
+            category_id,
+            name=data.name,
+            description=data.description,
+            is_active=data.is_active,
+        )
+    except custom_category_service.CategoryNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    except custom_category_service.DuplicateCategoryError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return PublicCustomCategory.model_validate(row)
+
+
+@router.delete(
+    "/categories/{category_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_scope("write"))],
+    summary="Delete a custom category (public API)",
+    description=(
+        "Hard delete (204). 404 on missing/other-org id. If the category's "
+        "name is referenced by an active `feedback_category_match` automation "
+        "rule, the response carries an `X-Rereflect-Warning` header — the "
+        "delete still succeeds (advisory only, no cascade)."
+    ),
+)
+def public_delete_category(
+    category_id: int,
+    response: Response,
+    auth: ApiKeyAuth = Depends(verify_api_key),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(CustomCategory)
+        .filter(
+            CustomCategory.id == category_id,
+            CustomCategory.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+
+    name = row.name
+    referencing_rules = custom_category_service.rules_referencing_category(
+        db, auth.organization_id, name
+    )
+
+    custom_category_service.delete_category(db, auth.organization_id, category_id)
+
+    if referencing_rules:
+        safe_name = _sanitize_header_value(name)
+        safe_rules = [_sanitize_header_value(r) for r in referencing_rules]
+        rule_list = ", ".join(safe_rules)
+        response.headers["X-Rereflect-Warning"] = (
+            f"category '{safe_name}' is referenced by {len(referencing_rules)} "
+            f"automation rule(s): {rule_list}"
+        )
+    return None
+
+
 # ─── Dedicated OpenAPI docs for the public surface ───────────────────────────
 
 
@@ -886,9 +1368,12 @@ def public_openapi(request: Request) -> JSONResponse:
             "description": (
                 "Public REST API for Rereflect. Authenticate every request with an API key:\n\n"
                 "`Authorization: Bearer rrf_...`\n\n"
-                "Keys carry scopes: **read** (GET endpoints), **ingest** (POST /feedback), "
-                "and **write** (`PATCH /feedback/{id}` — workflow status, corrections, "
-                "tags replace, is_urgent — and `DELETE /feedback/{id}`). "
+                "Keys carry scopes: **read** (GET endpoints, incl. `GET /categories`), "
+                "**ingest** (POST /feedback), and **write** (`PATCH /feedback/{id}` — "
+                "workflow status, corrections, tags replace, is_urgent — "
+                "`DELETE /feedback/{id}`, `POST /feedback/bulk` — the same patch applied "
+                "to up to 500 ids in one request — and the custom-categories CRUD: "
+                "`POST`/`PATCH`/`DELETE /categories`). "
                 "All data is scoped to the organization that owns the key."
             ),
         },
