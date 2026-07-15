@@ -47,7 +47,7 @@ class SalesforceIntegration(Base):
 
     # CRM-sourced churn labels (crm-churn-labels aspect): default-deny opt-in
     churn_labels_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
-    churn_label_config = Column(JSON, nullable=True)  # {"renewal_pipelines": [...]} / {"opportunity_types": [...]}
+    churn_label_config = Column(JSON, nullable=True)  # {"renewal_opportunity_types": [...]}
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
