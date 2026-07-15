@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -290,16 +291,43 @@ class HubSpotClient:
             if d.get("properties", {}).get("dealstage") not in closed_stages
         ]
 
-    def get_closed_lost_deals_for_company(self, company_id: str) -> list[dict]:
+    def get_closed_lost_deals_for_company(
+        self, company_id: str, *, since: Optional[datetime] = None
+    ) -> list[dict]:
         """
         Return closedlost deals associated with a company — the sibling
         accessor that retains what get_open_deals_for_company drops.
+
+        `since` (historical-backfill aspect) is an optional window floor,
+        applied client-side against `closedate` (the batch-read already
+        requests it). Default `None` preserves today's unfiltered behavior
+        — only the backfill task passes a floor. Parsing reuses
+        `churn_harvest_adapters._parse_close_date` semantics (ISO-8601,
+        "Z" -> "+00:00"); a deal with no/unparseable closedate is dropped
+        once a floor is supplied (nothing to compare).
         """
         all_deals = self._fetch_deals_for_company(company_id)
-        return [
+        lost = [
             d for d in all_deals
             if d.get("properties", {}).get("dealstage") == "closedlost"
         ]
+        if since is None:
+            return lost
+
+        from src.services.churn_harvest_adapters import _parse_close_date
+
+        floor = since if since.tzinfo else since
+        filtered = []
+        for d in lost:
+            close_dt = _parse_close_date(d.get("properties", {}).get("closedate"))
+            if close_dt is None:
+                continue
+            # Compare naive-to-naive / aware-to-aware; strip tzinfo from the
+            # parsed value if the floor is naive (callers pass naive UTC).
+            compare_dt = close_dt.replace(tzinfo=None) if floor.tzinfo is None else close_dt
+            if compare_dt >= floor:
+                filtered.append(d)
+        return filtered
 
     # ------------------------------------------------------------------
     # Writeback (contact property updates)

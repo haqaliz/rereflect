@@ -652,6 +652,97 @@ class TestGetClosedLostDealsForCompany:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 (historical-backfill): since-floor on get_closed_lost_deals_for_company
+# ---------------------------------------------------------------------------
+
+
+class TestGetClosedLostDealsSinceFloor:
+    _OLD = {
+        "id": "d-old",
+        "properties": {
+            "dealname": "Old Lost",
+            "dealstage": "closedlost",
+            "amount": "500",
+            "closedate": "2024-01-15T00:00:00Z",
+        },
+    }
+    _NEW = {
+        "id": "d-new",
+        "properties": {
+            "dealname": "New Lost",
+            "dealstage": "closedlost",
+            "amount": "700",
+            "closedate": "2026-06-15T00:00:00Z",
+        },
+    }
+
+    def _mock_transport(self, deals):
+        assoc_resp = _make_resp(
+            200,
+            {"results": [{"id": d["id"], "type": "company_to_deal"} for d in deals]},
+        )
+        batch_resp = _make_resp(200, {"results": deals, "status": "COMPLETE"})
+        return assoc_resp, batch_resp
+
+    def test_since_none_returns_all_closed_lost_deals(self):
+        """Default (since=None) preserves today's behavior — no filtering."""
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._OLD, self._NEW]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company("c1")
+
+        assert {d["id"] for d in lost} == {"d-old", "d-new"}
+
+    def test_since_floor_excludes_deals_closed_before_floor(self):
+        from datetime import datetime
+
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._OLD, self._NEW]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company(
+                    "c1", since=datetime(2025, 1, 1)
+                )
+
+        assert {d["id"] for d in lost} == {"d-new"}
+
+    def test_since_floor_includes_deal_closed_exactly_at_floor(self):
+        from datetime import datetime
+
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._NEW]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company(
+                    "c1", since=datetime(2026, 6, 15, 0, 0, 0)
+                )
+
+        assert {d["id"] for d in lost} == {"d-new"}
+
+
+# ---------------------------------------------------------------------------
 # Phase 6 (provider-churn-fetch): request `pipeline` on both deal accessors
 # ---------------------------------------------------------------------------
 

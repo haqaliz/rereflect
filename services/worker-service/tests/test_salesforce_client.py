@@ -624,6 +624,75 @@ class TestGetLostOpportunities:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 (historical-backfill): since-floor on get_lost_opportunities
+# ---------------------------------------------------------------------------
+
+
+class TestGetLostOpportunitiesSinceFloor:
+    def test_since_none_omits_close_date_clause(self):
+        """Default (since=None) preserves today's SOQL — no CloseDate filter."""
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        page = _make_resp(200, {"records": [], "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert "CloseDate >=" not in soql
+
+    def test_since_appends_close_date_floor_formatted_not_interpolated_raw(self):
+        from datetime import datetime
+
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        page = _make_resp(200, {"records": [], "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_lost_opportunities(
+                    "001xxxxxxxxxxxxxxx", since=datetime(2024, 3, 1)
+                )
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert soql == (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed, IsWon, Type "
+            "FROM Opportunity WHERE AccountId = '001xxxxxxxxxxxxxxx' "
+            "AND IsClosed = true AND IsWon = false AND CloseDate >= 2024-03-01"
+        )
+
+    def test_malformed_id_with_since_still_raises_no_http_call(self):
+        from datetime import datetime
+
+        from src.clients.salesforce import SalesforceClient, SalesforceQueryError
+
+        token_resp = _make_token_resp()
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                with pytest.raises(SalesforceQueryError):
+                    client.get_lost_opportunities(
+                        "'; DROP--", since=datetime(2024, 3, 1)
+                    )
+
+        instance.get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Phase 3 (provider-churn-fetch): SalesforceClient.get_opportunity_type_values
 # ---------------------------------------------------------------------------
 
