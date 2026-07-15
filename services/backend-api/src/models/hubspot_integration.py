@@ -6,7 +6,7 @@ One row per organization. access_token is Fernet-encrypted via encrypt_api_key
 """
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean,
-    DateTime, Index, UniqueConstraint,
+    DateTime, Index, UniqueConstraint, JSON,
 )
 from datetime import datetime
 from .base import Base
@@ -42,6 +42,10 @@ class HubSpotIntegration(Base):
     last_writeback_status = Column(String(50), nullable=True)
     last_writeback_error = Column(Text, nullable=True)
     contacts_written = Column(Integer, nullable=False, default=0, server_default="0")
+
+    # CRM-sourced churn labels (crm-churn-labels aspect): default-deny opt-in
+    churn_labels_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    churn_label_config = Column(JSON, nullable=True)  # {"renewal_pipelines": [...]} / {"opportunity_types": [...]}
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
