@@ -25,6 +25,7 @@ from src.api.routes import account as account_router
 from src.api.routes import ai_corrections as ai_corrections_router  # noqa: E402 — M3.8 Track B
 from src.api.routes import automations as automations_router  # noqa: E402 — M4.4 AI Workflow Automation
 from src.api.routes import churn_events as churn_events_router  # noqa: E402 — M4.1 Advanced Churn Prediction
+from src.api.routes import churn_suggestions as churn_suggestions_router  # noqa: E402 — review-queue (M5 CRM churn labels)
 from src.api.routes import api_keys as api_keys_router  # noqa: E402 — Feature C: Public REST API key management
 from src.api.routes import public_api as public_api_router  # noqa: E402 — Feature C: Public REST API surface
 from src.api.routes import churn_analytics as churn_analytics_router  # noqa: E402 — M4.1 Cohort Analytics
@@ -269,6 +270,10 @@ app.include_router(admin_ai_models.router)
 # NOTE: must be included BEFORE customers.router — its static paths (/churn-events/bulk, etc.)
 # must win over customers.router's /{email} wildcard.
 app.include_router(churn_events_router.router)
+# CRM churn-suggestion review queue (review-queue aspect, M5) — must also be
+# included BEFORE customers.router for the same reason: our static
+# /churn-suggestions/bulk path must win over customers.router's /{email}.
+app.include_router(churn_suggestions_router.router)
 # Advanced Churn Prediction — Cohort Analytics (M4.1 Phase 4)
 app.include_router(churn_analytics_router.router)
 # Advanced Churn Prediction — Accuracy API (M4.1 Phase 6.2a)
