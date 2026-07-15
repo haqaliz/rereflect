@@ -37,6 +37,13 @@ vi.mock('@/lib/api/customers', () => ({
   },
 }));
 
+// Mock churn-suggestions API — the /customers StatCard row queries the
+// pending count; unmocked, it would hit a real (unhandled) network call
+// in jsdom. Resolve to 0 so pre-existing tests below are unaffected.
+vi.mock('@/lib/api/churn-suggestions', () => ({
+  listChurnSuggestions: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 1 }),
+}));
+
 import { customersAPI } from '@/lib/api/customers';
 import CustomersPage from '../../app/(dashboard)/customers/page';
 
