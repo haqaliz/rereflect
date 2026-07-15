@@ -301,6 +301,22 @@ class SalesforceClient:
         )
         return self.query(soql)
 
+    def get_lost_opportunities(self, account_id: str) -> list[dict]:
+        """
+        Return all lost (closed, not-won) Opportunities for the given Account.
+
+        Sibling of get_open_opportunities — additive only, does not alter
+        the open-opportunity query used by the renewal-proxy enrichment.
+        Records are returned verbatim (no filtering, no normalization).
+        """
+        account_id = self._validate_sf_id(account_id)
+        soql = (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed, IsWon, Type "
+            f"FROM Opportunity WHERE AccountId = '{account_id}' "
+            "AND IsClosed = true AND IsWon = false"
+        )
+        return self.query(soql)
+
     # ------------------------------------------------------------------
     # Writeback (Contact field updates)
     # ------------------------------------------------------------------
