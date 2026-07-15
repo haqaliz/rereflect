@@ -256,6 +256,106 @@ class TestSuppression:
         assert db.query(ChurnLabelSuggestion).count() == 1
 
 
+class TestCharacterizationFrozen:
+    """
+    Phase 0 (historical-backfill aspect) — characterization lock.
+
+    Freezes harvest_org_suggestions' exact output shape (returned dict AND
+    the persisted rows' scalar fields) BEFORE the Phase 1 extraction of
+    _process_raw_record. Any diff here after the extraction means the
+    extraction changed behavior — fix the extraction, never this test.
+    """
+
+    def test_harvest_output_is_frozen(self, db):
+        client = FakeCrmClient(
+            deals_by_company={
+                "co1": [_hs_deal("d1"), _hs_deal("d2")],
+                "co2": [_hs_deal("d3")],
+            }
+        )
+
+        result = harvest_org_suggestions(
+            7, db, client,
+            provider="hubspot",
+            renewal_set=RENEWAL_SET,
+            known_emails=frozenset({"alice@example.com", "bob@example.com"}),
+            company_ids={"alice@example.com": "co1", "bob@example.com": "co2"},
+        )
+
+        assert result == {
+            "status": "success",
+            "scanned": 3,
+            "suggested": 3,
+            "skipped_existing": 0,
+            "denied": 0,
+            "dropped_by_cap": 0,
+        }
+
+        rows = (
+            db.query(ChurnLabelSuggestion)
+            .order_by(ChurnLabelSuggestion.external_opportunity_id)
+            .all()
+        )
+        frozen = [
+            (
+                r.customer_email,
+                r.provider,
+                r.external_opportunity_id,
+                r.suggested_churned_at,
+                r.evidence,
+                r.status,
+            )
+            for r in rows
+        ]
+        assert frozen == [
+            (
+                "alice@example.com",
+                "hubspot",
+                "d1",
+                datetime(2026, 6, 15, 0, 0),
+                {
+                    "name": "Deal d1",
+                    "stage": "closedlost",
+                    "type": "renewal",
+                    "amount": 1000.0,
+                    "close_date": "2026-06-15T00:00:00Z",
+                    "provider": "hubspot",
+                },
+                "pending",
+            ),
+            (
+                "alice@example.com",
+                "hubspot",
+                "d2",
+                datetime(2026, 6, 15, 0, 0),
+                {
+                    "name": "Deal d2",
+                    "stage": "closedlost",
+                    "type": "renewal",
+                    "amount": 1000.0,
+                    "close_date": "2026-06-15T00:00:00Z",
+                    "provider": "hubspot",
+                },
+                "pending",
+            ),
+            (
+                "bob@example.com",
+                "hubspot",
+                "d3",
+                datetime(2026, 6, 15, 0, 0),
+                {
+                    "name": "Deal d3",
+                    "stage": "closedlost",
+                    "type": "renewal",
+                    "amount": 1000.0,
+                    "close_date": "2026-06-15T00:00:00Z",
+                    "provider": "hubspot",
+                },
+                "pending",
+            ),
+        ]
+
+
 class TestCapAndErrors:
     def test_cap_drops_remainder_and_logs_warning(self, db, caplog):
         deals = [_hs_deal(f"d{i}") for i in range(250)]
