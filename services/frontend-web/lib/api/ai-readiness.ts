@@ -9,9 +9,11 @@ export interface AIReadiness {
   corrections_total: number;
   corrections_by_type: Record<string, number>;
   churn_labels_total: number;
+  churn_labels_trainable: number;
   churn_labels_recovered: number;
   churn_labels_by_reason: Record<string, number>;
   churn_labels_by_source: Record<string, number>;
+  pending_suggestions: number;
   correction_volume_target: number;
   churn_label_target: number;
   correction_volume_ready: boolean;
