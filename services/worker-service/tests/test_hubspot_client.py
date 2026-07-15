@@ -503,3 +503,147 @@ class TestOpenDealsCharacterizationLock:
                 deals = client.get_open_deals_for_company("c1")
 
         assert deals == [d1, d2]
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 (provider-churn-fetch): HubSpotClient.get_closed_lost_deals_for_company
+# ---------------------------------------------------------------------------
+
+
+class TestGetClosedLostDealsForCompany:
+    _D1 = {
+        "id": "d1",
+        "properties": {
+            "dealname": "Open High",
+            "dealstage": "contractsent",
+            "amount": "900",
+            "closedate": "2026-09-01T00:00:00Z",
+        },
+    }
+    _D2 = {
+        "id": "d2",
+        "properties": {
+            "dealname": "Open Low",
+            "dealstage": "appointmentscheduled",
+            "amount": "100",
+            "closedate": "2026-08-01T00:00:00Z",
+        },
+    }
+    _D3 = {
+        "id": "d3",
+        "properties": {
+            "dealname": "Won Big",
+            "dealstage": "closedwon",
+            "amount": "5000",
+            "closedate": "2026-05-01T00:00:00Z",
+        },
+    }
+    _D4 = {
+        "id": "d4",
+        "properties": {
+            "dealname": "Lost Big",
+            "dealstage": "closedlost",
+            "amount": "4000",
+            "closedate": "2026-01-15T00:00:00Z",
+        },
+    }
+
+    def _mock_transport(self, deals):
+        assoc_resp = _make_resp(
+            200,
+            {"results": [{"id": d["id"], "type": "company_to_deal"} for d in deals]},
+        )
+        batch_resp = _make_resp(200, {"results": deals, "status": "COMPLETE"})
+        return assoc_resp, batch_resp
+
+    def test_returns_only_closedlost_deals(self):
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._D1, self._D2, self._D3, self._D4]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company("c1")
+
+        assert lost == [self._D4]
+
+    def test_disjoint_with_open_deals(self):
+        from src.clients.hubspot import HubSpotClient
+
+        deals = [self._D1, self._D2, self._D3, self._D4]
+        assoc_resp, batch_resp = self._mock_transport(deals)
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                open_deals = client.get_open_deals_for_company("c1")
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                lost_deals = client.get_closed_lost_deals_for_company("c1")
+
+        open_ids = {d["id"] for d in open_deals}
+        lost_ids = {d["id"] for d in lost_deals}
+        assert open_ids & lost_ids == set()
+        assert "d4" in lost_ids
+
+    def test_404_on_associations_returns_empty_list(self):
+        from src.clients.hubspot import HubSpotClient
+
+        assoc_404 = MagicMock()
+        assoc_404.status_code = 404
+        assoc_404.headers = {}
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_404
+
+            with HubSpotClient("test-token") as client:
+                lost = client.get_closed_lost_deals_for_company("c1")
+
+        assert lost == []
+        instance.post.assert_not_called()
+
+    def test_429_on_associations_raises_transient(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "1"}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep"):
+            instance = MockHTTP.return_value
+            instance.get.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.get_closed_lost_deals_for_company("c1")
+
+    def test_429_on_batch_read_raises_transient(self):
+        from src.clients.hubspot import HubSpotClient, HubSpotTransientError
+
+        assoc_resp = self._mock_transport([self._D4])[0]
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "1"}
+
+        with patch("httpx.Client") as MockHTTP, patch("time.sleep"):
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = resp_429
+
+            with pytest.raises(HubSpotTransientError):
+                with HubSpotClient("test-token") as client:
+                    client.get_closed_lost_deals_for_company("c1")

@@ -290,6 +290,17 @@ class HubSpotClient:
             if d.get("properties", {}).get("dealstage") not in closed_stages
         ]
 
+    def get_closed_lost_deals_for_company(self, company_id: str) -> list[dict]:
+        """
+        Return closedlost deals associated with a company — the sibling
+        accessor that retains what get_open_deals_for_company drops.
+        """
+        all_deals = self._fetch_deals_for_company(company_id)
+        return [
+            d for d in all_deals
+            if d.get("properties", {}).get("dealstage") == "closedlost"
+        ]
+
     # ------------------------------------------------------------------
     # Writeback (contact property updates)
     # ------------------------------------------------------------------
