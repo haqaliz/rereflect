@@ -6,6 +6,8 @@ Pure asserts only — no I/O, no fixtures, no DB, no mocks, no `patch`.
 
 from __future__ import annotations
 
+import os
+
 from src.services.churn_harvest_core import (
     SUGGESTION_DENY_REASONS,
     decide_suggestion,
@@ -172,3 +174,34 @@ class TestSuggestPath:
             known_emails=frozenset({"a@example.com"}),
         )
         assert (suggest, reason) == (True, None)
+
+
+class TestPurityGuard:
+    """Source-level drift guard (AC 9): the two pure modules must never grow
+    a Celery/SQLAlchemy/FastAPI/httpx/client import. Mirrors the purity
+    contract asserted by status_sync_core.py's docstring."""
+
+    FORBIDDEN_TOKENS = ("celery", "sqlalchemy", "fastapi", "httpx", "client")
+
+    def _source_lines(self, relative_path: str) -> list[str]:
+        here = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(here, "..", relative_path)
+        with open(full_path, "r", encoding="utf-8") as fh:
+            return fh.readlines()
+
+    def _assert_no_forbidden_imports(self, relative_path: str) -> None:
+        for line in self._source_lines(relative_path):
+            stripped = line.strip()
+            if not (stripped.startswith("import ") or stripped.startswith("from ")):
+                continue
+            lowered = stripped.lower()
+            for token in self.FORBIDDEN_TOKENS:
+                assert token not in lowered, (
+                    f"{relative_path} imports forbidden token {token!r}: {stripped!r}"
+                )
+
+    def test_churn_harvest_core_has_no_forbidden_imports(self):
+        self._assert_no_forbidden_imports("src/services/churn_harvest_core.py")
+
+    def test_churn_harvest_adapters_has_no_forbidden_imports(self):
+        self._assert_no_forbidden_imports("src/services/churn_harvest_adapters.py")
