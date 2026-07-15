@@ -52,6 +52,7 @@ celery_app = Celery(
         "src.tasks.hubspot_writeback",
         "src.tasks.salesforce_sync",
         "src.tasks.salesforce_writeback",
+        "src.tasks.churn_backfill_task",
         "src.tasks.zendesk_sync",
         "src.tasks.jira_sync",
         "src.tasks.zendesk_status_sync",
