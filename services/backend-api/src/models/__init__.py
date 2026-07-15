@@ -45,6 +45,7 @@ from .ai_correction import AICorrection
 from .automation_rule import AutomationRule
 from .automation_execution import AutomationExecution
 from .churn_event import CustomerChurnEvent
+from .churn_label_suggestion import ChurnLabelSuggestion
 from .churn_calibration import ChurnCalibrationModel, ChurnBacktestRun
 from .churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
 from .org_classifier import OrgClassifierModel, OrgClassifierEvalRun
@@ -111,6 +112,7 @@ __all__ = [
     "AutomationRule",
     "AutomationExecution",
     "CustomerChurnEvent",
+    "ChurnLabelSuggestion",
     "ChurnCalibrationModel",
     "ChurnBacktestRun",
     "ChurnPlaybook",
