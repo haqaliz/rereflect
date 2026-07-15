@@ -16,11 +16,12 @@ operator-actionable message — never a 500.
 """
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import (
@@ -33,6 +34,11 @@ from src.database.session import get_db
 from src.models.hubspot_integration import HubSpotIntegration
 from src.models.organization import Organization
 from src.models.user import User
+from src.services.crm_churn_label_options import (
+    _extract_requested_ids,
+    _validate_churn_label_config,
+    fetch_renewal_options,
+)
 from src.services.crm_integration_common import another_crm_active, purge_crm_enrichment
 from src.services.hubspot_writeback_validation import validate_writeback_field
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
@@ -78,6 +84,13 @@ class HubSpotStatusResponse(BaseModel):
     last_writeback_status: Optional[str] = None
     last_writeback_error: Optional[str] = None
     contacts_written: int = 0
+    # CRM-sourced churn labels (org-config-api-and-ui aspect)
+    churn_labels_enabled: bool = False
+    churn_label_config: Optional[Dict] = None
+    last_harvest_at: Optional[datetime] = None
+    last_harvest_status: Optional[str] = None
+    last_harvest_error: Optional[str] = None
+    suggestions_created: int = 0
     # access_token is intentionally NEVER included
 
 
@@ -107,6 +120,31 @@ class HubSpotWritebackTestRequest(BaseModel):
 class HubSpotWritebackTestResponse(BaseModel):
     ok: bool
     reason: Optional[str] = None
+
+
+class HubSpotChurnLabelsUpdateRequest(BaseModel):
+    enabled: bool
+    config: Optional[Dict] = None
+
+
+class HubSpotChurnLabelOption(BaseModel):
+    id: str
+    label: str
+
+
+class HubSpotChurnLabelOptionsResponse(BaseModel):
+    options: List[HubSpotChurnLabelOption]
+    provider: str
+
+
+class HubSpotChurnLabelsResponse(BaseModel):
+    churn_labels_enabled: bool
+    churn_label_config: Optional[Dict] = None
+    last_harvest_at: Optional[datetime] = None
+    last_harvest_status: Optional[str] = None
+    last_harvest_error: Optional[str] = None
+    suggestions_created: int = 0
+    # access_token is intentionally NEVER included
 
 
 # CRM writeback (writeback-task-trigger aspect): bound on backfill-on-enable
@@ -164,6 +202,54 @@ def _get_active_integration(
             HubSpotIntegration.is_active.is_(True),
         )
         .first()
+    )
+
+
+def _get_org_integration(org_id: int, db: Session) -> Optional[HubSpotIntegration]:
+    """Return the HubSpot integration row for an org regardless of is_active
+    (the churn-labels setting is persisted on the row, so 404 vs 400 can be
+    distinguished — mirrors jira_integration.py's _get_org_integration)."""
+    return (
+        db.query(HubSpotIntegration)
+        .filter(HubSpotIntegration.organization_id == org_id)
+        .first()
+    )
+
+
+def _suggestions_created(db: Session, org_id: int, provider: str) -> int:
+    """COUNT of ChurnLabelSuggestion rows for this org+provider (mirrors
+    jira_integration.py:255 _last_status_synced_at — a status-response field
+    derived from a related table, not a column on this row)."""
+    from src.models.churn_label_suggestion import ChurnLabelSuggestion
+
+    return (
+        db.query(func.count(ChurnLabelSuggestion.id))
+        .filter(
+            ChurnLabelSuggestion.organization_id == org_id,
+            ChurnLabelSuggestion.provider == provider,
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _build_churn_labels_response(
+    db: Session, org_id: int, row: HubSpotIntegration
+) -> HubSpotChurnLabelsResponse:
+    """
+    Build the ChurnLabelsResponse for an existing row.
+
+    last_harvest_at/status/error columns do not exist yet (owned by the
+    harvester aspect) — read via getattr(..., None) so this route needs no
+    edit when that migration lands (D1).
+    """
+    return HubSpotChurnLabelsResponse(
+        churn_labels_enabled=bool(row.churn_labels_enabled),
+        churn_label_config=row.churn_label_config,
+        last_harvest_at=getattr(row, "last_harvest_at", None),
+        last_harvest_status=getattr(row, "last_harvest_status", None),
+        last_harvest_error=getattr(row, "last_harvest_error", None),
+        suggestions_created=_suggestions_created(db, org_id, "hubspot"),
     )
 
 
@@ -306,6 +392,12 @@ def hubspot_status(
         last_writeback_status=row.last_writeback_status,
         last_writeback_error=row.last_writeback_error,
         contacts_written=row.contacts_written,
+        churn_labels_enabled=bool(row.churn_labels_enabled),
+        churn_label_config=row.churn_label_config,
+        last_harvest_at=getattr(row, "last_harvest_at", None),
+        last_harvest_status=getattr(row, "last_harvest_status", None),
+        last_harvest_error=getattr(row, "last_harvest_error", None),
+        suggestions_created=_suggestions_created(db, current_org.id, "hubspot"),
     )
 
 
@@ -540,6 +632,114 @@ def hubspot_writeback_test(
     plain_token = get_decrypted_token(integration)
     ok, reason = validate_writeback_field(plain_token, field_name)
     return HubSpotWritebackTestResponse(ok=ok, reason=reason)
+
+
+@router.patch(
+    "/churn-labels",
+    response_model=HubSpotChurnLabelsResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_configure_churn_labels(
+    payload: HubSpotChurnLabelsUpdateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Configure per-org CRM-sourced churn-label suggestions (default-deny).
+
+    404 if the org has no HubSpot integration row at all (the setting is
+    persisted on the integration row, so one must exist first). 400 if the
+    row exists but is not active (validation needs a live token).
+
+    Shape (unknown key / non-list / non-string member) is validated
+    unconditionally. The live pipelines call — and the id-existence check —
+    only runs when the payload's renewal_pipeline_ids list is non-empty:
+    `{enabled: true}` with an empty/absent list is 200, never a 422, and
+    NEVER invents an "all pipelines" default (that would inject exactly the
+    false labels this feature exists to prevent — the card carries the
+    warning instead). Nothing is mutated until every check has passed.
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No HubSpot integration found. Connect HubSpot first.",
+        )
+    if not row.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="HubSpot integration is not active.",
+        )
+
+    # Shape-only pass — never touches the CRM, so a typo'd key/shape 422s
+    # before any network call.
+    _validate_churn_label_config(payload.config, "hubspot")
+
+    requested_ids = _extract_requested_ids(payload.config, "hubspot")
+    if requested_ids:
+        live_options, reason = fetch_renewal_options("hubspot", row)
+        if reason:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "reason": reason,
+                    "message": f"Could not validate renewal pipelines: {reason}.",
+                },
+            )
+        _validate_churn_label_config(payload.config, "hubspot", live_options)
+
+    row.churn_labels_enabled = payload.enabled
+    if payload.config is not None:
+        row.churn_label_config = payload.config
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "HubSpot churn-labels updated for org %s (enabled=%s)",
+        current_org.id,
+        row.churn_labels_enabled,
+    )
+    return _build_churn_labels_response(db, current_org.id, row)
+
+
+@router.get(
+    "/churn-labels/options",
+    response_model=HubSpotChurnLabelOptionsResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_churn_label_options(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Live deal pipelines for the renewal-set picker. 404 if no active
+    integration (needs a live token); 502 on CRM fetch failure."""
+    row = _get_active_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active HubSpot integration found.",
+        )
+
+    options, reason = fetch_renewal_options("hubspot", row)
+    if reason:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "reason": reason,
+                "message": f"Could not fetch HubSpot deal pipelines: {reason}.",
+            },
+        )
+    return HubSpotChurnLabelOptionsResponse(
+        options=[HubSpotChurnLabelOption(**opt) for opt in options],
+        provider="hubspot",
+    )
 
 
 # ──────────────────────── Sync trigger endpoint ──────────────────────────────

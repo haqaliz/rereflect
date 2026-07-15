@@ -26,6 +26,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 import httpx
+from fastapi import HTTPException, status
 
 from src.utils.encryption import decrypt_api_key
 
@@ -35,6 +36,14 @@ HUBSPOT_PIPELINES_URL = "https://api.hubapi.com/crm/v3/pipelines/deals"
 SALESFORCE_API_VERSION = "v60.0"
 
 Option = Dict[str, str]
+
+# Provider -> the single config key each provider's churn-label config may
+# hold (spec D2 — the model comments' "renewal_pipelines" was illustrative;
+# the spec's names are the contract).
+CHURN_LABEL_CONFIG_KEYS = {
+    "hubspot": "renewal_pipeline_ids",
+    "salesforce": "renewal_opportunity_types",
+}
 
 
 def fetch_renewal_options(
@@ -180,3 +189,85 @@ def _fetch_salesforce_opportunity_types(integration) -> Tuple[List[Option], Opti
         if value.get("active", True)
     ]
     return options, None
+
+
+# ──────────────────── Shared config validator (one source of truth) ──────────
+#
+# Both routers (hubspot_integration.py, salesforce_integration.py) import
+# _extract_requested_ids and _validate_churn_label_config from here so the
+# shape/id-validation rules can never drift between providers (spec §7).
+
+
+def _extract_requested_ids(config: Optional[dict], provider: str) -> List[str]:
+    """
+    Return the raw id/type list from `config` for `provider`'s expected key,
+    or [] if config/the key is absent or malformed. Malformed shapes (non-list
+    value, non-string members, unknown key) are 422'd by
+    `_validate_churn_label_config`, not here — this is a read, not a check.
+    """
+    if not config:
+        return []
+    expected_key = CHURN_LABEL_CONFIG_KEYS.get(provider)
+    value = config.get(expected_key) if expected_key else None
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _validate_churn_label_config(
+    config: Optional[dict],
+    provider: str,
+    live_options: Optional[List[Option]] = None,
+) -> None:
+    """
+    Mirrors `jira_integration.py::_validate_status_mapping`'s shape (422 on
+    the first violation found).
+
+    Raises 422 when `config` holds:
+      - an unrecognized key (must be exactly the provider's expected key,
+        e.g. "renewal_pipeline_ids" for HubSpot);
+      - a non-list value;
+      - a non-string member;
+      - (only when `live_options` is provided — i.e. the caller already did
+        the live CRM fetch because the payload's list was non-empty) an id
+        absent from `live_options` — detail names the offending id.
+
+    `live_options=None` means "id-check not yet performed" (used for the
+    shape-only pass before deciding whether a live fetch is even needed —
+    R-A/spec AC5: an empty/absent renewal list must 200 without ever calling
+    the CRM). Validates only ids present in the incoming payload — never
+    inspects or prunes the previously saved config (R-C).
+    """
+    if config is None:
+        return
+
+    expected_key = CHURN_LABEL_CONFIG_KEYS[provider]
+    for key, value in config.items():
+        if key != expected_key:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid churn_label_config key '{key}'. Must be '{expected_key}'.",
+            )
+        if not isinstance(value, list):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{expected_key}' must be a list of strings.",
+            )
+        for item in value:
+            if not isinstance(item, str):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"'{expected_key}' must contain only strings.",
+                )
+
+        if live_options is not None:
+            live_ids = {opt.get("id") for opt in live_options}
+            for item in value:
+                if item not in live_ids:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"Unknown id '{item}' in '{expected_key}': not found "
+                            "in live CRM metadata."
+                        ),
+                    )
