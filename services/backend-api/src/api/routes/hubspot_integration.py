@@ -91,6 +91,11 @@ class HubSpotStatusResponse(BaseModel):
     last_harvest_status: Optional[str] = None
     last_harvest_error: Optional[str] = None
     suggestions_created: int = 0
+    # Historical churn-label backfill (historical-backfill aspect)
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
     # access_token is intentionally NEVER included
 
 
@@ -144,7 +149,27 @@ class HubSpotChurnLabelsResponse(BaseModel):
     last_harvest_status: Optional[str] = None
     last_harvest_error: Optional[str] = None
     suggestions_created: int = 0
+    # Historical churn-label backfill (historical-backfill aspect)
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
     # access_token is intentionally NEVER included
+
+
+class HubSpotBackfillTriggerRequest(BaseModel):
+    """Operator-chosen window in months. Out-of-range -> 422 for free
+    (Field validation), so the route body never has to hand-roll AC-2's
+    bounds check."""
+    months: int = Field(default=24, ge=1, le=60)
+
+
+class HubSpotBackfillActionResponse(BaseModel):
+    status: str
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
 
 
 # CRM writeback (writeback-task-trigger aspect): bound on backfill-on-enable
@@ -250,6 +275,10 @@ def _build_churn_labels_response(
         last_harvest_status=getattr(row, "last_harvest_status", None),
         last_harvest_error=getattr(row, "last_harvest_error", None),
         suggestions_created=_suggestions_created(db, org_id, "hubspot"),
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
@@ -398,6 +427,10 @@ def hubspot_status(
         last_harvest_status=getattr(row, "last_harvest_status", None),
         last_harvest_error=getattr(row, "last_harvest_error", None),
         suggestions_created=_suggestions_created(db, current_org.id, "hubspot"),
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
@@ -739,6 +772,147 @@ def hubspot_churn_label_options(
     return HubSpotChurnLabelOptionsResponse(
         options=[HubSpotChurnLabelOption(**opt) for opt in options],
         provider="hubspot",
+    )
+
+
+# ──────────────────────── Historical churn-label backfill ───────────────────
+# historical-backfill aspect (PRD M7). Distinct, cancellable Celery task —
+# never inside the daily hubspot sync beat (03:15 UTC). See
+# docs/planning/crm-churn-labels/historical-backfill/spec.md.
+
+
+@router.post(
+    "/churn-labels/backfill",
+    response_model=HubSpotBackfillActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_trigger_churn_backfill(
+    payload: HubSpotBackfillTriggerRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger an on-demand historical backfill of closed-lost HubSpot deals
+    into churn-label suggestions, over an operator-chosen window (months,
+    default 24, hard max 60 — enforced by the request schema, so an
+    out-of-range value 422s before this body runs).
+
+    Guards, in order: admin/owner + feature (route dependencies) -> no
+    integration row -> 404; disabled or unconfigured churn labels -> 400;
+    already running -> 409. Dispatch failure (broker down) rolls the status
+    back to "failed" and returns 502 — never a 500 (deliberate divergence
+    from the unguarded /sync endpoint above).
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No HubSpot integration found. Connect HubSpot first.",
+        )
+
+    renewal_ids = (row.churn_label_config or {}).get("renewal_pipeline_ids") or []
+    if not row.churn_labels_enabled or not renewal_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "CRM-sourced churn labels are not enabled or configured for "
+                "HubSpot. Enable them with at least one renewal pipeline first."
+            ),
+        )
+
+    if row.backfill_status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A churn-label backfill is already running for this integration.",
+        )
+
+    row.backfill_status = "running"
+    row.backfill_progress = {
+        "scanned": 0, "suggested": 0, "skipped_existing": 0,
+        "denied": 0, "dropped_by_cap": 0,
+    }
+    row.backfill_error = None
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.churn_backfill_task.backfill_churn_suggestions",
+            args=[row.id, payload.months, "hubspot"],
+        )
+    except Exception as exc:
+        row.backfill_status = "failed"
+        row.backfill_error = f"Failed to enqueue backfill task: {exc}"[:500]
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not enqueue the churn-label backfill task.",
+        )
+
+    logger.info(
+        "HubSpot churn-label backfill triggered for org %s (integration_id=%s, months=%s)",
+        current_org.id, row.id, payload.months,
+    )
+    return HubSpotBackfillActionResponse(
+        status="queued",
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
+    )
+
+
+@router.post(
+    "/churn-labels/backfill/cancel",
+    response_model=HubSpotBackfillActionResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("hubspot_integration")),
+    ],
+)
+def hubspot_cancel_churn_backfill(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Request cancellation of a running backfill. Celery `revoke` cannot stop
+    a running task body, so the DB `backfill_status` flag is the mechanism:
+    the task polls it before each fetch unit (company/account) and stops at
+    the next boundary, persisting "cancelled" + whatever partial progress
+    had already been committed.
+
+    409 if there is no running backfill to cancel.
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No HubSpot integration found.",
+        )
+
+    if row.backfill_status != "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No running churn-label backfill to cancel.",
+        )
+
+    row.backfill_status = "cancelling"
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    return HubSpotBackfillActionResponse(
+        status="cancelling",
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 

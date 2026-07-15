@@ -152,6 +152,11 @@ class SalesforceStatusResponse(BaseModel):
     last_harvest_status: Optional[str] = None
     last_harvest_error: Optional[str] = None
     suggestions_created: int = 0
+    # Historical churn-label backfill (historical-backfill aspect)
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
     # refresh_token / access_token are intentionally NEVER included
 
 
@@ -210,7 +215,25 @@ class SalesforceChurnLabelsResponse(BaseModel):
     last_harvest_status: Optional[str] = None
     last_harvest_error: Optional[str] = None
     suggestions_created: int = 0
+    # Historical churn-label backfill (historical-backfill aspect)
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
     # refresh_token / access_token are intentionally NEVER included
+
+
+class SalesforceBackfillTriggerRequest(BaseModel):
+    """Operator-chosen window in months. Out-of-range -> 422 for free."""
+    months: int = Field(default=24, ge=1, le=60)
+
+
+class SalesforceBackfillActionResponse(BaseModel):
+    status: str
+    backfill_status: Optional[str] = None
+    backfill_progress: Optional[Dict] = None
+    backfill_last_run_at: Optional[datetime] = None
+    backfill_error: Optional[str] = None
 
 
 # CRM writeback (writeback-task-trigger aspect): bound on backfill-on-enable
@@ -339,6 +362,10 @@ def _build_churn_labels_response(
         last_harvest_status=getattr(row, "last_harvest_status", None),
         last_harvest_error=getattr(row, "last_harvest_error", None),
         suggestions_created=_suggestions_created(db, org_id, "salesforce"),
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
@@ -508,6 +535,10 @@ def salesforce_status(
         last_harvest_status=getattr(row, "last_harvest_status", None),
         last_harvest_error=getattr(row, "last_harvest_error", None),
         suggestions_created=_suggestions_created(db, current_org.id, "salesforce"),
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
@@ -1054,6 +1085,148 @@ def salesforce_churn_label_options(
     return SalesforceChurnLabelOptionsResponse(
         options=[SalesforceChurnLabelOption(**opt) for opt in options],
         provider="salesforce",
+    )
+
+
+# ──────────────────────── Historical churn-label backfill ───────────────────
+# historical-backfill aspect (PRD M7). Distinct, cancellable Celery task —
+# never inside the daily salesforce sync beat (03:45 UTC). See
+# docs/planning/crm-churn-labels/historical-backfill/spec.md.
+
+
+@router.post(
+    "/churn-labels/backfill",
+    response_model=SalesforceBackfillActionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_trigger_churn_backfill(
+    payload: SalesforceBackfillTriggerRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Trigger an on-demand historical backfill of closed-lost Salesforce
+    Opportunities into churn-label suggestions, over an operator-chosen
+    window (months, default 24, hard max 60 — enforced by the request
+    schema, so an out-of-range value 422s before this body runs).
+
+    Guards, in order: admin/owner + feature (route dependencies) -> no
+    integration row -> 404; disabled or unconfigured churn labels -> 400;
+    already running -> 409. Dispatch failure (broker down) rolls the status
+    back to "failed" and returns 502 — never a 500 (deliberate divergence
+    from the unguarded /sync endpoint above).
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Salesforce integration found. Connect Salesforce first.",
+        )
+
+    renewal_types = (row.churn_label_config or {}).get("renewal_opportunity_types") or []
+    if not row.churn_labels_enabled or not renewal_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "CRM-sourced churn labels are not enabled or configured for "
+                "Salesforce. Enable them with at least one renewal opportunity "
+                "type first."
+            ),
+        )
+
+    if row.backfill_status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A churn-label backfill is already running for this integration.",
+        )
+
+    row.backfill_status = "running"
+    row.backfill_progress = {
+        "scanned": 0, "suggested": 0, "skipped_existing": 0,
+        "denied": 0, "dropped_by_cap": 0,
+    }
+    row.backfill_error = None
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    try:
+        _get_celery_app().send_task(
+            "src.tasks.churn_backfill_task.backfill_churn_suggestions",
+            args=[row.id, payload.months, "salesforce"],
+        )
+    except Exception as exc:
+        row.backfill_status = "failed"
+        row.backfill_error = f"Failed to enqueue backfill task: {exc}"[:500]
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not enqueue the churn-label backfill task.",
+        )
+
+    logger.info(
+        "Salesforce churn-label backfill triggered for org %s (integration_id=%s, months=%s)",
+        current_org.id, row.id, payload.months,
+    )
+    return SalesforceBackfillActionResponse(
+        status="queued",
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
+    )
+
+
+@router.post(
+    "/churn-labels/backfill/cancel",
+    response_model=SalesforceBackfillActionResponse,
+    dependencies=[
+        Depends(require_admin_or_owner),
+        Depends(require_feature("salesforce_integration")),
+    ],
+)
+def salesforce_cancel_churn_backfill(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Request cancellation of a running backfill. Celery `revoke` cannot stop
+    a running task body, so the DB `backfill_status` flag is the mechanism:
+    the task polls it before each fetch unit (account) and stops at the next
+    boundary, persisting "cancelled" + whatever partial progress had already
+    been committed.
+
+    409 if there is no running backfill to cancel.
+    """
+    row = _get_org_integration(current_org.id, db)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Salesforce integration found.",
+        )
+
+    if row.backfill_status != "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No running churn-label backfill to cancel.",
+        )
+
+    row.backfill_status = "cancelling"
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    return SalesforceBackfillActionResponse(
+        status="cancelling",
+        backfill_status=row.backfill_status,
+        backfill_progress=row.backfill_progress,
+        backfill_last_run_at=row.backfill_last_run_at,
+        backfill_error=row.backfill_error,
     )
 
 
