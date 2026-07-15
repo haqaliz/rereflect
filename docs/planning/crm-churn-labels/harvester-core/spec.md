@@ -8,9 +8,8 @@
 storable. This aspect is the decision + wiring between them: given a closed-lost HubSpot deal or
 Salesforce Opportunity, decide whether it is a churn suggestion and write it — **once** — into
 `churn_label_suggestions`. A configured org wakes to pending suggestions from the daily CRM sync it
-already runs; an unconfigured org sees **nothing** (default-deny; R2). The discipline: **a guess
-must never reach the training set** — this aspect writes suggestions only, with no path to
-`customer_churn_events`.
+already runs; an unconfigured org sees **nothing** (default-deny; R2). The discipline: **a guess must
+never reach the training set** — this aspect writes suggestions only, never `customer_churn_events`.
 
 ## In scope
 
@@ -20,70 +19,60 @@ must never reach the training set** — this aspect writes suggestions only, wit
    ```python
    def decide_suggestion(
        *, is_closed: bool, is_won: bool,
-       discriminator: str | None,            # SF Opportunity.Type / HubSpot deal pipeline id
-       renewal_set: frozenset[str] | None,   # org's configured renewal types/pipelines
-       customer_email: str | None,           # already lowercased by the adapter
-       known_emails: frozenset[str],
+       discriminator: str | None,           # SF Opportunity.Type / HubSpot deal pipeline id
+       renewal_set: frozenset[str] | None,  # org's configured renewal types/pipelines
+       customer_email: str | None, known_emails: frozenset[str],   # both lowercased
    ) -> tuple[bool, str | None]:
        """(suggest, deny_reason). DEFAULT-DENY. Never raises."""
    ```
 
-   Suggest only when closed AND not won AND `discriminator in renewal_set` AND
-   `customer_email in known_emails`; any None/unknown/unconfigured input denies. Deny order is
-   fixed and asserted so the logged reason is deterministic — module constant
-   `SUGGESTION_DENY_REASONS`: `not_closed` → `won` → `discriminator_not_configured` (None/empty
-   `renewal_set`) → `no_discriminator` (None/blank discriminator — R5) → `unknown_customer`.
-   Matching is exact: **no regex, no normalization, no prefix match** on pipeline names (M2).
+   Suggest only when closed AND not won AND `discriminator in renewal_set` AND `customer_email in
+   known_emails`; any None/unknown/unconfigured input denies. Deny order is fixed and asserted so
+   the logged reason is deterministic — module constant `SUGGESTION_DENY_REASONS`: `not_closed` →
+   `won` → `discriminator_not_configured` (None/empty `renewal_set`) → `no_discriminator`
+   (None/blank — R5) → `unknown_customer`. Matching is exact: **no regex, no normalization, no
+   prefix match** on pipeline names (M2).
 
 2. **Two thin adapters** — `worker-service/src/services/churn_harvest_adapters.py`. Pure,
    stdlib-only. `hubspot_deal_to_candidate(deal, contact_email)` and
-   `salesforce_opportunity_to_candidate(opp, contact_email)` each return one shape —
+   `salesforce_opportunity_to_candidate(opp, contact_email)` each normalize to one shape —
    `{customer_email, external_opportunity_id, suggested_churned_at, evidence, is_closed, is_won,
    discriminator}` — or `None` when the record lacks an id or a usable close date.
-   - `suggested_churned_at` = the **CRM close date** (`closedate` / `CloseDate`), ISO-8601 with
-     `Z` → `+00:00` (reuse `hubspot_sync.py:239-244`). **Never the detection date** — stability is
-     what makes re-harvest idempotent (understanding.md Finding 5). Unparseable → `None`, dropped.
-   - `is_won`: HubSpot `dealstage == "closedwon"`; SF the `IsWon` boolean. `discriminator`: HubSpot
-     `properties.pipeline`; SF `Type`. `evidence`: `{name, stage, type, amount, close_date,
-     provider}` — what the reviewer sees.
+   `suggested_churned_at` = the **CRM close date** (`closedate` / `CloseDate`), ISO-8601 with
+   `Z` → `+00:00` (reuse `hubspot_sync.py:239-244`) — **never the detection date**, since stability
+   is what makes re-harvest idempotent (understanding.md Finding 5); unparseable → dropped.
+   `is_won`: HubSpot `dealstage == "closedwon"`, SF the `IsWon` boolean. `discriminator`: HubSpot
+   `properties.pipeline`, SF `Type`. `evidence`: `{name, stage, type, amount, close_date,
+   provider}` — what the reviewer sees.
 
-
-3. **Wiring — no new beat.** Called from inside the existing `_sync_org(org_id, db, client)` of
-   `hubspot_sync.py` / `salesforce_sync.py`, where `known_emails` is already built
-   (`hubspot_sync.py:179-199`, `salesforce_sync.py:218-245`) and the live client + decrypted token
-   are already held — under the existing `sync_hubspot_org` (03:15 UTC) / `sync_salesforce_org`
-   (03:45 UTC) beats. Skipped unless `churn_labels_enabled` **and** a non-empty renewal set.
-
-   ```python
-   # worker-service/src/services/churn_suggestion_harvester.py
-   def harvest_org_suggestions(
-       org_id: int, db, client, *, provider: str,
-       renewal_set: frozenset[str], known_emails: frozenset[str],
-       cap: int = PER_RUN_SUGGESTION_CAP,
-   ) -> dict:  # {"scanned","suggested","skipped_existing","denied","dropped_by_cap"}
-   ```
-
-   Celery-free, injectable `client`, caller owns the transaction — the `_sync_org` contract.
-   Harvest must **not** fail enrichment: exception-wrapped, logged, recorded
+3. **Wiring — no new beat.** `worker-service/src/services/churn_suggestion_harvester.py`, called
+   from inside the existing `_sync_org(org_id, db, client)` of `hubspot_sync.py` /
+   `salesforce_sync.py`, where `known_emails` is already built (`hubspot_sync.py:179-199`,
+   `salesforce_sync.py:218-245`) and the live client + decrypted token are already held — under the
+   existing `sync_hubspot_org` (03:15 UTC) / `sync_salesforce_org` (03:45 UTC) beats. Skipped
+   unless `churn_labels_enabled` **and** a non-empty renewal set. Signature:
+   `harvest_org_suggestions(org_id, db, client, *, provider, renewal_set, known_emails,
+   cap=PER_RUN_SUGGESTION_CAP) -> dict` returning `{scanned, suggested, skipped_existing, denied,
+   dropped_by_cap}` — Celery-free, injectable `client`, caller owns the transaction (the
+   `_sync_org` contract). Harvest must **not** fail enrichment: exception-wrapped, logged, recorded
    (`last_harvest_status='error'`), leaving the sync's `success` intact (R4).
 
-4. **Idempotency + suppression.** Per candidate, before insert:
-   - Look up `(organization_id, provider, external_opportunity_id)`. **Row exists → skip, in any
-     status** — a `rejected` suggestion is never re-suggested, a `confirmed` one never duplicated.
-     Existing rows are **not** updated; re-harvest is a no-op, not a refresh.
-   - Skip when the customer already has an active `CustomerChurnEvent` — reuse
-     `_has_existing_active_event` semantics (`routes/churn_events.py:74-88,148-150`:
-     `org + email + recovered_at IS NULL`), reimplemented in the worker (cannot import backend).
-   - Insert via pre-check + `IntegrityError` catch → skip. No `ON CONFLICT` (SQLite-safe, matching
-     `_upsert_enrichment`); the DB UNIQUE is the guarantee, the pre-check the fast path.
+4. **Idempotency + suppression.** Per candidate, before insert: look up `(organization_id,
+   provider, external_opportunity_id)` — **row exists → skip, in any status**, so a `rejected`
+   suggestion is never re-suggested and a `confirmed` one never duplicated; existing rows are
+   **not** updated (re-harvest is a no-op, not a refresh). Skip when the customer already has an
+   active `CustomerChurnEvent`, reusing `_has_existing_active_event` semantics
+   (`routes/churn_events.py:74-88,148-150`: `org + email + recovered_at IS NULL`), reimplemented in
+   the worker (cannot import backend). Insert via pre-check + `IntegrityError` catch → skip; no
+   `ON CONFLICT` (SQLite-safe, per `_upsert_enrichment`) — the DB UNIQUE is the real guarantee.
 
 5. **Per-run cap, never silent.** `PER_RUN_SUGGESTION_CAP` (module constant, default 200). On hit:
    stop inserting, count the remainder, emit a **WARNING** naming `org_id`, `provider`, cap and
    `dropped_by_cap`, and return that count. House rule: **no silent caps**.
 
 6. **Mirroring — decided: NO backend mirror.** `status_sync_core.py` is mirrored because *both*
-   services apply status. Here only the worker harvests; the review queue reads rows and never
-   re-decides. So core + adapters live in **worker-service only**, with no parity test. If a
+   services apply status; here only the worker harvests, and the review queue reads rows without
+   re-deciding. So core + adapters live in **worker-service only**, with no parity test — if a
    backend caller ever needs `decide_suggestion`, mirror it byte-identically **then**.
 
 ## Out of scope
@@ -99,19 +88,16 @@ must never reach the training set** — this aspect writes suggestions only, wit
 1. `decide_suggestion` → `(True, None)` only for closed + not-won + discriminator in `renewal_set`
    + email in `known_emails`. Pure asserts, no I/O, no fixtures.
 2. Each deny path asserted with its exact reason, **R5 explicitly**: `discriminator=None` →
-   `no_discriminator`; `renewal_set` None/empty → `discriminator_not_configured`; unknown email →
-   `unknown_customer`.
+   `no_discriminator`, `renewal_set` None/empty → `discriminator_not_configured`, unknown email → `unknown_customer`.
 3. Adapters map a fixture HubSpot deal and SF Opportunity to identical-shaped dicts;
-   `suggested_churned_at` equals the CRM close date, **stable across two calls**; unparseable or
-   missing close date / id → `None`.
+   `suggested_churned_at` equals the CRM close date, **stable across two calls**; unparseable/missing close date or id → `None`.
 4. `harvest_org_suggestions` with a hand-written **Fake client** + real SQLite `db` fixture inserts
    N pending rows; **a second run inserts zero** (`scanned` > 0, `suggested == 0`).
 5. A `rejected` existing suggestion is not re-suggested; a customer with an active
    `CustomerChurnEvent` is skipped; a **recovered** (`recovered_at` set) one is **not** skipped.
 6. 250 candidates with `cap=200` → 200 rows, `dropped_by_cap == 50`, WARNING logged (`caplog`).
-7. `churn_labels_enabled=False` (default) → zero suggestion rows and `_sync_org`'s enrichment
-   result dict **unchanged** from the pre-change baseline. A raising Fake client inside harvest
-   likewise leaves enrichment intact and `last_sync_status == 'success'`.
+7. `churn_labels_enabled=False` (default) → zero suggestion rows and `_sync_org`'s enrichment result
+   dict **unchanged** from baseline; a raising Fake client likewise leaves enrichment intact and `last_sync_status == 'success'`.
 8. **No `customer_churn_events` row is ever written by this aspect** — asserted directly (count
    before == count after) on the happy path.
 9. Zero Celery, zero httpx, zero `patch` in this aspect's tests; worker suite green.
@@ -124,10 +110,10 @@ must never reach the training set** — this aspect writes suggestions only, wit
   reuses `decide_suggestion` + the adapters unchanged in its own cancellable task.
 - Config columns land in `org-config-api-and-ui` (M3); until then tests pass `renewal_set`
   directly — the harvester never reads config, it is handed a `frozenset`.
-- **Signature deviation, flagged:** the CRM tasks use the older
-  `_sync_x_org_body(task_self, integration_id)` shape (own session, no injectable client), unlike
-  jira's `_sync_jira_org_body(integration_id, db, client=None)`. Do **not** refactor them here
-  (blast radius, R4). Test at `_sync_org(org_id, db, client)` — already the injectable seam.
+- **Signature deviation, flagged:** the CRM tasks use the older `_sync_x_org_body(task_self,
+  integration_id)` shape (own session, no injectable client), unlike jira's
+  `_sync_jira_org_body(integration_id, db, client=None)`. Do **not** refactor them here (blast
+  radius, R4). Test at `_sync_org(org_id, db, client)` — already the injectable seam.
 
 ## Risks
 
