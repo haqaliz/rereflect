@@ -41,6 +41,10 @@ const faqs = [
     a: 'Churn prediction uses a calibrated model trained on your own labeled outcomes — customers you have marked as churned. The model runs in your instance. Each prediction includes a confidence interval so you can see how certain the model is. Org-specific models activate once you have labeled at least 20 customers; before that a global baseline model is used.',
   },
   {
+    q: 'Can Rereflect pull churn labels from my CRM?',
+    a: 'Yes, if you connect HubSpot or Salesforce — and it is opt-in and off by default. Rereflect reads closed-lost deals from the renewal pipelines (or opportunity types) you name and proposes them as churn suggestions; an optional on-demand backfill can cover your closed-lost history. Nothing is applied automatically: every suggestion waits in a review queue for a person to confirm or reject it, because a lost renewal is not always a churn — deals close lost for renegotiations, contract merges, and mis-staging too. Until you name your renewal pipelines, nothing is suggested at all.',
+  },
+  {
     q: 'Can I automate actions based on feedback events?',
     a: 'Yes. Create IF/THEN automation rules that trigger when specific conditions are met — like a health score dropping below a threshold or multiple negative feedbacks arriving. Rules can auto-assign team members, change workflow status, send Slack notifications, and draft AI responses. Pre-built templates are included.',
   },

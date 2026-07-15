@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Logo } from '@rereflect/ui';
-import { ArrowRight, ChevronRight, ChevronDown, Users, DollarSign, TrendingUp, BarChart3, Sparkles, Rocket, MessageSquare, Settings as SettingsIcon, Github } from 'lucide-react';
+import { ArrowRight, ChevronRight, ChevronDown, Users, DollarSign, TrendingUp, BarChart3, ClipboardCheck, Sparkles, Rocket, MessageSquare, Settings as SettingsIcon, Github } from 'lucide-react';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { getIntegration } from '@/lib/integrations';
 
@@ -18,6 +18,7 @@ const featureIconMap: Record<string, React.ComponentType<{ className?: string }>
   DollarSign,
   TrendingUp,
   BarChart3,
+  ClipboardCheck,
 };
 
 export default function SalesforceIntegrationPage() {

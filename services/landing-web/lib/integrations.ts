@@ -383,6 +383,7 @@ export const integrations: Integration[] = [
       { title: 'Revenue Impact', description: 'Prioritize feedback from high-value accounts. Know which pain points affect your biggest customers.', icon: 'TrendingUp' },
       { title: 'Lifecycle Tracking', description: 'Track how customer sentiment evolves across their lifecycle — from prospect to long-term customer.', icon: 'BarChart3' },
       { title: 'Health-Score Writeback', description: 'Opt-in bidirectional sync pushes Rereflect\'s calculated health score back into a HubSpot contact property you choose — kept in sync automatically as scores change.', icon: 'RefreshCw' },
+      { title: 'Churn Labels from Lost Renewals', description: 'Opt in and Rereflect reads closed-lost deals from the renewal pipelines you name and proposes them as churn labels. They are suggestions, never labels: each one waits in a review queue for a human to confirm or reject, because a lost renewal is not always a churn. Off until you configure it — name no pipelines and nothing is suggested.', icon: 'ClipboardCheck' },
     ],
     useCases: [
       { persona: 'Customer Success Manager', role: 'B2B SaaS, HubSpot CRM', quote: 'Our reps live in HubSpot. Now the health score shows up right on the contact record, so nobody has to context-switch to Rereflect to know an account is at risk.', icon: 'Heart' },
@@ -419,6 +420,7 @@ export const integrations: Integration[] = [
       { title: 'ARR & Renewal Tracking', description: 'Annual revenue and a renewal-date proxy (the highest-amount open opportunity) are pulled in for every account.', icon: 'TrendingUp' },
       { title: 'Revenue Impact', description: 'Prioritize feedback from high-value accounts. Know which pain points affect your biggest customers.', icon: 'BarChart3' },
       { title: 'Health-Score Writeback', description: 'Opt in to push Rereflect\'s calculated health score back into a numeric Contact field you choose — kept in sync automatically as scores change, so CSMs see it right in Salesforce.', icon: 'RefreshCw' },
+      { title: 'Churn Labels from Lost Renewals', description: 'Opt in and Rereflect reads closed-lost Opportunities of the renewal types you name and proposes them as churn labels. They are suggestions, never labels: each one waits in a review queue for a human to confirm or reject, because a lost renewal is not always a churn. Off until you configure it — name no opportunity types and nothing is suggested.', icon: 'ClipboardCheck' },
     ],
     useCases: [
       { persona: 'Customer Success Manager', role: 'Enterprise SaaS, Salesforce CRM', quote: 'I can finally see churn-risk feedback next to the account\'s ARR and renewal date without leaving Rereflect. It changes which fires I fight first.', icon: 'Heart' },
