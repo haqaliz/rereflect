@@ -9,35 +9,33 @@ use.** `_churn_label_counts` (`routes/ai_readiness.py:74-79`) counts `CustomerCh
 **no source filter**, and `churn_labels_ready = churn["total"] >= CHURN_LABEL_TARGET` (`:149`,
 `config/readiness_thresholds.py:8` = 500). The calibrator meanwhile excludes
 `source='auto_suggested'` in **four** places — `tasks/churn_calibration.py:50,125`,
-`services/calibration_refit.py:64,191`. The report and the fit disagree about what a label is.
-Worse than an inert counter: it is the number an operator consults to decide whether M5.3 is
-reachable, and it can say *ready* on rows the fit drops (or, at `:125`/`:191`, trains as
-**negatives**).
+`services/calibration_refit.py:64,191`. The report and the fit disagree about what a label is —
+and this is the number an operator consults to decide whether M5.3 is reachable, so it can say
+*ready* on rows the fit drops (or, at `:125`/`:191`, trains as **negatives**).
 
-**Outcome:** `churn_labels_ready` counts only **trainable** labels, aligned with the four
-calibration filters; pending CRM suggestions surface as a **separate** number that never counts
-toward readiness. Defensive — this feature writes no `auto_suggested` rows (PRD Out of Scope) —
-but the report should agree with the fit regardless of who writes.
+**Outcome:** `churn_labels_ready` counts only **trainable** labels, aligned with those four filters;
+pending CRM suggestions surface as a **separate** number that never counts toward readiness.
+Defensive — this feature writes no `auto_suggested` rows — but the report must agree with the fit
+regardless of who writes.
 
 ## In scope
 
-1. **`trainable` count** — `_churn_label_counts` gains a count of the org's `CustomerChurnEvent`
-   with `source != 'auto_suggested'`, mirroring the four calibration filters. Exposed as a new
-   `churn_labels_trainable` field on `AIReadinessResponse`.
+1. **`trainable` count** — `_churn_label_counts` gains a count of the org's `CustomerChurnEvent` with
+   `source != 'auto_suggested'`, mirroring the four calibration filters; exposed as a new
+   `churn_labels_trainable` field on `AIReadinessResponse`. **A comment at the filter names the four
+   calibration sites it mirrors**, so the next editor of either side sees the coupling.
 2. **`churn_labels_ready = trainable >= CHURN_LABEL_TARGET`** (`:149`) — the **only** semantic
    change to the boolean. `CHURN_LABEL_TARGET` stays 500; this aspect does not re-derive it (R8).
 3. **`churn_labels_total` and `churn_labels_by_source` keep their current meaning** — every event
    regardless of source; the `auto_suggested` bucket keeps showing. `total` is "what exists",
    `trainable` is "what trains", and the gap between them is the honesty. Only the boolean and the
    new trainable total change.
-4. **`pending_suggestions`** — count of `churn_label_suggestions` WHERE
-   `organization_id = org_id AND status = 'pending'` (M4 table), as a **separate** response field.
-   **Never** added to `churn_labels_total`, `trainable`, or the boolean. Zero when unconfigured.
-5. **Frontend Readiness card copy** — trainable-vs-target and pending rendered as distinct facts,
-   e.g. *"312 trainable labels / 500 · 47 CRM suggestions awaiting review"*, with the review queue
-   linked. A suggestion must never read as progress toward the gate.
-6. **A comment at the trainable filter naming the four calibration sites it mirrors**, so the next
-   editor of either side sees the coupling.
+4. **`pending_suggestions`** — count of `churn_label_suggestions` WHERE `organization_id = org_id AND
+   status = 'pending'` (M4 table), a **separate** response field. **Never** added to
+   `churn_labels_total`, `trainable`, or the boolean. Zero when unconfigured.
+5. **Frontend Readiness card copy** — trainable-vs-target and pending as distinct facts, e.g.
+   *"312 trainable labels / 500 · 47 CRM suggestions awaiting review"*, review queue linked. A
+   suggestion must never read as progress toward the gate.
 
 ## Out of scope
 
@@ -58,21 +56,18 @@ but the report should agree with the fit regardless of who writes.
   `churn_labels_trainable == 499`, **`churn_labels_ready is False`** — this case fails on today's
   code and is the regression test for the bug.
 - **AC-2 (breakdown preserved — existing tests stay green unmodified).**
-  `tests/test_ai_readiness.py:172,190` assert `churn_labels_total == 4` and `churn_labels_by_source
-  == {"manual": 2, "csv_import": 1, "auto_suggested": 1}`. Both still pass; the auto row keeps
-  appearing in `by_source` and in `total`.
+  `tests/test_ai_readiness.py:172,190` assert `churn_labels_total == 4` and `churn_labels_by_source ==
+  {"manual": 2, "csv_import": 1, "auto_suggested": 1}`. Both still pass unmodified.
 - **AC-3 (trainable sources).** `manual` and `csv_import` both count as trainable; only
   `auto_suggested` is excluded — asserted per source value, matching the calibration filters.
-- **AC-4 (recovered unchanged).** A recovered event still counts toward `total`, its
-  `by_reason`/`by_source` bucket, **and** `trainable` if its source is trainable — the `:68-72`
-  docstring stays true; recovery is not a source filter.
-- **AC-5 (pending is separate).** 47 `pending` + 3 `confirmed` + 2 `rejected` →
-  `pending_suggestions == 47`; `churn_labels_total`/`churn_labels_trainable` **unchanged** by any
-  suggestion row. With 499 trainable + 47 pending, `churn_labels_ready is False`.
+- **AC-4 (recovered unchanged).** A recovered event still counts toward `total`, its bucket, **and**
+  `trainable` if its source is trainable — the `:68-72` docstring stays true; recovery is not a filter.
+- **AC-5 (pending is separate).** 47 `pending` + 3 `confirmed` + 2 `rejected` → `pending_suggestions
+  == 47`; `churn_labels_total`/`churn_labels_trainable` **unchanged** by any suggestion row. With 499
+  trainable + 47 pending, `churn_labels_ready is False`.
 - **AC-6 (confirmed counts via its event, not itself).** Confirming a suggestion writes
   `CustomerChurnEvent(source='manual')` (M5) → trainable +1, `pending_suggestions` −1; no double count.
-- **AC-7 (org scoping).** Suggestions and events from another org contribute 0 to every field —
-  extends the existing cross-org isolation test.
+- **AC-7 (org scoping).** Another org's suggestions and events contribute 0 to every field.
 - **AC-8 (no gate change).** The endpoint stays read-only with no role gate (any org member can view,
   per the `:119-131` docstring and RBAC "view analytics — all roles"). No `require_admin_or_owner`.
 - **AC-9 (frontend).** The card renders trainable/target and pending as two distinct numbers; pending
@@ -94,10 +89,10 @@ touches only `routes/ai_readiness.py`, its schema, its test, and the frontend ca
 ## Risks
 
 - **Coupling by convention, not by code.** The trainable filter duplicates a rule living in four
-  worker-side files, and the worker cannot import backend code — a fifth copy can drift. Mitigated by
-  §6's comment; a shared constant is not worth a cross-service mirror for one string.
-- **The number will go down.** An operator at "500/500 ready" may see "499/500". That is the point
-  — M8 must say so plainly rather than shipping a silent correction to a trust surface.
+  worker-side files and the worker cannot import backend code — a fifth copy can drift. Mitigated by
+  §1's comment; a shared constant is not worth a cross-service mirror for one string.
+- **The number will go down.** An operator at "500/500 ready" may see "499/500" — that is the point;
+  M8 must say so plainly rather than ship a silent correction to a trust surface.
 - **PRD R8 — the target may be wrong anyway.** Being honest about *which* labels count does not make
   500 the right number. Not this aspect's problem; M8 records it as under review.
 - **`pending_suggestions` could be misread as progress.** A copy risk; AC-9 pins the two numbers
