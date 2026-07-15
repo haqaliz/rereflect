@@ -47,6 +47,15 @@ class HubSpotIntegration(Base):
     churn_labels_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     churn_label_config = Column(JSON, nullable=True)  # {"renewal_pipeline_ids": [...]}
 
+    # Historical churn-label backfill (historical-backfill aspect): operator-
+    # triggered, window-bounded, cancellable. NULL backfill_status reads as
+    # "idle" at the application layer — no server_default (house convention,
+    # no DB CHECK; validated in Pydantic against BACKFILL_STATUSES).
+    backfill_status = Column(String(20), nullable=True)
+    backfill_progress = Column(JSON, nullable=True)
+    backfill_last_run_at = Column(DateTime, nullable=True)
+    backfill_error = Column(Text, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
                         onupdate=datetime.utcnow)

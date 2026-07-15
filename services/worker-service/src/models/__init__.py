@@ -1086,6 +1086,14 @@ class HubSpotIntegration(Base):
     churn_labels_enabled = Column(Boolean, nullable=False, default=False)
     churn_label_config = Column(JSON, nullable=True)
 
+    # Historical churn-label backfill (historical-backfill aspect) — mirrors
+    # src/models/hubspot_integration.py on the backend; no FK (worker no-FK
+    # pattern). The backfill task reads/writes these fields directly.
+    backfill_status = Column(String(20), nullable=True)
+    backfill_progress = Column(JSON, nullable=True)
+    backfill_last_run_at = Column(DateTime, nullable=True)
+    backfill_error = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -1131,6 +1139,14 @@ class SalesforceIntegration(Base):
     # CRM-sourced churn labels (crm-churn-labels aspect): default-deny opt-in
     churn_labels_enabled = Column(Boolean, nullable=False, default=False)
     churn_label_config = Column(JSON, nullable=True)
+
+    # Historical churn-label backfill (historical-backfill aspect) — mirrors
+    # src/models/salesforce_integration.py on the backend; no FK (worker
+    # no-FK pattern). The backfill task reads/writes these fields directly.
+    backfill_status = Column(String(20), nullable=True)
+    backfill_progress = Column(JSON, nullable=True)
+    backfill_last_run_at = Column(DateTime, nullable=True)
+    backfill_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
