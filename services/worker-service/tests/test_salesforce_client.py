@@ -619,3 +619,167 @@ class TestGetLostOpportunities:
                     client.get_lost_opportunities("001xxxxxxxxxxxxxxx")
 
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 (provider-churn-fetch): SalesforceClient.get_opportunity_type_values
+# ---------------------------------------------------------------------------
+
+
+class TestGetOpportunityTypeValues:
+    def test_returns_picklist_values_for_type_field(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(
+            200,
+            {
+                "fields": [
+                    {
+                        "name": "Type",
+                        "picklistValues": [
+                            {"label": "Renewal", "value": "Renewal", "active": True}
+                        ],
+                    }
+                ]
+            },
+        )
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == [{"label": "Renewal", "value": "Renewal", "active": True}]
+
+    def test_type_field_absent_returns_empty_list(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": [{"name": "StageName"}]})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == []
+
+    def test_type_field_present_with_no_picklist_returns_empty_list(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": [{"name": "Type"}]})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == []
+
+    def test_type_field_present_with_empty_picklist_returns_empty_list(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": [{"name": "Type", "picklistValues": []}]})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                values = client.get_opportunity_type_values()
+
+        assert values == []
+
+    def test_describes_opportunity_sobject(self):
+        """Must call describe_object("Opportunity"), not Contact (the default)."""
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        describe_resp = _make_resp(200, {"fields": []})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = describe_resp
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                client.get_opportunity_type_values()
+
+        url = instance.get.call_args[0][0]
+        assert "sobjects/Opportunity/describe" in url
+
+    def test_403_raises_scope_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceScopeError
+
+        token_resp = _make_token_resp()
+        resp = _make_resp(403, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp
+
+            with pytest.raises(SalesforceScopeError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+    def test_401_refreshes_once_then_raises_auth_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceAuthError
+
+        token_resp = _make_token_resp()
+        resp_401 = _make_resp(401, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_401
+
+            with pytest.raises(SalesforceAuthError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+        # __enter__'s initial refresh + the retry-after-401 refresh = 2 posts
+        assert instance.post.call_count == 2
+
+    def test_429_raises_transient_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp_429 = _make_resp(429, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_429
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()
+
+    def test_5xx_raises_transient_error(self):
+        from src.clients.salesforce import SalesforceClient, SalesforceTransientError
+
+        token_resp = _make_token_resp()
+        resp_500 = _make_resp(500, {})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = resp_500
+
+            with pytest.raises(SalesforceTransientError):
+                with SalesforceClient(**_client_kwargs()) as client:
+                    client.get_opportunity_type_values()

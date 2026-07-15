@@ -427,3 +427,20 @@ class SalesforceClient:
             )
 
         return resp.json()
+
+    def get_opportunity_type_values(self) -> list[dict]:
+        """
+        Return the picklistValues of Opportunity.Type (the discriminator that
+        separates a lost renewal from a lost new-business deal), `[]` when the
+        Type field is absent or has no picklist.
+
+        Reuses describe_object (401-refresh-once / 429 / 403 taxonomy) —
+        no hand-rolled describe call.
+        """
+        data = self.describe_object("Opportunity")
+        field = next(
+            (f for f in data.get("fields") or [] if f.get("name") == "Type"), None
+        )
+        if field is None:
+            return []
+        return field.get("picklistValues") or []
