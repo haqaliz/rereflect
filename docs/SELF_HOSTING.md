@@ -16,6 +16,7 @@ default) treats every instance as fully featured.
 - [Public API — bulk feedback writes & taxonomy CRUD](#public-api--bulk-feedback-writes--taxonomy-crud)
 - [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment)
 - [Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment)
+- [CRM churn-label suggestions (opt-in)](#crm-churn-label-suggestions-opt-in)
 - [Connecting Jira](#connecting-jira)
 - [Connecting Zendesk](#connecting-zendesk)
 - [Connecting Asana](#connecting-asana)
@@ -666,6 +667,164 @@ write access, writeback silently pauses (status shows the reason) — the inboun
 and health scores are unaffected. If a customer's email maps to more than one Salesforce
 Contact, the lowest Contact Id is chosen deterministically and the status notes the
 ambiguity.
+
+## CRM churn-label suggestions (opt-in)
+
+Churn prediction learns from **churn labels** — records of customers who actually
+left. Until now you produced those by hand (Customer 360 → **Mark as churned**) or by
+CSV import. If you've connected HubSpot or Salesforce, your CRM already knows which
+renewals were lost, and this feature reads them for you.
+
+It produces **suggestions, not labels.** A suggestion is a proposal that sits in a
+review queue until a human confirms it. **Nothing is ever auto-applied** — no
+suggestion reaches the training set without an operator clicking Confirm. That is
+deliberate, and it is the whole design: **a lost renewal is not always a churn.** A
+deal can close lost because it merged into another contract, because procurement
+re-papered it, because the champion moved to a new department, or because someone
+mis-staged it. Only a human knows which.
+
+Two more things this feature does **not** do, stated plainly:
+
+- It makes **no claim about churn-prediction quality.** It produces labels. Whether
+  more labels change the model is a separate, open question (see `AI-TRACKING.md`,
+  M5.3) — nothing here should be read as a promise that predictions get better.
+- Churn prediction remains **a calibrated heuristic**, not machine learning. This
+  feature does not change that.
+
+### 1. Connect a CRM
+
+Follow [Connecting HubSpot CRM enrichment](#connecting-hubspot-crm-enrichment) or
+[Connecting Salesforce CRM enrichment](#connecting-salesforce-crm-enrichment) first.
+Only one CRM (HubSpot or Salesforce) can be connected per organization at a time.
+No extra scope is needed — the `crm.objects.deals.read` scope (HubSpot) and the `api`
+scope (Salesforce) you already granted are sufficient.
+
+### 2. Enable and choose your renewal set
+
+Go to **Settings → Integrations → HubSpot** (or **Salesforce**), admin/owner only, and
+find the **CRM Churn-Label Suggestions** card.
+
+1. Toggle **Enable churn-label suggestions** on.
+2. Choose your renewal set:
+   - **HubSpot** — pick your **Renewal pipelines**. The picker lists the deal pipelines
+     live from your portal.
+   - **Salesforce** — pick your **Renewal opportunity types**, listed live from your
+     `Opportunity.Type` picklist.
+3. Save.
+
+**The picker locks while the feature is enabled.** To re-point it at a different
+pipeline or type, toggle the feature off, change the selection, and toggle it back on.
+(This stops a live harvest having its renewal set changed out from under an in-flight
+run.) The toggle itself is never locked — you can always turn it off.
+
+Once enabled, the harvest runs inside the **existing daily CRM sync** — 03:15 UTC for
+HubSpot, 03:45 UTC for Salesforce. **No new schedule, no new worker.**
+
+### 3. Default-deny: nothing happens until you pick
+
+This feature is **off by default and denies by default.** Concretely:
+
+- No suggestions exist until you both enable the toggle **and** name at least one
+  renewal pipeline / opportunity type.
+- Enabling the toggle while selecting **nothing** produces **nothing**. The card warns
+  you: *"No renewal pipelines selected — no suggestions will be created. Pick the
+  pipeline your renewals close in."*
+- A deal or opportunity whose pipeline / type is **null or unrecognised produces no
+  suggestion, ever.** There is no guessing, no fuzzy matching, no regex over pipeline
+  names. If it isn't in the set you named, it is skipped.
+- **An organization that ignores this feature sees no change anywhere** — no new rows,
+  no new counters, no change to churn scores.
+
+### 4. Backfill your history (optional, on-demand)
+
+Enabling only harvests going forward. To reach back over closed-lost history, use
+**Backfill history** on the same card.
+
+- **On-demand only.** It never runs automatically and is **not** triggered by enabling
+  the feature. It runs when you click **Run**, and never otherwise.
+- **You choose the window** from the **Backfill window** picker: **12 / 24 / 36 / 60**
+  months back. Default **24**; **60 months (5 years) is the hard maximum** — the API
+  rejects anything outside 1–60.
+- **It produces suggestions, not labels.** Exactly like the daily harvest, every row
+  lands in the review queue for a human. A backfill can never mark anyone churned.
+- **Resumable and idempotent.** Re-running completes the remainder instead of
+  duplicating: suggestions are unique per `(organization, provider, external id)`.
+- **Cancellable.** Click **Cancel** while it runs. Cancellation is checked at each
+  company/account boundary, so it stops shortly after you ask rather than instantly;
+  progress already made is kept.
+- **Progress is live.** The card polls every 5s and shows **Scanned**, **Suggested**
+  and **Skipped**.
+- **The cap is not silent.** A run is capped at **2,000 suggestions**. If it truncates,
+  the card raises an alert naming both the count and how far back it actually got —
+  e.g. *"37 dropped by the per-run cap; covered window: since 7/15/2024."* Narrow the
+  window (or confirm/reject what's queued) and run it again to continue.
+
+**Run** stays disabled until the feature is enabled and at least one pipeline / type is
+selected — default-deny applies to backfill too.
+
+### 5. Review the queue — the step that creates labels
+
+Suggestions accumulate as **pending** and go nowhere on their own. When any are
+waiting, admins and owners see a **CRM churn suggestions** card on the **Customers**
+page linking to **Customers → CRM churn suggestions**
+(`/customers/churn-suggestions`).
+
+The queue lists **Customer**, **Provider**, **Evidence** (the CRM deal/opportunity
+detail behind the suggestion), and **Close date**. For each row:
+
+- **Confirm** — opens **Confirm churn suggestion**. A **Reason** is **required**
+  (Price, Competitor, Product Quality, No Longer Needed, Silent Churn, Other), and an
+  optional note is stored with the event. The **CRM close date** is shown read-only and
+  is used as the churn date — you cannot edit it.
+- **Reject** — dismisses the suggestion.
+
+**Confirming is what creates a label.** It writes a real churn event with
+`source='manual'`, stamped with your user id and linked back to the suggestion for
+provenance — identical to a label created by hand via **Mark as churned**, and fully
+trainable. Rejecting writes no event.
+
+**Bulk review.** Select rows and use **Confirm selected** / **Reject selected**, capped
+at **500** per action. A bulk confirm requires one Reason applied to the whole
+selection — if the customers churned for different reasons, confirm them individually.
+A filter-based selection larger than the cap processes the first 500 and tells you what
+it didn't process; an explicit selection over 500 is rejected outright rather than
+silently trimmed.
+
+If a customer was already marked as churned by other means, confirming resolves the
+suggestion against the existing event rather than creating a duplicate, and reports it
+as skipped.
+
+> **Known rough edge:** the **note** field on the *reject* dialog is **not persisted** —
+> there is no column for it yet. Reject notes are discarded. The note on the *confirm*
+> dialog is stored normally. Also, a bulk **reject** reports its tally as
+> *"N confirmed"* — a contract-parity artifact in the response field name, not a sign
+> anything was confirmed.
+
+### Verify
+
+The **CRM Churn-Label Suggestions** card shows **last harvest time**, **last harvest
+status**, **suggestions created**, and **last harvest error**. **Settings → AI →
+Readiness** shows **pending suggestions** as its own counter — deliberately **not**
+counted toward readiness, because a pending suggestion is not a label.
+
+### Troubleshooting
+
+- **No suggestions at all.** By far the most likely cause: no renewal pipelines /
+  opportunity types are selected. Check the card for the empty-state warning. Otherwise
+  there may genuinely be no lost renewals in the window — this is common and not a bug.
+- **Suggestions look wrong.** Your renewal set is probably too broad (e.g. a new-business
+  pipeline selected alongside renewals). Toggle off, narrow the selection, toggle on.
+  Reject the bad rows — rejecting is free and nothing was labeled.
+- **`403` from the CRM.** The token is missing the deal/opportunity read scope. Re-grant
+  it (HubSpot: `crm.objects.deals.read`) and re-run.
+- **`429` from the CRM.** You're throttled. The harvest backs off and retries on the next
+  daily sync; a backfill retries with a delay. No action needed.
+- **Daily harvest cap.** The daily harvest is capped at **200** suggestions per run
+  (separate from backfill's 2,000). Overflow is logged with a `dropped_by_cap` count —
+  never silently dropped — and the next run picks up where it left off.
+- **Backfill won't start.** **Run** is disabled unless the feature is enabled with at
+  least one pipeline/type selected. A `409` means a backfill is already running. A `502`
+  means the task queue (Redis/Celery) couldn't be reached — check the worker is up.
 
 ## Connecting Jira
 
