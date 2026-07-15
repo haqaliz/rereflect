@@ -436,3 +436,70 @@ class TestHubSpotClientGetDeals:
         requested_ids = {inp["id"] for inp in body.get("inputs", [])}
         assert "d1" in requested_ids
         assert "d2" not in requested_ids
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (provider-churn-fetch): characterization lock — pins the EXISTING
+# get_open_deals_for_company output byte-identical before any client edit.
+# ---------------------------------------------------------------------------
+
+
+class TestOpenDealsCharacterizationLock:
+    def test_get_open_deals_returns_exact_list_same_order(self):
+        """Fixed 4-deal payload (open-high, open-low, closedwon, closedlost):
+        get_open_deals_for_company must return exactly [d1, d2], in order,
+        with the same dicts — untouched by this aspect's later phases."""
+        from src.clients.hubspot import HubSpotClient
+
+        d1 = {
+            "id": "d1",
+            "properties": {
+                "dealname": "Open High",
+                "dealstage": "contractsent",
+                "amount": "900",
+                "closedate": "2026-09-01T00:00:00Z",
+            },
+        }
+        d2 = {
+            "id": "d2",
+            "properties": {
+                "dealname": "Open Low",
+                "dealstage": "appointmentscheduled",
+                "amount": "100",
+                "closedate": "2026-08-01T00:00:00Z",
+            },
+        }
+        d3 = {
+            "id": "d3",
+            "properties": {
+                "dealname": "Won Big",
+                "dealstage": "closedwon",
+                "amount": "5000",
+                "closedate": "2026-05-01T00:00:00Z",
+            },
+        }
+        d4 = {
+            "id": "d4",
+            "properties": {
+                "dealname": "Lost Big",
+                "dealstage": "closedlost",
+                "amount": "4000",
+                "closedate": "2026-01-15T00:00:00Z",
+            },
+        }
+
+        assoc_resp = _make_resp(
+            200,
+            {"results": [{"id": did, "type": "company_to_deal"} for did in ["d1", "d2", "d3", "d4"]]},
+        )
+        batch_resp = _make_resp(200, {"results": [d1, d2, d3, d4], "status": "COMPLETE"})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.get.return_value = assoc_resp
+            instance.post.return_value = batch_resp
+
+            with HubSpotClient("test-token") as client:
+                deals = client.get_open_deals_for_company("c1")
+
+        assert deals == [d1, d2]

@@ -870,3 +870,99 @@ class TestCeleryTaskRegistration:
         cron = entry["schedule"]
         assert cron.hour == {3}
         assert cron.minute == {45}  # 03:45 — avoids 03:00 calibration / 03:15 hubspot
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (provider-churn-fetch): characterization lock — pins the EXISTING
+# enrichment output byte-identical before any client edit in this aspect.
+# Mirrors TestEnrichmentCharacterizationLock in test_hubspot_sync.py.
+# ---------------------------------------------------------------------------
+
+
+# Fixed payload: 4 opportunities — open/high-amount, open/low, closed-won,
+# closed-lost. Amounts are chosen so a broken filter would pick a different
+# opportunity than o1.
+CHARACTERIZATION_OPPS = [
+    {
+        "Id": "006o1",
+        "Name": "Open High",
+        "StageName": "Negotiation",
+        "Amount": 900,
+        "CloseDate": "2026-09-01",
+        "IsClosed": False,
+    },
+    {
+        "Id": "006o2",
+        "Name": "Open Low",
+        "StageName": "Proposal",
+        "Amount": 100,
+        "CloseDate": "2026-08-01",
+        "IsClosed": False,
+    },
+    {
+        "Id": "006o3",
+        "Name": "Won Big",
+        "StageName": "Closed Won",
+        "Amount": 5000,
+        "CloseDate": "2026-05-01",
+        "IsClosed": True,
+    },
+    {
+        "Id": "006o4",
+        "Name": "Lost Big",
+        "StageName": "Closed Lost",
+        "Amount": 4000,
+        "CloseDate": "2026-01-15",
+        "IsClosed": True,
+    },
+]
+
+
+class TestEnrichmentCharacterizationLock:
+    def test_pick_renewal_opportunity_picks_o1(self):
+        from src.tasks.salesforce_sync import _pick_renewal_opportunity
+
+        assert _pick_renewal_opportunity(CHARACTERIZATION_OPPS) is CHARACTERIZATION_OPPS[0]
+
+    def test_pick_renewal_opportunity_ignores_closed(self):
+        from src.tasks.salesforce_sync import _pick_renewal_opportunity
+
+        winner = _pick_renewal_opportunity(CHARACTERIZATION_OPPS)
+        assert winner["Id"] != "006o3"
+        assert winner["Id"] != "006o4"
+        # o3/o4 have higher raw amounts (5000, 4000) than the winner (900) —
+        # proves the IsClosed exclusion, not just amount ranking.
+        assert winner["Amount"] == 900
+
+    def test_enrichment_row_fields_are_exact(self, db):
+        from datetime import datetime, timezone
+        from src.models import CrmEnrichment
+
+        org = _make_org(db)
+        _make_customer(db, org.id, "alice@example.com")
+
+        client = _make_mock_client(
+            contacts=[
+                {"Id": "003c1", "Email": "alice@example.com", "AccountId": "001a1"}
+            ],
+            account={"Id": "001a1", "Name": "Acme", "AnnualRevenue": 5000, "Type": "Customer"},
+            opportunities=CHARACTERIZATION_OPPS,
+        )
+
+        _run_sync_org(org.id, db, client)
+
+        row = db.query(CrmEnrichment).first()
+        actual = {
+            "deal_name": row.deal_name,
+            "deal_stage": row.deal_stage,
+            "deal_amount": row.deal_amount,
+            "renewal_date": row.renewal_date,
+        }
+        expected = {
+            "deal_name": "Open High",
+            "deal_stage": "Negotiation",
+            "deal_amount": 900.0,
+            "renewal_date": datetime(2026, 9, 1),
+        }
+        assert actual == expected
+        assert actual["deal_stage"] not in ("Closed Won", "Closed Lost")

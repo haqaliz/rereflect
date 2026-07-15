@@ -455,3 +455,43 @@ class TestSalesforceClientTypedHelpers:
                     client.get_open_opportunities("x' OR Name!='")
 
         instance.get.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (provider-churn-fetch): characterization lock — pins the EXISTING
+# get_open_opportunities SOQL + returned records byte-identical before any
+# client edit in this aspect.
+# ---------------------------------------------------------------------------
+
+
+class TestOpenOppsCharacterizationLock:
+    def test_soql_and_records_unchanged(self):
+        from src.clients.salesforce import SalesforceClient
+
+        token_resp = _make_token_resp()
+        stub_records = [
+            {
+                "Id": "006o1",
+                "Name": "Open High",
+                "StageName": "Negotiation",
+                "Amount": 900,
+                "CloseDate": "2026-09-01",
+                "IsClosed": False,
+            }
+        ]
+        page = _make_resp(200, {"records": stub_records, "done": True})
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = token_resp
+            instance.get.return_value = page
+
+            with SalesforceClient(**_client_kwargs()) as client:
+                records = client.get_open_opportunities("001xxxxxxxxxxxxxxx")
+
+        soql = instance.get.call_args.kwargs["params"]["q"]
+        assert soql == (
+            "SELECT Id, Name, StageName, Amount, CloseDate, IsClosed "
+            "FROM Opportunity WHERE AccountId = '001xxxxxxxxxxxxxxx' AND IsClosed = false"
+        )
+        assert records == stub_records
