@@ -59,6 +59,7 @@ from .jira_integration import JiraIntegration, FeedbackJiraIssue
 from .zendesk_integration import ZendeskIntegration
 from .feedback_zendesk_sync import FeedbackZendeskSync
 from .asana_integration import AsanaIntegration, FeedbackAsanaTask
+from .oidc_config import OidcConfig
 
 __all__ = [
     "Base",
@@ -131,4 +132,5 @@ __all__ = [
     "FeedbackZendeskSync",
     "AsanaIntegration",
     "FeedbackAsanaTask",
+    "OidcConfig",
 ]
