@@ -35,6 +35,7 @@ from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 
 from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402 — product-usage ingest receiver
 from src.api.routes import sentiment_accuracy as sentiment_accuracy_router  # noqa: E402 — eval-harness-and-card (M5.1 disclosure)
 from src.api.routes import classifier_accuracy as classifier_accuracy_router  # noqa: E402 — M5.2 settings-api-and-accuracy-card
+from src.api.routes import oidc_config as oidc_config_router  # noqa: E402 — oidc-sso: oidc-config aspect (M2/M3/M12)
 from src.seed import seed_admin_user, seed_system_templates
 from src.services.copilot.template_saver import TemplateSaver
 from src.services.embeddings import resolve_embedding_provider
@@ -326,6 +327,8 @@ app.include_router(account_router.router)
 app.include_router(ai_corrections_router.router)
 # AI Workflow Automation (M4.4)
 app.include_router(automations_router.router)
+# OIDC SSO config CRUD (oidc-sso: oidc-config aspect, M2/M3/M12)
+app.include_router(oidc_config_router.router)
 # Churn Playbooks (M4.1 Phase 5.1)
 # NOTE: executions static route must win over {playbook_id} wildcard — router
 # handles this via ordering of routes within the module.
