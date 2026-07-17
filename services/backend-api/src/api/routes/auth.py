@@ -16,6 +16,7 @@ from src.database.session import get_db
 from src.models.user import User
 from src.models.organization import Organization
 from src.models.oidc_config import OidcConfig
+from src.models.saml_config import SamlConfig
 from src.api.schemas import (
     SignupRequest, LoginRequest, TokenResponse, UserResponse,
     GoogleLoginRequest, GoogleSignupRequest,
@@ -326,6 +327,32 @@ def get_oidc_status(db: Session = Depends(get_db)):
     if not config:
         return OidcStatusResponse(enabled=False, button_label=DEFAULT_OIDC_BUTTON_LABEL)
     return OidcStatusResponse(enabled=True, button_label=config.button_label)
+
+
+# ============================================================================
+# SAML SSO Status Probe (saml-sso: config-model-and-crud aspect)
+# ============================================================================
+
+
+DEFAULT_SAML_BUTTON_LABEL = "Sign in with SSO"
+
+
+class SamlStatusResponse(BaseModel):
+    enabled: bool
+    button_label: str
+
+
+@router.get("/saml/status", response_model=SamlStatusResponse)
+def get_saml_status(db: Session = Depends(get_db)):
+    """
+    Public, unauthenticated probe the login page polls before showing a SAML
+    SSO button. Leaks nothing beyond enabled/button_label. Never 500s when
+    unconfigured.
+    """
+    config = db.query(SamlConfig).filter(SamlConfig.enabled.is_(True)).first()
+    if not config:
+        return SamlStatusResponse(enabled=False, button_label=DEFAULT_SAML_BUTTON_LABEL)
+    return SamlStatusResponse(enabled=True, button_label=config.button_label)
 
 
 # ============================================================================
