@@ -343,3 +343,73 @@ class TestOidcConfigRoute:
 
         resp = client.put("/api/v1/settings/oidc", json=payload, headers=owner_headers)
         assert resp.status_code == 422
+
+
+class TestOidcStatusEndpoint:
+    """Public, unauthenticated status probe: GET /api/v1/auth/oidc/status (AC6)."""
+
+    def test_unauthenticated_reachable_and_disabled_when_unconfigured(self, client):
+        resp = client.get("/api/v1/auth/oidc/status")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {"enabled": False, "button_label": "Sign in with SSO"}
+
+    def test_enabled_config_reports_enabled_and_custom_label(
+        self, client, db, test_organization
+    ):
+        from src.models.oidc_config import OidcConfig
+
+        config = OidcConfig(
+            organization_id=test_organization.id,
+            issuer_url="https://idp.example.com",
+            client_id="client-abc-123",
+            client_secret="encrypted_secret_value",
+            secret_hint="...wxyz",
+            enabled=True,
+            button_label="Sign in with Acme SSO",
+        )
+        db.add(config)
+        db.commit()
+
+        resp = client.get("/api/v1/auth/oidc/status")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == {"enabled": True, "button_label": "Sign in with Acme SSO"}
+
+    def test_disabled_config_still_reports_disabled(
+        self, client, db, test_organization
+    ):
+        from src.models.oidc_config import OidcConfig
+
+        config = OidcConfig(
+            organization_id=test_organization.id,
+            issuer_url="https://idp.example.com",
+            client_id="client-abc-123",
+            client_secret="encrypted_secret_value",
+            enabled=False,
+            button_label="Sign in with Acme SSO",
+        )
+        db.add(config)
+        db.commit()
+
+        resp = client.get("/api/v1/auth/oidc/status")
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": False, "button_label": "Sign in with SSO"}
+
+    def test_response_leaks_exactly_two_keys(self, client, db, test_organization):
+        from src.models.oidc_config import OidcConfig
+
+        config = OidcConfig(
+            organization_id=test_organization.id,
+            issuer_url="https://idp.example.com",
+            client_id="client-abc-123",
+            client_secret="encrypted_secret_value",
+            enabled=True,
+            allowed_email_domains=["acme.com"],
+            button_label="Sign in with Acme SSO",
+        )
+        db.add(config)
+        db.commit()
+
+        resp = client.get("/api/v1/auth/oidc/status")
+        assert set(resp.json().keys()) == {"enabled", "button_label"}

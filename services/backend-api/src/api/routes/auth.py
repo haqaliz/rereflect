@@ -1,9 +1,11 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from src.database.session import get_db
 from src.models.user import User
 from src.models.organization import Organization
+from src.models.oidc_config import OidcConfig
 from src.api.schemas import (
     SignupRequest, LoginRequest, TokenResponse, UserResponse,
     GoogleLoginRequest, GoogleSignupRequest,
@@ -281,3 +283,29 @@ async def google_login(data: GoogleLoginRequest, db: Session = Depends(get_db)):
     })
 
     return TokenResponse(access_token=access_token)
+
+
+# ============================================================================
+# OIDC SSO Status Probe
+# ============================================================================
+
+
+DEFAULT_OIDC_BUTTON_LABEL = "Sign in with SSO"
+
+
+class OidcStatusResponse(BaseModel):
+    enabled: bool
+    button_label: str
+
+
+@router.get("/oidc/status", response_model=OidcStatusResponse)
+def get_oidc_status(db: Session = Depends(get_db)):
+    """
+    Public, unauthenticated probe the login page polls before showing an SSO
+    button. Leaks nothing beyond enabled/button_label — never issuer_url,
+    client_id, allowed_email_domains, or org id. Never 500s when unconfigured.
+    """
+    config = db.query(OidcConfig).filter(OidcConfig.enabled.is_(True)).first()
+    if not config:
+        return OidcStatusResponse(enabled=False, button_label=DEFAULT_OIDC_BUTTON_LABEL)
+    return OidcStatusResponse(enabled=True, button_label=config.button_label)
