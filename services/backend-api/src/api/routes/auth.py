@@ -1,7 +1,13 @@
+import json
+import logging
+import os
+import secrets
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import httpx
 from src.database.session import get_db
 from src.models.user import User
 from src.models.organization import Organization
@@ -14,6 +20,11 @@ from src.api.schemas import (
 from src.api.auth import hash_password, verify_password, create_access_token
 from src.api.dependencies import get_current_user
 from src.services.google_auth import verify_google_access_token
+from src.services.oidc_provider import OidcProvider, OidcValidationError
+from src.utils.ssrf import SsrfError
+from src.api.routes._oidc_state import sign_state, hash_nonce, make_pkce, STATE_TTL_SECONDS
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
@@ -309,3 +320,77 @@ def get_oidc_status(db: Session = Depends(get_db)):
     if not config:
         return OidcStatusResponse(enabled=False, button_label=DEFAULT_OIDC_BUTTON_LABEL)
     return OidcStatusResponse(enabled=True, button_label=config.button_label)
+
+
+# ============================================================================
+# OIDC SSO Login Flow — /start
+# ============================================================================
+#
+# No prior session: this endpoint is hit by an UNAUTHENTICATED browser. The
+# signed `state` carries ONLY a CSRF nonce hash — never a user/org id (see
+# docs/planning/oidc-sso/oidc-login-flow/spec.md, "load-bearing divergence
+# from the Salesforce precedent"). Identity is resolved later, in /callback,
+# from the validated ID token.
+#
+# The callback-path-scoped HttpOnly+Secure cookie set below carries the
+# PKCE verifier + OIDC nonce + session nonce needed by /callback — it never
+# leaves the browser<->this backend and carries no long-lived secret.
+
+OIDC_CALLBACK_PATH = "/api/v1/auth/oidc/callback"
+OIDC_SESSION_COOKIE = "oidc_session"
+
+
+def _frontend_url() -> str:
+    return os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+
+def _backend_url() -> str:
+    return os.getenv("BACKEND_URL", "http://localhost:8000")
+
+
+@router.get("/oidc/start")
+def oidc_start(db: Session = Depends(get_db)):
+    """
+    Redirect an unauthenticated user to the enabled OIDC IdP to start SSO
+    login. Never 500s: a missing/disabled config or any discovery/SSRF
+    failure redirects to the frontend login page with a generic error
+    instead of raising or leaking issuer/validation internals.
+    """
+    config = db.query(OidcConfig).filter(OidcConfig.enabled.is_(True)).first()
+    if not config:
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login?sso_error=disabled",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    try:
+        provider = OidcProvider.from_config(config)
+        code_verifier, code_challenge = make_pkce()
+        oidc_nonce = secrets.token_urlsafe(32)
+        session_nonce = secrets.token_urlsafe(32)
+        state = sign_state(hash_nonce(session_nonce))
+        redirect_uri = f"{_backend_url()}{OIDC_CALLBACK_PATH}"
+        auth_url = provider.authorization_url(state, oidc_nonce, code_challenge, redirect_uri)
+    except (SsrfError, OidcValidationError, httpx.HTTPError, KeyError) as exc:
+        logger.error("OIDC start failed for config %s: %s", config.id, exc)
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login?sso_error=config",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    redirect = RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+    cookie_payload = json.dumps({
+        "session_nonce": session_nonce,
+        "code_verifier": code_verifier,
+        "oidc_nonce": oidc_nonce,
+    })
+    redirect.set_cookie(
+        key=OIDC_SESSION_COOKIE,
+        value=cookie_payload,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path=OIDC_CALLBACK_PATH,
+    )
+    return redirect
