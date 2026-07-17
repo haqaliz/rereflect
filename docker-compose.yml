@@ -87,8 +87,12 @@ services:
     deploy:
       replicas: 1
 
-  # Keycloak (dev/test OIDC issuer — NOT for production, dev creds only)
+  # Keycloak (dev/test OIDC issuer AND SAML IdP — NOT for production, dev creds only)
   # Start with: docker compose --profile dev-idp up keycloak
+  # For SAML: create a realm, add a SAML client with ACS URL
+  # http://localhost:8000/api/v1/auth/saml/callback (POST binding), enable assertion
+  # signing, then copy the realm's descriptor values into /settings/sso — see
+  # docs/SELF_HOSTING.md § Single Sign-On (SAML 2.0).
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     container_name: rereflect-keycloak
