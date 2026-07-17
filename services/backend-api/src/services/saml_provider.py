@@ -112,9 +112,11 @@ _ERROR_REASON_MAP = (
     ("audience", "audience"),
     ("recipient", "recipient"),
     ("destination", "recipient"),
+    ("received at", "recipient"),  # "The response was received at X instead of Y"
     ("notonorafter", "expired"),
     ("not on or after", "expired"),
     ("notbefore", "expired"),
+    ("not yet valid", "expired"),
     ("is not yet valid", "expired"),
     ("is no longer valid", "expired"),
     ("timestamp", "expired"),
@@ -209,6 +211,9 @@ class SamlProvider:
                 "wantAssertionsEncrypted": False,
                 "wantNameId": True,
                 "wantNameIdEncrypted": False,
+                # We accept NameID-email with no AttributeStatement, so don't
+                # force attributes (a NameID Format=emailAddress carries the email).
+                "wantAttributeStatement": False,
                 "authnRequestsSigned": False,
                 "rejectUnsolicitedResponsesWithInResponseTo": False,
                 "requestedAuthnContext": False,
@@ -276,13 +281,7 @@ class SamlProvider:
         errors = auth.get_errors()
         if errors:
             reason = auth.get_last_error_reason() or ""
-            code = _map_error_reason(reason)
-            # ±60s clock-skew supplement (Option A): only for a pure timestamp
-            # rejection, re-check against the signature-validated assertion.
-            if code == "expired" and self._within_skew(auth):
-                pass  # tolerated — fall through to identity extraction
-            else:
-                raise SamlValidationError(code, f"{errors}: {reason}")
+            raise SamlValidationError(_map_error_reason(reason), f"{errors}: {reason}")
 
         # Identity read ONLY from the validated getters — never the raw XML.
         name_id = auth.get_nameid()
@@ -290,36 +289,51 @@ class SamlProvider:
             raise SamlValidationError("assertion", "missing or empty NameID (null subject)")
         name_id_format = auth.get_nameid_format() or ""
         attributes = auth.get_attributes() or {}
-        email = self._extract_email(name_id, name_id_format, attributes)
 
+        # ±60s clock-skew supplement (Option A). The installed python3-saml
+        # 1.16.0 has a *native* ALLOWED_CLOCK_DRIFT of 300s on the Conditions
+        # window — contrary to the plan's premise of "no knob". To honour the
+        # spec's ±60s exactly (and be strictly MORE secure than the library
+        # default), we re-check the Conditions NotBefore/NotOnOrAfter of the
+        # already-signature-validated single assertion and reject anything
+        # outside ±60s. XSW-safe: only timestamps are read (never identity), the
+        # bytes were signature-checked, and the library already rejected any
+        # multi-assertion (wrapping) document above.
+        self._enforce_skew_tolerance(saml_response_b64)
+
+        email = self._extract_email(name_id, name_id_format, attributes)
         return ValidatedAssertion(subject=name_id, email=email, attributes=attributes)
 
     # ── helpers ─────────────────────────────────────────────────────────
 
-    def _within_skew(self, auth) -> bool:
-        """True iff the assertion's NotBefore/NotOnOrAfter are within ±60s of now.
+    def _enforce_skew_tolerance(self, saml_response_b64: str) -> None:
+        """Reject the validated assertion if `now` is outside
+        [NotBefore - 60s, NotOnOrAfter + 60s] on the Conditions element.
 
-        Reads timestamps from the already-signature-validated assertion document
-        (`auth.get_last_assertion_not_on_or_after` when available, else parses the
-        validated document). XSW-safe: the bytes were signature-checked; only
-        timestamps (never identity) are read here.
-        """
+        Runs only after the library's full validation succeeded, so exactly one
+        signed assertion exists; reading its Conditions timestamps here does not
+        reintroduce XSW. Raises SamlValidationError("expired") on violation."""
+        from onelogin.saml2.xml_utils import OneLogin_Saml2_XML
+
+        raw = OneLogin_Saml2_Utils.b64decode(saml_response_b64)
+        doc = OneLogin_Saml2_XML.to_etree(raw)
+        conditions = OneLogin_Saml2_XML.query(doc, "//saml:Assertion/saml:Conditions")
         now = _now()
-        try:
-            not_on_or_after = None
-            getter = getattr(auth, "get_last_assertion_not_on_or_after", None)
-            if callable(getter):
-                not_on_or_after = getter()
-            if not_on_or_after is not None:
-                # library returns epoch seconds
-                if now > float(not_on_or_after) + CLOCK_SKEW_SECONDS:
-                    return False
-                # NotBefore isn't exposed by a getter; the signed doc was already
-                # parsed, so a NotOnOrAfter within skew is sufficient tolerance.
-                return now >= float(not_on_or_after) - CLOCK_SKEW_SECONDS - SAML_REQUEST_TTL_SECONDS
-        except Exception:
-            return False
-        return False
+        for cond in conditions:
+            nb = cond.get("NotBefore")
+            nooa = cond.get("NotOnOrAfter")
+            if nb:
+                nb_t = OneLogin_Saml2_Utils.parse_SAML_to_time(nb)
+                if now < nb_t - CLOCK_SKEW_SECONDS:
+                    raise SamlValidationError(
+                        "expired", "assertion not yet valid beyond ±60s skew"
+                    )
+            if nooa:
+                nooa_t = OneLogin_Saml2_Utils.parse_SAML_to_time(nooa)
+                if now > nooa_t + CLOCK_SKEW_SECONDS:
+                    raise SamlValidationError(
+                        "expired", "assertion expired beyond ±60s skew"
+                    )
 
     def _extract_email(self, name_id: str, name_id_format: str, attributes: dict) -> Optional[str]:
         # 1. NameID when Format=emailAddress and it looks like an email.

@@ -25,8 +25,8 @@ from onelogin.saml2.utils import OneLogin_Saml2_Utils
 # Canonical identifiers shared between fixtures and the provider under test.
 IDP_ENTITY_ID = "https://idp.example.com/metadata"
 IDP_SSO_URL = "https://idp.example.com/sso"
-SP_ENTITY_ID = "http://localhost:8000/api/v1/auth/saml/metadata"
-ACS_URL = "http://localhost:8000/api/v1/auth/saml/callback"
+SP_ENTITY_ID = "https://localhost:8000/api/v1/auth/saml/metadata"
+ACS_URL = "https://localhost:8000/api/v1/auth/saml/callback"
 DEFAULT_IN_RESPONSE_TO = "_req-fixture-0001"
 DEFAULT_NAMEID = "user@example.com"
 
@@ -74,6 +74,7 @@ def _assertion_xml(
     session_not_on_or_after: datetime,
     attributes: dict,
     include_subject: bool = True,
+    sc_not_on_or_after: datetime = None,
 ) -> str:
     """One <saml:Assertion> element (string). Kept separate so the XSW variant
     can splice a *second*, forged, unsigned assertion around the signed one."""
@@ -95,13 +96,17 @@ def _assertion_xml(
         )
         attr_statements = f"<saml:AttributeStatement>{attrs}</saml:AttributeStatement>"
 
+    # SubjectConfirmationData NotOnOrAfter is a *strict* (no-drift) bearer check
+    # in python3-saml; keep it independently controllable so skew tests can hold
+    # it generously in the future while moving the Conditions window.
+    sc_nooa = sc_not_on_or_after if sc_not_on_or_after is not None else not_on_or_after
     subject = ""
     if include_subject:
         subject = (
             "<saml:Subject>"
             f'<saml:NameID Format="{name_id_format}">{name_id}</saml:NameID>'
             '<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">'
-            f'<saml:SubjectConfirmationData NotOnOrAfter="{_iso(not_on_or_after)}" '
+            f'<saml:SubjectConfirmationData NotOnOrAfter="{_iso(sc_nooa)}" '
             f'Recipient="{recipient}" InResponseTo="{in_response_to}"/>'
             "</saml:SubjectConfirmation>"
             "</saml:Subject>"
@@ -158,20 +163,30 @@ def make_signed_response(
     name_id_format: str = OneLogin_Saml2_Constants.NAMEID_UNSPECIFIED,
     not_before_delta_seconds: int = -30,
     not_on_or_after_delta_seconds: int = 300,
+    sc_not_on_or_after_delta_seconds: int = None,
     attributes: dict = None,
     include_subject: bool = True,
     xsw: bool = False,
+    sign_response: bool = False,
 ) -> str:
     """Build a base64-encoded SAMLResponse.
 
     - `sign=True` signs the *Assertion* (trust anchor). `sign=False` leaves it
       unsigned. `sign_key_pem`/`sign_cert_pem` override the signer (wrong-cert).
+    - `sign_response=True` signs the *Response* element instead of/in addition
+      to the assertion — used to prove that requiring an assertion signature
+      (not merely a response signature) is load-bearing.
     - `xsw=True` wraps a forged, *unsigned* second assertion (evil NameID) around
       the legitimately-signed one — the classic XML Signature Wrapping attack.
     """
     now = datetime.utcnow()
     not_before = now + timedelta(seconds=not_before_delta_seconds)
     not_on_or_after = now + timedelta(seconds=not_on_or_after_delta_seconds)
+    sc_nooa = (
+        now + timedelta(seconds=sc_not_on_or_after_delta_seconds)
+        if sc_not_on_or_after_delta_seconds is not None
+        else not_on_or_after
+    )
     session_expiry = now + timedelta(hours=8)
     attrs = attributes if attributes is not None else {}
 
@@ -189,6 +204,7 @@ def make_signed_response(
         session_not_on_or_after=session_expiry,
         attributes=attrs,
         include_subject=include_subject,
+        sc_not_on_or_after=sc_nooa,
     )
 
     if sign:
@@ -233,4 +249,17 @@ def make_signed_response(
         in_response_to=in_response_to,
         assertion_block=assertion_block,
     )
+
+    if sign_response:
+        skey = sign_key_pem or key_pem
+        scert = sign_cert_pem or cert_pem
+        signed_resp = OneLogin_Saml2_Utils.add_sign(
+            response,
+            skey,
+            scert,
+            sign_algorithm=OneLogin_Saml2_Constants.RSA_SHA256,
+            digest_algorithm=OneLogin_Saml2_Constants.SHA256,
+        )
+        response = signed_resp.decode() if isinstance(signed_resp, bytes) else signed_resp
+
     return base64.b64encode(response.encode("utf-8")).decode("ascii")
