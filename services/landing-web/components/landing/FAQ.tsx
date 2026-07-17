@@ -29,6 +29,10 @@ const faqs = [
     a: 'Slack (OAuth), Intercom (OAuth + webhooks), email forwarding, CSV import, webhooks for custom sources, and Linear. Zendesk and HubSpot integrations are planned. All integrations are configured in your self-hosted instance — no hosted service required.',
   },
   {
+    q: 'Does it support single sign-on (SSO)?',
+    a: 'Yes — OIDC single sign-on, alongside email/password and Google login. Point it at your own identity provider (Okta, Azure AD, Google Workspace, Keycloak, or any provider that issues RS256-signed ID tokens), configure it in Settings → SSO, and restrict access by email domain. First-time users are provisioned automatically. Like everything else, it is fully unlocked — there is no enterprise tier or SSO tax. SAML is not supported yet.',
+  },
+  {
     q: 'Who owns my data?',
     a: 'You do, entirely. Because Rereflect runs on your infrastructure, your feedback data never leaves your servers (unless you configure an external LLM key). There is no cloud service, no analytics pipeline, and no third party with access to your data.',
   },

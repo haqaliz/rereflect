@@ -8,6 +8,32 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Added — Single sign-on (OIDC)
+
+Self-hosted deployments can now wire in their own identity provider for login. It sits **alongside**
+the existing email/password and Google sign-in — neither of those changes — and, like everything in
+the open-source edition, it is fully unlocked with no tier or seat gate.
+
+- **OIDC authorization-code login** (PKCE, signed state + nonce) against any provider that issues
+  **RS256**-signed ID tokens — Okta, Azure AD, Google Workspace, Keycloak, and other conformant IdPs.
+- **Configured in-app** at **Settings → SSO** (`/settings/sso`, admin/owner only): issuer URL, client
+  id, client secret (stored Fernet-encrypted, never returned), an email-domain allowlist, and an
+  enable toggle. One enabled configuration per deployment.
+- **Just-in-time provisioning**: a first-time SSO user is created as a `member` in the configured
+  organization; an existing password/Google account with the same **verified** email is linked rather
+  than duplicated. `email_verified` is required.
+- **Deny-by-default access**: the email-domain allowlist is deny-all when empty — you must name at
+  least one domain, so a misconfigured multi-tenant issuer cannot mass-provision accounts.
+- **Server-side hardening**: the operator-supplied issuer and every discovered endpoint
+  (discovery, JWKS, authorize, token) are checked for HTTPS, private-IP/SSRF, and issuer-host
+  containment before any request; the client secret is never logged or sent cross-host.
+- Requires `LLM_ENCRYPTION_KEY` (the same Fernet key that protects other integration secrets) — now
+  documented in `.env.example`. A dev **Keycloak** service is available via
+  `docker compose --profile dev-idp up keycloak` for local testing. See the **Single Sign-On (OIDC)**
+  section of `docs/SELF_HOSTING.md`.
+- **Known limitation**: only RS256-signed ID tokens are accepted today; SAML and ES256 are not yet
+  supported.
+
 ### Fixed — telemetry: Sentry is now opt-in and off by default
 
 Earlier builds initialized Sentry unconditionally with a **hardcoded DSN pointing at the
