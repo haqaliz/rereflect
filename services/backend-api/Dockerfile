@@ -15,9 +15,22 @@ ENV HF_HOME=/app/models
 ARG BAKE_SENTIMENT_MODEL=false
 
 # Install system dependencies
+#  - libpq-dev, gcc: existing (psycopg2 + C ext builds)
+#  - libxml2/libxmlsec1 (+ -dev, -openssl), pkg-config, build-essential: native deps for python3-saml's
+#    xmlsec binding. Runtime libs (libxml2, libxmlsec1, libxmlsec1-openssl) are required to LOAD xmlsec;
+#    the -dev headers + pkg-config + build-essential are required to BUILD the xmlsec wheel from sdist if
+#    no compatible manylinux wheel resolves. Single-stage image keeps both (see saml-sso deps-and-docker
+#    plan §6 for a multi-stage slimming follow-up, out of scope this slice).
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
+    build-essential \
+    pkg-config \
+    libxml2 \
+    libxml2-dev \
+    libxmlsec1 \
+    libxmlsec1-dev \
+    libxmlsec1-openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching

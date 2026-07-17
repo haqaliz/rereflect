@@ -165,8 +165,10 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 **Goal**: 10 enterprise customers, $50K MRR
 
 ### Security & Compliance
-- [~] SSO — **OIDC shipped** (Okta, Azure AD, Google Workspace, Keycloak; RS256, JIT + verified-email
-  linking, domain allowlist, config at `/settings/sso`). **SAML deferred.** Plan gate void (OSS, all unlocked).
+- [x] SSO — **OIDC + SAML shipped** (Okta, Azure AD, Google Workspace, Keycloak; OIDC: RS256, JIT +
+  verified-email linking; SAML: SP-initiated only, signed-assertion validation, JIT + verified-email
+  linking; domain allowlist for both; config at `/settings/sso`; one SSO protocol enabled at a time).
+  SLO/SCIM/IdP-initiated deferred. Plan gate void (OSS, all unlocked).
 - [ ] Advanced RBAC (custom roles)
 - [ ] Data residency (US/EU/APAC)
 - [ ] SOC 2 Type II certification
@@ -230,11 +232,16 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 - [ ] Customer 360 enrichment: CRM data on customer profile
 - [ ] Plan gate: Business+
 
-### M3.6 — SSO — OIDC slice shipped (`feat/oidc-sso`); SAML deferred
-- [ ] SAML 2.0 integration (Okta, Azure AD, Google Workspace) — **deferred** (separate, heavier slice)
-- [x] **OIDC authorization-code login** (PKCE, state+nonce, RS256 ID-token validation) — the shipped SSO slice
+### M3.6 — SSO — OIDC + SAML shipped (`feat/oidc-sso`, `feat/saml-sso`)
+- [x] **OIDC authorization-code login** (PKCE, state+nonce, RS256 ID-token validation) — the shipped OIDC slice
+- [x] **SAML 2.0 SP-initiated login** (`feat/saml-sso`, slice 1) — single operator-configured IdP;
+      signed-assertion validation (XSW-guarded via the validated-getters-only identity read, assertion
+      signature required); strict Audience/Recipient/`NotBefore`-`NotOnOrAfter` (±60s skew)/`InResponseTo`
+      + replay/unsolicited checks; JIT-as-`member` + verified-email linking; domain allowlist (deny-all
+      when empty); one SSO protocol per deployment (SAML XOR OIDC, enforced at save time). **Out of
+      scope:** IdP-initiated login, Single Logout (SLO), SCIM, encrypted assertions, multiple IdPs.
 - [x] Auto-provisioning: create users (as `member`) on first SSO login; link existing verified-email accounts
-- [x] Settings page: SSO configuration (`/settings/sso` — issuer, client id/secret, domain allowlist, enable)
+- [x] Settings page: SSO configuration (`/settings/sso` — OIDC card + SAML card, domain allowlist, enable)
 - [x] Plan gate: **removed** — all features unlocked in the open-source self-hosted edition (pre-pivot framing was stale)
 
 ### M3.7 — Advanced RBAC & GDPR (2 weeks) — GDPR COMPLETE

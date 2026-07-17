@@ -29,6 +29,26 @@ google-auth>=2.27.0          # Google ID token verification
 # OIDC SSO (oidc-sso feature — ID-token/JWKS validation, do not hand-roll)
 Authlib==1.7.2                # OIDC discovery + JWKS + ID-token validation
 
+# SAML 2.0 SSO (saml-sso feature — SP-initiated; validate assertions, do not hand-roll XML-DSig)
+# python3-saml pulls the native xmlsec (libxmlsec1/libxml2) binding — see the Dockerfile apt layer.
+#
+# lxml + xmlsec MUST link the SAME libxml2, or import dies with
+#   "lxml & xmlsec libxml2 library version mismatch".
+# Mixing prebuilt wheels does not guarantee that, so we force BOTH from source (--no-binary below)
+# against the system libxml2 that the Dockerfile / host provides.
+#
+# xmlsec version is platform-split because no single SOURCE version fits both targets:
+#   - Debian 12 (bookworm) image  -> libxmlsec1 1.2.37 -> needs xmlsec <= 1.3.13
+#   - macOS dev host (brew)        -> libxmlsec1 1.3.x  -> needs xmlsec >= 1.3.14
+# The Python API is identical across these; tests run on both. (A future Docker bump to a base with
+# libxmlsec1 >= 1.3.0 — e.g. trixie — would let us unify on one version.)
+# macOS source build needs brew paths on PKG_CONFIG_PATH/CPPFLAGS/LDFLAGS (see docs/SELF_HOSTING.md dev note).
+--no-binary=lxml,xmlsec
+python3-saml==1.16.0                    # OneLogin SP-side SAML — import path: onelogin.saml2.*
+lxml==5.4.0                             # XML backend; source-built to match xmlsec's libxml2
+xmlsec==1.3.13 ; sys_platform == "linux"    # Native XML-DSig binding — libxmlsec1 1.2.x (bookworm)
+xmlsec==1.3.16 ; sys_platform == "darwin"   # Native XML-DSig binding — libxmlsec1 1.3.x (brew/macOS dev)
+
 # Encryption (for BYOK API key storage)
 cryptography>=43.0.0         # Fernet symmetric encryption for LLM API keys
 

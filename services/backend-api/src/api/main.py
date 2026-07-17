@@ -36,6 +36,7 @@ from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402
 from src.api.routes import sentiment_accuracy as sentiment_accuracy_router  # noqa: E402 — eval-harness-and-card (M5.1 disclosure)
 from src.api.routes import classifier_accuracy as classifier_accuracy_router  # noqa: E402 — M5.2 settings-api-and-accuracy-card
 from src.api.routes import oidc_config as oidc_config_router  # noqa: E402 — oidc-sso: oidc-config aspect (M2/M3/M12)
+from src.api.routes import saml_config as saml_config_router  # noqa: E402 — saml-sso: config-model-and-crud aspect (M1/M6)
 from src.seed import seed_admin_user, seed_system_templates
 from src.services.copilot.template_saver import TemplateSaver
 from src.services.embeddings import resolve_embedding_provider
@@ -329,6 +330,8 @@ app.include_router(ai_corrections_router.router)
 app.include_router(automations_router.router)
 # OIDC SSO config CRUD (oidc-sso: oidc-config aspect, M2/M3/M12)
 app.include_router(oidc_config_router.router)
+# SAML SSO config CRUD (saml-sso: config-model-and-crud aspect, M1/M6)
+app.include_router(saml_config_router.router)
 # Churn Playbooks (M4.1 Phase 5.1)
 # NOTE: executions static route must win over {playbook_id} wildcard — router
 # handles this via ordering of routes within the module.

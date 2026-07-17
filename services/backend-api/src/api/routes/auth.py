@@ -5,7 +5,7 @@ import os
 import secrets
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from src.database.session import get_db
 from src.models.user import User
 from src.models.organization import Organization
 from src.models.oidc_config import OidcConfig
+from src.models.saml_config import SamlConfig
 from src.api.schemas import (
     SignupRequest, LoginRequest, TokenResponse, UserResponse,
     GoogleLoginRequest, GoogleSignupRequest,
@@ -25,6 +26,8 @@ from src.api.auth import hash_password, verify_password, create_access_token
 from src.api.dependencies import get_current_user
 from src.services.google_auth import verify_google_access_token
 from src.services.oidc_provider import OidcProvider, OidcValidationError
+from src.services.saml_provider import SamlProvider, SamlValidationError, SAML_ACS_PATH
+from src.services.saml_replay import register_request, consume_request, ConsumeOutcome
 from src.utils.ssrf import SsrfError
 from src.api.routes._oidc_state import (
     sign_state, verify_state, hash_nonce, make_pkce, STATE_TTL_SECONDS,
@@ -329,6 +332,32 @@ def get_oidc_status(db: Session = Depends(get_db)):
 
 
 # ============================================================================
+# SAML SSO Status Probe (saml-sso: config-model-and-crud aspect)
+# ============================================================================
+
+
+DEFAULT_SAML_BUTTON_LABEL = "Sign in with SSO"
+
+
+class SamlStatusResponse(BaseModel):
+    enabled: bool
+    button_label: str
+
+
+@router.get("/saml/status", response_model=SamlStatusResponse)
+def get_saml_status(db: Session = Depends(get_db)):
+    """
+    Public, unauthenticated probe the login page polls before showing a SAML
+    SSO button. Leaks nothing beyond enabled/button_label. Never 500s when
+    unconfigured.
+    """
+    config = db.query(SamlConfig).filter(SamlConfig.enabled.is_(True)).first()
+    if not config:
+        return SamlStatusResponse(enabled=False, button_label=DEFAULT_SAML_BUTTON_LABEL)
+    return SamlStatusResponse(enabled=True, button_label=config.button_label)
+
+
+# ============================================================================
 # OIDC SSO Login Flow — /start
 # ============================================================================
 #
@@ -560,3 +589,240 @@ def oidc_callback(
     )
     redirect.delete_cookie(OIDC_SESSION_COOKIE, path=OIDC_CALLBACK_PATH)
     return redirect
+
+
+# ============================================================================
+# SAML 2.0 SSO Login Flow (saml-sso: login-routes-and-identity aspect)
+# ============================================================================
+#
+# Two routes, both riding the existing `auth.router` (prefix /api/v1/auth):
+#   GET  /saml/login     — SP-initiated start; 302 to the IdP.
+#   POST /saml/callback  — the Assertion Consumer Service (ACS).
+#
+# Unlike OIDC, there is NO session cookie: the browser POSTs the SAMLResponse
+# back cross-site, so a SameSite=Lax cookie would not be sent. RelayState is an
+# HMAC-signed nonce hash (freshness/HMAC proof only — no identity, no trust
+# weight); the real anti-forgery controls live at the ACS (see below).
+#
+# `SAML_SSO_ERROR_CODES` documents every `sso_error` this flow can emit; the
+# frontend `getSsoErrorMessage` map (next aspect) is the human-facing copy.
+SAML_SSO_ERROR_CODES = frozenset({
+    "disabled",     # no enabled SamlConfig at /login or ACS
+    "config",       # SamlProvider.from_config / build_authn_request raised SsrfError/ValueError
+    "state",        # RelayState missing / bad HMAC / TTL-expired at ACS
+    "signature",    # assertion unsigned / wrong cert / XSW
+    "assertion",    # malformed response, missing InResponseTo, or any UNEXPECTED provider error
+    "audience",     # Audience != SP entity id
+    "recipient",    # Destination/Recipient != ACS URL
+    "expired",      # NotBefore/NotOnOrAfter outside skew, OR replay-store expired
+    "replay",       # InResponseTo already consumed
+    "unsolicited",  # InResponseTo unknown to the replay store
+    "unverified",   # assertion carries no email (SAML has no email_verified)
+    "domain",       # email domain not in allowed_email_domains (empty = deny-all)
+    "token",        # null/empty NameID subject — the account-takeover guard
+})
+
+
+@router.get("/saml/login")
+def saml_login(db: Session = Depends(get_db)):
+    """
+    SP-initiated SAML start. Redirect an unauthenticated user to the enabled
+    SAML IdP. Never 500s: a missing/disabled config or any provider/SSRF/value
+    error (including a replay-store write failure) redirects to the frontend
+    login page with a generic error instead of raising or leaking IdP internals.
+    """
+    config = db.query(SamlConfig).filter(SamlConfig.enabled.is_(True)).first()
+    if not config:
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login?sso_error=disabled",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    try:
+        provider = SamlProvider.from_config(config)
+        # RelayState = signed(hash(random)) — HMAC/freshness proof, carries no
+        # identity (mirrors the OIDC `state`, minus the session-nonce cookie).
+        relay_state = sign_state(hash_nonce(secrets.token_urlsafe(32)))
+        redirect_url, request_id = provider.build_authn_request(relay_state)
+        # Persist the issued request_id as PENDING so the ACS can one-time
+        # consume its InResponseTo. Inside the try: a DB error also degrades to
+        # sso_error=config, never a 500.
+        register_request(db, request_id=request_id, organization_id=config.organization_id)
+    except (SsrfError, ValueError) as exc:
+        logger.error("SAML login start failed for config %s: %s", config.id, exc)
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login?sso_error=config",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    return RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
+
+
+def _extract_saml_in_response_to(saml_response_b64: str) -> Optional[str]:
+    """Read the SAML Response `@InResponseTo` — a NON-identity field — so the
+    ACS can key it into the server-side replay store.
+
+    Read from the raw XML BEFORE signature validation, which is safe: the value
+    is used ONLY as a lookup key into the pending-request store (a forged /
+    attacker-chosen value simply resolves to unsolicited or replay, and the
+    consume happens only AFTER the assertion is cryptographically validated).
+    Identity (subject/email) is NEVER read here — it comes solely from the
+    provider's validated `ValidatedAssertion`, closing the XSW door. Returns
+    None if the body is unparseable (never raises)."""
+    try:
+        from onelogin.saml2.utils import OneLogin_Saml2_Utils
+        from onelogin.saml2.xml_utils import OneLogin_Saml2_XML
+
+        raw = OneLogin_Saml2_Utils.b64decode(saml_response_b64)
+        doc = OneLogin_Saml2_XML.to_etree(raw)
+        return doc.get("InResponseTo") or None
+    except Exception:  # noqa: BLE001 - parse failure is not fatal; -> unsolicited
+        return None
+
+
+@router.post("/saml/callback")
+def saml_callback(
+    SAMLResponse: str = Form(...),
+    RelayState: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    SAML Assertion Consumer Service (ACS).
+
+    AUTH-EXEMPT and CSRF-EXEMPT **by design**. A browser returning from the IdP
+    POSTs cross-site, so a SameSite=Lax session cookie would not be sent — a
+    cookie-based CSRF token is structurally impossible here. The trust controls
+    are instead:
+      (1) the XML SIGNATURE over the assertion, verified against the
+          operator-configured IdP cert (an attacker cannot mint a valid
+          signature); and
+      (2) the one-time `InResponseTo` CONSUME against the server-side replay
+          store (a captured assertion cannot be replayed; an unsolicited
+          response with an unknown InResponseTo is rejected).
+    `RelayState` is an HMAC-signed nonce hash with NO identity and NO trust
+    weight — it only proves the redirect was minted by our /saml/login within
+    the TTL (defense in depth). Forging/omitting it yields sso_error=state;
+    forging the assertion yields signature; replaying yields replay.
+
+    Never 500s: every failure path redirects to the FIXED FRONTEND_URL with a
+    generic ?sso_error= (detail stays server-side in logs), and creates/links
+    no user. Validation runs BEFORE the replay consume so a forged POST can
+    never burn a legitimate user's pending request_id.
+    """
+
+    def _err(code: str) -> RedirectResponse:
+        # Base is ALWAYS the fixed configured FRONTEND_URL — never request/IdP/
+        # RelayState-derived (open-redirect guard). No user created/linked here.
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login?sso_error={code}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    try:
+        # (1) RelayState: HMAC + TTL only. Carries a nonce hash, no identity.
+        if not RelayState or verify_state(RelayState) is None:
+            return _err("state")
+
+        # (2) Enabled config required to know the cert/entityId to validate against.
+        config = db.query(SamlConfig).filter(SamlConfig.enabled.is_(True)).first()
+        if not config:
+            return _err("disabled")
+
+        # (3) Validate the SAML Response (signature, XSW-resistance, Audience,
+        #     Recipient/Destination, NotBefore/NotOnOrAfter, Issuer,
+        #     InResponseTo). Pure crypto — no DB. ANY unexpected (non-typed)
+        #     exception maps to a generic `assertion` error, NEVER a 500 / stack
+        #     trace on this unauthenticated endpoint.
+        in_response_to = _extract_saml_in_response_to(SAMLResponse)
+        acs_url = f"{_backend_url()}{SAML_ACS_PATH}"
+        try:
+            provider = SamlProvider.from_config(config)
+            assertion = provider.validate_response(
+                SAMLResponse,
+                expected_in_response_to=in_response_to,
+                acs_url=acs_url,
+            )
+        except SamlValidationError as exc:
+            logger.error(
+                "SAML assertion validation failed for config %s: code=%s",
+                config.id, exc.code,
+            )
+            return _err(exc.code)
+        except SsrfError as exc:
+            logger.error("SAML provider SSRF for config %s: %s", config.id, exc)
+            return _err("config")
+        except Exception as exc:  # noqa: BLE001 - unauthenticated ACS must never 500
+            logger.error(
+                "SAML ACS unexpected validation error for config %s: %s",
+                config.id, exc,
+            )
+            return _err("assertion")
+
+        # (4) Replay/unsolicited/expired: one-time conditional consume of the
+        #     InResponseTo. Runs only AFTER the assertion is cryptographically
+        #     trusted, so a forged POST cannot consume a real pending request.
+        outcome = consume_request(db, request_id=in_response_to or "")
+        if outcome != ConsumeOutcome.OK:
+            return _err(outcome.value)  # "replay" | "unsolicited" | "expired"
+
+        # (5) Identity resolution — mirrors the OIDC callback in shape. SAML has
+        #     no email_verified field: a validly-signed assertion's email is
+        #     trusted (the IdP asserts it), so `unverified` here means "no email".
+        email = assertion.email
+        if not email:
+            return _err("unverified")
+        email = email.lower()
+        subject = assertion.subject
+        if not subject:
+            # KEEP the null-subject rejection: `User.saml_subject == None`
+            # compiles to `WHERE saml_subject IS NULL`, matching every existing
+            # password/Google/OIDC user; `.first()` would then mint a token for
+            # the lowest-id row (the org owner) — account takeover. Reject before
+            # any identity-resolution query runs.
+            return _err("token")
+
+        # Domain allowlist — empty/absent list is deny-all (matches OIDC).
+        allowed_domains = [d.lower() for d in (config.allowed_email_domains or [])]
+        if email.rsplit("@", 1)[-1] not in allowed_domains:
+            return _err("domain")
+
+        # saml_subject first (a returning SSO user whose IdP email changed), then
+        # case-insensitive email link, else JIT-provision a new member.
+        user = db.query(User).filter(User.saml_subject == subject).first()
+        if not user:
+            user = db.query(User).filter(func.lower(User.email) == email).first()
+            if user:
+                user.saml_subject = subject
+                if user.auth_provider in ("email", "google", "oidc"):
+                    user.auth_provider = "both"
+                db.commit()
+                db.refresh(user)
+            else:
+                user = User(
+                    email=email,
+                    password_hash=None,
+                    saml_subject=subject,
+                    auth_provider="saml",
+                    organization_id=config.organization_id,
+                    role="member",
+                    joined_at=datetime.utcnow(),
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+        access_token = create_access_token({
+            "user_id": user.id,
+            "organization_id": user.organization_id,
+            "role": user.role,
+        })
+        # (6) Token via URL FRAGMENT on the FIXED FRONTEND_URL — reuse the
+        #     existing public /login/callback route (open-redirect guard); never
+        #     reflect an attacker/IdP/RelayState-derived URL.
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login/callback#token={access_token}",
+            status_code=status.HTTP_302_FOUND,
+        )
+    except Exception as exc:  # noqa: BLE001 - belt-and-braces: the ACS never 500s
+        logger.error("SAML ACS unhandled error: %s", exc)
+        return _err("assertion")

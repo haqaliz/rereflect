@@ -21,6 +21,7 @@ default) treats every instance as fully featured.
 - [Connecting Zendesk](#connecting-zendesk)
 - [Connecting Asana](#connecting-asana)
 - [Single Sign-On (OIDC)](#single-sign-on-oidc)
+- [Single Sign-On (SAML 2.0)](#single-sign-on-saml-20)
 - [Production notes](#production-notes)
 
 ## Prerequisites
@@ -1321,6 +1322,184 @@ to the browser.
 ### All features unlocked
 
 Because Rereflect is self-hosted and open-source, SSO has no plan gate, seat limit, or
+usage cap — it's available to every organization running the app.
+
+## Single Sign-On (SAML 2.0)
+
+Rereflect also supports **SP-initiated SAML 2.0** single sign-on, alongside password,
+Google, and OIDC login (see [Single Sign-On (OIDC)](#single-sign-on-oidc) above) — none
+of those change. **All features are unlocked** on self-hosted, so SAML carries no plan
+gate. This is a **slice-1** implementation: it covers the common enterprise IdP-login
+case, not the full SAML 2.0 feature surface — see [Known limitations](#known-limitations-slice-1)
+below before you commit to it.
+
+**No new secret is required.** Unlike the OIDC client secret, the IdP's X.509 signing
+certificate you paste in is **public** material — it is stored as plain PEM, never
+Fernet-encrypted, so `LLM_ENCRYPTION_KEY` is **not** a prerequisite for SAML (it's still
+required for OIDC/CRM secrets if you use those).
+
+### macOS dev note: building `xmlsec`/`lxml` locally
+
+If you run `services/backend-api` directly on macOS (e.g. via `./start.sh`, outside
+Docker) rather than through `docker-compose`, `pip install -r requirements.txt` compiles
+`lxml` and `xmlsec` **from source** (see the comments above the pins in
+`services/backend-api/requirements.txt`) — they must link the same `libxml2`, and the
+Docker image's Debian package version doesn't match what's typically on a Mac. Before
+installing, install the native libs via Homebrew and point the build at them:
+
+```bash
+brew install libxmlsec1 libxml2 pkg-config
+
+export PKG_CONFIG_PATH="$(brew --prefix libxmlsec1)/lib/pkgconfig:$(brew --prefix libxml2)/lib/pkgconfig:$PKG_CONFIG_PATH"
+export CPPFLAGS="-I$(brew --prefix libxmlsec1)/include -I$(brew --prefix libxml2)/include"
+export LDFLAGS="-L$(brew --prefix libxmlsec1)/lib -L$(brew --prefix libxml2)/lib"
+
+pip install -r requirements.txt
+```
+
+The pinned `xmlsec` version differs by platform for the same reason — `1.3.13` on the
+Debian container image, `1.3.16` on a brew host — but the Python API the code imports
+(`onelogin.saml2.*`) is identical either way; you don't need to change any application
+code to develop on macOS.
+
+### 1. Register Rereflect as a SAML SP with your IdP
+
+Create a SAML application/client in your IdP with:
+
+| Setting | Value |
+|---------|-------|
+| ACS (Assertion Consumer Service) URL | `{BACKEND_URL}/api/v1/auth/saml/callback` — **HTTP-POST binding** — e.g. `http://localhost:8000/api/v1/auth/saml/callback` for a local install. Must match exactly what you register. |
+| SP Entity ID | `{BACKEND_URL}/api/v1/auth/saml/metadata` — e.g. `http://localhost:8000/api/v1/auth/saml/metadata`. This is an **identifier string only**: Rereflect does **not** serve a metadata document at that URL in this release, so register it as a literal value with your IdP, not as a fetchable link. |
+| NameID format | Any format is accepted. If it's `emailAddress` and contains `@`, Rereflect reads the email straight from the NameID. Otherwise it falls back to an attribute (see the **email attribute** field below, then a default chain of common email-claim names). |
+| Assertion signing | **The IdP must sign the assertion itself** (not just the outer response). Rereflect rejects an unsigned or response-only-signed assertion. |
+
+This works with any IdP that can sign SAML assertions and POST them to an ACS URL —
+Okta, Azure AD (Entra ID), OneLogin, ADFS, Google Workspace, and Keycloak all qualify.
+
+**The signed assertion must bind to the request it answers.** For this SP-initiated flow,
+the IdP's response must echo the original AuthnRequest's ID back as `InResponseTo` on the
+assertion's `SubjectConfirmationData` — standard behavior for any SP-initiated SAML
+exchange, and every IdP listed above does this by default. This is what stops
+assertion-substitution: without it, a validly-signed assertion issued for a *different*
+login attempt (the IdP's or another SP's) could be replayed against this one. Note that
+Rereflect does **not** require `wantMessagesSigned` (signing the outer Response, on top of
+the assertion) — the `InResponseTo` binding lives inside the signed assertion itself, so
+requiring message-level signing too would add no further anti-substitution guarantee for
+mainstream IdPs.
+
+### 2. Configure in the app
+
+Go to **Settings → SSO** (`/settings/sso`, admin/owner only) — the SAML card sits below
+the OIDC card on the same page — and fill in:
+
+| Field | Notes |
+|-------|-------|
+| IdP Entity ID | Your IdP's SAML issuer/entity identifier |
+| IdP SSO URL | Your IdP's SAML SSO endpoint (HTTP-Redirect binding). Must be `https://` and passes an SSRF host check on save. |
+| IdP X.509 signing certificate | Paste the IdP's public PEM certificate. Validated as parseable X.509 on save (422 if it isn't). The app never echoes the PEM back — it shows a SHA-256 fingerprint you can cross-check against your IdP console. |
+| Email attribute (optional) | Name of the SAML attribute carrying the user's email, if your IdP doesn't send NameID as an email address. Leave blank to use the default chain (`email`, the LDAP `mail` OID, or the standard `emailaddress` claim URI). |
+| Allowed email domains | See below — **required**, or nobody can sign in |
+| Button label | Optional custom text for the "Sign in with SSO" button |
+| Enabled | Turns the login button on/off |
+
+### 3. Allowed email domains: empty means deny-all
+
+An empty `allowed_email_domains` list is **not** "allow anyone" — it is **deny-all**.
+You must list at least one domain (e.g. `acme.com`) before any SAML login can succeed;
+an identity outside the list is rejected with no account created or linked.
+
+### One SSO protocol per deployment
+
+Rereflect allows **at most one SSO protocol enabled at a time** — SAML and OIDC are
+mutually exclusive *when enabled*, not mutually exclusive to configure. You may have
+both a SAML config and an OIDC config saved; enabling one while the other is already
+enabled is rejected (422 — "only one SSO protocol may be active per deployment"). Only
+one SSO button ever appears on the login page.
+
+### JIT provisioning and account linking
+
+- **New user, no existing Rereflect account:** the first successful SAML login
+  auto-creates a `member` in the organization that owns the enabled config. There is no
+  invite step.
+- **Existing password, Google, or OIDC account with the same email:** it is linked to
+  the SAML identity (its auth method becomes "both") — matched case-insensitively.
+- **Trust model differs from OIDC:** SAML has no `email_verified` claim. A validly
+  **signed** assertion's email is trusted outright (the IdP is asserting it under
+  signature). An assertion with no usable email is rejected; no account is created or
+  linked.
+
+### Known limitations (slice 1)
+
+- **SP-initiated only** — there is no IdP-initiated login (starting from an IdP's own
+  app dashboard/tile will not work).
+- **No Single Logout (SLO).**
+- **No SCIM / directory provisioning** — users are created just-in-time on first login
+  only; there is no background directory sync or deprovisioning.
+- **Signed, not encrypted, assertions** — Rereflect requires and validates a signed
+  assertion but does not support encrypted assertions.
+- **Single IdP, single signing certificate** per deployment — one SAML config, one cert.
+- **Cert rotation:** because a config holds exactly one certificate, rotate by pasting
+  the **new** certificate into `/settings/sso` while the **old** one is still valid and
+  configured at the IdP (an overlap window), then cut the IdP over to sign with the new
+  key. There is no dual-cert grace period on the Rereflect side. If a bad rotation locks
+  out your SSO users, **owner email/password login still works** — that's the
+  deliberate fallback, not an oversight.
+
+### Testing against a local Keycloak (SAML)
+
+The same dev-only Keycloak service used for OIDC testing also speaks SAML:
+
+```bash
+docker compose --profile dev-idp up keycloak
+```
+
+Open the admin console at `http://localhost:8080` and log in with the dev credentials
+(`admin` / `admin`). Create a realm, then add a **SAML client** inside it:
+
+- Set the client's **ACS URL** / valid redirect to
+  `http://localhost:8000/api/v1/auth/saml/callback`, **POST** binding.
+- Enable **assertion signing** for the client (client signature / "Sign assertions").
+
+Then copy the realm's SAML descriptor values — IdP Entity ID, SSO URL, and signing
+certificate, visible at `http://localhost:8080/realms/<realm-name>/protocol/saml/descriptor`
+— into `/settings/sso`.
+
+### Troubleshooting
+
+A failed SAML login redirects to `/login?sso_error=<code>`:
+
+| Code | Meaning |
+|------|---------|
+| `disabled` | No SAML configuration is currently enabled |
+| `config` | Building the AuthnRequest failed (bad IdP config or an SSRF-gated URL) |
+| `state` | The RelayState nonce was missing, malformed, or its signature/TTL check failed |
+| `signature` | The assertion's XML signature failed validation against the configured certificate |
+| `assertion` | The response/assertion was malformed, unsigned, or failed a structural check |
+| `audience` | The assertion's `Audience` did not match the SP entity ID |
+| `recipient` | The assertion's `Recipient`/`Destination` did not match the ACS URL |
+| `expired` | The assertion was outside its validity window (`NotBefore`/`NotOnOrAfter`, ±60 seconds of clock-skew tolerance) |
+| `replay` | This assertion's request ID was already consumed (replay) |
+| `unsolicited` | The assertion's `InResponseTo` didn't match a request Rereflect issued |
+| `unverified` | No usable email was present in the assertion |
+| `domain` | The email's domain is not in `allowed_email_domains` |
+| `token` | The assertion had no subject (`NameID`) — rejected before any identity lookup |
+
+Every code above is generic by design — no IdP or validation detail is ever exposed to
+the browser.
+
+**A note on `InResponseTo`:** your IdP's signed assertion must include a
+`SubjectConfirmationData` element carrying the request's `InResponseTo` attribute —
+standard behavior for SP-initiated SAML — since that's what binds the returned
+assertion to the specific AuthnRequest Rereflect issued. IdPs that only support
+IdP-initiated flows (and so never populate `InResponseTo`) are not compatible with this
+slice. Also note the two timestamp checks are held to different tolerances: the
+assertion's `Conditions` window (`NotBefore`/`NotOnOrAfter`) gets a ±60 second clock-skew
+allowance, while the `SubjectConfirmationData` bearer window is enforced with no added
+tolerance.
+
+### All features unlocked
+
+Because Rereflect is self-hosted and open-source, SAML has no plan gate, seat limit, or
 usage cap — it's available to every organization running the app.
 
 ## Production notes

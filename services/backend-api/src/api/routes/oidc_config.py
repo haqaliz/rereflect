@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_org, require_admin_or_owner
+from src.api.routes._sso_guard import assert_no_other_provider_enabled
 from src.database.session import get_db
 from src.models.oidc_config import OidcConfig
 from src.models.organization import Organization
@@ -164,6 +165,7 @@ def upsert_oidc_config(
 
     if payload.enabled:
         _assert_no_other_enabled(db, current_org.id)
+        assert_no_other_provider_enabled(db, enabling="oidc")
 
     existing = _get_org_config(db, current_org.id)
 
