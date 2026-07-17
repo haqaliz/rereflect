@@ -31,8 +31,45 @@ the open-source edition, it is fully unlocked with no tier or seat gate.
   documented in `.env.example`. A dev **Keycloak** service is available via
   `docker compose --profile dev-idp up keycloak` for local testing. See the **Single Sign-On (OIDC)**
   section of `docs/SELF_HOSTING.md`.
-- **Known limitation**: only RS256-signed ID tokens are accepted today; SAML and ES256 are not yet
-  supported.
+- **Known limitation**: only RS256-signed ID tokens are accepted today (ES256 and other algorithms are
+  not); SAML is supported separately — see the SAML entry below.
+
+### Added — Single sign-on (SAML 2.0)
+
+Self-hosted deployments can also wire in a **SAML 2.0** identity provider — a slice-1, SP-initiated
+implementation covering the common enterprise-login case. It sits alongside password, Google, and OIDC
+login (none of those change), and, like everything in the open-source edition, is fully unlocked with
+no tier or seat gate.
+
+- **SP-initiated SAML login** against a single operator-configured IdP: the IdP's assertion **must be
+  signed** (unsigned or response-only-signed assertions are rejected). Identity is read only from the
+  SAML library's signature-validated getters — never the raw XML — closing the XML Signature Wrapping
+  (XSW) door.
+- Strict validation of `Audience` (against the SP entity ID), `Recipient`/`Destination` (against the ACS
+  URL), `NotBefore`/`NotOnOrAfter` (±60 second clock-skew tolerance on the assertion's `Conditions`
+  window; the `SubjectConfirmationData` bearer window gets no added tolerance), and `InResponseTo` —
+  plus one-time replay/unsolicited-response rejection via a server-side pending-request store.
+- The IdP SSO URL is SSRF-gated (HTTPS + private-IP checks) both at config-save time and again at login
+  time.
+- **Configured in-app** at **Settings → SSO** (`/settings/sso`, admin/owner only, same page as OIDC):
+  IdP Entity ID, IdP SSO URL, IdP X.509 signing certificate (PEM; the API returns a SHA-256 fingerprint,
+  never the raw PEM back), an optional email-attribute override, an email-domain allowlist, a button
+  label, and an enable toggle.
+- **Just-in-time provisioning**: a first-time SAML user is created as a `member` in the configured
+  organization; an existing password/Google/OIDC account with the same email (matched case-insensitively)
+  is linked rather than duplicated. SAML has no `email_verified` claim — a validly **signed** assertion's
+  email is trusted outright.
+- **Deny-by-default access**: the email-domain allowlist is deny-all when empty, same as OIDC.
+- **One SSO protocol per deployment**: enabling SAML while an OIDC config is enabled (or vice versa) is
+  rejected — at most one of {OIDC, SAML} may be enabled at a time.
+- No new secret: the pasted X.509 certificate is public material, stored as plain PEM (not
+  Fernet-encrypted), so `LLM_ENCRYPTION_KEY` is not a SAML prerequisite. The dev **Keycloak** service
+  (`docker compose --profile dev-idp up keycloak`) also speaks SAML for local testing. See the
+  **Single Sign-On (SAML 2.0)** section of `docs/SELF_HOSTING.md`.
+- **Known limitations (slice 1)**: SP-initiated only — no IdP-initiated login; no Single Logout (SLO);
+  no SCIM/directory provisioning; assertions are signed but not encrypted; single IdP and single signing
+  certificate per deployment (see the docs for the cert-rotation procedure and the owner-login lockout
+  fallback).
 
 ### Fixed — telemetry: Sentry is now opt-in and off by default
 
