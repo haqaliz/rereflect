@@ -61,6 +61,7 @@ from .feedback_zendesk_sync import FeedbackZendeskSync
 from .asana_integration import AsanaIntegration, FeedbackAsanaTask
 from .oidc_config import OidcConfig
 from .saml_config import SamlConfig
+from .saml_auth_request import SamlAuthRequest
 
 __all__ = [
     "Base",
@@ -135,4 +136,5 @@ __all__ = [
     "FeedbackAsanaTask",
     "OidcConfig",
     "SamlConfig",
+    "SamlAuthRequest",
 ]
