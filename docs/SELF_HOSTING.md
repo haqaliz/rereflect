@@ -1287,10 +1287,18 @@ is currently rejected. Stated here plainly rather than discovered at login time.
 ### Testing against a local Keycloak
 
 For a quick end-to-end test without a real IdP, the bundled `docker-compose.yml`
-includes a dev-only Keycloak service (see [`docker-compose.yml`](../docker-compose.yml)
-for how to start it). Create a realm and client in its admin console, set the redirect
-URI and scopes as in step 1 above, and paste its issuer URL (`.../realms/<realm-name>`)
-into `/settings/sso`.
+includes a dev-only Keycloak service, gated behind a profile so it never starts with a
+plain `docker compose up`:
+
+```bash
+docker compose --profile dev-idp up keycloak
+```
+
+Open the admin console at `http://localhost:8080` and log in with the dev credentials
+(`admin` / `admin`). Create a realm, then a confidential client inside it with the
+redirect URI `http://localhost:8000/api/v1/auth/oidc/callback` and the scopes/response
+type/PKCE settings from step 1 above. Paste the realm's issuer URL
+(`http://localhost:8080/realms/<realm-name>`) into `/settings/sso`.
 
 ### Troubleshooting
 
