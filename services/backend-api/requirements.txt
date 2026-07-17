@@ -29,6 +29,14 @@ google-auth>=2.27.0          # Google ID token verification
 # OIDC SSO (oidc-sso feature — ID-token/JWKS validation, do not hand-roll)
 Authlib==1.7.2                # OIDC discovery + JWKS + ID-token validation
 
+# SAML 2.0 SSO (saml-sso feature — SP-initiated; validate assertions, do not hand-roll XML-DSig)
+# python3-saml pulls native xmlsec (libxmlsec1/libxml2) — see services/backend-api/Dockerfile apt layer.
+# xmlsec is PINNED for ABI compatibility with the Debian 12 (bookworm) base image's libxmlsec1 1.2.37:
+# xmlsec >= 1.3.14 requires libxmlsec1 >= 1.3.0 and will NOT load against bookworm. Do not unpin blindly.
+python3-saml==1.16.0         # OneLogin SP-side SAML — import path: onelogin.saml2.*
+xmlsec==1.3.13               # Native XML-DSig/enc binding; last line compatible w/ libxmlsec1 1.2.x (bookworm)
+lxml>=4.9.0,<6               # python3-saml/xmlsec XML backend (prebuilt wheels; must match xmlsec's lxml ABI)
+
 # Encryption (for BYOK API key storage)
 cryptography>=43.0.0         # Fernet symmetric encryption for LLM API keys
 
