@@ -12,6 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { OidcSignInButton } from '@/components/OidcSignInButton';
+import { getSsoErrorMessage } from '@/lib/oidcErrors';
 import { analytics } from '@/lib/analytics';
 import gsap from 'gsap';
 
@@ -21,6 +23,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [ssoError, setSsoError] = useState('');
   const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -30,6 +33,19 @@ export default function LoginPage() {
       router.push('/dashboard');
     }
   }, [authLoading, isAuthenticated, router]);
+
+  // Surface the backend's `?sso_error=` redirect (from a failed OIDC flow)
+  // as a friendly message, then scrub it from the URL so a refresh doesn't
+  // re-show it. Reads window.location.search directly (mirrors
+  // /login/callback) rather than useSearchParams, so no Suspense boundary
+  // is needed on this page.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('sso_error');
+    if (code) {
+      setSsoError(getSsoErrorMessage(code));
+      router.replace('/login', { scroll: false });
+    }
+  }, [router]);
 
   useEffect(() => {
     // Only run animations if not authenticated and not loading
@@ -251,6 +267,13 @@ export default function LoginPage() {
             </Alert>
           )}
 
+          {ssoError && (
+            <Alert variant="destructive" className="mb-6 animate-fade-in">
+              <AlertTitle>Single sign-on error</AlertTitle>
+              <AlertDescription>{ssoError}</AlertDescription>
+            </Alert>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="form-field space-y-2">
               <Label htmlFor="email" className="text-foreground font-medium">Email address</Label>
@@ -336,6 +359,12 @@ export default function LoginPage() {
                 </div>
               </>
             )}
+
+            {/* SSO Sign-In — hides itself until the runtime probe confirms
+                the operator has enabled it (see OidcSignInButton). */}
+            <div className="form-field">
+              <OidcSignInButton />
+            </div>
           </form>
         </div>
       </div>

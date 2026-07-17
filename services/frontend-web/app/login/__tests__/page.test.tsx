@@ -52,6 +52,13 @@ vi.mock('@/components/GoogleSignInButton', () => ({
   ),
 }));
 
+// Mock the OIDC status probe — OidcSignInButton's own render/hide behavior
+// is characterized in OidcSignInButton.test.tsx. Rejecting here keeps this
+// test free of real network calls and matches the "not configured" default.
+vi.mock('@/lib/api/oidc', () => ({
+  getOidcStatus: vi.fn().mockRejectedValue(new Error('not configured')),
+}));
+
 // Mock localStorage (same pattern as AuthContext.test.tsx / api-client.test.ts)
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
