@@ -154,3 +154,160 @@ in a negative/known-limitation context ("no IdP-initiated login", "no SLO", "not
 Per the plan's Agent Execution Notes, `feat/saml-sso` was cut from local `master` (`c6d80da`, which
 carries the OIDC slice); this aspect did not check or alter `origin/master` state — that is a PR/merge
 concern outside a docs-only aspect's scope, flagged here for the human before opening the PR.
+
+---
+
+## Final-review fix wave
+
+Consolidated fix wave from the branch's final review, applied after all six aspects above had
+shipped and gone green (94 backend + 50 frontend SAML tests at the time). Five findings (M-1, M-2,
+M-3, M-5, I-1); M-4 and M-6 and the OIDC/SAML helper duplication were reviewed and accepted as-is
+(no change made), per the review's own disposition.
+
+### FIX 1 (M-1) — frontend `sso_error` code contract drift
+
+**Status: done.**
+
+`services/frontend-web/lib/samlErrors.ts` previously had a message map that had drifted from the
+backend's `SAML_SSO_ERROR_CODES` (`services/backend-api/src/api/routes/auth.py:609`) — the exact
+same drift this aspect's own "Deviations from the plan" note above had already flagged for the
+*docs* table, but the code map itself still carried the stale `denied` entry and was missing `state`
+and `token`.
+
+- Added `state` → `"Your sign-on session couldn't be verified. Please try again."`
+- Added `token` → `"Your identity provider didn't identify you correctly. Contact your admin."`
+- Removed the dead `denied` entry (SAML never emits it).
+- Exported `SAML_ERROR_CODES` (the map's key set) from `samlErrors.ts` so both the test and FIX 2's
+  login-page resolver can do exact/set-membership checks instead of re-deriving the list.
+- Rewrote `lib/__tests__/samlErrors.test.ts` to assert the map's key set is **exactly** the 13
+  backend codes (sorted-array equality against a literal list mirroring `SAML_SSO_ERROR_CODES`), so
+  a future one-sided edit on either side fails this test instead of silently degrading to the
+  generic fallback in production. Added a case for `denied` explicitly proving it now falls back to
+  the generic message.
+
+Test: `lib/__tests__/samlErrors.test.ts` — 16 tests, all passing.
+
+### FIX 2 (M-2 / aspect-5 Important) — deterministic login-page `sso_error` merge
+
+**Status: done.**
+
+`services/frontend-web/app/login/page.tsx` previously picked between the OIDC and SAML message maps
+via `isKnownToOidc = oidcMessage !== '<fallback literal>'` — a magic-string compare that breaks the
+moment either fallback string is edited, and gives no principled answer for codes both maps claim
+(`unverified`/`token`/`state`/`domain`/`config`/`disabled`).
+
+Replaced with an exported, directly-testable helper:
+
+```ts
+export function resolveSsoErrorMessage(code: string): string {
+  if (SAML_ERROR_CODES.has(code)) {
+    return getSamlErrorMessage(code);
+  }
+  return getSsoErrorMessage(code);
+}
+```
+
+Rule: any code in the SAML map's key set (SAML-only codes plus the shared-but-differently-worded
+ones) resolves via `getSamlErrorMessage`; everything else falls through to `getSsoErrorMessage`
+(OIDC), which itself degrades to the generic fallback for anything neither map claims. No
+magic-string comparison anywhere in the resolution path.
+
+Added `describe('resolveSsoErrorMessage', ...)` to `app/login/__tests__/page.test.tsx` (imported
+directly, not via full page render) covering:
+- a SAML-specific code (`signature`) → SAML wording
+- `unverified` → SAML's wording specifically, with an explicit assertion it is **not** OIDC's wording
+- an OIDC-only code (`exchange`) → OIDC wording
+- an unknown code → the generic fallback
+
+Test: `app/login/__tests__/page.test.tsx` — 6 tests (2 pre-existing submit-flow tests + 4 new), all
+passing.
+
+### FIX 3 (M-3) — de-vacuous the XSW test assertion
+
+**Status: done.**
+
+`services/backend-api/tests/test_saml_provider.py::test_xsw_wrapped_assertion_rejected_and_forged_subject_never_surfaces`
+had a final assertion that was tautologically true:
+`assert "attacker" not in str(ei.value).lower() or ei.value.code in {"assertion", "signature"}` — the
+right-hand disjunct was already asserted on the prior line, so the whole expression was true
+regardless of the left-hand check.
+
+Replaced with an unconditional, load-bearing assertion on its own line:
+`assert "attacker" not in str(ei.value).lower()`. Re-ran the test standalone — it passes, because
+`SamlValidationError` is raised (with a code-only or code+generic-detail message) before the forged
+NameID is ever read, so the forged subject genuinely never reaches the exception's string form.
+
+Test: `tests/test_saml_provider.py` — 22 tests, all passing.
+
+### FIX 4 (M-5) — validate the cross-provider guard param
+
+**Status: done.**
+
+`services/backend-api/src/api/routes/_sso_guard.py::assert_no_other_provider_enabled` computed
+`other_model = SamlConfig if enabling == "oidc" else OidcConfig` — any value other than the literal
+`"oidc"` (a typo, an empty string, etc.) silently fell into the `else` branch and was treated as
+`"saml"`, checking the wrong config table with no error.
+
+Added an explicit guard raising `ValueError` for any `enabling` not in `{"oidc", "saml"}`, before the
+model selection. Both existing call sites (`oidc_config.py:168`, `saml_config.py:218`) already pass
+the correct literals, so this is purely an added invariant — no behavior change for valid callers.
+
+Added `TestCrossProviderGuard.test_invalid_enabling_value_raises_value_error` to
+`tests/test_saml_config.py`, asserting `ValueError` for both a typo'd value (`"oidcc"`) and an empty
+string.
+
+Test: `tests/test_saml_config.py` — 34 tests, all passing.
+
+### FIX 5 (I-1) — document the InResponseTo binding requirement
+
+**Status: done.** Docs + code comment only, no behavior change.
+
+- `docs/SELF_HOSTING.md` (SAML section, after the IdP-registration table): added a paragraph
+  explicitly stating the signed assertion must carry `InResponseTo` (matching this SP's
+  AuthnRequest) on `SubjectConfirmationData` — standard SP-initiated behavior, present by default on
+  every IdP the doc already lists (Okta, Azure AD/Entra, OneLogin, ADFS, Google Workspace, Keycloak).
+  Explains this is what prevents assertion-substitution, and that `wantMessagesSigned` is
+  intentionally not required because that binding lives inside the already-required signed
+  assertion.
+- `services/backend-api/src/services/saml_provider.py`: added a comment directly above
+  `"wantMessagesSigned": False` in `_build_settings()` explaining the same reasoning in code —
+  `InResponseTo`/`SubjectConfirmationData` validation happens inside python3-saml's
+  `process_response()` against the signed assertion, so message-level signing adds no further
+  anti-substitution guarantee. No behavior change (confirmed by full suite re-run below).
+
+### Post-fix verification
+
+Backend (`services/backend-api`, venv active):
+```
+python -m pytest tests/test_saml_provider.py tests/test_saml_config.py tests/test_saml_login.py tests/test_saml_replay.py -q
+→ 92 passed
+python -m pytest tests/test_oidc_config.py tests/test_oidc_login.py tests/test_oidc_provider.py -q
+→ 69 passed   (OIDC counterparts — no regression)
+```
+
+Frontend (`services/frontend-web`):
+```
+./node_modules/.bin/vitest run lib/__tests__/samlErrors.test.ts lib/api/__tests__/saml.test.ts \
+  components/__tests__/SamlSignInButton.test.tsx "app/(dashboard)/settings/sso/__tests__/page.test.tsx" app/login
+→ 6 files, 44 tests passed
+./node_modules/.bin/vitest run lib/__tests__/oidcErrors.test.ts lib/api/__tests__/oidc.test.ts components/__tests__/OidcSignInButton.test.tsx
+→ 3 files, 18 tests passed   (OIDC counterparts — no regression)
+```
+
+(Two `UND_ERR_INVALID_ARG` "Unhandled Rejection" warnings appear during `app/login/__tests__/page.test.tsx`
+in both runs; confirmed pre-existing on `master` via `git stash` — unrelated to this fix wave, and all
+tests in that file still pass.)
+
+Lint (`services/frontend-web`):
+```
+npm run lint
+→ 34 errors, 19 warnings in 34 files — identical count to the pre-fix-wave baseline (verified via
+  git stash); `npx eslint` on only the files touched by this fix wave (samlErrors.ts, samlErrors.test.ts,
+  login/page.tsx, login/page.test.tsx) reports zero issues.
+```
+
+### Not changed (accepted/locked per instructions)
+
+- **M-4** (version-fragile error map) — fail-closed behavior accepted as-is.
+- **M-6** (global email-link) — deliberate OIDC parity, accepted as-is.
+- The plan-directed OIDC/SAML helper duplication — accepted as-is.

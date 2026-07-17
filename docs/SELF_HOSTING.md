@@ -1376,6 +1376,17 @@ Create a SAML application/client in your IdP with:
 This works with any IdP that can sign SAML assertions and POST them to an ACS URL —
 Okta, Azure AD (Entra ID), OneLogin, ADFS, Google Workspace, and Keycloak all qualify.
 
+**The signed assertion must bind to the request it answers.** For this SP-initiated flow,
+the IdP's response must echo the original AuthnRequest's ID back as `InResponseTo` on the
+assertion's `SubjectConfirmationData` — standard behavior for any SP-initiated SAML
+exchange, and every IdP listed above does this by default. This is what stops
+assertion-substitution: without it, a validly-signed assertion issued for a *different*
+login attempt (the IdP's or another SP's) could be replayed against this one. Note that
+Rereflect does **not** require `wantMessagesSigned` (signing the outer Response, on top of
+the assertion) — the `InResponseTo` binding lives inside the signed assertion itself, so
+requiring message-level signing too would add no further anti-substitution guarantee for
+mainstream IdPs.
+
 ### 2. Configure in the app
 
 Go to **Settings → SSO** (`/settings/sso`, admin/owner only) — the SAML card sits below

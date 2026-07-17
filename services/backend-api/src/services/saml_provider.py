@@ -207,6 +207,21 @@ class SamlProvider:
             },
             "security": {
                 "wantAssertionsSigned": True,
+                # `wantMessagesSigned` is intentionally False: we don't require
+                # the outer Response element itself to be signed, only the
+                # Assertion (wantAssertionsSigned=True, above). This is safe
+                # because request<->response binding — the control that stops
+                # an attacker from replaying/substituting a validly-signed
+                # assertion from an unrelated flow — is enforced independently
+                # via the signed assertion's own SubjectConfirmationData/
+                # @InResponseTo, which python3-saml checks against the request
+                # id we pass to process_response() (see onelogin's response.py
+                # get_in_response_to / subject confirmation validation). Since
+                # that binding lives inside the signed assertion, requiring
+                # message-level signing on top would add no additional
+                # anti-substitution guarantee for mainstream IdPs that sign
+                # assertions (Okta, Azure AD/Entra, OneLogin, ADFS, Google
+                # Workspace, Keycloak all do).
                 "wantMessagesSigned": False,
                 "wantAssertionsEncrypted": False,
                 "wantNameId": True,
