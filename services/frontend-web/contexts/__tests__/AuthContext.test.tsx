@@ -144,6 +144,24 @@ describe('AuthContext', () => {
     expect(mockPush).toHaveBeenCalledWith('/login');
   });
 
+  it('treats /login/callback as a public route (no redirect to /login)', async () => {
+    // No token, on the OIDC callback path — the provider must not bounce
+    // this to /login before the callback page has a chance to store the
+    // token from the URL fragment.
+    vi.mocked(usePathname).mockReturnValue('/login/callback');
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('is-authenticated')).toHaveTextContent('false');
+    });
+    expect(mockPush).not.toHaveBeenCalledWith('/login');
+  });
+
   it('clears the token and redirects when getMe() rejects', async () => {
     localStorageMock.setItem('access_token', 'invalid-token');
     vi.mocked(usePathname).mockReturnValue('/dashboard'); // protected route

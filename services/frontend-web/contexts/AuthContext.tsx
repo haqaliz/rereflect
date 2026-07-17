@@ -25,7 +25,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Public routes that don't require authentication
-const publicRoutes = ['/', '/login', '/signup', '/privacy', '/terms', '/changelog'];
+const publicRoutes = ['/', '/login', '/login/callback', '/signup', '/privacy', '/terms', '/changelog'];
 
 // Public route prefixes (routes that start with these paths)
 const publicRoutePrefixes = ['/invite', '/shared'];
