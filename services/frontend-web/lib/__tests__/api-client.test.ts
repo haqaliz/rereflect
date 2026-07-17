@@ -71,7 +71,7 @@ describe('api-client response interceptor (401 skip-list)', () => {
     return { response: { status: 401 } };
   }
 
-  it.each(['/login', '/signup', '/invite/abc123', '/shared/report-1'])(
+  it.each(['/login', '/login/callback', '/signup', '/invite/abc123', '/shared/report-1'])(
     'does not redirect on a 401 when pathname is %s (skip-list)',
     async (pathname) => {
       window.location.pathname = pathname;

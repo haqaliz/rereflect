@@ -36,6 +36,7 @@ import {
   Gauge,
   Key,
   Activity,
+  ShieldCheck,
 } from 'lucide-react';
 import { authAPI, UserResponse } from '@/lib/api/auth';
 import { Logo } from './Logo';
@@ -141,6 +142,7 @@ const settingsNavItems = [
   { title: 'Team', href: '/settings/team', icon: Users },
   { title: 'Integrations', href: '/settings/integrations', icon: Plug, requiredRole: 'admin' as const },
   { title: 'AI', href: '/settings/ai', icon: Brain, requiredRole: 'admin' as const },
+  { title: 'SSO', href: '/settings/sso', icon: ShieldCheck, requiredRole: 'admin' as const },
   { title: 'Response Templates', href: '/settings/response-templates', icon: MessageSquarePlus, requiredRole: 'admin' as const },
   { title: 'Webhooks', href: '/settings/webhooks', icon: Webhook },
   { title: 'API Keys', href: '/settings/api-keys', icon: Key, requiredRole: 'admin' as const },
