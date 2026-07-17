@@ -15,9 +15,33 @@ import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { OidcSignInButton } from '@/components/OidcSignInButton';
 import { SamlSignInButton } from '@/components/SamlSignInButton';
 import { getSsoErrorMessage } from '@/lib/oidcErrors';
-import { getSamlErrorMessage } from '@/lib/samlErrors';
+import { getSamlErrorMessage, SAML_ERROR_CODES } from '@/lib/samlErrors';
 import { analytics } from '@/lib/analytics';
 import gsap from 'gsap';
+
+/**
+ * Resolve a `?sso_error=<code>` query param to a friendly message, without a
+ * protocol tag on the code itself. Deterministic, code-set based (no
+ * magic-string compare against either map's generic-fallback text):
+ *
+ *   1. If `code` is one `getSamlErrorMessage` actually maps (SAML_ERROR_CODES
+ *      — this covers both the SAML-only codes like `signature`/`assertion`
+ *      and the codes SAML shares with OIDC but words differently, like
+ *      `unverified`/`token`/`state`/`domain`/`config`/`disabled`), use the
+ *      SAML wording.
+ *   2. Otherwise fall back to the OIDC map (`getSsoErrorMessage`), which
+ *      covers OIDC-only codes (e.g. `exchange`) and itself degrades to the
+ *      generic "could not be completed" message for anything unknown.
+ *
+ * Exported for direct unit testing (see __tests__/page.test.tsx) independent
+ * of rendering the whole page.
+ */
+export function resolveSsoErrorMessage(code: string): string {
+  if (SAML_ERROR_CODES.has(code)) {
+    return getSamlErrorMessage(code);
+  }
+  return getSsoErrorMessage(code);
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -42,18 +66,13 @@ export default function LoginPage() {
   // /login/callback) rather than useSearchParams, so no Suspense boundary
   // is needed on this page.
   //
-  // The query param carries no protocol tag, so we merge both error maps:
-  // prefer the OIDC message when the code is OIDC-known (disabled/domain/
-  // config/denied/unverified are shared or near-identical across both
-  // maps), otherwise fall back to the SAML map (which covers the SAML-only
-  // codes: signature/assertion/audience/recipient/expired/replay/
-  // unsolicited) — and finally a generic message for anything unknown.
+  // The query param carries no protocol tag, so resolution is a deterministic
+  // code-set lookup (see resolveSsoErrorMessage below) rather than a
+  // magic-string compare against either map's fallback text.
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('sso_error');
     if (code) {
-      const oidcMessage = getSsoErrorMessage(code);
-      const isKnownToOidc = oidcMessage !== 'Single sign-on could not be completed.';
-      setSsoError(isKnownToOidc ? oidcMessage : getSamlErrorMessage(code));
+      setSsoError(resolveSsoErrorMessage(code));
       router.replace('/login', { scroll: false });
     }
   }, [router]);

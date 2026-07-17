@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { useRouter } from 'next/navigation';
 import { authAPI } from '@/lib/api/auth';
 import { useAuth } from '@/contexts/AuthContext';
-import LoginPage from '../page';
+import LoginPage, { resolveSsoErrorMessage } from '../page';
 
 // Mock next/navigation — the page calls router.push('/dashboard') on success.
 vi.mock('next/navigation', () => ({
@@ -149,5 +149,33 @@ describe('LoginPage', () => {
     });
     expect(localStorageMock.getItem('access_token')).toBe('google-token');
     expect(mockPush).toHaveBeenCalledWith('/dashboard');
+  });
+});
+
+// M-2: deterministic, protocol-aware `sso_error` code resolution. Replaces
+// the old magic-string compare (`oidcMessage !== '<fallback literal>'`) with
+// a code-set lookup — these tests exercise the extracted helper directly so
+// they pin the resolution rule itself, independent of page rendering.
+describe('resolveSsoErrorMessage', () => {
+  it('renders SAML wording for a SAML-specific code (e.g. signature)', () => {
+    expect(resolveSsoErrorMessage('signature')).toBe(
+      "We couldn't verify the response from your identity provider. Please try again."
+    );
+  });
+
+  it('renders SAML wording for "unverified" — NOT the OIDC wording', () => {
+    const message = resolveSsoErrorMessage('unverified');
+    expect(message).toBe("Your identity provider didn't provide an email address.");
+    expect(message).not.toBe('Your identity provider did not confirm a verified email.');
+  });
+
+  it('renders OIDC wording for an OIDC-only code (e.g. exchange)', () => {
+    expect(resolveSsoErrorMessage('exchange')).toBe('Single sign-on failed. Please try again.');
+  });
+
+  it('falls back to the generic message for an unknown code', () => {
+    expect(resolveSsoErrorMessage('something_unexpected')).toBe(
+      'Single sign-on could not be completed.'
+    );
   });
 });
