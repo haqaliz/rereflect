@@ -503,6 +503,47 @@ class TestOidcCallback:
         decoded = decode_access_token(token)
         assert decoded["user_id"] == existing.id
 
+    def test_link_existing_password_user_case_insensitive_email(
+        self, client, db: Session, test_organization: Organization
+    ):
+        """Existing password user stored with a MIXED-CASE email must still be
+        linked (not duplicated) when the IdP reports the same email lowercased."""
+        _make_enabled_oidc_config(db, test_organization, allowed_email_domains=["corp.com"])
+        existing = User(
+            email="Alice@corp.com",
+            password_hash=hash_password("password123"),
+            organization_id=test_organization.id,
+            role="member",
+            auth_provider="email",
+        )
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        before = db.query(User).count()
+
+        cookie_value, state = _session_cookie_and_state()
+        claims = _verified_claims(email="alice@corp.com", sub="idp-sub-mixed-case")
+
+        with patch("src.api.routes.auth.OidcProvider") as MockProvider:
+            MockProvider.from_config.return_value = _StubCallbackProvider(claims=claims)
+            resp = client.get(
+                CALLBACK_URL,
+                params={"code": "auth-code", "state": state},
+                cookies={OIDC_SESSION_COOKIE: cookie_value},
+                follow_redirects=False,
+            )
+
+        assert resp.status_code in (302, 307)
+        assert db.query(User).count() == before  # no new user row (would be a duplicate)
+
+        db.refresh(existing)
+        assert existing.oidc_sub == "idp-sub-mixed-case"
+        assert existing.auth_provider == "both"
+
+        token = resp.headers["location"].split("#token=", 1)[1]
+        decoded = decode_access_token(token)
+        assert decoded["user_id"] == existing.id
+
     def test_returning_by_sub_with_changed_email(self, client, db: Session, test_organization: Organization):
         """AC8 — matched by oidc_sub even though the IdP-reported email changed."""
         _make_enabled_oidc_config(db, test_organization, allowed_email_domains=["example.com"])

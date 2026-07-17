@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import httpx
@@ -514,9 +515,16 @@ def oidc_callback(
     # (8) Identity resolution — oidc_sub first (a returning SSO user may have
     # since changed their IdP-side email), then email (link an existing
     # password/Google user), else JIT-provision a new member.
+    # NOTE (follow-up): oidc_sub is globally unique but OIDC 'sub' is only
+    # unique per-issuer; if the enabled config is ever repointed to a
+    # different IdP that reuses a sub, bind identity to issuer (e.g.
+    # store/compare oidc_iss or scope on organization_id). Not exploitable
+    # today — D5 pins one enabled config and iss is validated.
     user = db.query(User).filter(User.oidc_sub == sub).first()
     if not user:
-        user = db.query(User).filter(User.email == email).first()
+        # Case-insensitive: existing password/Google users may be stored
+        # with mixed-case emails; `email` here is already lowercased.
+        user = db.query(User).filter(func.lower(User.email) == email).first()
         if user:
             user.oidc_sub = sub
             if user.auth_provider in ("email", "google"):
