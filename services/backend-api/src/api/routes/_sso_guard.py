@@ -19,6 +19,12 @@ _LABELS = {"oidc": "OIDC", "saml": "SAML"}
 def assert_no_other_provider_enabled(db: Session, *, enabling: str) -> None:
     """Raise 422 if the OTHER SSO provider has any enabled config anywhere in
     the deployment. `enabling` is 'oidc' or 'saml'."""
+    if enabling not in {"oidc", "saml"}:
+        # Guard against a silent fallthrough: without this, any typo/unknown
+        # value would fall into the `else` branch below and be treated as
+        # "saml" (checking OidcConfig), which is exactly the wrong guard for
+        # an unrecognized caller. Fail loudly instead.
+        raise ValueError(f"assert_no_other_provider_enabled: invalid enabling={enabling!r}; expected 'oidc' or 'saml'")
     other_model = SamlConfig if enabling == "oidc" else OidcConfig
     other_label = _LABELS["saml" if enabling == "oidc" else "oidc"]
     row = db.query(other_model).filter(other_model.enabled.is_(True)).first()

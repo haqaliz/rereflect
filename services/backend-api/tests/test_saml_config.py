@@ -506,6 +506,19 @@ class TestCrossProviderGuard:
         resp = client.put("/api/v1/settings/saml", json=payload, headers=other_owner_headers)
         assert resp.status_code == 422
 
+    def test_invalid_enabling_value_raises_value_error(self, db):
+        """M-5: `enabling` must be 'oidc' or 'saml'. Without this guard, a typo
+        (or any other value) silently falls into the `else` branch and is
+        treated as 'saml' — checking the wrong model entirely. Assert it
+        fails loudly instead."""
+        from src.api.routes._sso_guard import assert_no_other_provider_enabled
+
+        with pytest.raises(ValueError):
+            assert_no_other_provider_enabled(db, enabling="oidcc")
+
+        with pytest.raises(ValueError):
+            assert_no_other_provider_enabled(db, enabling="")
+
 
 class TestOidcCrossCheck:
     """Characterization tests exercising the EDITED OIDC route. Prove the
