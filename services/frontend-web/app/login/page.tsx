@@ -13,7 +13,9 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Logo } from '@/components/Logo';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { OidcSignInButton } from '@/components/OidcSignInButton';
+import { SamlSignInButton } from '@/components/SamlSignInButton';
 import { getSsoErrorMessage } from '@/lib/oidcErrors';
+import { getSamlErrorMessage } from '@/lib/samlErrors';
 import { analytics } from '@/lib/analytics';
 import gsap from 'gsap';
 
@@ -34,15 +36,24 @@ export default function LoginPage() {
     }
   }, [authLoading, isAuthenticated, router]);
 
-  // Surface the backend's `?sso_error=` redirect (from a failed OIDC flow)
-  // as a friendly message, then scrub it from the URL so a refresh doesn't
-  // re-show it. Reads window.location.search directly (mirrors
+  // Surface the backend's `?sso_error=` redirect (from a failed OIDC or SAML
+  // flow) as a friendly message, then scrub it from the URL so a refresh
+  // doesn't re-show it. Reads window.location.search directly (mirrors
   // /login/callback) rather than useSearchParams, so no Suspense boundary
   // is needed on this page.
+  //
+  // The query param carries no protocol tag, so we merge both error maps:
+  // prefer the OIDC message when the code is OIDC-known (disabled/domain/
+  // config/denied/unverified are shared or near-identical across both
+  // maps), otherwise fall back to the SAML map (which covers the SAML-only
+  // codes: signature/assertion/audience/recipient/expired/replay/
+  // unsolicited) — and finally a generic message for anything unknown.
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('sso_error');
     if (code) {
-      setSsoError(getSsoErrorMessage(code));
+      const oidcMessage = getSsoErrorMessage(code);
+      const isKnownToOidc = oidcMessage !== 'Single sign-on could not be completed.';
+      setSsoError(isKnownToOidc ? oidcMessage : getSamlErrorMessage(code));
       router.replace('/login', { scroll: false });
     }
   }, [router]);
@@ -360,10 +371,17 @@ export default function LoginPage() {
               </>
             )}
 
-            {/* SSO Sign-In — hides itself until the runtime probe confirms
-                the operator has enabled it (see OidcSignInButton). */}
+            {/* SSO Sign-In — each button hides itself until its own runtime
+                probe confirms the operator has enabled it (see
+                OidcSignInButton / SamlSignInButton). The one-protocol-per-
+                deployment guard on the backend means at most one of these
+                is ever enabled, so mounting both is safe and yields exactly
+                one visible button. */}
             <div className="form-field">
               <OidcSignInButton />
+            </div>
+            <div className="form-field">
+              <SamlSignInButton />
             </div>
           </form>
         </div>
