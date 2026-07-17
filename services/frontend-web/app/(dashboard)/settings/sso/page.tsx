@@ -9,6 +9,7 @@ import {
   deleteOidcConfig,
   type OidcConfigUpdate,
 } from '@/lib/api/oidc';
+import { SamlConfigCard } from '@/components/settings/SamlConfigCard';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -375,6 +376,8 @@ export default function SsoSettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <SamlConfigCard isAdminOrOwner={isAdminOrOwner} />
       </main>
 
       {/* Disconnect confirm dialog */}
