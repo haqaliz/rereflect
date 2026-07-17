@@ -1,9 +1,11 @@
+import hmac
 import json
 import logging
 import os
 import secrets
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -22,7 +24,9 @@ from src.api.dependencies import get_current_user
 from src.services.google_auth import verify_google_access_token
 from src.services.oidc_provider import OidcProvider, OidcValidationError
 from src.utils.ssrf import SsrfError
-from src.api.routes._oidc_state import sign_state, hash_nonce, make_pkce, STATE_TTL_SECONDS
+from src.api.routes._oidc_state import (
+    sign_state, verify_state, hash_nonce, make_pkce, STATE_TTL_SECONDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -394,3 +398,145 @@ def oidc_start(db: Session = Depends(get_db)):
         path=OIDC_CALLBACK_PATH,
     )
     return redirect
+
+
+# ============================================================================
+# OIDC SSO Login Flow — /callback
+# ============================================================================
+#
+# THE SECURITY CORE of this feature. This endpoint is hit by an
+# UNAUTHENTICATED browser returning from the IdP. Every failure path below
+# redirects to a GENERIC `{FRONTEND_URL}/login?sso_error=<code>` — never an
+# HTTPException with IdP/validation detail — and creates/links no user.
+# Identity is resolved solely from the validated ID token (never from
+# `state`, which carries only a CSRF nonce hash — see spec.md's
+# "load-bearing divergence from the Salesforce precedent").
+
+
+@router.get("/oidc/callback")
+def oidc_callback(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Complete OIDC login: verify the CSRF state + nonce-cookie binding,
+    exchange the authorization code, validate the ID token, enforce
+    `email_verified` and the M12 domain allowlist, resolve identity
+    (oidc_sub then email) to link or JIT-provision a `User`, mint an
+    internal JWT, and redirect to the frontend with the token in a URL
+    FRAGMENT (never a query param — never logged/referred).
+    """
+
+    def _error_redirect(error_code: str) -> RedirectResponse:
+        return RedirectResponse(
+            url=f"{_frontend_url()}/login?sso_error={error_code}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # (1) User denied consent at the IdP.
+    if error:
+        return _error_redirect("denied")
+
+    # (2) Read + parse the callback-path-scoped session cookie set by /start.
+    cookie_raw = request.cookies.get(OIDC_SESSION_COOKIE)
+    if not cookie_raw:
+        return _error_redirect("state")
+    try:
+        session_data = json.loads(cookie_raw)
+        session_nonce = session_data["session_nonce"]
+        code_verifier = session_data["code_verifier"]
+        oidc_nonce = session_data["oidc_nonce"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return _error_redirect("state")
+
+    # (3) Verify the signed `state` and bind it to the session-nonce cookie
+    # (CSRF protection, AC9). hmac.compare_digest guards against timing leaks.
+    payload = verify_state(state) if state else None
+    if payload is None:
+        return _error_redirect("state")
+    if not hmac.compare_digest(str(payload.get("nonce_hash", "")), hash_nonce(session_nonce)):
+        return _error_redirect("state")
+
+    if not code:
+        return _error_redirect("state")
+
+    config = db.query(OidcConfig).filter(OidcConfig.enabled.is_(True)).first()
+    if not config:
+        return _error_redirect("disabled")
+
+    redirect_uri = f"{_backend_url()}{OIDC_CALLBACK_PATH}"
+
+    # (4) Exchange the code server-side. Any network/SSRF/token-endpoint
+    # failure maps to a single generic error — detail stays server-side.
+    try:
+        provider = OidcProvider.from_config(config)
+        tokens = provider.exchange_code(code, code_verifier, redirect_uri)
+    except (SsrfError, OidcValidationError, httpx.HTTPError, KeyError) as exc:
+        logger.error("OIDC code exchange failed for config %s: %s", config.id, exc)
+        return _error_redirect("exchange")
+
+    # (5) Validate the ID token (signature vs JWKS, iss, aud, exp/nbf, nonce).
+    try:
+        claims = provider.validate_id_token(tokens["id_token"], oidc_nonce)
+    except (OidcValidationError, KeyError) as exc:
+        logger.error("OIDC id_token validation failed for config %s: %s", config.id, exc)
+        return _error_redirect("token")
+
+    # (6) email_verified gate (M9/D6) — required to link or provision.
+    if claims.get("email_verified") is not True:
+        return _error_redirect("unverified")
+
+    email = claims.get("email")
+    if not email:
+        return _error_redirect("unverified")
+    email = email.lower()
+    sub = claims.get("sub")
+
+    # (7) M12 domain allowlist — empty/absent list is deny-all.
+    allowed_domains = [d.lower() for d in (config.allowed_email_domains or [])]
+    email_domain = email.rsplit("@", 1)[-1]
+    if email_domain not in allowed_domains:
+        return _error_redirect("domain")
+
+    # (8) Identity resolution — oidc_sub first (a returning SSO user may have
+    # since changed their IdP-side email), then email (link an existing
+    # password/Google user), else JIT-provision a new member.
+    user = db.query(User).filter(User.oidc_sub == sub).first()
+    if not user:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.oidc_sub = sub
+            if user.auth_provider in ("email", "google"):
+                user.auth_provider = "both"
+            db.commit()
+            db.refresh(user)
+        else:
+            user = User(
+                email=email,
+                password_hash=None,
+                oidc_sub=sub,
+                auth_provider="oidc",
+                organization_id=config.organization_id,
+                role="member",
+                joined_at=datetime.utcnow(),
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+    access_token = create_access_token({
+        "user_id": user.id,
+        "organization_id": user.organization_id,
+        "role": user.role,
+    })
+
+    # (9) Token to an unauthenticated browser via URL FRAGMENT, never query —
+    # the redirect base is always the fixed configured FRONTEND_URL, never
+    # request/IdP-derived (open-redirect guard, spec R3).
+    return RedirectResponse(
+        url=f"{_frontend_url()}/login/callback#token={access_token}",
+        status_code=status.HTTP_302_FOUND,
+    )
