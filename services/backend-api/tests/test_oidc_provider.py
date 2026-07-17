@@ -310,3 +310,142 @@ def test_exchange_code_posts_expected_params_and_returns_tokens():
 
     assert result == token_response
     assert transport.call_counts[f"{ISSUER}/token"] == 1
+
+
+# ── Security-review follow-up: SSRF gate + https-only + issuer-containment
+#    on token_endpoint (and authorization_endpoint), not just issuer/jwks_uri
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_exchange_code_rejects_token_endpoint_resolving_to_private_ip():
+    """token_endpoint from discovery points at a host that resolves to a
+    private IP — must be rejected before the client_secret is ever POSTed."""
+    discovery_doc = dict(DISCOVERY_DOC, token_endpoint="https://token.internal.corp/token")
+    transport = RecordingTransport(
+        {f"{ISSUER}/.well-known/openid-configuration": (200, discovery_doc)}
+    )
+    provider = _provider(transport)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "idp.example.com":
+            return PUBLIC_ADDRINFO
+        if host == "token.internal.corp":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.9", 443))]
+        raise AssertionError(f"unexpected getaddrinfo host {host}")
+
+    with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
+        with pytest.raises(SsrfError):
+            provider.exchange_code(
+                code="auth-code-123",
+                code_verifier="verifier-abc",
+                redirect_uri="https://app.example.com/api/v1/auth/oidc/callback",
+            )
+
+    assert "https://token.internal.corp/token" not in transport.call_counts
+
+
+def test_exchange_code_rejects_http_scheme_token_endpoint():
+    """token_endpoint uses plain http:// — https-only must reject it."""
+    discovery_doc = dict(DISCOVERY_DOC, token_endpoint=f"http://idp.example.com/token")
+    transport = RecordingTransport(
+        {f"{ISSUER}/.well-known/openid-configuration": (200, discovery_doc)}
+    )
+    provider = _provider(transport)
+
+    with _patched_public_dns():
+        with pytest.raises(SsrfError):
+            provider.exchange_code(
+                code="auth-code-123",
+                code_verifier="verifier-abc",
+                redirect_uri="https://app.example.com/api/v1/auth/oidc/callback",
+            )
+
+    assert "http://idp.example.com/token" not in transport.call_counts
+
+
+def test_exchange_code_rejects_token_endpoint_on_different_public_host():
+    """token_endpoint points at a DIFFERENT (but publicly-resolving) host than
+    the issuer — issuer-containment must reject it so client_secret is never
+    sent cross-host, even though the SSRF host check alone would pass."""
+    discovery_doc = dict(DISCOVERY_DOC, token_endpoint="https://evil.attacker.com/token")
+    transport = RecordingTransport(
+        {
+            f"{ISSUER}/.well-known/openid-configuration": (200, discovery_doc),
+            "https://evil.attacker.com/token": (200, {"id_token": "x"}),
+        }
+    )
+    provider = _provider(transport)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        # Both hosts resolve PUBLICLY — the attack only works because the
+        # SSRF-only check would let this through.
+        return PUBLIC_ADDRINFO
+
+    with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
+        with pytest.raises(SsrfError):
+            provider.exchange_code(
+                code="auth-code-123",
+                code_verifier="verifier-abc",
+                redirect_uri="https://app.example.com/api/v1/auth/oidc/callback",
+            )
+
+    # The POST (which carries client_secret) must never have been sent.
+    assert "https://evil.attacker.com/token" not in transport.call_counts
+
+
+def test_exchange_code_allows_token_endpoint_on_issuer_subdomain():
+    """token_endpoint on a subdomain of the issuer host (e.g. issuer
+    `https://example.com`, token_endpoint `https://login.example.com/token`)
+    is ALLOWED — issuer-containment permits subdomains of the issuer host."""
+    sub_issuer = "https://example.com"
+    discovery_doc = {
+        "issuer": sub_issuer,
+        "authorization_endpoint": f"{sub_issuer}/authorize",
+        "token_endpoint": "https://login.example.com/token",
+        "jwks_uri": f"{sub_issuer}/jwks",
+    }
+    token_response = {"id_token": "fake-id-token", "access_token": "fake-access-token"}
+    transport = RecordingTransport(
+        {
+            f"{sub_issuer}/.well-known/openid-configuration": (200, discovery_doc),
+            "https://login.example.com/token": (200, token_response),
+        }
+    )
+    client = httpx.Client(transport=transport)
+    provider = OidcProvider(
+        issuer=sub_issuer, client_id=CLIENT_ID, client_secret=CLIENT_SECRET, http_client=client
+    )
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return PUBLIC_ADDRINFO
+
+    with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
+        result = provider.exchange_code(
+            code="auth-code-123",
+            code_verifier="verifier-abc",
+            redirect_uri="https://app.example.com/api/v1/auth/oidc/callback",
+        )
+
+    assert result == token_response
+    assert transport.call_counts["https://login.example.com/token"] == 1
+
+
+def test_authorization_url_rejects_authorization_endpoint_on_different_public_host():
+    """Same issuer-containment rule applies to authorization_endpoint."""
+    discovery_doc = dict(DISCOVERY_DOC, authorization_endpoint="https://evil.attacker.com/authorize")
+    transport = RecordingTransport(
+        {f"{ISSUER}/.well-known/openid-configuration": (200, discovery_doc)}
+    )
+    provider = _provider(transport)
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        return PUBLIC_ADDRINFO
+
+    with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
+        with pytest.raises(SsrfError):
+            provider.authorization_url(
+                state="signed-state-value",
+                nonce="a-nonce",
+                code_challenge="a-code-challenge",
+                redirect_uri="https://app.example.com/api/v1/auth/oidc/callback",
+            )

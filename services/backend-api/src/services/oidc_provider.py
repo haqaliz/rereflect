@@ -5,10 +5,20 @@ exchange, and ID-token validation for `oidc-login-flow`.
 No route wiring lives here — `src/api/routes/auth.py` calls this service.
 
 Security notes:
-- The issuer host and the discovered `jwks_uri` host are each passed through
-  `src.utils.ssrf.assert_host_not_ssrf` before any outbound fetch (AC2).
-  Both hosts originate from operator-supplied `OidcConfig` / IdP-controlled
-  discovery data, so they are treated as untrusted.
+- Every URL this service fetches or POSTs to — the discovery URL, and the
+  discovered `jwks_uri`, `authorization_endpoint`, and `token_endpoint` — is
+  passed through `_require_https_public()` before use (AC2). That single
+  hardened path enforces: (1) `https://` scheme only, (2) the resolved host
+  is not loopback/private/link-local (`src.utils.ssrf.assert_host_not_ssrf`),
+  and, for URLs discovered from the IdP's discovery document (`jwks_uri`,
+  `authorization_endpoint`, `token_endpoint`), (3) the host equals the issuer
+  host or is a subdomain of it. (3) matters because a malicious or MITM'd
+  discovery response could otherwise point `token_endpoint` at an
+  attacker-controlled-but-still-public host and exfiltrate `client_secret`
+  via a normal-looking POST — SSRF-gating the host alone doesn't stop that,
+  since the attacker's host resolves publicly.
+  All of these hosts originate from operator-supplied `OidcConfig` /
+  IdP-controlled discovery data, so they are treated as untrusted.
 - ID-token validation is delegated to `authlib.jose` (`JsonWebToken`) rather
   than hand-rolled JWKS/signature handling: signature is verified against
   the fetched JWKS, and `iss`, `aud`, `exp`/`nbf`, and `nonce` are all
@@ -29,7 +39,7 @@ from urllib.parse import urlencode, urlparse
 import httpx
 from authlib.jose import JsonWebToken
 
-from src.utils.ssrf import assert_host_not_ssrf
+from src.utils.ssrf import SsrfError, assert_host_not_ssrf
 
 ALLOWED_ID_TOKEN_ALGORITHMS = ["RS256"]
 
@@ -102,7 +112,43 @@ class OidcProvider:
             resp.raise_for_status()
             return resp.json()
 
-    # ── Discovery / JWKS (SSRF-gated, cached) ──────────────────────────
+    # ── Discovery / JWKS (https-only, SSRF-gated, issuer-contained, cached) ─
+
+    def _require_https_public(self, url: str, *, require_issuer_host: bool = False) -> str:
+        """Single hardened path every discovered/configured URL must pass
+        through before this service fetches or POSTs to it:
+
+        1. `https://` scheme only — rejects plain-`http` discovery/JWKS/token
+           endpoints (a downgraded scheme is as dangerous as a bad host).
+        2. The resolved host is not loopback/RFC1918-private/link-local
+           (`assert_host_not_ssrf`).
+        3. If `require_issuer_host` is set (used for URLs pulled out of the
+           discovery document, not the issuer URL itself): the host must
+           equal the issuer host, or be a subdomain of it
+           (`host == issuer_host or host.endswith("." + issuer_host)`). This
+           stops a malicious/MITM'd discovery document from redirecting
+           `token_endpoint` (and therefore `client_secret`) to an
+           attacker-controlled host that would otherwise pass the SSRF check
+           because it resolves publicly.
+
+        Returns the validated hostname. Raises `SsrfError` on any failure.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme != "https":
+            raise SsrfError(f"URL {url!r} must use https, got scheme {parsed.scheme!r}")
+
+        host = parsed.hostname
+        assert_host_not_ssrf(host)
+
+        if require_issuer_host:
+            issuer_host = urlparse(self.issuer).hostname
+            if host != issuer_host and not (issuer_host and host.endswith(f".{issuer_host}")):
+                raise SsrfError(
+                    f"URL {url!r} host {host!r} is not the issuer host "
+                    f"{issuer_host!r} or a subdomain of it"
+                )
+
+        return host
 
     def discover(self) -> dict:
         """Fetch (or return cached) `{issuer}/.well-known/openid-configuration`."""
@@ -112,10 +158,10 @@ class OidcProvider:
             if _now() < expires_at:
                 return data
 
-        host = urlparse(self.issuer).hostname
-        assert_host_not_ssrf(host)
+        discovery_url = f"{self.issuer}/.well-known/openid-configuration"
+        self._require_https_public(discovery_url)
 
-        data = self._get_json(f"{self.issuer}/.well-known/openid-configuration")
+        data = self._get_json(discovery_url)
         _discovery_cache[self.issuer] = (_now() + _DISCOVERY_TTL_SECONDS, data)
         return data
 
@@ -129,8 +175,7 @@ class OidcProvider:
             if _now() < expires_at:
                 return data
 
-        host = urlparse(jwks_uri).hostname
-        assert_host_not_ssrf(host)
+        self._require_https_public(jwks_uri, require_issuer_host=True)
 
         data = self._get_json(jwks_uri)
         _jwks_cache[jwks_uri] = (_now() + _JWKS_TTL_SECONDS, data)
@@ -141,6 +186,7 @@ class OidcProvider:
     def authorization_url(self, state: str, nonce: str, code_challenge: str, redirect_uri: str) -> str:
         """Build the IdP authorize URL from discovery's `authorization_endpoint`."""
         authorization_endpoint = self.discover()["authorization_endpoint"]
+        self._require_https_public(authorization_endpoint, require_issuer_host=True)
         params = {
             "response_type": "code",
             "scope": "openid email profile",
@@ -156,6 +202,7 @@ class OidcProvider:
     def exchange_code(self, code: str, code_verifier: str, redirect_uri: str) -> dict:
         """POST the authorization code (+ PKCE verifier) to the token endpoint."""
         token_endpoint = self.discover()["token_endpoint"]
+        self._require_https_public(token_endpoint, require_issuer_host=True)
         return self._post_json(
             token_endpoint,
             {
