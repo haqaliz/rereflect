@@ -187,6 +187,43 @@ def test_mismatched_nonce_rejected():
             provider.validate_id_token(token, nonce="a-different-nonce")
 
 
+def test_missing_sub_claim_rejected():
+    """Defense-in-depth: `sub` is OIDC-mandatory. A token validated without
+    one must fail closed here too (belt-and-suspenders alongside the
+    caller-side check in `oidc_callback`)."""
+    priv = _rsa_keypair()
+    jwks_doc = {"keys": [_public_jwk(priv)]}
+    claims = _base_claims()
+    del claims["sub"]
+    token = _sign(priv, claims)
+    provider = _provider(_standard_transport(jwks_doc))
+
+    with _patched_public_dns():
+        with pytest.raises(OidcValidationError):
+            provider.validate_id_token(token, nonce="expected-nonce")
+
+
+def test_hs256_alg_confusion_token_rejected():
+    """Algorithm-confusion attack: an id_token signed with HS256 (using a
+    secret the attacker controls) must be rejected outright because the
+    allowlist passed to `JsonWebToken` is RS256-only — the library must
+    refuse to even attempt verification with a non-allowlisted algorithm,
+    regardless of what secret/key material the attacker used to sign it."""
+    priv = _rsa_keypair()
+    jwks_doc = {"keys": [_public_jwk(priv)]}
+    provider = _provider(_standard_transport(jwks_doc))
+
+    attacker_jwt = JsonWebToken(["HS256"])
+    forged = attacker_jwt.encode(
+        {"alg": "HS256"}, _base_claims(), "attacker-controlled-secret"
+    )
+    forged = forged.decode() if isinstance(forged, bytes) else forged
+
+    with _patched_public_dns():
+        with pytest.raises(OidcValidationError):
+            provider.validate_id_token(forged, nonce="expected-nonce")
+
+
 # ── AC2: SSRF gate on issuer/jwks_uri hosts ─────────────────────────────
 
 

@@ -234,6 +234,7 @@ class OidcProvider:
                     "aud": {"essential": True, "value": self.client_id},
                     "exp": {"essential": True},
                     "nonce": {"essential": True, "value": nonce},
+                    "sub": {"essential": True},
                 },
             )
             claims.validate()

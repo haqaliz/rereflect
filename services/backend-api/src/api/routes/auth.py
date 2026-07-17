@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import httpx
+from cryptography.fernet import InvalidToken
 from src.database.session import get_db
 from src.models.user import User
 from src.models.organization import Organization
@@ -375,7 +376,7 @@ def oidc_start(db: Session = Depends(get_db)):
         state = sign_state(hash_nonce(session_nonce))
         redirect_uri = f"{_backend_url()}{OIDC_CALLBACK_PATH}"
         auth_url = provider.authorization_url(state, oidc_nonce, code_challenge, redirect_uri)
-    except (SsrfError, OidcValidationError, httpx.HTTPError, KeyError) as exc:
+    except (SsrfError, OidcValidationError, httpx.HTTPError, KeyError, ValueError, InvalidToken) as exc:
         logger.error("OIDC start failed for config %s: %s", config.id, exc)
         return RedirectResponse(
             url=f"{_frontend_url()}/login?sso_error=config",
@@ -431,10 +432,12 @@ def oidc_callback(
     """
 
     def _error_redirect(error_code: str) -> RedirectResponse:
-        return RedirectResponse(
+        redirect = RedirectResponse(
             url=f"{_frontend_url()}/login?sso_error={error_code}",
             status_code=status.HTTP_302_FOUND,
         )
+        redirect.delete_cookie(OIDC_SESSION_COOKIE, path=OIDC_CALLBACK_PATH)
+        return redirect
 
     # (1) User denied consent at the IdP.
     if error:
@@ -474,7 +477,7 @@ def oidc_callback(
     try:
         provider = OidcProvider.from_config(config)
         tokens = provider.exchange_code(code, code_verifier, redirect_uri)
-    except (SsrfError, OidcValidationError, httpx.HTTPError, KeyError) as exc:
+    except (SsrfError, OidcValidationError, httpx.HTTPError, KeyError, ValueError, InvalidToken) as exc:
         logger.error("OIDC code exchange failed for config %s: %s", config.id, exc)
         return _error_redirect("exchange")
 
@@ -494,6 +497,13 @@ def oidc_callback(
         return _error_redirect("unverified")
     email = email.lower()
     sub = claims.get("sub")
+    if not sub:
+        # `sub` is OIDC-mandatory. Without it, `User.oidc_sub == sub` would
+        # compile to `WHERE oidc_sub IS NULL`, matching every existing
+        # password/Google user and letting `.first()` mint a token for the
+        # lowest-id row (account takeover) — reject before any
+        # identity-resolution query runs.
+        return _error_redirect("token")
 
     # (7) M12 domain allowlist — empty/absent list is deny-all.
     allowed_domains = [d.lower() for d in (config.allowed_email_domains or [])]
@@ -536,7 +546,9 @@ def oidc_callback(
     # (9) Token to an unauthenticated browser via URL FRAGMENT, never query —
     # the redirect base is always the fixed configured FRONTEND_URL, never
     # request/IdP-derived (open-redirect guard, spec R3).
-    return RedirectResponse(
+    redirect = RedirectResponse(
         url=f"{_frontend_url()}/login/callback#token={access_token}",
         status_code=status.HTTP_302_FOUND,
     )
+    redirect.delete_cookie(OIDC_SESSION_COOKIE, path=OIDC_CALLBACK_PATH)
+    return redirect

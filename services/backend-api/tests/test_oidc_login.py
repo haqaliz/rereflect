@@ -559,3 +559,107 @@ class TestOidcCallback:
         assert location.startswith("http://localhost:3000/login/callback#token=")
         assert "?token=" not in location
         assert "&token=" not in location
+
+    def test_success_clears_oidc_session_cookie(
+        self, client, db: Session, test_organization: Organization
+    ):
+        """The single-use oidc_session cookie (code_verifier + nonces) must not
+        outlive the callback it was issued for."""
+        _make_enabled_oidc_config(db, test_organization, allowed_email_domains=["example.com"])
+        cookie_value, state = _session_cookie_and_state()
+        claims = _verified_claims(email="cookie-clear@example.com", sub="idp-sub-cookie-clear")
+
+        with patch("src.api.routes.auth.OidcProvider") as MockProvider:
+            MockProvider.from_config.return_value = _StubCallbackProvider(claims=claims)
+            resp = client.get(
+                CALLBACK_URL,
+                params={"code": "auth-code", "state": state},
+                cookies={OIDC_SESSION_COOKIE: cookie_value},
+                follow_redirects=False,
+            )
+
+        clearing_headers = [
+            h for h in resp.headers.get_list("set-cookie")
+            if h.startswith(f"{OIDC_SESSION_COOKIE}=")
+        ]
+        assert len(clearing_headers) == 1
+        header = clearing_headers[0].lower()
+        assert "max-age=0" in header or "expires=thu, 01 jan 1970" in header
+
+    # ── Security-review follow-up: missing/null `sub` must never be treated
+    #    as "matches every existing password/Google user" (account takeover)
+    # ─────────────────────────────────────────────────────────────────────
+
+    def test_missing_sub_rejected_no_takeover(
+        self, client, db: Session, test_organization: Organization
+    ):
+        """A validated id_token with NO `sub` claim at all must be rejected
+        before any identity-resolution query runs. Otherwise
+        `User.oidc_sub == None` compiles to `WHERE oidc_sub IS NULL`, which
+        matches every existing password/Google user (oidc_sub is NULL for
+        all of them) and `.first()` would mint a token for the lowest-id
+        row — here, the org owner — account takeover."""
+        _make_enabled_oidc_config(db, test_organization, allowed_email_domains=["example.com"])
+        owner = User(
+            email="owner@example.com",
+            password_hash=hash_password("password123"),
+            organization_id=test_organization.id,
+            role="owner",
+            auth_provider="email",
+        )
+        db.add(owner)
+        db.commit()
+        db.refresh(owner)
+        before = db.query(User).count()
+
+        cookie_value, state = _session_cookie_and_state()
+        claims = {"email": "attacker-controlled@example.com", "email_verified": True}  # no "sub" key
+
+        with patch("src.api.routes.auth.OidcProvider") as MockProvider:
+            MockProvider.from_config.return_value = _StubCallbackProvider(claims=claims)
+            resp = client.get(
+                CALLBACK_URL,
+                params={"code": "auth-code", "state": state},
+                cookies={OIDC_SESSION_COOKIE: cookie_value},
+                follow_redirects=False,
+            )
+
+        assert resp.headers["location"] == f"{FRONTEND_URL}/login?sso_error=token"
+        assert "#token=" not in resp.headers["location"]
+        assert db.query(User).count() == before  # no JIT-provisioned user either
+
+        db.refresh(owner)
+        assert owner.oidc_sub is None  # owner untouched
+
+    def test_null_sub_rejected_no_takeover(
+        self, client, db: Session, test_organization: Organization
+    ):
+        """Same as above but claims explicitly carry `sub: None`."""
+        _make_enabled_oidc_config(db, test_organization, allowed_email_domains=["example.com"])
+        owner = User(
+            email="owner2@example.com",
+            password_hash=hash_password("password123"),
+            organization_id=test_organization.id,
+            role="owner",
+            auth_provider="email",
+        )
+        db.add(owner)
+        db.commit()
+        db.refresh(owner)
+        before = db.query(User).count()
+
+        cookie_value, state = _session_cookie_and_state()
+        claims = _verified_claims(email="attacker-controlled-2@example.com", sub=None)
+
+        with patch("src.api.routes.auth.OidcProvider") as MockProvider:
+            MockProvider.from_config.return_value = _StubCallbackProvider(claims=claims)
+            resp = client.get(
+                CALLBACK_URL,
+                params={"code": "auth-code", "state": state},
+                cookies={OIDC_SESSION_COOKIE: cookie_value},
+                follow_redirects=False,
+            )
+
+        assert resp.headers["location"] == f"{FRONTEND_URL}/login?sso_error=token"
+        assert "#token=" not in resp.headers["location"]
+        assert db.query(User).count() == before
