@@ -167,8 +167,11 @@ def test_xsw_wrapped_assertion_rejected_and_forged_subject_never_surfaces(provid
     with pytest.raises(SamlValidationError) as ei:
         _validate(provider, b64)
     assert ei.value.code in {"assertion", "signature"}
-    # And the forged subject must never have been returned.
-    assert "attacker" not in str(ei.value).lower() or ei.value.code in {"assertion", "signature"}
+    # And the forged subject must NEVER have been returned — unconditional,
+    # not OR'd with the (already-asserted) code check above, so this line is
+    # actually load-bearing: it fails if the error message ever leaks the
+    # forged NameID (e.g. via a raw-XML detail string).
+    assert "attacker" not in str(ei.value).lower()
 
 
 def test_response_signed_but_assertion_unsigned_rejected(provider, keypair):
