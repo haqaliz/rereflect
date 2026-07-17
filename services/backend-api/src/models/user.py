@@ -16,7 +16,10 @@ class User(Base):
 
     # Google OAuth fields
     google_id = Column(String(255), unique=True, nullable=True, index=True)
-    auth_provider = Column(String(50), nullable=False, default="email")  # email, google, both
+    auth_provider = Column(String(50), nullable=False, default="email")  # email, google, oidc, both
+
+    # OIDC SSO fields (oidc-login-flow aspect)
+    oidc_sub = Column(String(255), unique=True, nullable=True, index=True)
 
     # Notification preferences
     weekly_digest_enabled = Column(Boolean, default=True, nullable=False, server_default="true")

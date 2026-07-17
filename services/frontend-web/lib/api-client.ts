@@ -39,6 +39,7 @@ apiClient.interceptors.response.use(
         // Don't redirect if on auth pages or public routes like invite
         const pathname = window.location.pathname;
         const isPublicPage = pathname === '/login' ||
+                             pathname === '/login/callback' ||
                              pathname === '/signup' ||
                              pathname.startsWith('/invite') ||
                              pathname.startsWith('/shared');

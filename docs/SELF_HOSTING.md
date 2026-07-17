@@ -20,6 +20,7 @@ default) treats every instance as fully featured.
 - [Connecting Jira](#connecting-jira)
 - [Connecting Zendesk](#connecting-zendesk)
 - [Connecting Asana](#connecting-asana)
+- [Single Sign-On (OIDC)](#single-sign-on-oidc)
 - [Production notes](#production-notes)
 
 ## Prerequisites
@@ -1205,6 +1206,122 @@ projects can be selected.
 Because Rereflect is self-hosted and open-source, Asana task creation and
 status-sync have no plan gate, seat limit, or usage cap — they're available
 to every organization running the app.
+
+## Single Sign-On (OIDC)
+
+Rereflect supports OIDC-based single sign-on alongside the existing password and Google
+login — an operator can wire up their identity provider (Okta, Azure AD, Google
+Workspace, Keycloak, or any standards-compliant OIDC provider) so a team logs in with
+corporate credentials instead of a Rereflect password. Password and Google login are
+unaffected either way. **All features are unlocked** on self-hosted, so SSO carries no
+plan gate.
+
+**Prerequisite:** SSO configuration (including the client secret) is stored encrypted, so
+`LLM_ENCRYPTION_KEY` must already be set — see
+[Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok). Without it, saving an
+SSO config returns a validation error, never a 500.
+
+### 1. Register a client with your identity provider
+
+Create an OIDC client/application in your IdP with:
+
+| Setting | Value |
+|---------|-------|
+| Redirect / callback URL | `{BACKEND_URL}/api/v1/auth/oidc/callback` — e.g. `http://localhost:8000/api/v1/auth/oidc/callback` for a local install. **This must match exactly** what you whitelist in the IdP. |
+| Scopes | `openid email profile` |
+| Response type | `code` |
+| PKCE | **S256** (required — Rereflect always sends a PKCE challenge) |
+
+This works with any IdP that signs ID tokens with RS256, including Okta, Azure AD
+(Entra ID), Google Workspace, and Keycloak in their default configurations.
+
+### 2. Configure in the app
+
+Go to **Settings → SSO** (`/settings/sso`, admin/owner only) and fill in:
+
+| Field | Notes |
+|-------|-------|
+| Issuer URL | Your IdP's OIDC issuer (discovery is fetched from `{issuer}/.well-known/openid-configuration`) |
+| Client ID | From your IdP client registration |
+| Client secret | From your IdP client registration — encrypted at rest, never shown again after saving |
+| Allowed email domains | See below — **required**, or nobody can sign in |
+| Button label | Optional custom text for the "Sign in with SSO" button |
+| Enabled | Turns the login button on/off |
+
+### 3. Allowed email domains: empty means deny-all
+
+An empty `allowed_email_domains` list is **not** "allow anyone" — it is **deny-all**.
+You must list at least one domain (e.g. `acme.com`) before any SSO login can succeed;
+an identity outside the list is rejected with no account created or linked.
+
+**Do not list an over-broad public domain** (e.g. `gmail.com`) if your issuer is a
+multi-tenant IdP endpoint (Google's own OIDC, or an Azure AD app registered for "any
+organizational directory"). Doing so would auto-provision **any** account from that
+provider into your organization, since every such account already satisfies
+`email_verified: true`. Scope the issuer to your own tenant/directory and the allowlist
+to your own domain(s).
+
+### One enabled configuration per deployment
+
+At most one OIDC configuration can be `enabled` at a time across the whole deployment —
+there is no per-org SSO in this release. Enabling a second organization's config while
+another is already enabled is rejected.
+
+### JIT provisioning and account linking
+
+- **New user, no existing Rereflect account:** the first successful SSO login
+  auto-creates a `member` in the organization that owns the enabled config. There is no
+  invite step.
+- **Existing password or Google account with the same email:** it is linked to the SSO
+  identity (its auth method becomes "both") — **only if the IdP asserts
+  `email_verified: true`**. An unverified email is rejected outright; no account is
+  created or linked.
+
+### Known limitation: RS256 only
+
+ID tokens must be **RS256-signed**. This is the default for Okta, Azure AD, Google, and
+Keycloak, so most operators won't notice — but Rereflect does not negotiate signing
+algorithms with the IdP, and an issuer that signs only with ES256 or another algorithm
+is currently rejected. Stated here plainly rather than discovered at login time.
+
+### Testing against a local Keycloak
+
+For a quick end-to-end test without a real IdP, the bundled `docker-compose.yml`
+includes a dev-only Keycloak service, gated behind a profile so it never starts with a
+plain `docker compose up`:
+
+```bash
+docker compose --profile dev-idp up keycloak
+```
+
+Open the admin console at `http://localhost:8080` and log in with the dev credentials
+(`admin` / `admin`). Create a realm, then a confidential client inside it with the
+redirect URI `http://localhost:8000/api/v1/auth/oidc/callback` and the scopes/response
+type/PKCE settings from step 1 above. Paste the realm's issuer URL
+(`http://localhost:8080/realms/<realm-name>`) into `/settings/sso`.
+
+### Troubleshooting
+
+A failed SSO login redirects to `/login?sso_error=<code>`:
+
+| Code | Meaning |
+|------|---------|
+| `disabled` | No OIDC configuration is currently enabled |
+| `state` | The CSRF state or session cookie was missing, expired, or didn't match |
+| `denied` | The user declined consent at the identity provider |
+| `exchange` | The authorization code exchange with the IdP failed (network, SSRF check, or token endpoint error) |
+| `token` | The ID token failed validation (signature, issuer, audience, expiry, nonce, or missing `sub`) |
+| `unverified` | The IdP did not assert `email_verified: true` (or no email was present) |
+| `domain` | The verified email's domain is not in `allowed_email_domains` |
+| `config` | Building the authorization request failed (bad issuer, discovery/SSRF failure) |
+
+Every code above is generic by design — no issuer or validation detail is ever exposed
+to the browser.
+
+### All features unlocked
+
+Because Rereflect is self-hosted and open-source, SSO has no plan gate, seat limit, or
+usage cap — it's available to every organization running the app.
 
 ## Production notes
 

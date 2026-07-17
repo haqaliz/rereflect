@@ -87,6 +87,19 @@ services:
     deploy:
       replicas: 1
 
+  # Keycloak (dev/test OIDC issuer — NOT for production, dev creds only)
+  # Start with: docker compose --profile dev-idp up keycloak
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: rereflect-keycloak
+    profiles: ["dev-idp"]
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin  # dev-only credentials, do not use in production
+    ports:
+      - "8080:8080"
+
   # Frontend (Next.js)
   frontend:
     build:

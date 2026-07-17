@@ -6,9 +6,11 @@ import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from jose import jwt
 
 from src.models.user import User
 from src.models.organization import Organization
+from src.api.auth import JWT_SECRET, JWT_ALGORITHM
 
 
 class TestSignup:
@@ -101,6 +103,15 @@ class TestLogin:
         assert "access_token" in data
         assert isinstance(data["access_token"], str)
         assert len(data["access_token"]) > 0
+
+        # JWT claim shape: this is the payload OIDC login will reuse, so lock
+        # it down to exactly {user_id, organization_id, role, exp} (exp is
+        # added automatically by create_access_token).
+        payload = jwt.decode(data["access_token"], JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        assert set(payload.keys()) == {"user_id", "organization_id", "role", "exp"}
+        assert payload["user_id"] == test_user.id
+        assert payload["organization_id"] == test_user.organization_id
+        assert payload["role"] == test_user.role
 
     def test_login_wrong_password(self, client: TestClient, test_user: User):
         """Test login with wrong password fails."""
