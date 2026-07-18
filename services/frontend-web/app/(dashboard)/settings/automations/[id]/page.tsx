@@ -20,7 +20,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -363,7 +362,6 @@ export default function AutomationDetailPage() {
   const [triggerConfig, setTriggerConfig] = useState<Record<string, any>>({});
   const [actions, setActions] = useState<AutomationAction[]>([]);
   const [cooldownHours, setCooldownHours] = useState(24);
-  const [isActive, setIsActive] = useState(true);
   const [mode, setMode] = useState<'off' | 'shadow' | 'active'>('active');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -398,7 +396,6 @@ export default function AutomationDetailPage() {
         setTriggerConfig(r.trigger_config || r.trigger?.config || {});
         setActions(r.actions);
         setCooldownHours(r.cooldown_hours);
-        setIsActive(r.is_active);
         setMode(r.mode ?? 'active');
       } catch {
         toast.error('Failed to load automation rule');
@@ -419,7 +416,6 @@ export default function AutomationDetailPage() {
         trigger: { type: triggerType as TriggerType, config: triggerConfig },
         actions: actions.map(a => ({ type: a.type as ActionType, config: a.config })),
         cooldown_hours: cooldownHours,
-        is_active: isActive,
         mode,
       });
       setRule(updated);
@@ -429,7 +425,7 @@ export default function AutomationDetailPage() {
     } finally {
       setSaving(false);
     }
-  }, [rule, name, description, triggerType, triggerConfig, actions, cooldownHours, isActive, mode]);
+  }, [rule, name, description, triggerType, triggerConfig, actions, cooldownHours, mode]);
 
   const handleDelete = useCallback(() => {
     if (!rule) return;
@@ -573,17 +569,6 @@ export default function AutomationDetailPage() {
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="is-active"
-                    checked={isActive}
-                    onCheckedChange={setIsActive}
-                    disabled={!isAdminOrOwner}
-                  />
-                  <label htmlFor="is-active" className="text-sm font-medium cursor-pointer">
-                    Active
-                  </label>
-                </div>
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <label className="text-sm font-medium">Mode</label>
@@ -624,7 +609,14 @@ export default function AutomationDetailPage() {
                     value={triggerType}
                     onValueChange={val => {
                       setTriggerType(val as TriggerType);
-                      setTriggerConfig({});
+                      const triggerDefaults: Record<string, Record<string, any>> = {
+                        health_score_threshold: { threshold: 30, direction: 'below' },
+                        sentiment_pattern: { count: 3, days: 7, sentiment: 'negative' },
+                        churn_risk_level_change: { target_level: 'at_risk' },
+                        feedback_category_match: { categories: [], is_urgent: false },
+                        churn_probability_threshold: { threshold: 0.7, direction: 'above' },
+                      };
+                      setTriggerConfig(triggerDefaults[val] || {});
                     }}
                     disabled={!isAdminOrOwner}
                   >

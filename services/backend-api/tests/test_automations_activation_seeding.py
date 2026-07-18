@@ -340,6 +340,36 @@ def test_create_rule_as_shadow_does_not_seed(
 # 5. Shadow executions must be visible via GET /{rule_id}/executions
 # ---------------------------------------------------------------------------
 
+def test_toggle_rule_off_to_active_seeds_cooldowns(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict, fake_redis: FakeRedis
+):
+    rule = _churn_rule(db, test_organization, threshold=0.7, mode="off")
+    _make_health(db, test_organization, "above1@test.com", 0.75)
+    _make_health(db, test_organization, "above2@test.com", 0.90)
+    _make_health(db, test_organization, "below@test.com", 0.50)
+
+    response = client.patch(f"/api/v1/automations/{rule.id}/toggle", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["mode"] == "active"
+
+    seeded_keys = {c[0] for c in fake_redis.setex_calls}
+    assert f"{automation_engine.COOLDOWN_KEY_PREFIX}:{rule.id}:above1@test.com" in seeded_keys
+    assert f"{automation_engine.COOLDOWN_KEY_PREFIX}:{rule.id}:above2@test.com" in seeded_keys
+    assert f"{automation_engine.COOLDOWN_KEY_PREFIX}:{rule.id}:below@test.com" not in seeded_keys
+
+
+def test_toggle_rule_health_score_going_active_does_not_seed(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict, fake_redis: FakeRedis
+):
+    rule = _health_score_rule(db, test_organization, mode="off")
+    _make_health(db, test_organization, "above@test.com", 0.99)
+
+    response = client.patch(f"/api/v1/automations/{rule.id}/toggle", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["mode"] == "active"
+    assert fake_redis.setex_calls == []
+
+
 def test_shadow_executions_visible_via_executions_endpoint(
     client: TestClient, db: Session, test_organization: Organization, auth_headers: dict, fake_redis: FakeRedis
 ):

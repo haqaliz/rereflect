@@ -686,10 +686,27 @@ def toggle_rule(
 ):
     """Toggle a rule between active and paused. Requires Admin or Owner role."""
     rule = _get_rule_or_404(rule_id, current_org.id, db)
+    old_mode = rule.mode  # captured BEFORE the flip
     rule.is_active = not rule.is_active
     rule.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(rule)
+
+    if rule.mode == "active" and old_mode != "active":
+        # Transition INTO active via toggle — mirror update_rule's guard so
+        # the activation stampede doesn't reopen through this endpoint.
+        try:
+            seeded = seed_churn_cooldowns(db, rule)
+            if seeded:
+                logger.info(
+                    "toggle_rule: seeded %d cooldowns for rule %s activation (%s -> active)",
+                    seeded, rule.id, old_mode,
+                )
+        except Exception as exc:
+            logger.warning(
+                "toggle_rule: cooldown seeding failed for rule %s: %s", rule.id, exc
+            )
+
     return _rule_to_response(rule)
 
 

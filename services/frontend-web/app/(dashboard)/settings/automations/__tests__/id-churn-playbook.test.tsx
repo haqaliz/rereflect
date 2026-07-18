@@ -161,6 +161,48 @@ describe('AutomationDetailPage — rule mode selector', () => {
   });
 });
 
+describe('AutomationDetailPage — trigger-type switch seeds defaults', () => {
+  const healthScoreRule = {
+    ...churnRule,
+    trigger_type: 'health_score_threshold' as const,
+    trigger_config: { threshold: 30, direction: 'below' },
+    actions: [{ type: 'send_notification', config: { recipients: 'admins', channels: ['dashboard'] } }],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: ownerUser });
+    mockGet.mockResolvedValue(healthScoreRule);
+    mockListExecutions.mockResolvedValue([]);
+    mockListPlaybooks.mockResolvedValue(playbookFixtures);
+  });
+
+  it('seeds churn threshold defaults when switching trigger type without editing them, and saves them', async () => {
+    const user = userEvent.setup();
+    mockUpdate.mockResolvedValue({ ...healthScoreRule, trigger_type: 'churn_probability_threshold' });
+
+    render(<AutomationDetailPage />);
+
+    const triggerTypeSelect = await screen.findByTestId('trigger-type-select');
+    await user.click(triggerTypeSelect);
+    await user.click(await screen.findByRole('option', { name: 'Churn probability threshold' }));
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith(
+        5,
+        expect.objectContaining({
+          trigger: {
+            type: 'churn_probability_threshold',
+            config: { threshold: 0.7, direction: 'above' },
+          },
+        })
+      );
+    });
+  });
+});
+
 describe('AutomationDetailPage — non-admin/owner gating', () => {
   beforeEach(() => {
     vi.clearAllMocks();
