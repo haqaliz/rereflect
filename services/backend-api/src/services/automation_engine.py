@@ -73,10 +73,17 @@ class AutomationEngine:
         results = engine.evaluate(org_id, "health_score_threshold", context)
 
     Context shape varies by event type:
-        health_score_threshold:   {"health_score": int, "customer_email": str, "feedback_id": int}
-        sentiment_pattern:        {"customer_email": str, "feedback_id": int}
-        churn_risk_level_change:  {"new_risk_level": str, "old_risk_level": str, "customer_email": str, "feedback_id": int}
-        feedback_category_match:  {"customer_email": str, "feedback_id": int}
+        health_score_threshold:      {"health_score": int, "customer_email": str, "feedback_id": int}
+        sentiment_pattern:           {"customer_email": str, "feedback_id": int}
+        churn_risk_level_change:     {"new_risk_level": str, "old_risk_level": str, "customer_email": str, "feedback_id": int}
+        feedback_category_match:     {"customer_email": str, "feedback_id": int}
+        churn_probability_threshold: {"churn_probability": float, "customer_email": str}
+
+    Rule `mode` gating (see AutomationRule.mode):
+        off:    rule is never selected by evaluate().
+        shadow: trigger + cooldown are evaluated and an AutomationExecution is
+                logged (status="shadow"), but no actions are executed.
+        active: full evaluation — trigger, cooldown, actions, logging, stats.
     """
 
     def __init__(self, db: Session) -> None:
@@ -102,7 +109,7 @@ class AutomationEngine:
             .filter(
                 AutomationRule.organization_id == org_id,
                 AutomationRule.trigger_type == event_type,
-                AutomationRule.is_active == True,
+                AutomationRule.mode.in_(["shadow", "active"]),
             )
             .all()
         )
@@ -151,17 +158,21 @@ class AutomationEngine:
                 FeedbackItem.id == feedback_id
             ).first()
 
-        # 4. Execute actions
-        action_results = self._execute_actions(rule, feedback, context)
-
-        # 5. Determine overall status
-        errors = [r for r in action_results if r.get("error")]
-        if not errors:
-            status = "success"
-        elif len(errors) < len(action_results):
-            status = "partial_failure"
+        # 4. Execute actions — skipped entirely in shadow mode
+        if rule.mode == "shadow":
+            action_results: List[Dict] = []
+            status = "shadow"
         else:
-            status = "failed"
+            action_results = self._execute_actions(rule, feedback, context)
+
+            # 5. Determine overall status
+            errors = [r for r in action_results if r.get("error")]
+            if not errors:
+                status = "success"
+            elif len(errors) < len(action_results):
+                status = "partial_failure"
+            else:
+                status = "failed"
 
         # 6. Log execution
         self._log_execution(
@@ -206,6 +217,8 @@ class AutomationEngine:
             return self._trigger_churn_risk_level(cfg, context)
         if t == "feedback_category_match":
             return self._trigger_feedback_category(cfg, context)
+        if t == "churn_probability_threshold":
+            return self._trigger_churn_probability(cfg, context)
 
         logger.warning("AutomationEngine: unknown trigger type '%s'", t)
         return False
@@ -308,6 +321,13 @@ class AutomationEngine:
             return False
 
         return True
+
+    def _trigger_churn_probability(self, cfg: dict, context: dict) -> bool:
+        """Fire when churn_probability >= threshold (default 0.7)."""
+        p = context.get("churn_probability")
+        if p is None:
+            return False
+        return float(p) >= float(cfg.get("threshold", 0.7))
 
     # ------------------------------------------------------------------
     # Internal — cooldown
