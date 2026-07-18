@@ -1191,7 +1191,7 @@ feedback item follows without anyone updating it by hand.
 - **Poll-based (works behind a firewall).** A background job checks your
   linked tasks every ~15 minutes over the same personal access token — no
   webhook or public URL required, so it works on a self-hosted box behind
-  NAT. Real-time Asana webhooks are **not** part of this release.
+  NAT. This always runs, even if you also enable the real-time webhook below.
 - **Completion-based mapping — Asana has only two states.** An Asana task is
   either **completed** or **not**, so Rereflect maps:
   - not completed → `new`
@@ -1218,8 +1218,55 @@ feedback item follows without anyone updating it by hand.
   If a feedback item is linked to several Asana tasks, the most-advanced
   status wins.
 
-Real-time webhook sync, section/custom-field → intermediate-state mapping,
-and OAuth connection are planned for a future release.
+Section/custom-field → intermediate-state mapping and OAuth connection are
+planned for a future release.
+
+### Real-time webhook (optional)
+
+Status-sync above always works by polling — no public URL required. If your
+Rereflect instance is publicly reachable, you can additionally enable a
+real-time inbound webhook so an Asana task's completion change lands on the
+linked feedback item in seconds instead of waiting up to ~15 minutes for the
+next poll.
+
+Unlike Jira/Zendesk (where Rereflect generates its own signing secret
+locally), **Asana requires a handshake**: Rereflect registers the webhook
+directly with Asana's API, and Asana's *first delivery* to that webhook
+carries a fresh secret in an `X-Hook-Secret` header, which Rereflect must
+persist and echo back immediately (HTTP 200, same header, no other work) —
+this is how Asana knows the endpoint is alive. Every delivery after that is
+signed with `X-Hook-Signature: <hex HMAC-SHA256(secret, raw_body)>` (no
+`sha256=` prefix, unlike Jira). You never see or copy a secret yourself —
+Rereflect handles both sides automatically:
+
+1. On **Settings → Integrations → Asana**, click **Set up webhook** under
+   "Real-time webhook" (admin/owner only), then pick the **workspace and
+   project** to watch (v1 scope: a single project — see "Known limitation"
+   below; this reuses the same workspace/project picker as task creation).
+2. Click **Enable webhook**. This calls
+   `POST /api/v1/integrations/asana/webhook/enable`, which registers a
+   webhook with Asana (`POST https://app.asana.com/api/1.0/webhooks`)
+   targeting `POST <your-api-base>/api/v1/webhooks/asana/inbound/{integration_id}`
+   and stores the returned webhook gid. Asana then performs the handshake
+   against that URL automatically — no copy/paste step, and no secret is
+   ever shown in the UI.
+3. Refresh the page after a few seconds to confirm the webhook shows as
+   active (the handshake completes the secret capture server-side).
+
+Rereflect resolves *which* organization a delivery belongs to from the
+`{integration_id}` embedded in the URL it registered in step 2 (rather than
+matching against every org's secret, as Jira/Zendesk do) — this works even
+before any secret exists yet, which the very first handshake delivery
+requires. Every subsequent event is fail-closed: a missing/invalid
+`X-Hook-Signature`, or an org with no captured secret, is rejected with
+`401` — never processed. Re-enabling the webhook always registers a fresh
+one at Asana and clears the old secret, so a new handshake is required.
+
+Task completion changes are reconciled through the exact same
+completion-based mapping and race-safe apply as the poll above, so enabling
+the webhook can never cause the two paths to disagree or double-write —
+disabling it (**Disable webhook**) simply falls back to poll-only, with no
+other effect.
 
 ### Known limitation: team-scoped projects
 
@@ -1230,7 +1277,10 @@ may not appear in that list, depending on your Asana workspace's permission
 model. If a project you expect is missing, check whether it's team-only in
 Asana. A team-aware project selector (choose a team first, then its
 projects) is planned as a v2 follow-up — for now, only workspace-visible
-projects can be selected.
+projects can be selected. This also applies to the real-time webhook above —
+it subscribes to a **single project** per organization, not the whole
+workspace; multi-project/workspace-wide subscriptions are a planned v2
+follow-up.
 
 ### All features unlocked
 

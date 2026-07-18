@@ -19,6 +19,13 @@ export interface AsanaConnectionStatus {
   status_sync_enabled: boolean;
   status_mapping: Record<string, string> | null;
   last_status_synced_at: string | null;
+  // Real-time inbound webhook (asana-webhook aspect, status-sync-realtime-mapping
+  // PRD). True only once the handshake has completed (a webhook_secret is
+  // stored server-side) -- registering the webhook at Asana
+  // (POST /webhook/enable) is a separate, earlier step. Never includes the
+  // secret itself -- unlike Jira, Asana's secret is never even returned to
+  // the frontend (it's captured directly from Asana's handshake delivery).
+  webhook_enabled: boolean;
 }
 
 export interface AsanaConnectRequest {
@@ -88,6 +95,17 @@ export interface AsanaSyncTriggerResponse {
   status: string;
 }
 
+export interface AsanaWebhookEnableResponse {
+  webhook_gid: string;
+  webhook_url: string;
+  // webhook_secret is intentionally never included -- see AsanaConnectionStatus.
+}
+
+export interface AsanaWebhookDisableResponse {
+  success: boolean;
+  message: string;
+}
+
 // ---- API ----
 
 export const asanaAPI = {
@@ -153,5 +171,23 @@ export async function patchAsanaStatusSync(
 
 export async function triggerAsanaSync(): Promise<AsanaSyncTriggerResponse> {
   const response = await apiClient.post('/api/v1/integrations/asana/sync');
+  return response.data;
+}
+
+// Real-time inbound webhook (asana-webhook aspect). Unlike Jira (which
+// generates and reveals its own HMAC secret locally), enabling here
+// registers a webhook with Asana for the chosen project (resourceGid) --
+// the handshake secret itself is captured automatically server-side on
+// Asana's first delivery, never surfaced to the frontend.
+
+export async function enableAsanaWebhook(resourceGid: string): Promise<AsanaWebhookEnableResponse> {
+  const response = await apiClient.post('/api/v1/integrations/asana/webhook/enable', {
+    resource_gid: resourceGid,
+  });
+  return response.data;
+}
+
+export async function disableAsanaWebhook(): Promise<AsanaWebhookDisableResponse> {
+  const response = await apiClient.delete('/api/v1/integrations/asana/webhook');
   return response.data;
 }

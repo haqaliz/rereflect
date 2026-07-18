@@ -11,7 +11,13 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 import apiClient from '@/lib/api-client';
-import { asanaAPI, patchAsanaStatusSync, triggerAsanaSync } from '@/lib/api/asana';
+import {
+  asanaAPI,
+  patchAsanaStatusSync,
+  triggerAsanaSync,
+  enableAsanaWebhook,
+  disableAsanaWebhook,
+} from '@/lib/api/asana';
 
 describe('asanaAPI', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -193,5 +199,31 @@ describe('asanaAPI', () => {
     const result = await triggerAsanaSync();
     expect(apiClient.post).toHaveBeenCalledWith('/api/v1/integrations/asana/sync');
     expect(result.status).toBe('queued');
+  });
+
+  // ─── Real-time webhook (asana-webhook aspect) ────────────────────────────
+
+  it('enableAsanaWebhook calls POST /api/v1/integrations/asana/webhook/enable with resource_gid', async () => {
+    (apiClient.post as any).mockResolvedValue({
+      data: {
+        webhook_gid: '1400000000001',
+        webhook_url: 'http://localhost:8000/api/v1/webhooks/asana/inbound/7',
+      },
+    });
+    const result = await enableAsanaWebhook('1200000000001');
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v1/integrations/asana/webhook/enable', {
+      resource_gid: '1200000000001',
+    });
+    expect(result.webhook_gid).toBe('1400000000001');
+    expect(result.webhook_url).toBe('http://localhost:8000/api/v1/webhooks/asana/inbound/7');
+  });
+
+  it('disableAsanaWebhook calls DELETE /api/v1/integrations/asana/webhook', async () => {
+    (apiClient.delete as any).mockResolvedValue({
+      data: { success: true, message: 'Asana webhook disabled.' },
+    });
+    const result = await disableAsanaWebhook();
+    expect(apiClient.delete).toHaveBeenCalledWith('/api/v1/integrations/asana/webhook');
+    expect(result.success).toBe(true);
   });
 });

@@ -7,10 +7,20 @@ import React from 'react';
 
 const mockPatchAsanaStatusSync = vi.fn();
 const mockTriggerAsanaSync = vi.fn();
+const mockEnableAsanaWebhook = vi.fn();
+const mockDisableAsanaWebhook = vi.fn();
+const mockGetWorkspaces = vi.fn();
+const mockGetProjects = vi.fn();
 
 vi.mock('@/lib/api/asana', () => ({
   patchAsanaStatusSync: (...args: unknown[]) => mockPatchAsanaStatusSync(...args),
   triggerAsanaSync: (...args: unknown[]) => mockTriggerAsanaSync(...args),
+  enableAsanaWebhook: (...args: unknown[]) => mockEnableAsanaWebhook(...args),
+  disableAsanaWebhook: (...args: unknown[]) => mockDisableAsanaWebhook(...args),
+  asanaAPI: {
+    getWorkspaces: (...args: unknown[]) => mockGetWorkspaces(...args),
+    getProjects: (...args: unknown[]) => mockGetProjects(...args),
+  },
 }));
 
 const mockToastSuccess = vi.fn();
@@ -40,6 +50,7 @@ const baseStatus: AsanaConnectionStatus = {
   status_sync_enabled: false,
   status_mapping: null,
   last_status_synced_at: null,
+  webhook_enabled: false,
 };
 
 const disconnectedStatus: AsanaConnectionStatus = {
@@ -224,6 +235,143 @@ describe('AsanaStatusSyncCard', () => {
       expect(onStatusChange).toHaveBeenCalledWith(
         expect.objectContaining({ status_mapping: { done: 'resolved' } })
       );
+    });
+  });
+
+  // ─── Real-time webhook (asana-webhook aspect) ───────────────────────────────
+
+  describe('real-time webhook', () => {
+    it('shows a "Set up webhook" action when webhook_enabled is false', () => {
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByRole('button', { name: /set up webhook/i })).toBeInTheDocument();
+    });
+
+    it('does not add extra comboboxes to the DOM before "Set up webhook" is clicked', () => {
+      // Guards against the workspace/project selects (native <select>, ARIA
+      // role="combobox") leaking into the mapping editor's combobox count.
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getAllByRole('combobox')).toHaveLength(2); // new + done mapping rows only
+    });
+
+    it('clicking "Set up webhook" loads workspaces and reveals project selection', async () => {
+      const user = userEvent.setup();
+      mockGetWorkspaces.mockResolvedValue([{ gid: '111', name: 'Acme Workspace' }]);
+
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: /set up webhook/i }));
+
+      await waitFor(() => {
+        expect(mockGetWorkspaces).toHaveBeenCalled();
+        expect(screen.getByText('Acme Workspace')).toBeInTheDocument();
+      });
+    });
+
+    it('selecting a workspace loads its projects', async () => {
+      const user = userEvent.setup();
+      mockGetWorkspaces.mockResolvedValue([{ gid: '111', name: 'Acme Workspace' }]);
+      mockGetProjects.mockResolvedValue([{ gid: '222', name: 'Engineering' }]);
+
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: /set up webhook/i }));
+      await waitFor(() => screen.getByText('Acme Workspace'));
+
+      await user.selectOptions(screen.getByLabelText(/workspace/i), '111');
+
+      await waitFor(() => {
+        expect(mockGetProjects).toHaveBeenCalledWith('111');
+        expect(screen.getByText('Engineering')).toBeInTheDocument();
+      });
+    });
+
+    it('the "Enable webhook" button is disabled until a project is selected', async () => {
+      const user = userEvent.setup();
+      mockGetWorkspaces.mockResolvedValue([{ gid: '111', name: 'Acme Workspace' }]);
+      mockGetProjects.mockResolvedValue([{ gid: '222', name: 'Engineering' }]);
+
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: /set up webhook/i }));
+      await waitFor(() => screen.getByText('Acme Workspace'));
+
+      expect(screen.getByRole('button', { name: /^enable webhook$/i })).toBeDisabled();
+
+      await user.selectOptions(screen.getByLabelText(/workspace/i), '111');
+      await waitFor(() => screen.getByText('Engineering'));
+      await user.selectOptions(screen.getByLabelText(/project/i), '222');
+
+      expect(screen.getByRole('button', { name: /^enable webhook$/i })).toBeEnabled();
+    });
+
+    it('enabling calls enableAsanaWebhook with the selected project and shows the webhook URL', async () => {
+      const user = userEvent.setup();
+      mockGetWorkspaces.mockResolvedValue([{ gid: '111', name: 'Acme Workspace' }]);
+      mockGetProjects.mockResolvedValue([{ gid: '222', name: 'Engineering' }]);
+      mockEnableAsanaWebhook.mockResolvedValue({
+        webhook_gid: '1400000000001',
+        webhook_url: 'http://localhost:8000/api/v1/webhooks/asana/inbound/7',
+      });
+
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: /set up webhook/i }));
+      await waitFor(() => screen.getByText('Acme Workspace'));
+      await user.selectOptions(screen.getByLabelText(/workspace/i), '111');
+      await waitFor(() => screen.getByText('Engineering'));
+      await user.selectOptions(screen.getByLabelText(/project/i), '222');
+
+      await user.click(screen.getByRole('button', { name: /^enable webhook$/i }));
+
+      await waitFor(() => {
+        expect(mockEnableAsanaWebhook).toHaveBeenCalledWith('222');
+        expect(
+          screen.getByDisplayValue('http://localhost:8000/api/v1/webhooks/asana/inbound/7')
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('shows a "Disable webhook" action when webhook_enabled is true', () => {
+      render(
+        <AsanaStatusSyncCard status={{ ...baseStatus, webhook_enabled: true }} onStatusChange={vi.fn()} />
+      );
+      expect(screen.getByRole('button', { name: /disable webhook/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /set up webhook/i })).not.toBeInTheDocument();
+    });
+
+    it('disabling calls disableAsanaWebhook and updates status', async () => {
+      const user = userEvent.setup();
+      const onStatusChange = vi.fn();
+      mockDisableAsanaWebhook.mockResolvedValue({ success: true, message: 'Asana webhook disabled.' });
+
+      render(
+        <AsanaStatusSyncCard status={{ ...baseStatus, webhook_enabled: true }} onStatusChange={onStatusChange} />
+      );
+      await user.click(screen.getByRole('button', { name: /disable webhook/i }));
+
+      await waitFor(() => {
+        expect(mockDisableAsanaWebhook).toHaveBeenCalled();
+        expect(onStatusChange).toHaveBeenCalledWith(
+          expect.objectContaining({ webhook_enabled: false })
+        );
+      });
+    });
+
+    it('shows an error toast if enabling fails', async () => {
+      const user = userEvent.setup();
+      mockGetWorkspaces.mockResolvedValue([{ gid: '111', name: 'Acme Workspace' }]);
+      mockGetProjects.mockResolvedValue([{ gid: '222', name: 'Engineering' }]);
+      mockEnableAsanaWebhook.mockRejectedValue({
+        response: { status: 403, data: { detail: 'Asana token is invalid.' } },
+      });
+
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: /set up webhook/i }));
+      await waitFor(() => screen.getByText('Acme Workspace'));
+      await user.selectOptions(screen.getByLabelText(/workspace/i), '111');
+      await waitFor(() => screen.getByText('Engineering'));
+      await user.selectOptions(screen.getByLabelText(/project/i), '222');
+      await user.click(screen.getByRole('button', { name: /^enable webhook$/i }));
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith('Asana token is invalid.');
+      });
     });
   });
 });

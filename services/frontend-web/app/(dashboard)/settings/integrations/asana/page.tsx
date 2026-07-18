@@ -103,6 +103,7 @@ export default function AsanaSettingsPage() {
         status_sync_enabled: false,
         status_mapping: null,
         last_status_synced_at: null,
+        webhook_enabled: false,
       });
       setTokenInput('');  // clear after successful connect
     } catch (err: any) {
