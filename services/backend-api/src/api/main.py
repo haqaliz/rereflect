@@ -16,6 +16,7 @@ from src.api.routes import salesforce_integration as salesforce_integration_rout
 from src.api.routes import jira_integration as jira_integration_router
 from src.api.routes import jira_webhook as jira_webhook_router
 from src.api.routes import asana_integration as asana_integration_router
+from src.api.routes import asana_webhook as asana_webhook_router
 from src.api.routes import zendesk_integration as zendesk_integration_router
 from src.api.routes import response_templates, response_settings, feedback_responses
 from src.api.routes import feedback_issue_draft as feedback_issue_draft_router  # noqa: E402 — ai-drafted-issue-content
@@ -312,6 +313,7 @@ app.include_router(jira_integration_router.router)
 app.include_router(jira_webhook_router.router)
 # Asana integration (asana-integration backend-connection aspect)
 app.include_router(asana_integration_router.router)
+app.include_router(asana_webhook_router.router)
 # Zendesk inbound integration (zendesk-integration backend-connection aspect)
 app.include_router(zendesk_integration_router.router)
 app.include_router(response_templates.router)
