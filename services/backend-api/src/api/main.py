@@ -14,6 +14,7 @@ from src.api.routes import linear_integration, linear_webhook
 from src.api.routes import hubspot_integration as hubspot_integration_router
 from src.api.routes import salesforce_integration as salesforce_integration_router
 from src.api.routes import jira_integration as jira_integration_router
+from src.api.routes import jira_webhook as jira_webhook_router
 from src.api.routes import asana_integration as asana_integration_router
 from src.api.routes import zendesk_integration as zendesk_integration_router
 from src.api.routes import response_templates, response_settings, feedback_responses
@@ -308,6 +309,7 @@ app.include_router(hubspot_integration_router.router)
 app.include_router(salesforce_integration_router.router)
 # Jira Cloud integration (jira-integration backend-connection aspect)
 app.include_router(jira_integration_router.router)
+app.include_router(jira_webhook_router.router)
 # Asana integration (asana-integration backend-connection aspect)
 app.include_router(asana_integration_router.router)
 # Zendesk inbound integration (zendesk-integration backend-connection aspect)
