@@ -251,6 +251,27 @@ class TestStatusEndpointStatusSyncFields:
         assert body["connected"] is False
         assert body["status_sync_enabled"] is False
 
+    def test_status_mapping_is_null_when_unset(
+        self, client: TestClient, active_integration: AsanaIntegration, owner_headers: dict
+    ):
+        resp = client.get("/api/v1/integrations/asana/status", headers=owner_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status_mapping"] is None
+
+    def test_status_mapping_reflects_stored_value(
+        self,
+        client: TestClient,
+        db: Session,
+        active_integration: AsanaIntegration,
+        owner_headers: dict,
+    ):
+        active_integration.status_mapping = {"new": "new", "done": "resolved"}
+        db.commit()
+
+        resp = client.get("/api/v1/integrations/asana/status", headers=owner_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status_mapping"] == {"new": "new", "done": "resolved"}
+
 
 # ──────────────────────────── PATCH /status-sync ───────────────────────────────
 

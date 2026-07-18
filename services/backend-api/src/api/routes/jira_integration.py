@@ -92,6 +92,7 @@ class JiraStatusResponse(BaseModel):
     # Inbound status-sync fields (Phase 5 — operator control surface)
     status_sync_enabled: bool = False
     last_status_synced_at: Optional[datetime] = None
+    status_mapping: Optional[Dict[str, str]] = None
     # api_token is intentionally NEVER included
 
 
@@ -277,6 +278,7 @@ def _build_status_response(db: Session, org_id: int, row: JiraIntegration) -> Ji
         connected_at=row.connected_at,
         status_sync_enabled=bool(row.status_sync_enabled),
         last_status_synced_at=_last_status_synced_at(db, org_id),
+        status_mapping=row.status_mapping,
     )
 
 

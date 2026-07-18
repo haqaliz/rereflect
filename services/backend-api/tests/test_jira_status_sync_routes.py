@@ -237,6 +237,31 @@ class TestStatusEndpointStatusSyncFields:
         assert body["last_sync_status"] == "error"
         assert body["last_error"] == "401 invalid token"
 
+    def test_status_mapping_is_null_when_unset(
+        self, client: TestClient, active_integration: JiraIntegration, owner_headers: dict
+    ):
+        resp = client.get("/api/v1/integrations/jira/status", headers=owner_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status_mapping"] is None
+
+    def test_status_mapping_reflects_stored_value(
+        self,
+        client: TestClient,
+        db: Session,
+        active_integration: JiraIntegration,
+        owner_headers: dict,
+    ):
+        active_integration.status_mapping = {"new": "new", "indeterminate": "in_review", "done": "resolved"}
+        db.commit()
+
+        resp = client.get("/api/v1/integrations/jira/status", headers=owner_headers)
+        assert resp.status_code == 200
+        assert resp.json()["status_mapping"] == {
+            "new": "new",
+            "indeterminate": "in_review",
+            "done": "resolved",
+        }
+
 
 # ──────────────────────────── PATCH /status-sync ───────────────────────────────
 
