@@ -240,7 +240,8 @@ def _sync_asana_org_body(integration_id: int, db, client=None) -> Dict[str, Any]
                 continue
 
             target = resolve_target_status(top_category, integ.status_mapping)
-            if target is None or target == feedback.workflow_status:
+            observed_old_status = feedback.workflow_status
+            if target is None or target == observed_old_status:
                 continue
 
             # The link that drove the most-advanced category — used for the
@@ -254,6 +255,7 @@ def _sync_asana_org_body(integration_id: int, db, client=None) -> Dict[str, Any]
                 db,
                 feedback,
                 target,
+                old_status=observed_old_status,
                 organization_id=integ.organization_id,
                 actor_label="asana-sync",
                 metadata={
