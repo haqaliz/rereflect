@@ -17,6 +17,7 @@ export interface AsanaConnectionStatus {
   // `last_error` above are shared with the general connection status but
   // are also updated by the status-sync poller.
   status_sync_enabled: boolean;
+  status_mapping: Record<string, string> | null;
   last_status_synced_at: string | null;
 }
 

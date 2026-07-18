@@ -48,6 +48,20 @@ describe('jiraAPI', () => {
     expect(result.connected).toBe(false);
   });
 
+  it('getStatus parses status_mapping from the response', async () => {
+    (apiClient.get as any).mockResolvedValue({
+      data: { connected: true, status_mapping: { new: 'new', indeterminate: 'in_review', done: 'resolved' } },
+    });
+    const result = await jiraAPI.getStatus();
+    expect(result.status_mapping).toEqual({ new: 'new', indeterminate: 'in_review', done: 'resolved' });
+  });
+
+  it('getStatus parses a null status_mapping when unset', async () => {
+    (apiClient.get as any).mockResolvedValue({ data: { connected: true, status_mapping: null } });
+    const result = await jiraAPI.getStatus();
+    expect(result.status_mapping).toBeNull();
+  });
+
   it('disconnect calls DELETE /api/v1/integrations/jira/disconnect', async () => {
     (apiClient.delete as any).mockResolvedValue({ data: { success: true, message: 'ok' } });
     const result = await jiraAPI.disconnect();

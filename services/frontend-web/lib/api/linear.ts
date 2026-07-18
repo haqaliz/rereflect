@@ -1,4 +1,5 @@
 import apiClient from '../api-client';
+import { REREFLECT_STATUSES } from '../constants/workflow-status';
 
 // ---- Types ----
 
@@ -224,12 +225,10 @@ export const LINEAR_STATUS_TYPES = [
   { value: 'canceled', label: 'Canceled' },
 ] as const;
 
-export const REREFLECT_STATUSES = [
-  { value: 'new', label: 'New' },
-  { value: 'in_review', label: 'In Review' },
-  { value: 'resolved', label: 'Resolved' },
-  { value: 'closed', label: 'Closed' },
-] as const;
+// Relocated to lib/constants/workflow-status.ts (mapping-editor aspect) — kept
+// as a re-export so existing `import { REREFLECT_STATUSES } from '@/lib/api/linear'`
+// call sites keep working.
+export { REREFLECT_STATUSES };
 
 export const LINEAR_PRIORITY_LABELS: Record<number, string> = {
   0: 'No priority',

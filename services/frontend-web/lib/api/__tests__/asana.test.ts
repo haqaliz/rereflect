@@ -40,6 +40,20 @@ describe('asanaAPI', () => {
     expect(result.connected).toBe(false);
   });
 
+  it('getStatus parses status_mapping from the response', async () => {
+    (apiClient.get as any).mockResolvedValue({
+      data: { connected: true, status_mapping: { new: 'new', done: 'resolved' } },
+    });
+    const result = await asanaAPI.getStatus();
+    expect(result.status_mapping).toEqual({ new: 'new', done: 'resolved' });
+  });
+
+  it('getStatus parses a null status_mapping when unset', async () => {
+    (apiClient.get as any).mockResolvedValue({ data: { connected: true, status_mapping: null } });
+    const result = await asanaAPI.getStatus();
+    expect(result.status_mapping).toBeNull();
+  });
+
   it('disconnect calls DELETE /api/v1/integrations/asana/disconnect', async () => {
     (apiClient.delete as any).mockResolvedValue({ data: { success: true, message: 'ok' } });
     const result = await asanaAPI.disconnect();
