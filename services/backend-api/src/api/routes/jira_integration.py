@@ -27,6 +27,8 @@ depth (see src/services/jira_client.py::_assert_safe_site_url).
 """
 import ipaddress
 import logging
+import os
+import secrets
 import socket
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -56,6 +58,11 @@ from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/integrations/jira", tags=["jira"])
+
+# jira-webhook aspect (status-sync-realtime-mapping): base URL used to build
+# the inbound webhook URL returned by POST /webhook/enable. Mirrors
+# linear_integration.py's BACKEND_URL pattern.
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 
 # ──────────────────────── Pydantic schemas ────────────────────────────────────
@@ -93,7 +100,11 @@ class JiraStatusResponse(BaseModel):
     status_sync_enabled: bool = False
     last_status_synced_at: Optional[datetime] = None
     status_mapping: Optional[Dict[str, str]] = None
-    # api_token is intentionally NEVER included
+    # jira-webhook aspect: whether the inbound real-time webhook is enabled
+    # for this org. Never includes the secret itself — see POST
+    # /webhook/enable (display-once) and DELETE /webhook.
+    webhook_enabled: bool = False
+    # api_token / webhook_secret are intentionally NEVER included
 
 
 class JiraStatusSyncUpdateRequest(BaseModel):
@@ -103,6 +114,18 @@ class JiraStatusSyncUpdateRequest(BaseModel):
 
 class JiraSyncTriggerResponse(BaseModel):
     status: str
+
+
+class JiraWebhookEnableResponse(BaseModel):
+    # Display-once: only ever returned by this endpoint, never by GET
+    # /status (see JiraStatusResponse.webhook_enabled).
+    webhook_secret: str
+    webhook_url: str
+
+
+class JiraWebhookDisableResponse(BaseModel):
+    success: bool
+    message: str
 
 
 class JiraDisconnectResponse(BaseModel):
@@ -279,6 +302,7 @@ def _build_status_response(db: Session, org_id: int, row: JiraIntegration) -> Ji
         status_sync_enabled=bool(row.status_sync_enabled),
         last_status_synced_at=_last_status_synced_at(db, org_id),
         status_mapping=row.status_mapping,
+        webhook_enabled=row.webhook_secret is not None,
     )
 
 
@@ -585,6 +609,92 @@ def jira_update_status_sync(
         row.status_sync_enabled,
     )
     return _build_status_response(db, current_org.id, row)
+
+
+# ────────────────────── Inbound real-time webhook (jira-webhook aspect) ───────
+
+
+@router.post(
+    "/webhook/enable",
+    response_model=JiraWebhookEnableResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_webhook_enable(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Enable the inbound real-time Jira webhook for this org.
+
+    Generates a fresh `secrets.token_urlsafe(32)` HMAC secret (rotating any
+    previously-enabled secret — re-enabling always issues a new one, mirrors
+    the "reconnect rotates the token" posture of /connect), encrypts it with
+    Fernet, and returns the PLAINTEXT secret + the inbound URL exactly once.
+    GET /status never returns the secret (see webhook_enabled).
+
+    404 if the org has no Jira integration row at all (mirrors
+    /status-sync — the setting is persisted on the integration row, so one
+    must exist first, connected or not).
+
+    R6 fail-closed: 422 if LLM_ENCRYPTION_KEY is unset — never a 500, and
+    NO plaintext secret is ever stored or returned in that case.
+    """
+    row = _get_org_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Jira integration found. Connect Jira first.",
+        )
+
+    plaintext_secret = secrets.token_urlsafe(32)
+    try:
+        encrypted_secret = encrypt_api_key(plaintext_secret)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Cannot enable the Jira webhook: LLM_ENCRYPTION_KEY is not "
+                "set. Set this environment variable and restart the service."
+            ),
+        ) from exc
+
+    row.webhook_secret = encrypted_secret
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+    webhook_url = f"{BACKEND_URL}/api/v1/webhooks/jira/inbound"
+    logger.info("Jira webhook enabled for org %s", current_org.id)
+    return JiraWebhookEnableResponse(webhook_secret=plaintext_secret, webhook_url=webhook_url)
+
+
+@router.delete(
+    "/webhook",
+    response_model=JiraWebhookDisableResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def jira_webhook_disable(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Disable the inbound real-time Jira webhook for this org (clears
+    webhook_secret; fail-closed by construction — the receiver 401s once
+    the stored secret is gone). Idempotent: succeeds even if the webhook was
+    never enabled. 404 only if the org has no Jira integration row at all.
+    """
+    row = _get_org_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Jira integration found.",
+        )
+
+    row.webhook_secret = None
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+    logger.info("Jira webhook disabled for org %s", current_org.id)
+    return JiraWebhookDisableResponse(success=True, message="Jira webhook disabled.")
 
 
 def _get_celery_app():
