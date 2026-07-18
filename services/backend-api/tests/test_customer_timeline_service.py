@@ -24,6 +24,7 @@ from src.models.churn_event import CustomerChurnEvent
 from src.models.customer_usage import CustomerUsage
 from src.models.usage_event import UsageEvent
 from src.models.organization import Organization
+from src.models.churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
 
 
 # ---------------------------------------------------------------------------
@@ -775,6 +776,42 @@ class TestTimelinePhase4:
 # Phase 5 — CRM events (crm_contact_synced + crm_renewal_upcoming)
 # ---------------------------------------------------------------------------
 
+def _playbook(db, org=None, name="Retention Outreach", prob_min="0.50", prob_max="0.80") -> ChurnPlaybook:
+    pb = ChurnPlaybook(
+        organization_id=org.id if org else None,
+        name=name,
+        probability_min=prob_min,
+        probability_max=prob_max,
+        action_sequence=[],
+        is_template=False,
+        is_active=True,
+    )
+    db.add(pb)
+    db.commit()
+    db.refresh(pb)
+    return pb
+
+
+def _playbook_execution(
+    db, org, playbook, email, *, triggered_by="auto_probability",
+    status="done", created_at=None, completed_at=None,
+) -> ChurnPlaybookExecution:
+    ex = ChurnPlaybookExecution(
+        playbook_id=playbook.id,
+        organization_id=org.id,
+        customer_email=email,
+        triggered_by=triggered_by,
+        status=status,
+        action_log=[],
+        created_at=created_at or datetime.utcnow(),
+        completed_at=completed_at,
+    )
+    db.add(ex)
+    db.commit()
+    db.refresh(ex)
+    return ex
+
+
 def _crm(db, org, email, *, last_synced_at, renewal_date=None, **cols) -> CrmEnrichment:
     row = CrmEnrichment(
         organization_id=org.id,
@@ -1001,4 +1038,199 @@ class TestTimelinePhase5:
         events, _ = build_timeline(db, org_a.id, email, limit=50)
         assert all(e.type != "crm_contact_synced" for e in events), (
             "CRM events from org B leaked into org A's timeline"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Playbook auto-run events (playbook_auto_run)
+# ---------------------------------------------------------------------------
+
+class TestTimelinePhase6:
+    """Auto-triggered playbook executions surface as playbook_auto_run events.
+    Manual runs are excluded (per PRD)."""
+
+    def test_auto_run_appears_with_playbook_name(self, db: Session):
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Win-back Sequence")
+        ts = datetime.utcnow() - timedelta(hours=2)
+        _playbook_execution(
+            db, org, pb, "p6auto@acme.com",
+            triggered_by="auto_probability", status="done", created_at=ts,
+        )
+
+        events, _ = build_timeline(db, org.id, "p6auto@acme.com", limit=50)
+        types = [e.type for e in events]
+        assert "playbook_auto_run" in types
+
+        ev = next(e for e in events if e.type == "playbook_auto_run")
+        assert "Win-back Sequence" in ev.description
+        assert ev.timestamp.replace(microsecond=0) == ts.replace(microsecond=0)
+        assert ev.source == "churn_playbook_executions"
+
+    def test_auto_run_failed_status_reflected_in_description(self, db: Session):
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Escalation Playbook")
+        _playbook_execution(
+            db, org, pb, "p6failed@acme.com",
+            triggered_by="auto_probability", status="failed",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+
+        events, _ = build_timeline(db, org.id, "p6failed@acme.com", limit=50)
+        ev = next(e for e in events if e.type == "playbook_auto_run")
+        assert "Escalation Playbook" in ev.description
+        assert "failed" in ev.description.lower()
+
+    def test_auto_run_falls_back_to_id_when_playbook_deleted(self, db: Session):
+        """If the playbook row is gone (deleted), fall back to '#<id>'."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Temp Playbook")
+        pb_id = pb.id
+        ex = _playbook_execution(
+            db, org, pb, "p6deleted@acme.com",
+            triggered_by="auto_probability", status="done",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+        # Delete the playbook but keep the execution row (simulate orphaned FK,
+        # as would occur if ON DELETE behavior ever changes / in test isolation).
+        db.query(ChurnPlaybook).filter(ChurnPlaybook.id == pb_id).delete()
+        db.commit()
+
+        events, _ = build_timeline(db, org.id, "p6deleted@acme.com", limit=50)
+        ev = next(e for e in events if e.type == "playbook_auto_run")
+        assert f"#{pb_id}" in ev.description
+
+    def test_manual_run_not_surfaced(self, db: Session):
+        """triggered_by='manual' executions must NOT appear on the timeline."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Manual Playbook")
+        _playbook_execution(
+            db, org, pb, "p6manual@acme.com",
+            triggered_by="manual", status="done",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+
+        events, _ = build_timeline(db, org.id, "p6manual@acme.com", limit=50)
+        assert all(e.type != "playbook_auto_run" for e in events)
+
+    def test_scheduled_run_not_surfaced(self, db: Session):
+        """triggered_by='scheduled' executions are also excluded — only
+        'auto_probability' is surfaced."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Scheduled Playbook")
+        _playbook_execution(
+            db, org, pb, "p6scheduled@acme.com",
+            triggered_by="scheduled", status="done",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+
+        events, _ = build_timeline(db, org.id, "p6scheduled@acme.com", limit=50)
+        assert all(e.type != "playbook_auto_run" for e in events)
+
+    def test_multiple_auto_runs_sort_correctly(self, db: Session):
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Multi Run Playbook")
+        now = datetime.utcnow()
+        _playbook_execution(
+            db, org, pb, "p6multi@acme.com",
+            triggered_by="auto_probability", status="done",
+            created_at=now - timedelta(days=3),
+        )
+        _playbook_execution(
+            db, org, pb, "p6multi@acme.com",
+            triggered_by="auto_probability", status="done",
+            created_at=now - timedelta(days=1),
+        )
+        _playbook_execution(
+            db, org, pb, "p6multi@acme.com",
+            triggered_by="auto_probability", status="done",
+            created_at=now - timedelta(hours=1),
+        )
+
+        events, _ = build_timeline(db, org.id, "p6multi@acme.com", limit=50)
+        auto_events = [e for e in events if e.type == "playbook_auto_run"]
+        assert len(auto_events) == 3
+        # Newest first
+        for i in range(len(auto_events) - 1):
+            assert auto_events[i].timestamp >= auto_events[i + 1].timestamp
+
+    def test_auto_run_interleaved_with_other_events(self, db: Session):
+        """playbook_auto_run must sort correctly alongside feedback/churn events."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Interleave Playbook")
+        now = datetime.utcnow()
+        _feedback(db, org, "p6interleave@acme.com", ts=now - timedelta(hours=5))
+        _playbook_execution(
+            db, org, pb, "p6interleave@acme.com",
+            triggered_by="auto_probability", status="done",
+            created_at=now - timedelta(hours=2),
+        )
+        _churn(db, org, "p6interleave@acme.com", churned_at=now - timedelta(hours=8))
+
+        events, _ = build_timeline(db, org.id, "p6interleave@acme.com", limit=50)
+        types = [e.type for e in events]
+        auto_idx = types.index("playbook_auto_run")
+        fb_idx = types.index("feedback_created")
+        churn_idx = types.index("churned")
+        # Newest first: playbook (T-2h) < feedback (T-5h) < churn (T-8h)
+        assert auto_idx < fb_idx < churn_idx
+
+    def test_auto_run_cursor_pagination_no_skip(self, db: Session):
+        """Cursor pagination with auto-run events present — no skips or duplicates."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Paged Playbook")
+        now = datetime.utcnow()
+        for i in range(4):
+            _playbook_execution(
+                db, org, pb, "p6page@acme.com",
+                triggered_by="auto_probability", status="done",
+                created_at=now - timedelta(hours=i + 1),
+            )
+        _feedback(db, org, "p6page@acme.com", ts=now - timedelta(hours=10))
+
+        all_events, _ = build_timeline(db, org.id, "p6page@acme.com", limit=100)
+        assert len(all_events) >= 5
+
+        collected = []
+        cursor = None
+        for _ in range(20):
+            page, cursor = build_timeline(db, org.id, "p6page@acme.com", before=cursor, limit=1)
+            collected.extend(page)
+            if cursor is None:
+                break
+
+        composite = [(e.type, e.timestamp, e.source_id) for e in collected]
+        assert len(composite) == len(set(composite)), "Duplicates detected in playbook auto-run pagination"
+        assert len(collected) == len(all_events), (
+            f"Paginated ({len(collected)}) != full ({len(all_events)})"
+        )
+
+    def test_auto_run_multi_tenant_isolation(self, db: Session):
+        """An auto-run for org B must not leak into org A's timeline."""
+        from src.services.customer_timeline_service import build_timeline
+        org_a = _org(db)
+        org_b = Organization(name="Org B Playbooks", plan="pro")
+        db.add(org_b)
+        db.commit()
+        db.refresh(org_b)
+
+        pb_b = _playbook(db, org_b, name="Org B Playbook")
+        email = "shared-pb@acme.com"
+        _playbook_execution(
+            db, org_b, pb_b, email,
+            triggered_by="auto_probability", status="done",
+            created_at=datetime.utcnow() - timedelta(hours=1),
+        )
+
+        events, _ = build_timeline(db, org_a.id, email, limit=50)
+        assert all(e.type != "playbook_auto_run" for e in events), (
+            "Playbook auto-run event from org B leaked into org A's timeline"
         )

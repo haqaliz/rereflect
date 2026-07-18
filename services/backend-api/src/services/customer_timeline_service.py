@@ -440,6 +440,52 @@ def _fetch_churn_events(
     return events
 
 
+def _fetch_playbook_runs(
+    db: Session,
+    org_id: int,
+    email: str,
+) -> List[TimelineEvent]:
+    """Auto-triggered playbook runs (triggered_by == 'auto_probability' only).
+    Manual runs are intentionally excluded per PRD. Few rows per customer, so
+    (like churn events) we fetch all rows and rely on build_timeline's Python
+    _after_cursor filter for cursor correctness.
+    """
+    from src.models.churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
+
+    rows = db.query(ChurnPlaybookExecution).filter(
+        ChurnPlaybookExecution.organization_id == org_id,
+        ChurnPlaybookExecution.customer_email == email,
+        ChurnPlaybookExecution.triggered_by == "auto_probability",
+    ).order_by(desc(ChurnPlaybookExecution.created_at)).all()
+
+    events: List[TimelineEvent] = []
+    for row in rows:
+        # created_at is NOT NULL on the model, but guard defensively per the
+        # timeline invariant that no event may carry a None timestamp
+        # (build_timeline sorts on it).
+        ts = _to_naive_utc(row.created_at)
+        if ts is None:
+            continue
+
+        playbook = db.query(ChurnPlaybook).filter(
+            ChurnPlaybook.id == row.playbook_id,
+        ).first()
+        playbook_name = playbook.name if playbook else f"#{row.playbook_id}"
+
+        description = f"Auto-ran playbook '{playbook_name}'"
+        if row.status == "failed":
+            description += " (failed)"
+
+        events.append(TimelineEvent(
+            type="playbook_auto_run",
+            timestamp=ts,
+            description=description,
+            source="churn_playbook_executions",
+            source_id=row.id,
+        ))
+    return events
+
+
 def _fetch_crm_events(
     db: Session,
     org_id: int,
@@ -649,6 +695,11 @@ def build_timeline(
     # CRM uses Python-only cursor filtering (single snapshot row, few events)
     all_events.extend(
         _fetch_crm_events(db, org_id, email)
+    )
+
+    # Playbook auto-runs use Python-only cursor filtering (few rows per customer)
+    all_events.extend(
+        _fetch_playbook_runs(db, org_id, email)
     )
 
     # Notable usage: always scan full window, cursor applied below
