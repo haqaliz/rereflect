@@ -381,6 +381,8 @@ class AutomationEngine:
                     r = self._execute_notify(action_config, feedback, rule)
                 elif action_type == "draft_response":
                     r = self._execute_draft_response(action_config, feedback)
+                elif action_type == "run_playbook":
+                    r = self._execute_run_playbook(action_config, context, rule)
                 else:
                     r = {"type": action_type, "result": None, "error": f"Unknown action type: {action_type}"}
             except Exception as exc:
@@ -589,6 +591,70 @@ class AutomationEngine:
         return {
             "type": "draft_response",
             "result": {"tone": tone, "length": len(draft_text)},
+            "error": None,
+        }
+
+    def _execute_run_playbook(
+        self,
+        config: dict,
+        context: Dict[str, Any],
+        rule: AutomationRule,
+    ) -> Dict:
+        """
+        Auto-run a designated churn playbook for the customer in *context*.
+
+        Reuses the EXISTING playbook execution pipeline: create a
+        ChurnPlaybookExecution row (triggered_by="auto_probability") and
+        enqueue the existing Celery task, exactly as the manual "run
+        playbook" API route does (src/api/routes/playbooks.py::_dispatch_celery).
+        """
+        from src.models.churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
+
+        playbook_id = config.get("playbook_id")
+        if not playbook_id:
+            return {"type": "run_playbook", "result": None, "error": "missing playbook_id"}
+
+        customer_email = context.get("customer_email")
+        if not customer_email:
+            return {"type": "run_playbook", "result": None, "error": "no customer_email in context"}
+
+        playbook = (
+            self.db.query(ChurnPlaybook)
+            .filter(
+                ChurnPlaybook.id == playbook_id,
+                ChurnPlaybook.is_active.is_(True),
+                (ChurnPlaybook.organization_id == rule.organization_id)
+                | (ChurnPlaybook.organization_id.is_(None)),
+            )
+            .first()
+        )
+        if playbook is None:
+            return {
+                "type": "run_playbook",
+                "result": None,
+                "error": "playbook not found / inactive / wrong org",
+            }
+
+        exec_row = ChurnPlaybookExecution(
+            playbook_id=playbook_id,
+            organization_id=rule.organization_id,
+            customer_email=customer_email,
+            triggered_by="auto_probability",
+            triggered_by_user_id=None,
+            status="queued",
+        )
+        self.db.add(exec_row)
+        self.db.flush()
+
+        from src.background.celery_client import get_celery_app
+
+        get_celery_app().send_task(
+            "tasks.churn_playbooks.run_playbook", args=[exec_row.id]
+        )
+
+        return {
+            "type": "run_playbook",
+            "result": {"execution_id": exec_row.id, "playbook_id": playbook_id},
             "error": None,
         }
 
