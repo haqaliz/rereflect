@@ -33,6 +33,7 @@ from src.config.plans import get_automation_rule_limit, has_feature
 from src.database.session import get_db
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import RULE_MODES, AutomationRule
+from src.services.automation_engine import seed_churn_cooldowns
 from src.models.churn_playbook import ChurnPlaybook
 from src.models.organization import Organization
 from src.models.user import User
@@ -566,6 +567,24 @@ def create_rule(
     db.add(rule)
     db.commit()
     db.refresh(rule)
+
+    if rule.mode == "active":
+        # Rule created directly in active mode with a churn_probability_threshold
+        # trigger — seed cooldowns so it doesn't stampede-fire for every
+        # customer already above threshold (seed_churn_cooldowns no-ops for
+        # any other trigger_type). Never let seeding failure fail the request.
+        try:
+            seeded = seed_churn_cooldowns(db, rule)
+            if seeded:
+                logger.info(
+                    "create_rule: seeded %d cooldowns for rule %s on creation (active)",
+                    seeded, rule.id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "create_rule: cooldown seeding failed for rule %s: %s", rule.id, exc
+            )
+
     return _rule_to_response(rule)
 
 
@@ -595,6 +614,7 @@ def update_rule(
 ):
     """Update an existing automation rule. Requires Admin or Owner role."""
     rule = _get_rule_or_404(rule_id, current_org.id, db)
+    old_mode = rule.mode  # captured BEFORE the update is applied
 
     if payload.actions is not None:
         _validate_run_playbook_actions(payload.actions, current_org.id, db)
@@ -616,6 +636,23 @@ def update_rule(
     rule.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(rule)
+
+    if rule.mode == "active" and old_mode != "active":
+        # Transition INTO active — seed against the FINAL (post-update)
+        # threshold/config now that the rule is persisted. Seeding failure
+        # must never fail the request.
+        try:
+            seeded = seed_churn_cooldowns(db, rule)
+            if seeded:
+                logger.info(
+                    "update_rule: seeded %d cooldowns for rule %s activation (%s -> active)",
+                    seeded, rule.id, old_mode,
+                )
+        except Exception as exc:
+            logger.warning(
+                "update_rule: cooldown seeding failed for rule %s: %s", rule.id, exc
+            )
+
     return _rule_to_response(rule)
 
 

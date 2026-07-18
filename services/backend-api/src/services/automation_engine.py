@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
+from src.models.customer_health import CustomerHealth
 from src.models.feedback import FeedbackItem
 
 logger = logging.getLogger(__name__)
@@ -685,3 +686,62 @@ class AutomationEngine:
         )
         self.db.add(execution)
         return execution
+
+
+# ---------------------------------------------------------------------------
+# Activation cooldown-seeding — prevents a "stampede" of fires when a
+# churn_probability_threshold rule transitions INTO mode="active" (see
+# src/api/routes/automations.py::update_rule / create_rule, M4.4 Task 7).
+# ---------------------------------------------------------------------------
+
+def seed_churn_cooldowns(db: Session, rule: AutomationRule) -> int:
+    """
+    Pre-seed the per-(rule,customer) cooldown for every customer currently
+    above *rule*'s churn-probability threshold.
+
+    The churn trigger is level-based, so activating a rule would otherwise
+    fire it for every customer already above threshold on their very next
+    recompute. Seeding the cooldown here (using the SAME Redis key scheme
+    the engine itself uses) means only NEW crossings fire after activation.
+
+    No-op (returns 0, never raises) for:
+      - any trigger_type other than "churn_probability_threshold" (health-
+        based rules fire from the backend health seam and are naturally
+        cooldown-gated on next recompute — out of scope for this slice).
+      - Redis being unavailable.
+
+    Returns the count of customers seeded (also usable as a "would-run"
+    preview number).
+    """
+    if rule.trigger_type != "churn_probability_threshold":
+        return 0
+
+    r = _get_redis()
+    if r is None:
+        return 0
+
+    threshold = float((rule.trigger_config or {}).get("threshold", 0.7))
+
+    customers = (
+        db.query(CustomerHealth)
+        .filter(
+            CustomerHealth.organization_id == rule.organization_id,
+            CustomerHealth.churn_probability.isnot(None),
+            CustomerHealth.churn_probability >= threshold,
+        )
+        .all()
+    )
+
+    engine = AutomationEngine(db)
+    count = 0
+    for customer in customers:
+        try:
+            engine._set_cooldown(rule.id, customer.customer_email, rule.cooldown_hours)
+            count += 1
+        except Exception as exc:
+            logger.warning(
+                "seed_churn_cooldowns: failed to seed cooldown for rule %s customer %s: %s",
+                rule.id, customer.customer_email, exc,
+            )
+
+    return count
