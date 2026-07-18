@@ -6,13 +6,15 @@ export type TriggerType =
   | 'health_score_threshold'
   | 'sentiment_pattern'
   | 'churn_risk_level_change'
-  | 'feedback_category_match';
+  | 'feedback_category_match'
+  | 'churn_probability_threshold';
 
 export type ActionType =
   | 'auto_assign'
   | 'change_status'
   | 'send_notification'
-  | 'draft_response';
+  | 'draft_response'
+  | 'run_playbook';
 
 export interface AutomationAction {
   type: ActionType | string;
@@ -24,6 +26,8 @@ export interface AutomationRule {
   name: string;
   description: string | null;
   is_active: boolean;
+  /** off|shadow|active — shadow logs matches without executing actions. Kept alongside `is_active` for back-compat. */
+  mode?: 'off' | 'shadow' | 'active';
   trigger_type: TriggerType;
   trigger_config: Record<string, any>;
   trigger?: { type: string; config: Record<string, any> };
@@ -64,6 +68,7 @@ export interface CreateAutomationRequest {
   trigger: { type: TriggerType; config: Record<string, any> };
   actions: { type: ActionType; config: Record<string, any> }[];
   cooldown_hours?: number;
+  mode?: 'off' | 'shadow' | 'active';
 }
 
 export interface UpdateAutomationRequest {
@@ -73,6 +78,7 @@ export interface UpdateAutomationRequest {
   trigger?: { type: TriggerType; config: Record<string, any> };
   actions?: { type: ActionType; config: Record<string, any> }[];
   cooldown_hours?: number;
+  mode?: 'off' | 'shadow' | 'active';
 }
 
 // ─── API Client ───────────────────────────────────────────────────────────────
@@ -130,6 +136,7 @@ export const TRIGGER_TYPE_LABELS: Record<TriggerType, string> = {
   sentiment_pattern: 'Sentiment Pattern',
   churn_risk_level_change: 'Churn Risk Level Change',
   feedback_category_match: 'Category Match',
+  churn_probability_threshold: 'Churn probability threshold',
 };
 
 export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
@@ -137,6 +144,7 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
   change_status: 'Change Status',
   send_notification: 'Send Notification',
   draft_response: 'Draft AI Response',
+  run_playbook: 'Run churn playbook',
 };
 
 export const PLAN_AUTOMATION_LIMITS: Record<string, number | null> = {

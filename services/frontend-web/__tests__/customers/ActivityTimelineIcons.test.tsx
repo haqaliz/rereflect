@@ -48,6 +48,21 @@ describe('eventIconMap — new usage/churn event types', () => {
   });
 });
 
+describe('eventIconMap — playbook_auto_run (churn-triggered-playbooks)', () => {
+  it('has an icon defined', () => {
+    expect(eventIconMap.playbook_auto_run).toBeDefined();
+    expect(eventIconMap.playbook_auto_run.icon).toBeDefined();
+  });
+
+  it('has a CSS-var color (not a hardcoded hex/rgb)', () => {
+    expect(eventIconMap.playbook_auto_run.color).toMatch(/^var\(--/);
+  });
+
+  it('has a CSS-var bg via color-mix', () => {
+    expect(eventIconMap.playbook_auto_run.bg).toMatch(/color-mix/);
+  });
+});
+
 describe('eventIconMap — CRM event types (F2)', () => {
   const crmTypes = [
     'crm_contact_synced',

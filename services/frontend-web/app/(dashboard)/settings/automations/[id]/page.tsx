@@ -14,6 +14,7 @@ import {
   type ActionType,
   type AutomationAction,
 } from '@/lib/api/automations';
+import { listPlaybooks, type Playbook } from '@/lib/api/playbooks';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -209,6 +210,29 @@ function TriggerConfigFields({ triggerType, config, onChange, disabled }: Trigge
     );
   }
 
+  if (triggerType === 'churn_probability_threshold') {
+    return (
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">
+          Fires when churn probability &ge; threshold
+        </label>
+        <Input
+          data-testid="trigger-config-churn-threshold"
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          value={config.threshold ?? 0.7}
+          onChange={e =>
+            onChange({ ...config, threshold: Number(e.target.value), direction: 'above' })
+          }
+          disabled={disabled}
+          className="w-32"
+        />
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -219,6 +243,7 @@ const ACTION_TYPES: ActionType[] = [
   'change_status',
   'send_notification',
   'draft_response',
+  'run_playbook',
 ];
 
 interface ActionRowProps {
@@ -227,9 +252,10 @@ interface ActionRowProps {
   onChange: (action: AutomationAction) => void;
   onRemove: () => void;
   disabled?: boolean;
+  playbooks: Playbook[];
 }
 
-function ActionRow({ index, action, onChange, onRemove, disabled }: ActionRowProps) {
+function ActionRow({ index, action, onChange, onRemove, disabled, playbooks }: ActionRowProps) {
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
       <div className="flex-1 space-y-3">
@@ -267,6 +293,31 @@ function ActionRow({ index, action, onChange, onRemove, disabled }: ActionRowPro
             </SelectContent>
           </Select>
         )}
+
+        {action.type === 'run_playbook' && (
+          playbooks.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              No active playbooks — create one first.
+            </p>
+          ) : (
+            <Select
+              value={action.config.playbook_id != null ? String(action.config.playbook_id) : ''}
+              onValueChange={val => onChange({ ...action, config: { ...action.config, playbook_id: Number(val) } })}
+              disabled={disabled}
+            >
+              <SelectTrigger data-testid="action-config-playbook">
+                <SelectValue placeholder="Select a playbook..." />
+              </SelectTrigger>
+              <SelectContent>
+                {playbooks.map(p => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )
+        )}
       </div>
 
       {!disabled && (
@@ -285,6 +336,12 @@ function ActionRow({ index, action, onChange, onRemove, disabled }: ActionRowPro
   );
 }
 
+const MODE_LABELS: Record<'off' | 'shadow' | 'active', string> = {
+  off: 'Off',
+  shadow: 'Shadow',
+  active: 'Active',
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AutomationDetailPage() {
@@ -297,6 +354,7 @@ export default function AutomationDetailPage() {
   const [loading, setLoading] = useState(true);
   const [rule, setRule] = useState<AutomationRule | null>(null);
   const [executions, setExecutions] = useState<AutomationExecution[]>([]);
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
 
   // Config form state
   const [name, setName] = useState('');
@@ -306,6 +364,7 @@ export default function AutomationDetailPage() {
   const [actions, setActions] = useState<AutomationAction[]>([]);
   const [cooldownHours, setCooldownHours] = useState(24);
   const [isActive, setIsActive] = useState(true);
+  const [mode, setMode] = useState<'off' | 'shadow' | 'active'>('active');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
@@ -323,12 +382,14 @@ export default function AutomationDetailPage() {
 
     async function load() {
       try {
-        const [r, execs] = await Promise.all([
+        const [r, execs, allPlaybooks] = await Promise.all([
           automationsAPI.get(ruleId),
           automationsAPI.listExecutions(ruleId),
+          listPlaybooks().catch(() => []),
         ]);
         setRule(r);
         setExecutions(execs);
+        setPlaybooks(allPlaybooks.filter(p => !p.is_template && p.is_active));
 
         // Populate form
         setName(r.name);
@@ -338,6 +399,7 @@ export default function AutomationDetailPage() {
         setActions(r.actions);
         setCooldownHours(r.cooldown_hours);
         setIsActive(r.is_active);
+        setMode(r.mode ?? 'active');
       } catch {
         toast.error('Failed to load automation rule');
       } finally {
@@ -358,6 +420,7 @@ export default function AutomationDetailPage() {
         actions: actions.map(a => ({ type: a.type as ActionType, config: a.config })),
         cooldown_hours: cooldownHours,
         is_active: isActive,
+        mode,
       });
       setRule(updated);
       toast.success('Rule saved');
@@ -366,7 +429,7 @@ export default function AutomationDetailPage() {
     } finally {
       setSaving(false);
     }
-  }, [rule, name, description, triggerType, triggerConfig, actions, cooldownHours, isActive]);
+  }, [rule, name, description, triggerType, triggerConfig, actions, cooldownHours, isActive, mode]);
 
   const handleDelete = useCallback(() => {
     if (!rule) return;
@@ -521,6 +584,32 @@ export default function AutomationDetailPage() {
                     Active
                   </label>
                 </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <label className="text-sm font-medium">Mode</label>
+                    <p className="text-xs text-muted-foreground">
+                      Shadow logs what would run without executing.
+                    </p>
+                  </div>
+                  <Select
+                    value={mode}
+                    onValueChange={val => setMode(val as 'off' | 'shadow' | 'active')}
+                    disabled={!isAdminOrOwner}
+                  >
+                    <SelectTrigger
+                      aria-label="Rule mode"
+                      data-testid="rule-mode-select"
+                      className="w-32 shrink-0"
+                    >
+                      <SelectValue>{MODE_LABELS[mode]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="off">Off</SelectItem>
+                      <SelectItem value="shadow">Shadow</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardContent>
             </Card>
 
@@ -587,6 +676,7 @@ export default function AutomationDetailPage() {
                       onChange={updated => updateAction(i, updated)}
                       onRemove={() => removeAction(i)}
                       disabled={!isAdminOrOwner}
+                      playbooks={playbooks}
                     />
                   ))
                 )}

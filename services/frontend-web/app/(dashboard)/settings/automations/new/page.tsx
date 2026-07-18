@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -11,6 +11,7 @@ import {
   type ActionType,
   type AutomationAction,
 } from '@/lib/api/automations';
+import { listPlaybooks, type Playbook } from '@/lib/api/playbooks';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -167,6 +168,28 @@ function TriggerConfigFields({ triggerType, config, onChange }: TriggerConfigPro
     return <CategoryMatchConfig config={config} onChange={onChange} />;
   }
 
+  if (triggerType === 'churn_probability_threshold') {
+    return (
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">
+          Fires when churn probability &ge; threshold
+        </label>
+        <Input
+          data-testid="trigger-config-churn-threshold"
+          type="number"
+          min={0}
+          max={1}
+          step={0.05}
+          value={config.threshold ?? 0.7}
+          onChange={e =>
+            onChange({ ...config, threshold: Number(e.target.value), direction: 'above' })
+          }
+          className="w-32"
+        />
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -177,6 +200,7 @@ interface ActionRowProps {
   action: AutomationAction;
   onChange: (action: AutomationAction) => void;
   onRemove: () => void;
+  playbooks: Playbook[];
 }
 
 const ACTION_TYPES: ActionType[] = [
@@ -184,9 +208,10 @@ const ACTION_TYPES: ActionType[] = [
   'change_status',
   'send_notification',
   'draft_response',
+  'run_playbook',
 ];
 
-function ActionRow({ index, action, onChange, onRemove }: ActionRowProps) {
+function ActionRow({ index, action, onChange, onRemove, playbooks }: ActionRowProps) {
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
       <div className="flex-1 space-y-3">
@@ -198,6 +223,7 @@ function ActionRow({ index, action, onChange, onRemove }: ActionRowProps) {
               change_status: { status: 'in_review' },
               send_notification: { recipients: 'admins', channels: ['dashboard'] },
               draft_response: { tone: 'professional' },
+              run_playbook: {},
             };
             onChange({ type: val as ActionType, config: defaults[val] || {} });
           }}
@@ -231,6 +257,31 @@ function ActionRow({ index, action, onChange, onRemove }: ActionRowProps) {
             </SelectContent>
           </Select>
         )}
+
+        {/* Inline config for run_playbook */}
+        {action.type === 'run_playbook' && (
+          playbooks.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              No active playbooks — create one first.
+            </p>
+          ) : (
+            <Select
+              value={action.config.playbook_id != null ? String(action.config.playbook_id) : ''}
+              onValueChange={val => onChange({ ...action, config: { ...action.config, playbook_id: Number(val) } })}
+            >
+              <SelectTrigger data-testid="action-config-playbook">
+                <SelectValue placeholder="Select a playbook..." />
+              </SelectTrigger>
+              <SelectContent>
+                {playbooks.map(p => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )
+        )}
       </div>
 
       <Button
@@ -247,6 +298,12 @@ function ActionRow({ index, action, onChange, onRemove }: ActionRowProps) {
   );
 }
 
+const MODE_LABELS: Record<'off' | 'shadow' | 'active', string> = {
+  off: 'Off',
+  shadow: 'Shadow',
+  active: 'Active',
+};
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewAutomationPage() {
@@ -259,7 +316,15 @@ export default function NewAutomationPage() {
   const [triggerConfig, setTriggerConfig] = useState<Record<string, any>>({});
   const [actions, setActions] = useState<AutomationAction[]>([]);
   const [cooldownHours, setCooldownHours] = useState(24);
+  const [mode, setMode] = useState<'off' | 'shadow' | 'active'>('active');
+  const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    listPlaybooks()
+      .then(all => setPlaybooks(all.filter(p => !p.is_template && p.is_active)))
+      .catch(() => setPlaybooks([]));
+  }, []);
 
   const addAction = () => {
     setActions(prev => [...prev, { type: 'send_notification', config: { recipients: 'admins', channels: ['dashboard'] } }]);
@@ -280,6 +345,7 @@ export default function NewAutomationPage() {
       sentiment_pattern: { count: 3, days: 7, sentiment: 'negative' },
       churn_risk_level_change: { target_level: 'at_risk' },
       feedback_category_match: { categories: [], is_urgent: false },
+      churn_probability_threshold: { threshold: 0.7, direction: 'above' },
     };
     setTriggerConfig(triggerDefaults[val] || {});
   };
@@ -302,6 +368,7 @@ export default function NewAutomationPage() {
         trigger: { type: triggerType, config: triggerConfig },
         actions: actions.map(a => ({ type: a.type as ActionType, config: a.config })),
         cooldown_hours: cooldownHours,
+        mode,
       });
       toast.success('Automation rule created');
       router.push(`/settings/automations/${created.id}`);
@@ -312,7 +379,7 @@ export default function NewAutomationPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [name, description, triggerType, triggerConfig, actions, cooldownHours, router]);
+  }, [name, description, triggerType, triggerConfig, actions, cooldownHours, mode, router]);
 
   return (
     <div className="min-h-screen pattern-bg">
@@ -353,6 +420,28 @@ export default function NewAutomationPage() {
                 rows={2}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
               />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <label className="text-sm font-medium">Mode</label>
+                <p className="text-xs text-muted-foreground">
+                  Shadow logs what would run without executing.
+                </p>
+              </div>
+              <Select value={mode} onValueChange={val => setMode(val as 'off' | 'shadow' | 'active')}>
+                <SelectTrigger
+                  aria-label="Rule mode"
+                  data-testid="rule-mode-select"
+                  className="w-32 shrink-0"
+                >
+                  <SelectValue>{MODE_LABELS[mode]}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="off">Off</SelectItem>
+                  <SelectItem value="shadow">Shadow</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
@@ -417,6 +506,7 @@ export default function NewAutomationPage() {
                   action={action}
                   onChange={updated => updateAction(i, updated)}
                   onRemove={() => removeAction(i)}
+                  playbooks={playbooks}
                 />
               ))
             )}

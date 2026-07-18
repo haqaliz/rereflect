@@ -222,7 +222,8 @@ export interface ActivityEvent {
     | 'usage_feature_adopted'
     | 'usage_reactivated'
     | 'crm_contact_synced'
-    | 'crm_renewal_upcoming';
+    | 'crm_renewal_upcoming'
+    | 'playbook_auto_run';
   description: string;
   timestamp: string;
   // Existing optional fields

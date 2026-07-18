@@ -14,6 +14,7 @@ import {
   Activity,
   Building2,
   CalendarClock,
+  PlayCircle,
 } from 'lucide-react';
 import { customersAPI, ActivityEvent } from '@/lib/api/customers';
 
@@ -105,6 +106,12 @@ export const eventIconMap: Record<ActivityEvent['type'], EventIconConfig> = {
     icon: CalendarClock,
     color: 'var(--chart-1)',
     bg: 'color-mix(in oklch, var(--chart-1) 10%, transparent)',
+  },
+  // Churn-triggered playbook auto-runs (M4.1 churn-triggered-playbooks)
+  playbook_auto_run: {
+    icon: PlayCircle,
+    color: 'var(--chart-2)',
+    bg: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
   },
 };
 

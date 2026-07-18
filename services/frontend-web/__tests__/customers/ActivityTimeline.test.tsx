@@ -109,6 +109,22 @@ describe('ActivityTimeline', () => {
     });
   });
 
+  it('renders a playbook_auto_run event with its description', async () => {
+    (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      events: [
+        {
+          type: 'playbook_auto_run' as const,
+          description: "Auto-ran 'Win-back offer' playbook",
+          timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+    renderWithQueryClient(<ActivityTimeline email="john@acme.com" />);
+    await waitFor(() => {
+      expect(screen.getByText("Auto-ran 'Win-back offer' playbook")).toBeInTheDocument();
+    });
+  });
+
   it('renders empty state when no events', async () => {
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [] });
     renderWithQueryClient(<ActivityTimeline email="john@acme.com" />);

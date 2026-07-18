@@ -295,6 +295,15 @@ export default function AutomationsPage() {
                           >
                             {rule.name}
                           </Link>
+                          {rule.mode === 'shadow' && (
+                            <Badge
+                              variant="outline"
+                              className="ml-2 text-xs font-normal align-middle"
+                              data-testid={`shadow-badge-${rule.id}`}
+                            >
+                              Shadow
+                            </Badge>
+                          )}
                           {rule.description && (
                             <p className="text-xs text-muted-foreground mt-0.5 font-normal">
                               {rule.description}
