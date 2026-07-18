@@ -25,6 +25,7 @@ R6 safeguard: POST /connect catches ValueError from encrypt_api_key (raised
 when LLM_ENCRYPTION_KEY is unset) and returns HTTP 422 — never a 500.
 """
 import logging
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -44,6 +45,7 @@ from src.models.user import User
 from src.services.asana_client import (
     AsanaAuthError,
     AsanaClient,
+    AsanaNotFoundError,
     AsanaTransientError,
 )
 from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
@@ -54,6 +56,11 @@ ASANA_TASK_NAME_MAX_LEN = 255
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/integrations/asana", tags=["asana"])
+
+# asana-webhook aspect (status-sync-realtime-mapping): base URL used to build
+# the inbound webhook URL registered with Asana by POST /webhook/enable.
+# Mirrors jira_integration.py's BACKEND_URL pattern.
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 
 # ──────────────────────── Pydantic schemas ────────────────────────────────────
@@ -85,7 +92,13 @@ class AsanaStatusResponse(BaseModel):
     status_sync_enabled: bool = False
     last_status_synced_at: Optional[datetime] = None
     status_mapping: Optional[Dict[str, str]] = None
-    # api_token is intentionally NEVER included
+    # asana-webhook aspect: whether the inbound real-time webhook has
+    # completed its handshake (a webhook_secret is stored) for this org.
+    # True only once the handshake has been received -- a registered
+    # webhook_gid with no captured secret still fail-closes on the receiver,
+    # so it is reported as NOT enabled. Never includes the secret itself.
+    webhook_enabled: bool = False
+    # api_token / webhook_secret are intentionally NEVER included
 
 
 class AsanaStatusSyncUpdateRequest(BaseModel):
@@ -98,6 +111,26 @@ class AsanaSyncTriggerResponse(BaseModel):
 
 
 class AsanaDisconnectResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class AsanaWebhookEnableRequest(BaseModel):
+    # v1 (R2): the operator's chosen resource to subscribe -- a project gid,
+    # reusing the same project wiring already used for task creation. See
+    # spec.md's R2 risk note (project vs workspace).
+    resource_gid: str = Field(..., min_length=1)
+
+
+class AsanaWebhookEnableResponse(BaseModel):
+    webhook_gid: str
+    webhook_url: str
+    # webhook_secret is intentionally NEVER included here -- unlike Jira
+    # (which generates its own secret locally), Asana's handshake secret is
+    # only known once Asana's first delivery to webhook_url arrives (Phase 3).
+
+
+class AsanaWebhookDisableResponse(BaseModel):
     success: bool
     message: str
 
@@ -231,6 +264,7 @@ def _build_status_response(db: Session, org_id: int, row: AsanaIntegration) -> A
         status_sync_enabled=bool(row.status_sync_enabled),
         last_status_synced_at=_last_status_synced_at(db, org_id),
         status_mapping=row.status_mapping,
+        webhook_enabled=row.webhook_secret is not None,
     )
 
 
@@ -454,6 +488,145 @@ def asana_test(
     except Exception as exc:  # noqa: BLE001 — must never surface as a 500
         logger.warning("Asana test failed for org %s: %s", current_org.id, exc)
         return AsanaTestResponse(success=False, message=str(exc))
+
+
+# ────────────────────── Inbound real-time webhook (asana-webhook aspect) ──────
+
+
+@router.post(
+    "/webhook/enable",
+    response_model=AsanaWebhookEnableResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def asana_webhook_enable(
+    payload: AsanaWebhookEnableRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Register an inbound real-time Asana webhook for this org's chosen
+    resource (v1: a project gid — see spec.md R2).
+
+    Requires an ACTIVE Asana integration (404 otherwise — mirrors the
+    Jira posture: the setting is persisted on the integration row, so one
+    must exist first, connected or not — but Asana additionally needs a
+    live token to call `POST /webhooks`, so this specifically requires an
+    active connection, unlike Jira's /webhook/enable).
+
+    Calls `AsanaClient.create_webhook(resource_gid, target_url)` where
+    `target_url` embeds THIS integration's id
+    (`{BACKEND_URL}/api/v1/webhooks/asana/inbound/{integration.id}`) so the
+    receiver (Phase 3) can resolve the org on the very first handshake
+    delivery, before any secret exists to match against (unlike Jira/Linear's
+    per-org secret-matching, which only works once a secret is already
+    known).
+
+    Re-enabling (a webhook_gid already stored) always registers a FRESH
+    webhook at Asana and clears any previously-captured webhook_secret — a
+    new handshake is required against the new webhook (mirrors the
+    "reconnect rotates the token" posture of /connect). The OLD webhook at
+    Asana is intentionally left registered (best-effort cleanup is out of
+    scope for v1 — the operator can DELETE /webhook first if desired).
+
+    AsanaAuthError -> 403 (stale/invalid token). AsanaTransientError -> 502.
+    Never a 500.
+    """
+    integration = _require_active_integration(db, current_org.id)
+
+    plain_token = get_decrypted_token(integration)
+    target_url = f"{BACKEND_URL}/api/v1/webhooks/asana/inbound/{integration.id}"
+
+    asana_client = AsanaClient(plain_token)
+    try:
+        created = asana_client.create_webhook(
+            resource_gid=payload.resource_gid, target_url=target_url
+        )
+    except AsanaAuthError as exc:
+        integration.last_sync_status = "error"
+        integration.last_error = str(exc)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Asana token is invalid or lacks required permissions. Reconnect Asana.",
+        ) from exc
+    except AsanaTransientError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Asana API returned a transient error: {exc}",
+        ) from exc
+    finally:
+        _close_client(asana_client)
+
+    integration.webhook_gid = created.get("gid")
+    # A re-enable always requires a fresh handshake against the newly
+    # created webhook -- any previously-captured secret is stale.
+    integration.webhook_secret = None
+    integration.updated_at = datetime.utcnow()
+    db.commit()
+
+    logger.info(
+        "Asana webhook enabled for org %s (webhook_gid=%s)",
+        current_org.id,
+        integration.webhook_gid,
+    )
+    return AsanaWebhookEnableResponse(
+        webhook_gid=integration.webhook_gid,
+        webhook_url=target_url,
+    )
+
+
+@router.delete(
+    "/webhook",
+    response_model=AsanaWebhookDisableResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def asana_webhook_disable(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """
+    Disable the inbound real-time Asana webhook for this org.
+
+    Idempotent: succeeds even if the webhook was never enabled. 404 only if
+    the org has no Asana integration row at all. Best-effort deletes the
+    webhook at Asana (`DELETE /webhooks/{gid}`) — an AsanaNotFoundError
+    (already gone at Asana) is swallowed; any other Asana error is logged
+    but never blocks clearing our local columns (fail-closed by
+    construction — the receiver 401s once webhook_secret is gone,
+    regardless of whether the Asana-side delete itself succeeded).
+    """
+    row = _get_org_integration(db, current_org.id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No Asana integration found.",
+        )
+
+    if row.webhook_gid and row.is_active:
+        try:
+            plain_token = get_decrypted_token(row)
+            asana_client = AsanaClient(plain_token)
+            try:
+                asana_client.delete_webhook(row.webhook_gid)
+            finally:
+                _close_client(asana_client)
+        except AsanaNotFoundError:
+            pass
+        except Exception as exc:  # noqa: BLE001 — must never block local cleanup
+            logger.warning(
+                "Asana webhook delete-at-source failed for org %s (webhook_gid=%s): %s",
+                current_org.id,
+                row.webhook_gid,
+                exc,
+            )
+
+    row.webhook_gid = None
+    row.webhook_secret = None
+    row.updated_at = datetime.utcnow()
+    db.commit()
+
+    logger.info("Asana webhook disabled for org %s", current_org.id)
+    return AsanaWebhookDisableResponse(success=True, message="Asana webhook disabled.")
 
 
 # ────────────────────── Inbound status-sync operator controls ─────────────────

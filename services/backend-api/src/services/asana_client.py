@@ -136,6 +136,10 @@ class AsanaClient:
         resp = self._client.post(path, json=json, **kwargs)
         return self._handle_response(resp)
 
+    def _delete(self, path: str, **kwargs) -> httpx.Response:
+        resp = self._client.delete(path, **kwargs)
+        return self._handle_response(resp)
+
     # ------------------------------------------------------------------
     # validate
     # ------------------------------------------------------------------
@@ -283,3 +287,48 @@ class AsanaClient:
             "completed_at": data.get("completed_at"),
             "memberships": data.get("memberships") or [],
         }
+
+    # ------------------------------------------------------------------
+    # create_webhook / delete_webhook (asana-webhook aspect)
+    # ------------------------------------------------------------------
+
+    def create_webhook(self, resource_gid: str, target_url: str) -> dict:
+        """
+        Register an inbound webhook via `POST /webhooks`.
+
+        Asana subscribes `resource_gid` (v1: a project gid -- see the
+        asana-webhook aspect's R2 scope note) and will deliver a handshake
+        POST (X-Hook-Secret header) to `target_url` before this call
+        returns, followed by event deliveries (X-Hook-Signature) on future
+        changes.
+
+        Args:
+            resource_gid: the Asana resource (project) gid to watch.
+            target_url: our publicly-reachable inbound receiver URL —
+                MUST already embed whatever identifier the receiver needs
+                to resolve the org (see api/routes/asana_webhook.py).
+
+        Returns:
+            dict with `gid` (the Asana webhook gid — persist this to allow
+            deletion later).
+
+        Raises:
+            AsanaAuthError: on 401/403.
+            AsanaTransientError: on 429 or 5xx.
+        """
+        payload = {"data": {"resource": resource_gid, "target": target_url}}
+        resp = self._post("/webhooks", json=payload)
+        data = resp.json().get("data", {})
+        return {"gid": data.get("gid")}
+
+    def delete_webhook(self, webhook_gid: str) -> None:
+        """
+        Delete a previously-registered webhook via `DELETE /webhooks/{gid}`.
+
+        Raises:
+            AsanaAuthError: on 401/403.
+            AsanaTransientError: on 429 or 5xx.
+            AsanaNotFoundError: on 404 (already deleted/expired at Asana) —
+                callers (the disable route) should treat this as already-clean.
+        """
+        self._delete(f"/webhooks/{webhook_gid}")

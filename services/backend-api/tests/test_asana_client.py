@@ -491,3 +491,98 @@ class TestAsanaClientConstantHostAssertion:
         with patch("httpx.Client"):
             # Should not raise.
             AsanaClient(API_TOKEN)
+
+
+CREATE_WEBHOOK_RESPONSE = {
+    "data": {
+        "gid": "1400000000001",
+        "resource": {"gid": "1200000000001"},
+        "target": "https://backend.example.com/api/v1/webhooks/asana/inbound/42",
+        "active": False,
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# create_webhook() / delete_webhook() — asana-webhook aspect (Phase 2)
+# ---------------------------------------------------------------------------
+class TestAsanaClientCreateWebhook:
+    def test_create_webhook_posts_expected_body(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(200, CREATE_WEBHOOK_RESPONSE)
+
+            client = AsanaClient(API_TOKEN)
+            result = client.create_webhook(
+                resource_gid="1200000000001",
+                target_url="https://backend.example.com/api/v1/webhooks/asana/inbound/42",
+            )
+
+        instance.post.assert_called_once_with(
+            "/webhooks",
+            json={
+                "data": {
+                    "resource": "1200000000001",
+                    "target": "https://backend.example.com/api/v1/webhooks/asana/inbound/42",
+                }
+            },
+        )
+        assert result == {"gid": "1400000000001"}
+
+    def test_create_webhook_auth_error(self):
+        from src.services.asana_client import AsanaAuthError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(401, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaAuthError):
+                client.create_webhook(resource_gid="1200000000001", target_url="https://x/inbound/1")
+
+    def test_create_webhook_transient_error(self):
+        from src.services.asana_client import AsanaTransientError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.post.return_value = _make_resp(500, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaTransientError):
+                client.create_webhook(resource_gid="1200000000001", target_url="https://x/inbound/1")
+
+
+class TestAsanaClientDeleteWebhook:
+    def test_delete_webhook_calls_expected_endpoint(self):
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.delete.return_value = _make_resp(200, {"data": {}})
+
+            client = AsanaClient(API_TOKEN)
+            client.delete_webhook("1400000000001")
+
+        instance.delete.assert_called_once_with("/webhooks/1400000000001")
+
+    def test_delete_webhook_not_found_swallowed(self):
+        """Deleting an already-gone webhook (404) must not raise — the
+        caller (disable route) treats this as already-clean."""
+        from src.services.asana_client import AsanaNotFoundError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.delete.return_value = _make_resp(404, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaNotFoundError):
+                client.delete_webhook("1400000000001")
+
+    def test_delete_webhook_auth_error(self):
+        from src.services.asana_client import AsanaAuthError
+
+        with patch("httpx.Client") as MockHTTP:
+            instance = MockHTTP.return_value
+            instance.delete.return_value = _make_resp(401, {})
+
+            client = AsanaClient(API_TOKEN)
+            with pytest.raises(AsanaAuthError):
+                client.delete_webhook("1400000000001")
