@@ -7,10 +7,14 @@ import React from 'react';
 
 const mockPatchJiraStatusSync = vi.fn();
 const mockTriggerJiraSync = vi.fn();
+const mockEnableJiraWebhook = vi.fn();
+const mockDisableJiraWebhook = vi.fn();
 
 vi.mock('@/lib/api/jira', () => ({
   patchJiraStatusSync: (...args: unknown[]) => mockPatchJiraStatusSync(...args),
   triggerJiraSync: (...args: unknown[]) => mockTriggerJiraSync(...args),
+  enableJiraWebhook: (...args: unknown[]) => mockEnableJiraWebhook(...args),
+  disableJiraWebhook: (...args: unknown[]) => mockDisableJiraWebhook(...args),
 }));
 
 const mockToastSuccess = vi.fn();
@@ -42,6 +46,7 @@ const baseStatus: JiraConnectionStatus = {
   status_sync_enabled: false,
   status_mapping: null,
   last_status_synced_at: null,
+  webhook_enabled: false,
 };
 
 const disconnectedStatus: JiraConnectionStatus = {
@@ -228,6 +233,78 @@ describe('JiraStatusSyncCard', () => {
       expect(onStatusChange).toHaveBeenCalledWith(
         expect.objectContaining({ status_mapping: { done: 'resolved' } })
       );
+    });
+  });
+
+  // ─── Real-time webhook (jira-webhook aspect) ────────────────────────────────
+
+  describe('real-time webhook', () => {
+    it('shows an "Enable webhook" action when webhook_enabled is false', () => {
+      render(<JiraStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByRole('button', { name: /enable webhook/i })).toBeInTheDocument();
+    });
+
+    it('enabling reveals the secret and URL exactly once', async () => {
+      const user = userEvent.setup();
+      const onStatusChange = vi.fn();
+      mockEnableJiraWebhook.mockResolvedValue({
+        webhook_secret: 'plaintext-secret-once',
+        webhook_url: 'http://localhost:8000/api/v1/webhooks/jira/inbound',
+      });
+
+      render(<JiraStatusSyncCard status={baseStatus} onStatusChange={onStatusChange} />);
+      await user.click(screen.getByRole('button', { name: /enable webhook/i }));
+
+      await waitFor(() => {
+        expect(mockEnableJiraWebhook).toHaveBeenCalled();
+        expect(screen.getByDisplayValue('plaintext-secret-once')).toBeInTheDocument();
+        expect(
+          screen.getByDisplayValue('http://localhost:8000/api/v1/webhooks/jira/inbound')
+        ).toBeInTheDocument();
+      });
+      expect(onStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({ webhook_enabled: true })
+      );
+    });
+
+    it('shows a "Disable webhook" action and a re-enable note when webhook_enabled is true (no secret in hand)', () => {
+      render(
+        <JiraStatusSyncCard status={{ ...baseStatus, webhook_enabled: true }} onStatusChange={vi.fn()} />
+      );
+      expect(screen.getByRole('button', { name: /disable webhook/i })).toBeInTheDocument();
+      expect(screen.queryByDisplayValue(/plaintext/)).not.toBeInTheDocument();
+    });
+
+    it('disabling calls disableJiraWebhook and updates status', async () => {
+      const user = userEvent.setup();
+      const onStatusChange = vi.fn();
+      mockDisableJiraWebhook.mockResolvedValue({ success: true, message: 'Jira webhook disabled.' });
+
+      render(
+        <JiraStatusSyncCard status={{ ...baseStatus, webhook_enabled: true }} onStatusChange={onStatusChange} />
+      );
+      await user.click(screen.getByRole('button', { name: /disable webhook/i }));
+
+      await waitFor(() => {
+        expect(mockDisableJiraWebhook).toHaveBeenCalled();
+        expect(onStatusChange).toHaveBeenCalledWith(
+          expect.objectContaining({ webhook_enabled: false })
+        );
+      });
+    });
+
+    it('shows an error toast if enabling fails', async () => {
+      const user = userEvent.setup();
+      mockEnableJiraWebhook.mockRejectedValue({
+        response: { status: 422, data: { detail: 'LLM_ENCRYPTION_KEY is not set.' } },
+      });
+
+      render(<JiraStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      await user.click(screen.getByRole('button', { name: /enable webhook/i }));
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith('LLM_ENCRYPTION_KEY is not set.');
+      });
     });
   });
 });

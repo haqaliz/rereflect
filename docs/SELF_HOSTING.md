@@ -932,8 +932,38 @@ with the Jira issue — so when an engineer moves the ticket to *In Progress* or
   not fight a status you set by hand unless the Jira issue genuinely moves. If a
   feedback item is linked to several Jira issues, the most-advanced status wins.
 
-Real-time webhook sync (instead of polling) and a per-status-name mapping editor
-are planned for a future release.
+### Real-time webhook (optional)
+
+Status-sync above always works by polling — no public URL required. If your
+Rereflect instance is publicly reachable, you can additionally enable a
+real-time inbound webhook so a Jira issue's status change lands on the linked
+feedback item in seconds instead of waiting up to ~15 minutes for the next
+poll:
+
+1. On **Settings → Integrations → Jira**, click **Enable webhook** under
+   "Real-time webhook" (admin/owner only). This calls
+   `POST /api/v1/integrations/jira/webhook/enable`, which generates a fresh
+   HMAC secret and returns it **once** together with the inbound URL
+   (`POST <your-api-base>/api/v1/webhooks/jira/inbound`) — copy both now,
+   Rereflect never shows the secret again (re-enabling rotates it).
+2. In Jira, open **Settings → System → WebHooks** (site-admin) and create a
+   webhook pointed at that URL, scoped to **Issue: updated**, with the secret
+   from step 1 configured as the webhook's signing secret.
+3. Jira Cloud signs each delivery over the raw request body and sends
+   `X-Hub-Signature: sha256=<hex HMAC-SHA256(secret, raw_body)>`. Rereflect
+   verifies every delivery against that header, resolving the org by trying
+   each org's configured secret (fail-closed: a missing/invalid signature, or
+   no org's secret matching, is rejected with `401` — never processed).
+
+Only `jira:issue_updated` deliveries that include a `status` field in the
+changelog are reconciled; every other Jira webhook event is acknowledged
+`200` and ignored. The webhook reconciles through the exact same
+category-based mapping and race-safe apply as the poll above, so enabling it
+can never cause the two paths to disagree or double-write — turning it off
+(**Disable webhook**) simply falls back to poll-only, with no other effect.
+
+A per-status-name (rather than per-category) mapping editor is planned for a
+future release.
 
 ### All features unlocked
 

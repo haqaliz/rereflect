@@ -11,7 +11,7 @@ vi.mock('@/lib/api-client', () => ({
 }));
 
 import apiClient from '@/lib/api-client';
-import { jiraAPI, patchJiraStatusSync, triggerJiraSync } from '@/lib/api/jira';
+import { jiraAPI, patchJiraStatusSync, triggerJiraSync, enableJiraWebhook, disableJiraWebhook } from '@/lib/api/jira';
 
 describe('jiraAPI', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -205,5 +205,29 @@ describe('jiraAPI', () => {
     const result = await triggerJiraSync();
     expect(apiClient.post).toHaveBeenCalledWith('/api/v1/integrations/jira/sync');
     expect(result.status).toBe('queued');
+  });
+
+  // ─── Real-time webhook (jira-webhook aspect) ────────────────────────────────
+
+  it('enableJiraWebhook calls POST /api/v1/integrations/jira/webhook/enable', async () => {
+    (apiClient.post as any).mockResolvedValue({
+      data: {
+        webhook_secret: 'plaintext-secret-shown-once',
+        webhook_url: 'http://localhost:8000/api/v1/webhooks/jira/inbound',
+      },
+    });
+    const result = await enableJiraWebhook();
+    expect(apiClient.post).toHaveBeenCalledWith('/api/v1/integrations/jira/webhook/enable');
+    expect(result.webhook_secret).toBe('plaintext-secret-shown-once');
+    expect(result.webhook_url).toBe('http://localhost:8000/api/v1/webhooks/jira/inbound');
+  });
+
+  it('disableJiraWebhook calls DELETE /api/v1/integrations/jira/webhook', async () => {
+    (apiClient.delete as any).mockResolvedValue({
+      data: { success: true, message: 'Jira webhook disabled.' },
+    });
+    const result = await disableJiraWebhook();
+    expect(apiClient.delete).toHaveBeenCalledWith('/api/v1/integrations/jira/webhook');
+    expect(result.success).toBe(true);
   });
 });

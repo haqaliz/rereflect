@@ -5,8 +5,16 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Loader2, RefreshCw } from 'lucide-react';
-import { patchJiraStatusSync, triggerJiraSync, type JiraConnectionStatus } from '@/lib/api/jira';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Loader2, RefreshCw, Copy, Check } from 'lucide-react';
+import {
+  patchJiraStatusSync,
+  triggerJiraSync,
+  enableJiraWebhook,
+  disableJiraWebhook,
+  type JiraConnectionStatus,
+} from '@/lib/api/jira';
 import { timeAgo } from '@/lib/notification-utils';
 import { StatusMappingEditor } from '@/components/settings/StatusMappingEditor';
 import { JIRA_STATUS_MAPPING_KEYS } from '@/lib/constants/status-sync-keys';
@@ -23,6 +31,16 @@ interface JiraStatusSyncCardProps {
 export function JiraStatusSyncCard({ status, onStatusChange }: JiraStatusSyncCardProps) {
   const [toggling, setToggling] = useState(false);
   const [syncing, setSyncing] = useState(false);
+
+  // Real-time webhook (jira-webhook aspect): display-once secret reveal.
+  // GET /status never returns the secret, so a page refresh cannot recover
+  // it — this state only ever holds what THIS session's enable call
+  // returned, mirroring Zendesk's connect-time reveal.
+  const [webhookBusy, setWebhookBusy] = useState(false);
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
+  const [copiedSecret, setCopiedSecret] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   if (!status.connected) {
     return null;
@@ -69,6 +87,54 @@ export function JiraStatusSyncCard({ status, onStatusChange }: JiraStatusSyncCar
   const handleSaveMapping = async (mapping: Record<string, string>) => {
     const updated = await patchJiraStatusSync(status.status_sync_enabled, mapping);
     onStatusChange(updated);
+  };
+
+  const handleEnableWebhook = async () => {
+    setWebhookBusy(true);
+    try {
+      const result = await enableJiraWebhook();
+      setWebhookSecret(result.webhook_secret);
+      setWebhookUrl(result.webhook_url);
+      onStatusChange({ ...status, webhook_enabled: true });
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : 'Failed to enable the Jira webhook.';
+      toast.error(message);
+    } finally {
+      setWebhookBusy(false);
+    }
+  };
+
+  const handleDisableWebhook = async () => {
+    setWebhookBusy(true);
+    try {
+      await disableJiraWebhook();
+      setWebhookSecret(null);
+      setWebhookUrl(null);
+      onStatusChange({ ...status, webhook_enabled: false });
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : 'Failed to disable the Jira webhook.';
+      toast.error(message);
+    } finally {
+      setWebhookBusy(false);
+    }
+  };
+
+  const copyWebhookSecret = () => {
+    if (webhookSecret) {
+      navigator.clipboard.writeText(webhookSecret);
+      setCopiedSecret(true);
+      setTimeout(() => setCopiedSecret(false), 2000);
+    }
+  };
+
+  const copyWebhookUrl = () => {
+    if (webhookUrl) {
+      navigator.clipboard.writeText(webhookUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    }
   };
 
   const lastSyncedLabel = status.last_status_synced_at ? timeAgo(status.last_status_synced_at) : 'Never';
@@ -124,6 +190,66 @@ export function JiraStatusSyncCard({ status, onStatusChange }: JiraStatusSyncCar
             onSave={handleSaveMapping}
             description="Jira status categories map to Rereflect workflow statuses. This is category-level, not per raw status name."
           />
+        </div>
+
+        <div className="pt-2 border-t border-border space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-foreground">Real-time webhook</p>
+              <p className="text-sm text-muted-foreground">
+                Optional — the 15-min poll above always runs as a fallback. Enabling adds a
+                signed inbound webhook so Jira status changes land in seconds.
+              </p>
+            </div>
+            {status.webhook_enabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDisableWebhook}
+                disabled={webhookBusy}
+              >
+                {webhookBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Disable webhook
+              </Button>
+            ) : (
+              <Button size="sm" onClick={handleEnableWebhook} disabled={webhookBusy}>
+                {webhookBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                Enable webhook
+              </Button>
+            )}
+          </div>
+
+          {webhookSecret && webhookUrl ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Webhook URL</Label>
+                <div className="flex items-center gap-2">
+                  <Input readOnly value={webhookUrl} className="font-mono text-sm" />
+                  <Button variant="outline" onClick={copyWebhookUrl}>
+                    {copiedUrl ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Webhook Secret</Label>
+                <div className="flex items-center gap-2">
+                  <Input readOnly value={webhookSecret} className="font-mono text-sm" />
+                  <Button variant="outline" onClick={copyWebhookSecret}>
+                    {copiedSecret ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Save this secret now — you won&apos;t be able to view it again. Add it to a Jira
+                  Cloud webhook (Settings → System → WebHooks) pointed at the URL above, signed
+                  with this secret.
+                </p>
+              </div>
+            </div>
+          ) : status.webhook_enabled ? (
+            <p className="text-xs text-muted-foreground">
+              Webhook enabled — re-enable (rotates the secret) to view the URL and secret again.
+            </p>
+          ) : null}
         </div>
       </CardContent>
     </Card>

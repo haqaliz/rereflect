@@ -21,6 +21,11 @@ export interface JiraConnectionStatus {
   status_sync_enabled: boolean;
   status_mapping: Record<string, string> | null;
   last_status_synced_at: string | null;
+  // Real-time inbound webhook (jira-webhook aspect, status-sync-realtime-mapping
+  // PRD). Whether the org has an active webhook_secret configured. Never
+  // includes the secret itself — see JiraWebhookEnableResponse below
+  // (display-once, only ever returned by POST /webhook/enable).
+  webhook_enabled: boolean;
 }
 
 export interface JiraConnectRequest {
@@ -97,6 +102,18 @@ export interface JiraSyncTriggerResponse {
   status: string;
 }
 
+export interface JiraWebhookEnableResponse {
+  // Display-once: only ever returned by POST /webhook/enable, never by
+  // GET /status.
+  webhook_secret: string;
+  webhook_url: string;
+}
+
+export interface JiraWebhookDisableResponse {
+  success: boolean;
+  message: string;
+}
+
 // ---- API ----
 
 export const jiraAPI = {
@@ -162,5 +179,20 @@ export async function patchJiraStatusSync(
 
 export async function triggerJiraSync(): Promise<JiraSyncTriggerResponse> {
   const response = await apiClient.post('/api/v1/integrations/jira/sync');
+  return response.data;
+}
+
+// Real-time inbound webhook (jira-webhook aspect). Enabling (re-)generates
+// and returns the plaintext HMAC secret exactly once — the caller must
+// display and discard it; a page refresh cannot recover it (GET /status
+// only ever reports webhook_enabled, never the secret).
+
+export async function enableJiraWebhook(): Promise<JiraWebhookEnableResponse> {
+  const response = await apiClient.post('/api/v1/integrations/jira/webhook/enable');
+  return response.data;
+}
+
+export async function disableJiraWebhook(): Promise<JiraWebhookDisableResponse> {
+  const response = await apiClient.delete('/api/v1/integrations/jira/webhook');
   return response.data;
 }
