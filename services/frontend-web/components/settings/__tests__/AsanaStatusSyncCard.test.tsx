@@ -301,8 +301,9 @@ describe('AsanaStatusSyncCard', () => {
       expect(screen.getByRole('button', { name: /^enable webhook$/i })).toBeEnabled();
     });
 
-    it('enabling calls enableAsanaWebhook with the selected project and shows the webhook URL', async () => {
+    it('enabling calls enableAsanaWebhook with the selected project and never displays the webhook URL', async () => {
       const user = userEvent.setup();
+      const onStatusChange = vi.fn();
       mockGetWorkspaces.mockResolvedValue([{ gid: '111', name: 'Acme Workspace' }]);
       mockGetProjects.mockResolvedValue([{ gid: '222', name: 'Engineering' }]);
       mockEnableAsanaWebhook.mockResolvedValue({
@@ -310,7 +311,7 @@ describe('AsanaStatusSyncCard', () => {
         webhook_url: 'http://localhost:8000/api/v1/webhooks/asana/inbound/7',
       });
 
-      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={onStatusChange} />);
       await user.click(screen.getByRole('button', { name: /set up webhook/i }));
       await waitFor(() => screen.getByText('Acme Workspace'));
       await user.selectOptions(screen.getByLabelText(/workspace/i), '111');
@@ -321,18 +322,40 @@ describe('AsanaStatusSyncCard', () => {
 
       await waitFor(() => {
         expect(mockEnableAsanaWebhook).toHaveBeenCalledWith('222');
-        expect(
-          screen.getByDisplayValue('http://localhost:8000/api/v1/webhooks/asana/inbound/7')
-        ).toBeInTheDocument();
+        expect(onStatusChange).toHaveBeenCalledWith(
+          expect.objectContaining({ webhook_enabled: true })
+        );
       });
+
+      // The response's webhook_url (token-bearing) must never be rendered --
+      // the operator never needs to see or copy it (Asana auto-registers).
+      expect(
+        screen.queryByDisplayValue('http://localhost:8000/api/v1/webhooks/asana/inbound/7')
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/webhook url/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
     });
 
-    it('shows a "Disable webhook" action when webhook_enabled is true', () => {
+    it('shows a "Disable webhook" action and an "Enabled" status when webhook_enabled is true', () => {
       render(
         <AsanaStatusSyncCard status={{ ...baseStatus, webhook_enabled: true }} onStatusChange={vi.fn()} />
       );
       expect(screen.getByRole('button', { name: /disable webhook/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /set up webhook/i })).not.toBeInTheDocument();
+      expect(screen.getByText(/status:\s*enabled/i)).toBeInTheDocument();
+    });
+
+    it('shows a "Disabled" status when webhook_enabled is false', () => {
+      render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+      expect(screen.getByText(/status:\s*disabled/i)).toBeInTheDocument();
+    });
+
+    it('never renders the webhook URL input or a copy button, regardless of enabled state', () => {
+      render(
+        <AsanaStatusSyncCard status={{ ...baseStatus, webhook_enabled: true }} onStatusChange={vi.fn()} />
+      );
+      expect(screen.queryByText(/webhook url/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
     });
 
     it('disabling calls disableAsanaWebhook and updates status', async () => {

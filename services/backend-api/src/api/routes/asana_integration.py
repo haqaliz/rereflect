@@ -630,6 +630,11 @@ def asana_webhook_disable(
 
     row.webhook_gid = None
     row.webhook_secret = None
+    # Also clear the unguessable URL token: leaving it set would keep the
+    # receiver's `webhook_url_token == token` lookup resolving to this row,
+    # letting anyone who still has the old URL POST a fresh X-Hook-Secret
+    # handshake and re-establish a secret post-disable.
+    row.webhook_url_token = None
     row.updated_at = datetime.utcnow()
     db.commit()
 

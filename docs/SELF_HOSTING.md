@@ -1250,9 +1250,12 @@ Rereflect handles both sides automatically:
    `POST <your-api-base>/api/v1/webhooks/asana/inbound/{webhook_url_token}`
    — **not** your integration's id — and stores the returned webhook gid.
    Asana then performs the handshake against that URL automatically — no
-   copy/paste step, and no secret (or token) is ever shown in the UI.
-3. Refresh the page after a few seconds to confirm the webhook shows as
-   active (the handshake completes the secret capture server-side).
+   copy/paste step, and neither the secret nor the URL/token is ever shown
+   in the UI (the operator never needs them — Asana auto-registration
+   handles both sides).
+3. The card immediately shows "Real-time webhook" as **Enabled**; the
+   handshake itself (secret capture) completes server-side within moments
+   of Asana's first delivery, with no further action needed.
 
 Rereflect resolves *which* organization a delivery belongs to from the
 unguessable `webhook_url_token` embedded in the URL it registered in step 2
@@ -1271,9 +1274,12 @@ URL is required — the old URL stops resolving immediately.
 
 Task completion changes are reconciled through the exact same
 completion-based mapping and race-safe apply as the poll above, so enabling
-the webhook can never cause the two paths to disagree or double-write —
-disabling it (**Disable webhook**) simply falls back to poll-only, with no
-other effect.
+the webhook can never cause the two paths to disagree or double-write.
+Clicking **Disable webhook** fully unreaches it: Rereflect clears the stored
+webhook gid, secret, *and* the unguessable URL token, so the old
+`/api/v1/webhooks/asana/inbound/{webhook_url_token}` URL 401s immediately —
+even someone who still holds that URL cannot re-establish a handshake
+against a disabled integration — and falls back to poll-only handling.
 
 ### Known limitation: team-scoped projects
 

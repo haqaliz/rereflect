@@ -297,6 +297,11 @@ class TestAsanaWebhookDisable:
         db.refresh(integration_with_webhook)
         assert integration_with_webhook.webhook_gid is None
         assert integration_with_webhook.webhook_secret is None
+        # Regression: a disabled integration must not remain reachable at its
+        # old URL -- the unguessable token itself must be cleared too, or a
+        # holder of the old URL could re-establish a fresh handshake secret
+        # against a still-"resolvable" (webhook_url_token match) row.
+        assert integration_with_webhook.webhook_url_token is None
 
     def test_member_forbidden(
         self, client: TestClient, integration_with_webhook: AsanaIntegration, member_headers: dict

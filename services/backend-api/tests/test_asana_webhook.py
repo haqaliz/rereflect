@@ -371,15 +371,18 @@ class TestAsanaWebhookHandshake:
         )
         assert response.status_code == 401
 
-    def test_handshake_never_enabled_webhook_401(
+    def test_handshake_unknown_token_for_never_enabled_is_401(
         self, client: TestClient, asana_integration_never_enabled: AsanaIntegration
     ):
-        """webhook_url_token is None (never enabled) -- no string path
-        segment may ever resolve this row (the query filters
-        `.isnot(None)` in addition to equality, so a coincidental match
-        against a NULL column can never happen)."""
+        """A never-enabled integration's `webhook_url_token` column is
+        genuinely NULL in the DB (the fixture). Posting a made-up token
+        that matches no row must still 401 -- it must not accidentally
+        resolve the NULL-token row (the query filters `.isnot(None)` in
+        addition to equality, so a coincidental match against a NULL
+        column can never happen), and no other row exists to match
+        either."""
         response = client.post(
-            _inbound_url("None"),
+            _inbound_url("made-up-token-that-matches-no-row"),
             content=b"{}",
             headers={"Content-Type": "application/json", "X-Hook-Secret": "whatever"},
         )

@@ -5,9 +5,8 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, RefreshCw, Copy, Check } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import {
   patchAsanaStatusSync,
   triggerAsanaSync,
@@ -41,8 +40,11 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
   // webhook UI), Asana's webhook is registered automatically by our backend
   // calling Asana's API — the operator only needs to pick which project to
   // watch (v1 scope: a single project, reusing the same workspace/project
-  // wiring as task creation). The handshake secret itself is captured
-  // server-side on Asana's first delivery and is never shown here.
+  // wiring as task creation). Neither the handshake secret nor the
+  // unguessable webhook URL/token is ever shown here (sec review):
+  // the operator never needs to see or copy it, since it's auto-registered
+  // server-side, and displaying it would leak the equivalent of a bearer
+  // credential into the UI.
   const [settingUpWebhook, setSettingUpWebhook] = useState(false);
   const [webhookBusy, setWebhookBusy] = useState(false);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
@@ -51,8 +53,6 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
   const [projects, setProjects] = useState<AsanaProject[]>([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
-  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
-  const [copiedUrl, setCopiedUrl] = useState(false);
 
   if (!status.connected) {
     return null;
@@ -93,8 +93,13 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
     if (!selectedProject) return;
     setWebhookBusy(true);
     try {
-      const result = await enableAsanaWebhook(selectedProject);
-      setWebhookUrl(result.webhook_url);
+      await enableAsanaWebhook(selectedProject);
+      setSettingUpWebhook(false);
+      setSelectedWorkspace('');
+      setSelectedProject('');
+      setWorkspaces([]);
+      setProjects([]);
+      onStatusChange({ ...status, webhook_enabled: true });
       toast.success('Asana webhook registered. It will activate once Asana completes the handshake.');
     } catch (err: any) {
       const detail = err?.response?.data?.detail;
@@ -110,7 +115,6 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
     try {
       await disableAsanaWebhook();
       setSettingUpWebhook(false);
-      setWebhookUrl(null);
       setSelectedWorkspace('');
       setSelectedProject('');
       setWorkspaces([]);
@@ -122,14 +126,6 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
       toast.error(message);
     } finally {
       setWebhookBusy(false);
-    }
-  };
-
-  const copyWebhookUrl = () => {
-    if (webhookUrl) {
-      navigator.clipboard.writeText(webhookUrl);
-      setCopiedUrl(true);
-      setTimeout(() => setCopiedUrl(false), 2000);
     }
   };
 
@@ -237,7 +233,12 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
               <p className="font-semibold text-foreground">Real-time webhook</p>
               <p className="text-sm text-muted-foreground">
                 Optional — the 15-min poll above always runs as a fallback. Enabling registers a
-                webhook with Asana for one project so task completion changes land in seconds.
+                webhook with Asana for one project so task completion changes land in seconds. No
+                manual URL setup is needed — Asana registration and the handshake secret are
+                handled automatically and are never shown here.
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Status: {status.webhook_enabled ? 'Enabled' : 'Disabled'}
               </p>
             </div>
             {status.webhook_enabled ? (
@@ -307,22 +308,6 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
               </Button>
             </div>
           )}
-
-          {webhookUrl ? (
-            <div className="space-y-2">
-              <Label>Webhook URL</Label>
-              <div className="flex items-center gap-2">
-                <Input readOnly value={webhookUrl} className="font-mono text-sm" />
-                <Button variant="outline" onClick={copyWebhookUrl}>
-                  {copiedUrl ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Registered with Asana. No further setup is needed — Asana completes the handshake
-                automatically; refresh this page in a moment to confirm the webhook is active.
-              </p>
-            </div>
-          ) : null}
         </div>
       </CardContent>
     </Card>
