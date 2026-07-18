@@ -248,6 +248,21 @@
 - [x] Accuracy tracking: precision/recall/F1/AUC metrics on organization + system admin accuracy dashboards, weekly refit Mondays 07:45 UTC
 - [x] Plan gate: Business+ (Pro gets enhanced risk_level + factor breakdown)
 
+#### M4.1.5 — Churn-triggered playbook auto-execution — COMPLETE (shipped 2026-07-19)
+> Delivered as `churn-triggered-playbooks` (commits `9aa6650`..`f133ccf`). Closes the deferred item at
+> `PRD-ADVANCED-CHURN-PREDICTION.md:465` ("Real-time playbook execution on probability threshold
+> cross. v1 supports manual trigger + run-batch only. Auto-execution on threshold cross is M4.1.5.").
+> See `docs/planning/churn-triggered-playbooks/`.
+- [x] AutomationEngine (M4.4): new `churn_probability_threshold` trigger + new `run_playbook` action
+- [x] `AutomationRule.mode` — `off` / `shadow` (evaluate + log, don't execute) / `active`
+- [x] Worker seam: the churn-probability recompute fires these rules via an isolated evaluator, reusing
+      the identical per-(rule, customer) Redis cooldown scheme as the existing M4.4 triggers
+- [x] Auto-runs create a `ChurnPlaybookExecution(triggered_by="auto_probability")` and surface on the
+      customer timeline as `playbook_auto_run` events
+- [x] Activating a rule seeds per-customer cooldowns up front, so a batch of already-at-risk customers
+      doesn't stampede all at once on the first recompute
+- [x] SMTP-free; no plan gate — unlocked in the open-source self-hosted edition
+
 #### M4.2 — Custom AI Models (3 weeks) — PARTIAL (categories + weights shipped 2026-06-22)
 - [x] Custom category configuration: org-specific pain point, feature request, and **urgency** categories — injected into the LLM prompt + merged into the keyword categorizers
 - [x] Custom health score weights: adjust the 4 component weights per org (validated to sum to 100); `health_score_service` reads them

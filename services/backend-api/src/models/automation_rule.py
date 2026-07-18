@@ -56,7 +56,7 @@ class AutomationRule(Base):
     )
 
     # Trigger
-    trigger_type = Column(String(50), nullable=False)  # health_score_threshold | sentiment_pattern | churn_risk_level_change | feedback_category_match
+    trigger_type = Column(String(50), nullable=False)  # health_score_threshold | sentiment_pattern | churn_risk_level_change | feedback_category_match | churn_probability_threshold
     trigger_config = Column(JSON, nullable=False, default=dict)
 
     # Actions — array of {type, config}

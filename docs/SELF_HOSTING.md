@@ -1609,3 +1609,15 @@ usage cap — it's available to every organization running the app.
   Traefik) in front for TLS.
 - **Backups.** Your data lives in the Postgres volume. Snapshot it (or run
   `pg_dump`) on a schedule before upgrades.
+
+### Redis is required for automation cooldowns
+
+Churn/health automation rules (including the `run_playbook` action triggered by a
+`churn_probability_threshold` rule) use a per-(rule, customer) Redis cooldown to fire
+at most once per window, so a customer sitting above the threshold doesn't re-trigger
+the same rule on every recompute. Redis is already required as the Celery broker in
+this stack, so this isn't a new dependency — but if Redis becomes unreachable, the
+cooldown check is disabled (fails open) and a persistently-at-risk customer could
+re-trigger an `active`-mode rule on every churn-probability recompute instead of once
+per window. Keep Redis healthy in production for correct automation behavior, not just
+for the task queue.

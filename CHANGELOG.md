@@ -161,6 +161,28 @@ build`) — a stale frontend image has the old DSN baked in at build time.
   the model in `auto` mode can only ever **escalate** an item to urgent — it never silently clears a
   flag the built-in heuristic raised. `shadow` mode logs both directions so you can judge accuracy first.
 
+### Churn-triggered playbook auto-execution
+
+- **Automations can now auto-run a churn-prevention playbook** when a customer's churn probability
+  crosses a threshold — a new `churn_probability_threshold` trigger and `run_playbook` action on the
+  existing automation-rule engine (Settings → Automations), alongside the existing health-score,
+  sentiment, churn-risk-level, and feedback-category triggers.
+- **Three-way rule mode**: `off`, `shadow` (evaluate and log what a rule *would* do, without running
+  anything), and `active`. Use `shadow` to sanity-check a new rule against real customers before
+  letting it take action.
+- Auto-runs create the same `ChurnPlaybookExecution` record as a manual/batch run
+  (`triggered_by="auto_probability"`) and appear on the customer's timeline as a `playbook_auto_run`
+  event, so you can see exactly why a playbook fired.
+- **Fires from the existing churn-probability recompute in the worker**, reusing the identical
+  per-(rule, customer) Redis cooldown as the other automation triggers — see the new "Redis is
+  required for automation cooldowns" note in `docs/SELF_HOSTING.md`.
+- **Activating a rule seeds cooldowns for every currently-matching customer up front**, so turning on
+  a rule against an existing at-risk cohort doesn't fire a stampede of playbooks in one pass.
+- SMTP-free, and — like everything in the open-source edition — fully unlocked with no plan gate.
+
+This closes the deferred "real-time playbook execution on probability threshold cross" item from the
+Advanced Churn Prediction PRD (`PRD-ADVANCED-CHURN-PREDICTION.md:465`).
+
 ## v0.1.0 — 2026-07-13
 
 First tagged release of the self-hosted edition. Headline theme: **close the integration loop**

@@ -46,7 +46,7 @@ class AutomationExecution(Base):
     trigger_snapshot = Column(JSON, nullable=True)   # Condition values at trigger time
     actions_executed = Column(JSON, nullable=True)   # [{type, result, error}]
 
-    status = Column(String(20), nullable=False)  # success | partial_failure | failed
+    status = Column(String(20), nullable=False)  # success | partial_failure | failed | shadow
 
     executed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
