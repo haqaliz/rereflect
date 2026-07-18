@@ -7,6 +7,7 @@ then driven GREEN by src/services/probability_updater.py.
 
 import json
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -310,3 +311,43 @@ def test_update_idempotent_when_called_twice(db):
 
     # probability_computed_at must not have moved
     assert health.probability_computed_at == ts_after_first
+
+
+# ---------------------------------------------------------------------------
+# Seam: automation_churn_trigger dispatch (Task 4, churn-triggered-playbooks)
+# ---------------------------------------------------------------------------
+
+
+def test_update_calls_churn_trigger_evaluator_with_new_probability(db):
+    """update() invokes evaluate_churn_probability_triggers with the fresh (org, email, p, db)."""
+    _make_health(db, org_id=1, churn_risk_component=60)
+
+    with patch(
+        "src.services.automation_churn_trigger.evaluate_churn_probability_triggers"
+    ) as mock_evaluate:
+        probability_updater.update(1, "test@example.com", db)
+
+    mock_evaluate.assert_called_once()
+    args, kwargs = mock_evaluate.call_args
+    assert args[0] == 1
+    assert args[1] == "test@example.com"
+    assert isinstance(args[2], float)
+    assert abs(args[2] - 0.60) < 0.001
+    assert args[3] is db
+
+
+def test_update_swallows_churn_trigger_evaluator_exceptions(db):
+    """An exception raised by the evaluator must NOT propagate out of update()."""
+    health = _make_health(db, org_id=1, churn_risk_component=60)
+
+    with patch(
+        "src.services.automation_churn_trigger.evaluate_churn_probability_triggers",
+        side_effect=RuntimeError("boom"),
+    ):
+        # Must not raise.
+        probability_updater.update(1, "test@example.com", db)
+
+    db.refresh(health)
+    # The probability update itself must still have succeeded.
+    assert health.churn_probability is not None
+    assert abs(float(health.churn_probability) - 0.60) < 0.001

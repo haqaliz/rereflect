@@ -86,6 +86,17 @@ def update(org_id: int, customer_email: str, db: Session) -> None:
     db.add(health)
     db.commit()
 
+    # Fire churn-probability-threshold automation rules (run_playbook only) —
+    # isolated worker mirror of backend-api's AutomationEngine, see
+    # src.services.automation_churn_trigger for why this is a focused
+    # evaluator rather than a full engine mirror. Must never break the
+    # probability update itself.
+    try:
+        from src.services.automation_churn_trigger import evaluate_churn_probability_triggers
+        evaluate_churn_probability_triggers(org_id, customer_email, float(p), db)
+    except Exception as exc:
+        logger.warning("churn playbook trigger failed for %s: %s", customer_email, exc)
+
 
 # ---------------------------------------------------------------------------
 # Private helpers
