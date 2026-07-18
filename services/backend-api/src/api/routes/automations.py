@@ -32,7 +32,8 @@ from src.config.automation_templates import AUTOMATION_TEMPLATES, TEMPLATES_BY_I
 from src.config.plans import get_automation_rule_limit, has_feature
 from src.database.session import get_db
 from src.models.automation_execution import AutomationExecution
-from src.models.automation_rule import AutomationRule
+from src.models.automation_rule import RULE_MODES, AutomationRule
+from src.models.churn_playbook import ChurnPlaybook
 from src.models.organization import Organization
 from src.models.user import User
 
@@ -49,6 +50,7 @@ VALID_TRIGGER_TYPES = frozenset({
     "sentiment_pattern",
     "churn_risk_level_change",
     "feedback_category_match",
+    "churn_probability_threshold",
 })
 
 VALID_ACTION_TYPES = frozenset({
@@ -56,6 +58,7 @@ VALID_ACTION_TYPES = frozenset({
     "change_status",
     "send_notification",
     "draft_response",
+    "run_playbook",
 })
 
 VALID_WORKFLOW_STATUSES = frozenset({"new", "in_review", "resolved", "closed"})
@@ -94,6 +97,18 @@ class ChurnRiskConfig(BaseModel):
     def validate_target_level(cls, v: str) -> str:
         if v not in VALID_CHURN_LEVELS:
             raise ValueError(f"target_level must be one of {sorted(VALID_CHURN_LEVELS)}")
+        return v
+
+
+class ChurnProbabilityConfig(BaseModel):
+    threshold: float = Field(..., ge=0.0, le=1.0)
+    direction: str = "above"
+
+    @field_validator("direction")
+    @classmethod
+    def direction_must_be_above(cls, v: str) -> str:
+        if v != "above":
+            raise ValueError("direction must be 'above'")
         return v
 
 
@@ -147,6 +162,12 @@ class DraftResponseConfig(BaseModel):
         return v
 
 
+class RunPlaybookConfig(BaseModel):
+    playbook_id: int = Field(..., ge=1)
+    # Ownership (org-scoped, active) is checked in the handler — a schema
+    # can't hit the DB.
+
+
 # ---------------------------------------------------------------------------
 # Pydantic — trigger / action wrappers
 # ---------------------------------------------------------------------------
@@ -173,6 +194,8 @@ class TriggerSchema(BaseModel):
             ChurnRiskConfig(**cfg)
         elif t == "feedback_category_match":
             FeedbackCategoryConfig(**cfg)
+        elif t == "churn_probability_threshold":
+            ChurnProbabilityConfig(**cfg)
 
         return self
 
@@ -199,6 +222,8 @@ class ActionSchema(BaseModel):
             SendNotificationConfig(**cfg)
         elif t == "draft_response":
             DraftResponseConfig(**cfg)
+        elif t == "run_playbook":
+            RunPlaybookConfig(**cfg)
 
         return self
 
@@ -213,6 +238,14 @@ class RuleCreateRequest(BaseModel):
     trigger: TriggerSchema
     actions: List[ActionSchema] = Field(..., min_length=1)
     cooldown_hours: int = Field(default=24, ge=1, le=168)
+    mode: str = Field(default="active")
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in RULE_MODES:
+            raise ValueError(f"mode must be one of {sorted(RULE_MODES)}")
+        return v
 
 
 class RuleUpdateRequest(BaseModel):
@@ -221,6 +254,14 @@ class RuleUpdateRequest(BaseModel):
     trigger: Optional[TriggerSchema] = None
     actions: Optional[List[ActionSchema]] = None
     cooldown_hours: Optional[int] = Field(None, ge=1, le=168)
+    mode: Optional[str] = None
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in RULE_MODES:
+            raise ValueError(f"mode must be one of {sorted(RULE_MODES)}")
+        return v
 
 
 class RuleResponse(BaseModel):
@@ -229,6 +270,7 @@ class RuleResponse(BaseModel):
     name: str
     description: Optional[str]
     is_active: bool
+    mode: str
     trigger: dict[str, Any]
     actions: list[dict[str, Any]]
     cooldown_hours: int
@@ -282,6 +324,7 @@ def _rule_to_response(rule: AutomationRule) -> RuleResponse:
         name=rule.name,
         description=rule.description,
         is_active=rule.is_active,
+        mode=rule.mode,
         trigger={"type": rule.trigger_type, "config": rule.trigger_config},
         actions=rule.actions,
         cooldown_hours=rule.cooldown_hours,
@@ -348,6 +391,41 @@ def _check_rule_limit(org: Organization, db: Session) -> None:
                     ),
                     "upgrade_url": "/settings/billing",
                 },
+            )
+
+
+def _validate_run_playbook_actions(
+    actions: List[ActionSchema], org_id: int, db: Session
+) -> None:
+    """Raise 422 if any `run_playbook` action references a playbook that is
+    missing, inactive, or owned by a different organization.
+
+    A playbook is a valid reference when it is `is_active == True` AND
+    (`organization_id == org_id` OR `organization_id IS NULL` — system
+    template). Called from both `create_rule` and `update_rule`, AFTER
+    request-schema validation and BEFORE persisting.
+    """
+    for action in actions:
+        if action.type != "run_playbook":
+            continue
+        playbook_id = action.config.get("playbook_id")
+        playbook = (
+            db.query(ChurnPlaybook)
+            .filter(
+                ChurnPlaybook.id == playbook_id,
+                ChurnPlaybook.is_active == True,  # noqa: E712
+                (ChurnPlaybook.organization_id == org_id)
+                | (ChurnPlaybook.organization_id.is_(None)),
+            )
+            .first()
+        )
+        if not playbook:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "run_playbook action references an unknown or inactive "
+                    f"playbook: {playbook_id}"
+                ),
             )
 
 
@@ -467,13 +545,14 @@ def create_rule(
     """Create a new automation rule. Requires Admin or Owner role."""
     _check_automation_access(current_org)
     _check_rule_limit(current_org, db)
+    _validate_run_playbook_actions(payload.actions, current_org.id, db)
 
     now = datetime.utcnow()
     rule = AutomationRule(
         organization_id=current_org.id,
         name=payload.name,
         description=payload.description,
-        is_active=True,
+        mode=payload.mode,
         trigger_type=payload.trigger.type,
         trigger_config=payload.trigger.config,
         actions=[a.model_dump() for a in payload.actions],
@@ -517,6 +596,9 @@ def update_rule(
     """Update an existing automation rule. Requires Admin or Owner role."""
     rule = _get_rule_or_404(rule_id, current_org.id, db)
 
+    if payload.actions is not None:
+        _validate_run_playbook_actions(payload.actions, current_org.id, db)
+
     if payload.name is not None:
         rule.name = payload.name
     if payload.description is not None:
@@ -528,6 +610,8 @@ def update_rule(
         rule.actions = [a.model_dump() for a in payload.actions]
     if payload.cooldown_hours is not None:
         rule.cooldown_hours = payload.cooldown_hours
+    if payload.mode is not None:
+        rule.mode = payload.mode
 
     rule.updated_at = datetime.utcnow()
     db.commit()
