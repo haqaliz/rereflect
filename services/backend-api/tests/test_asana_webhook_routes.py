@@ -115,6 +115,7 @@ def active_integration(db: Session, test_organization: Organization) -> AsanaInt
 def integration_with_webhook(db: Session, active_integration: AsanaIntegration) -> AsanaIntegration:
     active_integration.webhook_gid = "1400000000001"
     active_integration.webhook_secret = encrypt_api_key("captured-handshake-secret")
+    active_integration.webhook_url_token = "existing-token-before-rotation"
     db.commit()
     db.refresh(active_integration)
     return active_integration
@@ -144,19 +145,30 @@ class TestAsanaWebhookEnable:
         assert resp.status_code == 200
         body = resp.json()
         assert body["webhook_gid"] == "1400000000001"
-        assert body["webhook_url"].endswith("/api/v1/webhooks/asana/inbound/" + str(active_integration.id))
-        # No secret is known yet -- captured on the first delivery (handshake).
+        # SECURITY: the registered URL embeds an unguessable token, NEVER
+        # the integration's guessable integer id.
+        assert not body["webhook_url"].endswith(
+            "/api/v1/webhooks/asana/inbound/" + str(active_integration.id)
+        )
         assert "webhook_secret" not in body
 
         mock_client.create_webhook.assert_called_once()
         args, kwargs = mock_client.create_webhook.call_args
         call = {**dict(zip(["resource_gid", "target_url"], args)), **kwargs}
         assert call["resource_gid"] == RESOURCE_GID
-        assert call["target_url"].endswith(f"/api/v1/webhooks/asana/inbound/{active_integration.id}")
 
         db.refresh(active_integration)
         assert active_integration.webhook_gid == "1400000000001"
         assert active_integration.webhook_secret is None
+        # The minted webhook_url_token is persisted and matches the URL
+        # segment registered with Asana (and returned to the caller).
+        assert active_integration.webhook_url_token
+        assert len(active_integration.webhook_url_token) >= 32
+        expected_url = (
+            f"/api/v1/webhooks/asana/inbound/{active_integration.webhook_url_token}"
+        )
+        assert body["webhook_url"].endswith(expected_url)
+        assert call["target_url"].endswith(expected_url)
 
     def test_admin_can_enable_webhook(
         self, client: TestClient, db: Session, test_organization: Organization, active_integration: AsanaIntegration
@@ -228,6 +240,13 @@ class TestAsanaWebhookEnable:
         # Re-enabling clears the old handshake secret -- a fresh handshake
         # is required against the newly-created webhook.
         assert integration_with_webhook.webhook_secret is None
+        # Re-enabling also rotates the webhook_url_token -- the old
+        # (possibly already-known) URL must stop resolving.
+        assert integration_with_webhook.webhook_url_token != "existing-token-before-rotation"
+        assert integration_with_webhook.webhook_url_token
+        assert resp.json()["webhook_url"].endswith(
+            f"/api/v1/webhooks/asana/inbound/{integration_with_webhook.webhook_url_token}"
+        )
 
     def test_asana_auth_error_returns_403(
         self, client: TestClient, active_integration: AsanaIntegration, owner_headers: dict

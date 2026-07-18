@@ -26,6 +26,7 @@ when LLM_ENCRYPTION_KEY is unset) and returns HTTP 422 — never a 500.
 """
 import logging
 import os
+import secrets
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -514,19 +515,24 @@ def asana_webhook_enable(
     active connection, unlike Jira's /webhook/enable).
 
     Calls `AsanaClient.create_webhook(resource_gid, target_url)` where
-    `target_url` embeds THIS integration's id
-    (`{BACKEND_URL}/api/v1/webhooks/asana/inbound/{integration.id}`) so the
-    receiver (Phase 3) can resolve the org on the very first handshake
+    `target_url` embeds a freshly-minted unguessable `webhook_url_token`
+    (`secrets.token_urlsafe(32)`, unique-indexed) —
+    `{BACKEND_URL}/api/v1/webhooks/asana/inbound/{webhook_url_token}` — so
+    the receiver (Phase 3) can resolve the org on the very first handshake
     delivery, before any secret exists to match against (unlike Jira/Linear's
     per-org secret-matching, which only works once a secret is already
-    known).
+    known). SECURITY (sec review, CRITICAL): this token is intentionally
+    NOT the integration's integer id — a guessable id would let an
+    unauthenticated attacker POST a forged handshake to any active org and
+    hijack its webhook.
 
     Re-enabling (a webhook_gid already stored) always registers a FRESH
-    webhook at Asana and clears any previously-captured webhook_secret — a
-    new handshake is required against the new webhook (mirrors the
-    "reconnect rotates the token" posture of /connect). The OLD webhook at
-    Asana is intentionally left registered (best-effort cleanup is out of
-    scope for v1 — the operator can DELETE /webhook first if desired).
+    webhook at Asana, mints a NEW webhook_url_token, and clears any
+    previously-captured webhook_secret — a new handshake is required
+    against the new webhook (mirrors the "reconnect rotates the token"
+    posture of /connect). The OLD webhook at Asana is intentionally left
+    registered (best-effort cleanup is out of scope for v1 — the operator
+    can DELETE /webhook first if desired).
 
     AsanaAuthError -> 403 (stale/invalid token). AsanaTransientError -> 502.
     Never a 500.
@@ -534,7 +540,8 @@ def asana_webhook_enable(
     integration = _require_active_integration(db, current_org.id)
 
     plain_token = get_decrypted_token(integration)
-    target_url = f"{BACKEND_URL}/api/v1/webhooks/asana/inbound/{integration.id}"
+    webhook_url_token = secrets.token_urlsafe(32)
+    target_url = f"{BACKEND_URL}/api/v1/webhooks/asana/inbound/{webhook_url_token}"
 
     asana_client = AsanaClient(plain_token)
     try:
@@ -558,6 +565,7 @@ def asana_webhook_enable(
         _close_client(asana_client)
 
     integration.webhook_gid = created.get("gid")
+    integration.webhook_url_token = webhook_url_token
     # A re-enable always requires a fresh handshake against the newly
     # created webhook -- any previously-captured secret is stale.
     integration.webhook_secret = None

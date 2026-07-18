@@ -41,6 +41,7 @@ class TestAsanaIntegrationModel:
             "connected_by_user_id", "connected_at", "last_synced_at",
             "last_sync_status", "last_error", "created_at", "updated_at",
             "status_sync_enabled", "status_mapping",
+            "webhook_secret", "webhook_gid", "webhook_url_token",
         }
         assert expected.issubset(set(columns))
 

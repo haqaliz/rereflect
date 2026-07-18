@@ -2,16 +2,31 @@
 TDD tests for the Asana inbound real-time webhook receiver
 (status-sync-realtime-mapping/asana-webhook aspect, Phase 3).
 
-Covers: POST /api/v1/webhooks/asana/inbound/{integration_id}. Mirrors
+Covers: POST /api/v1/webhooks/asana/inbound/{webhook_url_token}. Mirrors
 TestJiraWebhookStatusChange in test_jira_webhook.py (fail-closed HMAC,
 reconcile, idempotency) PLUS the Asana-specific handshake branch (no Jira
 analog): the first POST carries `X-Hook-Secret` and must be persisted +
 echoed, 200, no reconcile.
 
+SECURITY (sec review, CRITICAL): the integration is resolved by an
+unguessable `webhook_url_token` (secrets.token_urlsafe(32), unique index) --
+NOT the guessable integer `integration_id` -- and the handshake branch is
+gated: it is only ever allowed to persist a secret when
+`integration.webhook_secret is None` (i.e. no handshake has completed yet,
+or POST /webhook/enable has just reset it to None for a fresh handshake).
+An org that already has a stored secret rejects ANY re-handshake attempt
+with 401 and leaves the stored secret untouched -- this closes both the
+integer-id enumeration attack AND the handshake-overwrite race that would
+otherwise let an unauthenticated attacker set a known secret for any active
+org and forge signed events.
+
 # Acceptance-criteria traceability (spec.md):
 # Handshake: first request with X-Hook-Secret and no stored secret ->
 #   secret persisted (encrypted) + echoed in response header, 200, no
 #   reconcile -> TestAsanaWebhookHandshake
+# No-overwrite gate: a request with X-Hook-Secret against an org that
+#   already has a stored secret -> 401, secret unchanged (sec review)
+#   -> TestAsanaWebhookHandshake
 # Signature verify: valid X-Hook-Signature -> processed; bad/missing -> 401;
 #   missing stored secret -> 401 (fail-closed)
 #   -> TestAsanaWebhookSignatureEnforcement
@@ -42,6 +57,8 @@ from src.utils.encryption import encrypt_api_key
 TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 WEBHOOK_SECRET_PLAIN = "whsec_asana_test_123"
+WEBHOOK_URL_TOKEN = "test-url-token-abc123-unguessable"
+WEBHOOK_URL_TOKEN_NO_SECRET = "test-url-token-no-secret-456-unguessable"
 
 
 def _make_asana_signature(body: bytes, secret: str) -> str:
@@ -108,6 +125,7 @@ def asana_integration(db: Session, test_organization: Organization) -> AsanaInte
         api_token=encrypt_api_key("asana-pat-abc"),
         webhook_gid="1400000000001",
         webhook_secret=encrypt_api_key(WEBHOOK_SECRET_PLAIN),
+        webhook_url_token=WEBHOOK_URL_TOKEN,
         is_active=True,
         status_sync_enabled=True,
         connected_at=datetime.utcnow(),
@@ -126,6 +144,28 @@ def asana_integration_no_secret(db: Session, test_organization: Organization) ->
         api_token=encrypt_api_key("asana-pat-abc"),
         webhook_gid="1400000000002",
         webhook_secret=None,
+        webhook_url_token=WEBHOOK_URL_TOKEN_NO_SECRET,
+        is_active=True,
+        status_sync_enabled=True,
+        connected_at=datetime.utcnow(),
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+
+@pytest.fixture
+def asana_integration_never_enabled(db: Session, test_organization: Organization) -> AsanaIntegration:
+    """Active AsanaIntegration that has never had /webhook/enable called --
+    webhook_url_token is None, same as a freshly-connected integration.
+    Defense-in-depth: no string token value should ever resolve this row."""
+    integration = AsanaIntegration(
+        organization_id=test_organization.id,
+        api_token=encrypt_api_key("asana-pat-abc"),
+        webhook_gid=None,
+        webhook_secret=None,
+        webhook_url_token=None,
         is_active=True,
         status_sync_enabled=True,
         connected_at=datetime.utcnow(),
@@ -181,8 +221,8 @@ def _events_for(db: Session, feedback_id: int):
     )
 
 
-def _inbound_url(integration_id: int) -> str:
-    return f"/api/v1/webhooks/asana/inbound/{integration_id}"
+def _inbound_url(token: str) -> str:
+    return f"/api/v1/webhooks/asana/inbound/{token}"
 
 
 # ============================================================================
@@ -251,7 +291,7 @@ class TestAsanaWebhookHandshake:
         _make_link(db, asana_integration_no_secret.organization_id, feedback.id)
 
         response = client.post(
-            _inbound_url(asana_integration_no_secret.id),
+            _inbound_url(asana_integration_no_secret.webhook_url_token),
             content=b"{}",
             headers={"Content-Type": "application/json", "X-Hook-Secret": "brand-new-handshake-secret"},
         )
@@ -268,31 +308,78 @@ class TestAsanaWebhookHandshake:
         assert feedback.workflow_status == "in_review"
         assert _events_for(db, feedback.id) == []
 
-    def test_re_handshake_is_idempotent_and_updates_secret(
+    def test_attacker_rehandshake_on_org_with_existing_secret_401_and_secret_unchanged(
         self, client: TestClient, asana_integration: AsanaIntegration, db: Session
     ):
+        """CRITICAL (sec review): an org that already completed its handshake
+        must reject any further X-Hook-Secret request -- an attacker who
+        discovers/guesses the webhook_url_token must NOT be able to
+        overwrite a stored secret and forge later signed events."""
+        original_encrypted_secret = asana_integration.webhook_secret
+
+        response = client.post(
+            _inbound_url(asana_integration.webhook_url_token),
+            content=b"{}",
+            headers={"Content-Type": "application/json", "X-Hook-Secret": "attacker-supplied-secret"},
+        )
+        assert response.status_code == 401
+
+        db.refresh(asana_integration)
+        assert asana_integration.webhook_secret == original_encrypted_secret
+        from src.utils.encryption import decrypt_api_key
+        assert decrypt_api_key(asana_integration.webhook_secret) == WEBHOOK_SECRET_PLAIN
+
+    def test_rehandshake_after_enable_succeeds_but_bare_rehandshake_rejected(
+        self, client: TestClient, asana_integration: AsanaIntegration, db: Session
+    ):
+        """A bare re-handshake against an org that already has a secret is
+        rejected (401), secret unchanged. Only AFTER simulating
+        POST /webhook/enable (which resets webhook_secret to None before
+        registering a fresh Asana webhook) does a subsequent handshake
+        succeed -- this is the only legitimate re-handshake path."""
         response1 = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=b"{}",
             headers={"Content-Type": "application/json", "X-Hook-Secret": "rotated-secret-1"},
         )
+        assert response1.status_code == 401
+        db.refresh(asana_integration)
+        from src.utils.encryption import decrypt_api_key
+        assert decrypt_api_key(asana_integration.webhook_secret) == WEBHOOK_SECRET_PLAIN
+
+        # Simulate POST /webhook/enable: resets webhook_secret to None
+        # ahead of registering a fresh webhook with Asana.
+        asana_integration.webhook_secret = None
+        db.commit()
+
         response2 = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=b"{}",
             headers={"Content-Type": "application/json", "X-Hook-Secret": "rotated-secret-2"},
         )
-        assert response1.status_code == 200
         assert response2.status_code == 200
-        assert response1.headers["X-Hook-Secret"] == "rotated-secret-1"
         assert response2.headers["X-Hook-Secret"] == "rotated-secret-2"
 
         db.refresh(asana_integration)
-        from src.utils.encryption import decrypt_api_key
         assert decrypt_api_key(asana_integration.webhook_secret) == "rotated-secret-2"
 
-    def test_handshake_unknown_integration_401(self, client: TestClient):
+    def test_handshake_unknown_token_401(self, client: TestClient):
         response = client.post(
-            _inbound_url(999999),
+            _inbound_url("completely-unknown-token-xyz"),
+            content=b"{}",
+            headers={"Content-Type": "application/json", "X-Hook-Secret": "whatever"},
+        )
+        assert response.status_code == 401
+
+    def test_handshake_never_enabled_webhook_401(
+        self, client: TestClient, asana_integration_never_enabled: AsanaIntegration
+    ):
+        """webhook_url_token is None (never enabled) -- no string path
+        segment may ever resolve this row (the query filters
+        `.isnot(None)` in addition to equality, so a coincidental match
+        against a NULL column can never happen)."""
+        response = client.post(
+            _inbound_url("None"),
             content=b"{}",
             headers={"Content-Type": "application/json", "X-Hook-Secret": "whatever"},
         )
@@ -303,7 +390,7 @@ class TestAsanaWebhookHandshake:
     ):
         with patch.dict(os.environ, {}, clear=True):
             response = client.post(
-                _inbound_url(asana_integration_no_secret.id),
+                _inbound_url(asana_integration_no_secret.webhook_url_token),
                 content=b"{}",
                 headers={"Content-Type": "application/json", "X-Hook-Secret": "whatever"},
             )
@@ -314,7 +401,7 @@ class TestAsanaWebhookHandshake:
         self, client: TestClient, asana_integration: AsanaIntegration
     ):
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=b"{}",
             headers={"Content-Type": "application/json", "X-Hook-Secret": "new-secret-value"},
         )
@@ -330,7 +417,7 @@ class TestAsanaWebhookSignatureEnforcement:
     def test_missing_signature_header_401(self, client: TestClient, asana_integration: AsanaIntegration):
         payload = _completion_event_payload()
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
@@ -340,7 +427,7 @@ class TestAsanaWebhookSignatureEnforcement:
         payload = _completion_event_payload()
         body = json.dumps(payload).encode()
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": "deadbeef"},
         )
@@ -352,7 +439,7 @@ class TestAsanaWebhookSignatureEnforcement:
         sig_for_a = _make_asana_signature(body_a, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body_b,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig_for_a},
         )
@@ -366,19 +453,19 @@ class TestAsanaWebhookSignatureEnforcement:
         sig = _make_asana_signature(body, "whatever-guessed-secret")
 
         response = client.post(
-            _inbound_url(asana_integration_no_secret.id),
+            _inbound_url(asana_integration_no_secret.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
         assert response.status_code == 401
 
-    def test_unknown_integration_id_401(self, client: TestClient):
+    def test_unknown_token_401(self, client: TestClient):
         payload = _completion_event_payload()
         body = json.dumps(payload).encode()
         sig = _make_asana_signature(body, "whatever-guessed-secret")
 
         response = client.post(
-            _inbound_url(999999),
+            _inbound_url("completely-unknown-token-xyz"),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -394,7 +481,7 @@ class TestAsanaWebhookSignatureEnforcement:
             side_effect=Exception("InvalidToken"),
         ):
             response = client.post(
-                _inbound_url(asana_integration.id),
+                _inbound_url(asana_integration.webhook_url_token),
                 content=body,
                 headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
             )
@@ -409,7 +496,7 @@ class TestAsanaWebhookSignatureEnforcement:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -420,7 +507,7 @@ class TestAsanaWebhookSignatureEnforcement:
         body = b"not-json-at-all{{{"
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -430,7 +517,7 @@ class TestAsanaWebhookSignatureEnforcement:
         body = b"[1, 2, 3]"
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -446,7 +533,7 @@ class TestAsanaWebhookEventDiscrimination:
         body = json.dumps({"events": []}).encode()
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -462,7 +549,7 @@ class TestAsanaWebhookEventDiscrimination:
         body = json.dumps(payload).encode()
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -493,7 +580,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -534,7 +621,7 @@ class TestAsanaWebhookCompletionChange:
         mock_client.get_task.return_value = {"completed": True, "completed_at": None, "memberships": []}
         with patch("src.api.routes.asana_webhook.AsanaClient", return_value=mock_client):
             response = client.post(
-                _inbound_url(asana_integration.id),
+                _inbound_url(asana_integration.webhook_url_token),
                 content=body,
                 headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
             )
@@ -565,7 +652,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -586,7 +673,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -609,7 +696,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -637,8 +724,8 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
         headers = {"Content-Type": "application/json", "X-Hook-Signature": sig}
 
-        response1 = client.post(_inbound_url(asana_integration.id), content=body, headers=headers)
-        response2 = client.post(_inbound_url(asana_integration.id), content=body, headers=headers)
+        response1 = client.post(_inbound_url(asana_integration.webhook_url_token), content=body, headers=headers)
+        response2 = client.post(_inbound_url(asana_integration.webhook_url_token), content=body, headers=headers)
 
         assert response1.status_code == 200
         assert response2.status_code == 200
@@ -674,7 +761,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -705,7 +792,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )
@@ -732,7 +819,7 @@ class TestAsanaWebhookCompletionChange:
         sig = _make_asana_signature(body, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
-            _inbound_url(asana_integration.id),
+            _inbound_url(asana_integration.webhook_url_token),
             content=body,
             headers={"Content-Type": "application/json", "X-Hook-Signature": sig},
         )

@@ -1244,23 +1244,30 @@ Rereflect handles both sides automatically:
    project** to watch (v1 scope: a single project — see "Known limitation"
    below; this reuses the same workspace/project picker as task creation).
 2. Click **Enable webhook**. This calls
-   `POST /api/v1/integrations/asana/webhook/enable`, which registers a
-   webhook with Asana (`POST https://app.asana.com/api/1.0/webhooks`)
-   targeting `POST <your-api-base>/api/v1/webhooks/asana/inbound/{integration_id}`
-   and stores the returned webhook gid. Asana then performs the handshake
-   against that URL automatically — no copy/paste step, and no secret is
-   ever shown in the UI.
+   `POST /api/v1/integrations/asana/webhook/enable`, which mints an
+   unguessable per-webhook URL token and registers a webhook with Asana
+   (`POST https://app.asana.com/api/1.0/webhooks`) targeting
+   `POST <your-api-base>/api/v1/webhooks/asana/inbound/{webhook_url_token}`
+   — **not** your integration's id — and stores the returned webhook gid.
+   Asana then performs the handshake against that URL automatically — no
+   copy/paste step, and no secret (or token) is ever shown in the UI.
 3. Refresh the page after a few seconds to confirm the webhook shows as
    active (the handshake completes the secret capture server-side).
 
 Rereflect resolves *which* organization a delivery belongs to from the
-`{integration_id}` embedded in the URL it registered in step 2 (rather than
-matching against every org's secret, as Jira/Zendesk do) — this works even
-before any secret exists yet, which the very first handshake delivery
-requires. Every subsequent event is fail-closed: a missing/invalid
-`X-Hook-Signature`, or an org with no captured secret, is rejected with
-`401` — never processed. Re-enabling the webhook always registers a fresh
-one at Asana and clears the old secret, so a new handshake is required.
+unguessable `webhook_url_token` embedded in the URL it registered in step 2
+(rather than matching against every org's secret, as Jira/Zendesk do, or a
+guessable sequential id) — this works even before any secret exists yet,
+which the very first handshake delivery requires. Every subsequent event is
+fail-closed: a missing/invalid `X-Hook-Signature`, or an org with no
+captured secret, is rejected with `401` — never processed. Critically, an
+org that has **already** completed its handshake also rejects any further
+`X-Hook-Secret` request with `401` and leaves the stored secret untouched —
+a handshake can only ever set a secret once per webhook, closing off any
+attempt (however the URL was obtained) to overwrite an established secret.
+Re-enabling the webhook always registers a fresh one at Asana, mints a new
+URL token, and clears the old secret, so a new handshake against the new
+URL is required — the old URL stops resolving immediately.
 
 Task completion changes are reconciled through the exact same
 completion-based mapping and race-safe apply as the poll above, so enabling

@@ -24,34 +24,52 @@ Confirmed external facts (Asana docs):
     otherwise this falls back to `AsanaClient.get_task(gid)` (mirrors the
     poller's per-task fetch).
 
-Org resolution (WHY a path param, unlike Jira/Linear's per-org
-secret-matching loop): Jira/Linear can loop over every active integration's
-webhook_secret and see which one verifies the signature — but that ONLY
-works once a secret already exists. Asana's very FIRST delivery (the
-handshake) carries no signature at all, so there is nothing to match
-against yet. Instead, POST /api/v1/integrations/asana/webhook/enable
-(Phase 2) registers the webhook's `target` as
-`{BACKEND_URL}/api/v1/webhooks/asana/inbound/{integration.id}` — the
-integration id is already known BEFORE the webhook (and its secret) exist,
-so both the handshake and every later event delivery resolve the org via
-this URL path segment. This is FAIL-CLOSED by construction: an unknown/
-inactive integration_id, or one with no stored secret yet, always 401s on
-the event branch (never a write).
+Org resolution — unguessable URL token (sec review, CRITICAL fix; WHY a path
+param, unlike Jira/Linear's per-org secret-matching loop): Jira/Linear can
+loop over every active integration's webhook_secret and see which one
+verifies the signature — but that ONLY works once a secret already exists.
+Asana's very FIRST delivery (the handshake) carries no signature at all, so
+there is nothing to match against yet. Instead,
+POST /api/v1/integrations/asana/webhook/enable (Phase 2) mints an
+unguessable `webhook_url_token` (`secrets.token_urlsafe(32)`, unique-indexed
+on `asana_integrations`) and registers the webhook's `target` as
+`{BACKEND_URL}/api/v1/webhooks/asana/inbound/{webhook_url_token}` — the
+token is already known BEFORE the webhook (and its secret) exist, so both
+the handshake and every later event delivery resolve the org via this URL
+path segment. This is FAIL-CLOSED by construction: an unknown token, a NULL
+token (never enabled), or an inactive integration always 401s (never a
+write). The token is deliberately NOT the integration's integer `id` — a
+guessable id would let an unauthenticated attacker POST a forged handshake
+to any active org's URL and hijack its webhook (see the no-overwrite
+invariant below, which independently closes the handshake itself even if a
+token were somehow guessed).
+
+No-overwrite invariant (sec review, CRITICAL fix): the handshake branch may
+ONLY persist a secret when `integration.webhook_secret is None`. An org
+that already completed its handshake rejects ANY further `X-Hook-Secret`
+request with 401 and leaves the stored secret untouched — this is what
+actually prevents secret hijacking/overwrite, independent of URL
+unguessability (defense in depth). The only way to get a fresh handshake is
+via `POST /webhook/enable`, which explicitly resets `webhook_secret` to
+`None` before registering a brand-new webhook (and mints a new
+`webhook_url_token` at the same time).
 
 Flow:
-  1. Resolve the integration by path `integration_id` (no such row, or an
-     inactive one -> 404 is NOT used here -- Asana has no way to react to a
-     404 differently than any other failure, so this mirrors Jira/Zendesk's
-     "no match -> 401" fail-closed posture uniformly).
-  2. HANDSHAKE branch: if the `X-Hook-Secret` header is present, this is
-     ALWAYS treated as a (re-)handshake -- store it (Fernet-encrypted,
-     overwriting any previous value -- idempotent, mirrors Asana
-     re-establishing the webhook) and echo the identical plaintext value
-     back via the response `X-Hook-Secret` header, 200, and return
-     immediately (no reconcile, no other I/O). R6 fail-closed: if
-     LLM_ENCRYPTION_KEY is unset, the secret cannot be safely persisted --
-     401, and the header is NOT echoed (never accept a handshake we can't
-     actually protect afterward).
+  1. Resolve the integration by path `token` (`AsanaIntegration.
+     webhook_url_token == token AND webhook_url_token IS NOT NULL AND
+     is_active`). No match -> 401 (mirrors Jira/Zendesk's "no match -> 401"
+     fail-closed posture uniformly; Asana has no way to react to a 404
+     differently than any other failure).
+  2. HANDSHAKE branch: if the `X-Hook-Secret` header is present AND
+     `integration.webhook_secret is None`, store it (Fernet-encrypted) and
+     echo the identical plaintext value back via the response
+     `X-Hook-Secret` header, 200, and return immediately (no reconcile, no
+     other I/O). If `integration.webhook_secret` is already set, 401
+     ("Handshake rejected: webhook already configured.") — the secret is
+     NOT touched. R6 fail-closed: if LLM_ENCRYPTION_KEY is unset, the
+     secret cannot be safely persisted -- 401, and the header is NOT
+     echoed (never accept a handshake we can't actually protect
+     afterward).
   3. EVENT branch (no `X-Hook-Secret` header): verify `X-Hook-Signature`
      against the integration's stored (decrypted) webhook_secret. Missing/
      invalid signature, or no stored secret at all (handshake never
@@ -133,9 +151,9 @@ def _resolve_completed(event: dict, client_factory) -> Optional[bool]:
     return client_factory()
 
 
-@router.post("/inbound/{integration_id}")
+@router.post("/inbound/{token}")
 async def asana_webhook_inbound(
-    integration_id: int, request: Request, response: Response, db: Session = Depends(get_db)
+    token: str, request: Request, response: Response, db: Session = Depends(get_db)
 ):
     """
     Receive Asana webhook deliveries (handshake + events) and reconcile
@@ -145,7 +163,8 @@ async def asana_webhook_inbound(
     integration = (
         db.query(AsanaIntegration)
         .filter(
-            AsanaIntegration.id == integration_id,
+            AsanaIntegration.webhook_url_token == token,
+            AsanaIntegration.webhook_url_token.isnot(None),
             AsanaIntegration.is_active.is_(True),
         )
         .first()
@@ -155,16 +174,32 @@ async def asana_webhook_inbound(
 
     hook_secret = request.headers.get(HOOK_SECRET_HEADER)
     if hook_secret:
-        # Handshake branch -- ALWAYS wins over any signature check on this
-        # request (Asana never sends both headers on the same delivery).
-        # I/O-free: persist + echo, no reconcile, no other work.
+        # Handshake branch -- I/O-free: persist + echo, no reconcile, no
+        # other work. SECURITY (sec review, CRITICAL): only ever allowed
+        # when no secret is stored yet -- an org that already completed its
+        # handshake must reject any further attempt outright, otherwise an
+        # attacker who reaches this URL (even the unguessable token) could
+        # overwrite the secret and forge subsequent signed events. The only
+        # legitimate way to get here again is POST /webhook/enable, which
+        # explicitly resets webhook_secret to None first.
+        if integration.webhook_secret is not None:
+            logger.warning(
+                "asana_webhook: rejected re-handshake attempt for an "
+                "already-configured webhook (org=%s)",
+                integration.organization_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Handshake rejected: webhook already configured.",
+            )
+
         try:
             encrypted_secret = encrypt_api_key(hook_secret)
         except ValueError:
             logger.error(
                 "asana_webhook: LLM_ENCRYPTION_KEY unset -- cannot persist "
-                "handshake secret for integration_id=%s",
-                integration_id,
+                "handshake secret for org=%s",
+                integration.organization_id,
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -175,7 +210,7 @@ async def asana_webhook_inbound(
         db.commit()
 
         response.headers[HOOK_SECRET_HEADER] = hook_secret
-        logger.info("asana_webhook: handshake completed for integration_id=%s", integration_id)
+        logger.info("asana_webhook: handshake completed for org=%s", integration.organization_id)
         return {"status": "handshake_ok"}
 
     body = await request.body()
@@ -191,8 +226,8 @@ async def asana_webhook_inbound(
         secret = decrypt_api_key(integration.webhook_secret)
     except Exception:
         logger.error(
-            "asana_webhook: failed to decrypt webhook_secret for integration_id=%s",
-            integration_id,
+            "asana_webhook: failed to decrypt webhook_secret for org=%s",
+            integration.organization_id,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature.")
 
