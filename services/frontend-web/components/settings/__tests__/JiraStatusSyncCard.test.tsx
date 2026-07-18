@@ -40,6 +40,7 @@ const baseStatus: JiraConnectionStatus = {
   last_error: null,
   connected_at: '2026-01-01T00:00:00Z',
   status_sync_enabled: false,
+  status_mapping: null,
   last_status_synced_at: null,
 };
 
@@ -179,6 +180,53 @@ describe('JiraStatusSyncCard', () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(
         expect.stringMatching(/background worker is unavailable/i)
+      );
+    });
+  });
+
+  // ─── Status mapping editor (mapping-editor aspect) ──────────────────────────
+
+  it('renders the status mapping editor with Jira category foreign keys', () => {
+    render(<JiraStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+    expect(screen.getByText('Category: To Do (new)')).toBeInTheDocument();
+    expect(screen.getByText('Category: In Progress (indeterminate)')).toBeInTheDocument();
+    expect(screen.getByText('Category: Done')).toBeInTheDocument();
+  });
+
+  it('pre-selects the row values from status.status_mapping', () => {
+    render(
+      <JiraStatusSyncCard
+        status={{ ...baseStatus, status_mapping: { new: 'new', indeterminate: 'in_review', done: 'resolved' } }}
+        onStatusChange={vi.fn()}
+      />
+    );
+    const triggers = screen.getAllByRole('combobox');
+    expect(triggers[0]).toHaveTextContent('New');
+    expect(triggers[1]).toHaveTextContent('In Review');
+    expect(triggers[2]).toHaveTextContent('Resolved');
+  });
+
+  it('saving the mapping editor calls patchJiraStatusSync with (enabled, mapping)', async () => {
+    const user = userEvent.setup();
+    const onStatusChange = vi.fn();
+    mockPatchJiraStatusSync.mockResolvedValue({
+      ...baseStatus,
+      status_mapping: { done: 'resolved' },
+    });
+
+    render(<JiraStatusSyncCard status={baseStatus} onStatusChange={onStatusChange} />);
+
+    const triggers = screen.getAllByRole('combobox');
+    await user.click(triggers[2]); // "done" row
+    await waitFor(() => screen.getByText('Resolved'));
+    await user.click(screen.getByText('Resolved'));
+
+    await user.click(screen.getByRole('button', { name: /save mapping/i }));
+
+    await waitFor(() => {
+      expect(mockPatchJiraStatusSync).toHaveBeenCalledWith(false, { done: 'resolved' });
+      expect(onStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({ status_mapping: { done: 'resolved' } })
       );
     });
   });

@@ -179,4 +179,52 @@ describe('ZendeskStatusSyncCard', () => {
       );
     });
   });
+
+  // ─── Status mapping editor (mapping-editor aspect) ──────────────────────────
+
+  it('renders the status mapping editor with the six raw Zendesk statuses', () => {
+    render(<ZendeskStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+    expect(screen.getByText('Pending')).toBeInTheDocument();
+    expect(screen.getByText('On-hold')).toBeInTheDocument();
+    expect(screen.getByText('Solved')).toBeInTheDocument();
+    expect(screen.getAllByRole('combobox')).toHaveLength(6);
+  });
+
+  it('pre-selects the row values from status.status_mapping', () => {
+    render(
+      <ZendeskStatusSyncCard
+        status={{ ...baseStatus, status_mapping: { solved: 'resolved', closed: 'closed' } }}
+        onStatusChange={vi.fn()}
+      />
+    );
+    const triggers = screen.getAllByRole('combobox');
+    // Row order: new, open, pending, hold, solved, closed
+    expect(triggers[4]).toHaveTextContent('Resolved');
+    expect(triggers[5]).toHaveTextContent('Closed');
+  });
+
+  it('saving the mapping editor calls patchZendeskStatusSync with (enabled, mapping)', async () => {
+    const user = userEvent.setup();
+    const onStatusChange = vi.fn();
+    mockPatchZendeskStatusSync.mockResolvedValue({
+      ...baseStatus,
+      status_mapping: { solved: 'resolved' },
+    });
+
+    render(<ZendeskStatusSyncCard status={baseStatus} onStatusChange={onStatusChange} />);
+
+    const triggers = screen.getAllByRole('combobox');
+    await user.click(triggers[4]); // "solved" row
+    await waitFor(() => screen.getByText('Resolved'));
+    await user.click(screen.getByText('Resolved'));
+
+    await user.click(screen.getByRole('button', { name: /save mapping/i }));
+
+    await waitFor(() => {
+      expect(mockPatchZendeskStatusSync).toHaveBeenCalledWith(false, { solved: 'resolved' });
+      expect(onStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({ status_mapping: { solved: 'resolved' } })
+      );
+    });
+  });
 });

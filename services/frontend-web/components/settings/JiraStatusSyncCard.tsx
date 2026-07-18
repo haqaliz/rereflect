@@ -8,16 +8,18 @@ import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { patchJiraStatusSync, triggerJiraSync, type JiraConnectionStatus } from '@/lib/api/jira';
 import { timeAgo } from '@/lib/notification-utils';
+import { StatusMappingEditor } from '@/components/settings/StatusMappingEditor';
+import { JIRA_STATUS_MAPPING_KEYS } from '@/lib/constants/status-sync-keys';
 
 interface JiraStatusSyncCardProps {
   status: JiraConnectionStatus;
   onStatusChange: (status: JiraConnectionStatus) => void;
 }
 
-// Minimal control surface for inbound Jira status sync (Phase 6 of
-// jira-status-sync/inbound-status-sync): a toggle, a read-only last-synced
-// indicator, and a manual "Sync now" trigger. No status-mapping editor here
-// — the mapping stays at the server default (out of scope per plan).
+// Control surface for inbound Jira status sync (Phase 6 of
+// jira-status-sync/inbound-status-sync, extended by the mapping-editor
+// aspect): a toggle, a read-only last-synced indicator, a manual "Sync now"
+// trigger, and a status-category → Rereflect-status mapping editor.
 export function JiraStatusSyncCard({ status, onStatusChange }: JiraStatusSyncCardProps) {
   const [toggling, setToggling] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -64,6 +66,11 @@ export function JiraStatusSyncCard({ status, onStatusChange }: JiraStatusSyncCar
     }
   };
 
+  const handleSaveMapping = async (mapping: Record<string, string>) => {
+    const updated = await patchJiraStatusSync(status.status_sync_enabled, mapping);
+    onStatusChange(updated);
+  };
+
   const lastSyncedLabel = status.last_status_synced_at ? timeAgo(status.last_status_synced_at) : 'Never';
   const isSyncError = status.last_sync_status === 'error';
 
@@ -108,6 +115,16 @@ export function JiraStatusSyncCard({ status, onStatusChange }: JiraStatusSyncCar
         {isSyncError && status.last_error && (
           <p className="text-sm text-destructive">{status.last_error}</p>
         )}
+
+        <div className="pt-2 border-t border-border">
+          <p className="font-semibold text-foreground mb-1">Status mapping</p>
+          <StatusMappingEditor
+            foreignKeys={JIRA_STATUS_MAPPING_KEYS}
+            currentMapping={status.status_mapping}
+            onSave={handleSaveMapping}
+            description="Jira status categories map to Rereflect workflow statuses. This is category-level, not per raw status name."
+          />
+        </div>
       </CardContent>
     </Card>
   );

@@ -107,6 +107,7 @@ export default function JiraSettingsPage() {
         last_error: null,
         connected_at: null,
         status_sync_enabled: false,
+        status_mapping: null,
         last_status_synced_at: null,
       });
       setTokenInput('');  // clear after successful connect

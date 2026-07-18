@@ -38,6 +38,7 @@ const baseStatus: AsanaConnectionStatus = {
   last_error: null,
   connected_at: '2026-01-01T00:00:00Z',
   status_sync_enabled: false,
+  status_mapping: null,
   last_status_synced_at: null,
 };
 
@@ -177,6 +178,51 @@ describe('AsanaStatusSyncCard', () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(
         expect.stringMatching(/background worker is unavailable/i)
+      );
+    });
+  });
+
+  // ─── Status mapping editor (mapping-editor aspect) ──────────────────────────
+
+  it('renders the status mapping editor with Asana completion foreign keys', () => {
+    render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={vi.fn()} />);
+    expect(screen.getByText('Not completed')).toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+  });
+
+  it('pre-selects the row values from status.status_mapping', () => {
+    render(
+      <AsanaStatusSyncCard
+        status={{ ...baseStatus, status_mapping: { new: 'new', done: 'resolved' } }}
+        onStatusChange={vi.fn()}
+      />
+    );
+    const triggers = screen.getAllByRole('combobox');
+    expect(triggers[0]).toHaveTextContent('New');
+    expect(triggers[1]).toHaveTextContent('Resolved');
+  });
+
+  it('saving the mapping editor calls patchAsanaStatusSync with (enabled, mapping)', async () => {
+    const user = userEvent.setup();
+    const onStatusChange = vi.fn();
+    mockPatchAsanaStatusSync.mockResolvedValue({
+      ...baseStatus,
+      status_mapping: { done: 'resolved' },
+    });
+
+    render(<AsanaStatusSyncCard status={baseStatus} onStatusChange={onStatusChange} />);
+
+    const triggers = screen.getAllByRole('combobox');
+    await user.click(triggers[1]); // "done" row
+    await waitFor(() => screen.getByText('Resolved'));
+    await user.click(screen.getByText('Resolved'));
+
+    await user.click(screen.getByRole('button', { name: /save mapping/i }));
+
+    await waitFor(() => {
+      expect(mockPatchAsanaStatusSync).toHaveBeenCalledWith(false, { done: 'resolved' });
+      expect(onStatusChange).toHaveBeenCalledWith(
+        expect.objectContaining({ status_mapping: { done: 'resolved' } })
       );
     });
   });

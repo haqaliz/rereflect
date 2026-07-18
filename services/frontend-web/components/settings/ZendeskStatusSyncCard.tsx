@@ -12,17 +12,19 @@ import {
   type ZendeskConnectionStatus,
 } from '@/lib/api/zendesk';
 import { timeAgo } from '@/lib/notification-utils';
+import { StatusMappingEditor } from '@/components/settings/StatusMappingEditor';
+import { ZENDESK_STATUS_MAPPING_KEYS } from '@/lib/constants/status-sync-keys';
 
 interface ZendeskStatusSyncCardProps {
   status: ZendeskConnectionStatus;
   onStatusChange: (status: ZendeskConnectionStatus) => void;
 }
 
-// Minimal control surface for inbound Zendesk status sync — a clone of
-// JiraStatusSyncCard (zendesk-status-sync/frontend): a toggle, a read-only
-// last-synced indicator, and a manual "Sync now" trigger. No status-mapping
-// editor here — the mapping stays at the server default (out of scope per
-// plan). Distinct from the connection card's ingestion "Sync tickets"
+// Control surface for inbound Zendesk status sync — a clone of
+// JiraStatusSyncCard (zendesk-status-sync/frontend), extended by the
+// mapping-editor aspect: a toggle, a read-only last-synced indicator, a
+// manual "Sync now" trigger, and a raw-status → Rereflect-status mapping
+// editor. Distinct from the connection card's ingestion "Sync tickets"
 // button — this one reconciles workflow_status on already-linked feedback.
 export function ZendeskStatusSyncCard({ status, onStatusChange }: ZendeskStatusSyncCardProps) {
   const [toggling, setToggling] = useState(false);
@@ -70,6 +72,11 @@ export function ZendeskStatusSyncCard({ status, onStatusChange }: ZendeskStatusS
     }
   };
 
+  const handleSaveMapping = async (mapping: Record<string, string>) => {
+    const updated = await patchZendeskStatusSync(status.status_sync_enabled, mapping);
+    onStatusChange(updated);
+  };
+
   const lastSyncedLabel = status.last_status_synced_at ? timeAgo(status.last_status_synced_at) : 'Never';
 
   return (
@@ -110,6 +117,16 @@ export function ZendeskStatusSyncCard({ status, onStatusChange }: ZendeskStatusS
         {status.last_status_sync_error && (
           <p className="text-sm text-destructive">{status.last_status_sync_error}</p>
         )}
+
+        <div className="pt-2 border-t border-border">
+          <p className="font-semibold text-foreground mb-1">Status mapping</p>
+          <StatusMappingEditor
+            foreignKeys={ZENDESK_STATUS_MAPPING_KEYS}
+            currentMapping={status.status_mapping}
+            onSave={handleSaveMapping}
+            description="Zendesk ticket statuses map to Rereflect workflow statuses."
+          />
+        </div>
       </CardContent>
     </Card>
   );

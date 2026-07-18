@@ -8,17 +8,19 @@ import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { patchAsanaStatusSync, triggerAsanaSync, type AsanaConnectionStatus } from '@/lib/api/asana';
 import { timeAgo } from '@/lib/notification-utils';
+import { StatusMappingEditor } from '@/components/settings/StatusMappingEditor';
+import { ASANA_STATUS_MAPPING_KEYS } from '@/lib/constants/status-sync-keys';
 
 interface AsanaStatusSyncCardProps {
   status: AsanaConnectionStatus;
   onStatusChange: (status: AsanaConnectionStatus) => void;
 }
 
-// Minimal control surface for inbound Asana status sync (asana-status-sync,
-// mirroring jira-status-sync/inbound-status-sync): a toggle, a read-only
-// last-synced indicator, and a manual "Sync now" trigger. No status-mapping
-// editor here — the mapping stays at the server default (out of scope per
-// plan).
+// Control surface for inbound Asana status sync (asana-status-sync,
+// mirroring jira-status-sync/inbound-status-sync; extended by the
+// mapping-editor aspect): a toggle, a read-only last-synced indicator, a
+// manual "Sync now" trigger, and a completion → Rereflect-status mapping
+// editor.
 export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncCardProps) {
   const [toggling, setToggling] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -65,6 +67,11 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
     }
   };
 
+  const handleSaveMapping = async (mapping: Record<string, string>) => {
+    const updated = await patchAsanaStatusSync(status.status_sync_enabled, mapping);
+    onStatusChange(updated);
+  };
+
   const lastSyncedLabel = status.last_status_synced_at ? timeAgo(status.last_status_synced_at) : 'Never';
   const isSyncError = status.last_sync_status === 'error';
 
@@ -109,6 +116,16 @@ export function AsanaStatusSyncCard({ status, onStatusChange }: AsanaStatusSyncC
         {isSyncError && status.last_error && (
           <p className="text-sm text-destructive">{status.last_error}</p>
         )}
+
+        <div className="pt-2 border-t border-border">
+          <p className="font-semibold text-foreground mb-1">Status mapping</p>
+          <StatusMappingEditor
+            foreignKeys={ASANA_STATUS_MAPPING_KEYS}
+            currentMapping={status.status_mapping}
+            onSave={handleSaveMapping}
+            description="Asana task completion maps to Rereflect workflow statuses."
+          />
+        </div>
       </CardContent>
     </Card>
   );
