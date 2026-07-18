@@ -31,6 +31,12 @@ class JiraIntegration(Base):
     last_error = Column(Text, nullable=True)
     status_sync_enabled = Column(Boolean, nullable=False, default=False, server_default=sa.false())
     status_mapping = Column(JSON, nullable=True)  # {jira_status_name: rereflect_status}
+    # jira-webhook aspect (status-sync-realtime-mapping): Fernet-encrypted HMAC
+    # secret for the inbound real-time webhook. NULL means the webhook is not
+    # enabled (fail-closed — see api/routes/jira_webhook.py). Generated via
+    # secrets.token_urlsafe(32) and encrypted at the route layer (mirrors
+    # api_token / Zendesk's webhook_secret above).
+    webhook_secret = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

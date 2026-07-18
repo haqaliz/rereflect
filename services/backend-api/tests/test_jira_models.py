@@ -40,6 +40,7 @@ class TestJiraIntegrationModel:
             "token_hint", "account_id", "display_name", "is_active",
             "connected_by_user_id", "connected_at", "last_synced_at",
             "last_sync_status", "last_error", "created_at", "updated_at",
+            "webhook_secret",
         }
         assert expected.issubset(set(columns))
 
