@@ -12,20 +12,30 @@ const DEFAULT_WEIGHTS: HealthWeights = {
   sentiment: 25,
   resolution: 25,
   frequency: 15,
+  usage: 0,
+  crm: 0,
 };
 
-const WEIGHT_LABELS: Record<keyof HealthWeights, string> = {
+/** `crm` is intentionally excluded here: it round-trips through state and the save payload
+ *  (see HealthWeights in lib/api/categories.ts) but is not yet an editable field in this UI. */
+type EditableWeightKey = Exclude<keyof HealthWeights, 'crm'>;
+
+const EDITABLE_KEYS: EditableWeightKey[] = ['churn', 'sentiment', 'resolution', 'frequency', 'usage'];
+
+const WEIGHT_LABELS: Record<EditableWeightKey, string> = {
   churn: 'Churn Risk',
   sentiment: 'Sentiment',
   resolution: 'Resolution Time',
   frequency: 'Feedback Frequency',
+  usage: 'Usage Activity',
 };
 
-const WEIGHT_DESCRIPTIONS: Record<keyof HealthWeights, string> = {
+const WEIGHT_DESCRIPTIONS: Record<EditableWeightKey, string> = {
   churn: 'Weight applied to the inverted average churn-risk score',
   sentiment: 'Weight applied to the average sentiment score',
   resolution: 'Weight applied to the average issue resolution speed',
   frequency: 'Weight applied to the complaint frequency trend',
+  usage: 'Weight applied to the usage-activity component (login recency, frequency, feature breadth)',
 };
 
 interface HealthWeightsEditorProps {
@@ -37,6 +47,7 @@ export function HealthWeightsEditor({ isAdminOrOwner }: HealthWeightsEditorProps
   const [saved, setSaved] = useState<HealthWeights>(DEFAULT_WEIGHTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     categoriesAPI.getHealthWeights()
@@ -44,21 +55,26 @@ export function HealthWeightsEditor({ isAdminOrOwner }: HealthWeightsEditorProps
         setWeights(w);
         setSaved(w);
       })
-      .catch((err) => console.error('Failed to load health weights:', err))
+      .catch((err) => {
+        // A failed load must never leave DEFAULT_WEIGHTS (crm: 0, usage: 0) saveable — that is
+        // the exact zeroing shape this fix removes. Block Save and surface the failure instead.
+        console.error('Failed to load health weights:', err);
+        setLoadError(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  const total = weights.churn + weights.sentiment + weights.resolution + weights.frequency;
+  const total = weights.churn + weights.sentiment + weights.resolution + weights.frequency + weights.usage + weights.crm;
   const isDirty = JSON.stringify(weights) !== JSON.stringify(saved);
   const isValid = total === 100;
 
-  const handleChange = (key: keyof HealthWeights, raw: string) => {
+  const handleChange = (key: EditableWeightKey, raw: string) => {
     const parsed = parseInt(raw, 10);
     setWeights((prev) => ({ ...prev, [key]: isNaN(parsed) ? 0 : Math.max(0, Math.min(100, parsed)) }));
   };
 
   const handleSave = async () => {
-    if (!isValid) return;
+    if (!isValid || loadError) return;
     setSaving(true);
     try {
       const updated = await categoriesAPI.updateHealthWeights(weights);
@@ -89,8 +105,21 @@ export function HealthWeightsEditor({ isAdminOrOwner }: HealthWeightsEditorProps
         Configure how each component contributes to the customer health score. Values must sum to exactly 100.
       </p>
 
+      {loadError && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          data-testid="weights-load-error"
+        >
+          <span>
+            Couldn&apos;t load your organization&apos;s current health score weights. Saving is
+            disabled until this loads successfully, so an existing usage or CRM weight isn&apos;t
+            overwritten with 0.
+          </span>
+        </div>
+      )}
+
       <div className="space-y-3">
-        {(Object.keys(weights) as (keyof HealthWeights)[]).map((key) => (
+        {EDITABLE_KEYS.map((key) => (
           <div key={key} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-start">
             <div className="sm:col-span-2">
               <p className="text-sm font-medium text-foreground">{WEIGHT_LABELS[key]}</p>
@@ -128,7 +157,8 @@ export function HealthWeightsEditor({ isAdminOrOwner }: HealthWeightsEditorProps
 
       {!isValid && (
         <p className="text-xs text-destructive" data-testid="weights-error">
-          Weights must sum to exactly 100 (currently {total})
+          Weights must sum to exactly 100 (currently {total}
+          {weights.crm > 0 && `, including a ${weights.crm}% CRM weight not shown here`})
         </p>
       )}
 
@@ -136,7 +166,7 @@ export function HealthWeightsEditor({ isAdminOrOwner }: HealthWeightsEditorProps
         <div className="flex gap-2">
           <Button
             onClick={handleSave}
-            disabled={!isDirty || !isValid || saving}
+            disabled={!isDirty || !isValid || saving || loadError}
             size="sm"
             data-testid="save-weights-button"
           >

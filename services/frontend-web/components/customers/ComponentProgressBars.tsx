@@ -29,7 +29,7 @@ const components = [
 
 /** Documented fallback weights used until org weights have loaded.
  *  Mirrors the backend defaults: churn 35 / sentiment 25 / resolution 25 / frequency 15 / usage 0.
- *  Usage is 0 until an operator opts in via Settings → Preferences. */
+ *  Usage is 0 until an operator opts in via Settings → AI → Health Score Weights. */
 const DEFAULT_WEIGHTS: Record<string, number> = {
   churn_risk: 35,
   sentiment: 25,

@@ -96,4 +96,12 @@ describe('UsageEventsPage', () => {
     const els = screen.getAllByText(/ingest/i);
     expect(els.length).toBeGreaterThanOrEqual(1);
   });
+
+  it('points the usage weight instructions at Settings > AI, not the preferences page (AC 15)', () => {
+    mockUseAuth.mockReturnValue({ user: adminUser, isLoading: false, isAuthenticated: true });
+    render(<UsageEventsPage />);
+    const link = screen.getByRole('link', { name: /health score weights/i });
+    expect(link).toHaveAttribute('href', '/settings/ai');
+    expect(screen.queryByRole('link', { name: /settings.{0,3}preferences/i })).not.toBeInTheDocument();
+  });
 });
