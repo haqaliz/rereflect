@@ -28,9 +28,11 @@ from src.services.segment_service import (
     SEGMENT_HAPPY_ADVOCATE,
     SEGMENT_NEW,
     SEGMENT_UNSEGMENTED,
+    SILENT_CHURNER_FEEDBACK_STALE_DAYS,
     UsageSignals,
     classify_segment,
 )
+from src.services.usage_score_service import FREQUENCY_LOW_MOD_DAYS, RECENCY_AGING_DAYS
 
 NOW = datetime(2026, 7, 8, 12, 0, 0)
 
@@ -515,3 +517,97 @@ class TestBoundaryValues:
             feedback_count=2,
         )
         assert result == SEGMENT_NEW
+
+
+# ---------------------------------------------------------------------------
+# silent_churner reachability after rolling-window re-derivation
+# (usage-trend-churn-signal / rollup-rewindow-fix, Phase E)
+#
+# Before that fix, `active_days_30d` froze at its last-event value for a
+# customer who stopped sending usage events entirely — the rolling window
+# never decayed toward zero on its own. Because the silent_churner rule is
+# gated on `active_days_30d < FREQUENCY_LOW_MOD_DAYS`, a customer who had
+# gone completely silent could still show a stale, high `active_days_30d`
+# and would never trip the gate built specifically to catch them. The daily
+# re-derivation (`recompute_usage_scores` -> `_rederive_windows`) now decays
+# `active_days_30d` toward 0 when there are no recent events, making the
+# segment reachable.
+# ---------------------------------------------------------------------------
+
+
+class TestSilentChurnerReachableAfterRewindow:
+    # Same customer, same declining sentiment, same stale feedback — only
+    # `active_days_30d` differs between the frozen (pre-fix) and re-derived
+    # (post-fix) rollup state.
+    _STALE_LAST_ACTIVE_AT = NOW - timedelta(days=RECENCY_AGING_DAYS + 15)
+    _STALE_LAST_FEEDBACK_AT = NOW - timedelta(days=SILENT_CHURNER_FEEDBACK_STALE_DAYS + 15)
+
+    def test_frozen_active_days_30d_classifies_as_dormant_not_silent_churner(self):
+        # Pre-fix: active_days_30d is frozen at its last-event high-water mark
+        # (>= FREQUENCY_LOW_MOD_DAYS), so the silent_churner gate never opens.
+        # The customer falls through to the dormant rule instead, via the
+        # equally-stale last_active_at.
+        usage = _usage(
+            active_days_30d=FREQUENCY_LOW_MOD_DAYS + 20,
+            last_active_at=self._STALE_LAST_ACTIVE_AT,
+        )
+        result = _classify(
+            risk_level="healthy",
+            churn_probability=None,
+            usage=usage,
+            sentiment_direction="declining",
+            last_feedback_at=self._STALE_LAST_FEEDBACK_AT,
+            health_score=50,
+        )
+        assert result == SEGMENT_DORMANT
+
+    def test_rederived_active_days_30d_classifies_as_silent_churner(self):
+        # Post-fix: the daily recompute has decayed active_days_30d to 0
+        # since there are no usage events in the window. Every other signal
+        # is unchanged. The silent_churner gate now opens, and rule 2 fires
+        # before the dormant check (rule 3) is ever reached.
+        usage = _usage(
+            active_days_30d=0,
+            last_active_at=self._STALE_LAST_ACTIVE_AT,
+        )
+        result = _classify(
+            risk_level="healthy",
+            churn_probability=None,
+            usage=usage,
+            sentiment_direction="declining",
+            last_feedback_at=self._STALE_LAST_FEEDBACK_AT,
+            health_score=50,
+        )
+        assert result == SEGMENT_SILENT_CHURNER
+
+
+class TestAtRiskPrecedesSilentChurner:
+    """
+    Guards against the fix accidentally reshuffling segment precedence:
+    at_risk (rule 1) must still win over silent_churner (rule 2) even when
+    a customer satisfies every silent_churner condition too.
+    """
+
+    def test_at_risk_via_risk_level_wins_over_silent_churner_shaped_row(self):
+        usage = _usage(active_days_30d=0, last_active_at=NOW - timedelta(days=45))
+        result = _classify(
+            risk_level="at_risk",
+            churn_probability=None,
+            usage=usage,
+            sentiment_direction="declining",
+            last_feedback_at=NOW - timedelta(days=45),
+            health_score=50,
+        )
+        assert result == SEGMENT_AT_RISK
+
+    def test_at_risk_via_churn_probability_wins_over_silent_churner_shaped_row(self):
+        usage = _usage(active_days_30d=0, last_active_at=NOW - timedelta(days=45))
+        result = _classify(
+            risk_level="healthy",
+            churn_probability=0.9,
+            usage=usage,
+            sentiment_direction="declining",
+            last_feedback_at=NOW - timedelta(days=45),
+            health_score=50,
+        )
+        assert result == SEGMENT_AT_RISK

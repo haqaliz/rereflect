@@ -8,7 +8,7 @@ before and after the usage component is added. They must stay GREEN (byte-identi
 output) through all subsequent phases, proving that health_weight_usage=0 changes nothing.
 """
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from src.models.organization import Organization
 from src.models.org_ai_config import OrgAIConfig
 from src.models.feedback import FeedbackItem
+from src.models.customer_usage import CustomerUsage
 from src.models.user import User
 from src.api.auth import hash_password, create_access_token
 from src.services.health_score_service import (
@@ -23,6 +24,7 @@ from src.services.health_score_service import (
     _get_org_weights,
     _compute_usage_component,
 )
+from src.services.usage_score_service import compute_usage_score
 
 
 # ---------------------------------------------------------------------------
@@ -543,3 +545,208 @@ class TestUsageComponentSavepointIsolation:
         # Session must still be usable — not in an aborted/invalid state
         val = db.execute(sql_text("SELECT 1")).scalar()
         assert val == 1, "Session must be usable after a savepoint-isolated usage error"
+
+
+# ---------------------------------------------------------------------------
+# rollup-rewindow-fix Phase D — Byte-stability at usage weight 0 +
+# deliberate correction at usage weight > 0
+# ---------------------------------------------------------------------------
+#
+# The daily worker task `recompute_usage_scores` (services/worker-service)
+# now re-derives active_days_7d/14d/30d and login_count_7d/30d against the
+# run's `now` instead of leaving them frozen at their last-event values.
+# That is a deliberate, product-visible correction for orgs that opted into
+# usage weighting (health_weight_usage > 0) — but it must change NOTHING for
+# the default (weight 0) case. These tests characterize both sides from the
+# backend-api side of the fix: they build a CustomerUsage rollup in its
+# frozen/pre-fix shape, then mutate it in place to the genuinely re-derived
+# shape the daily task now produces, and compare compute_health_score()
+# output before vs. after.
+
+
+def _seed_feedback_trio(db, org_id, email):
+    """Seed the same 3 (sentiment, churn) feedbacks used throughout this file."""
+    rows = [(0.5, 30), (-0.2, 60), (0.1, 45)]
+    for sentiment, churn in rows:
+        _make_feedback(db, org_id, email, sentiment, churn)
+
+
+class TestByteStabilityAtUsageWeightZero:
+    """
+    An org at health_weight_usage=0 (the default) must see IDENTICAL
+    compute_health_score() output — health_score AND every component — no
+    matter what a customer's usage rollup looks like: genuinely active,
+    frozen/stale-looking (the pre-fix shape), or entirely absent. The
+    usage_component itself is allowed to move; the weighted health_score
+    must not, because its weight is 0.
+    """
+
+    ACTIVE_EMAIL = "byte_stable_active@example.com"
+    QUIET_EMAIL = "byte_stable_quiet@example.com"
+    NO_USAGE_EMAIL = "byte_stable_no_usage@example.com"
+    NOW = datetime(2026, 6, 1, 12, 0, 0)
+
+    @pytest.fixture(autouse=True)
+    def seed(self, db: Session, test_organization: Organization):
+        """Seed identical feedback for 3 customers, an explicit weight=0 config,
+        and two CustomerUsage rollups (the third customer gets none)."""
+        for email in (self.ACTIVE_EMAIL, self.QUIET_EMAIL, self.NO_USAGE_EMAIL):
+            _seed_feedback_trio(db, test_organization.id, email)
+
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=25,
+            health_weight_resolution=25,
+            health_weight_frequency=15,
+            health_weight_usage=0,
+            health_weight_crm=0,
+        )
+        db.add(config)
+        db.commit()
+
+        # Actively using: recent last_active_at, windows matching reality —
+        # re-derivation would not change these fields.
+        active_row = CustomerUsage(
+            organization_id=test_organization.id,
+            customer_email=self.ACTIVE_EMAIL,
+            last_active_at=self.NOW - timedelta(days=1),
+            active_days_7d=6, active_days_14d=12, active_days_30d=25,
+            login_count_7d=9, login_count_30d=40,
+            distinct_feature_count=5,
+        )
+        active_row.usage_score = compute_usage_score(active_row, now=self.NOW)
+        db.add(active_row)
+
+        # Gone quiet, seeded in the FROZEN/pre-fix shape: active_days_30d
+        # stuck at 25 even though last_active_at is 50 days ago — exactly
+        # the stale rollup the daily task used to leave untouched.
+        quiet_row = CustomerUsage(
+            organization_id=test_organization.id,
+            customer_email=self.QUIET_EMAIL,
+            last_active_at=self.NOW - timedelta(days=50),
+            active_days_7d=6, active_days_14d=12, active_days_30d=25,
+            login_count_7d=9, login_count_30d=40,
+            distinct_feature_count=5,
+        )
+        quiet_row.usage_score = compute_usage_score(quiet_row, now=self.NOW)
+        db.add(quiet_row)
+        db.commit()
+        # NO_USAGE_EMAIL: deliberately no CustomerUsage row at all.
+
+    def test_health_score_and_components_identical_regardless_of_usage_rollup(
+        self, db: Session, test_organization: Organization
+    ):
+        """
+        Capture compute_health_score() for all three customers with the
+        frozen/pre-fix rollup in place ("before"), then mutate the quiet
+        customer's rollup to the genuinely re-derived shape the daily task
+        now produces (windows collapse to 0; usage_score follows) and
+        capture again ("after"). health_score and every other component must
+        be byte-identical before vs. after for ALL THREE customers.
+        """
+        emails = (self.ACTIVE_EMAIL, self.QUIET_EMAIL, self.NO_USAGE_EMAIL)
+        before = {email: compute_health_score(test_organization.id, email, db) for email in emails}
+
+        quiet_row = db.query(CustomerUsage).filter_by(
+            organization_id=test_organization.id, customer_email=self.QUIET_EMAIL,
+        ).first()
+        quiet_row.active_days_7d = 0
+        quiet_row.active_days_14d = 0
+        quiet_row.active_days_30d = 0
+        quiet_row.login_count_7d = 0
+        quiet_row.login_count_30d = 0
+        quiet_row.usage_score = compute_usage_score(quiet_row, now=self.NOW)
+        db.commit()
+
+        after = {email: compute_health_score(test_organization.id, email, db) for email in emails}
+
+        # Sanity check: the usage_component itself must have actually moved
+        # for the quiet customer, or this test would prove nothing.
+        assert after[self.QUIET_EMAIL]["usage_component"] != before[self.QUIET_EMAIL]["usage_component"]
+
+        for email in emails:
+            assert after[email]["health_score"] == before[email]["health_score"], email
+            for key in (
+                "churn_risk_component", "sentiment_component",
+                "resolution_component", "frequency_component",
+                "risk_level", "feedback_count", "confidence_level",
+            ):
+                assert after[email][key] == before[email][key], (email, key)
+
+
+class TestUsageWeightNonzeroCorrectsQuietCustomer:
+    """
+    Inverse of the byte-stability characterization above: with
+    health_weight_usage > 0 (opted in), a customer who has genuinely gone
+    quiet must score LOWER once their usage rollup reflects that inactivity
+    than they did under the frozen, pre-fix rollup. This is the deliberate
+    correction the aspect exists to make — asserted explicitly rather than
+    left implicit.
+    """
+
+    EMAIL = "usage_correction_quiet@example.com"
+    NOW = datetime(2026, 6, 1, 12, 0, 0)
+
+    @pytest.fixture(autouse=True)
+    def seed(self, db: Session, test_organization: Organization):
+        """Seed feedback + a config with usage weighted at 20. All 6 weight
+        fields (see categories.py:145-158) rebalanced to sum to 100:
+        churn=30, sentiment=20, resolution=20, frequency=10, usage=20, crm=0.
+        """
+        _seed_feedback_trio(db, test_organization.id, self.EMAIL)
+
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=30,
+            health_weight_sentiment=20,
+            health_weight_resolution=20,
+            health_weight_frequency=10,
+            health_weight_usage=20,
+            health_weight_crm=0,
+        )
+        db.add(config)
+        db.commit()
+
+    def test_quiet_customer_score_drops_under_genuine_usage_vs_inflated(
+        self, db: Session, test_organization: Organization
+    ):
+        """
+        Build the SAME customer's rollup twice: once in the frozen, pre-fix
+        shape (active_days_30d stuck at 25 despite last_active_at 50 days
+        ago), then mutated in place to the genuinely re-derived shape (no
+        events in the last 30 days -> windows collapse to 0). The health
+        score under the genuine rollup must be strictly lower.
+        """
+        row = CustomerUsage(
+            organization_id=test_organization.id,
+            customer_email=self.EMAIL,
+            last_active_at=self.NOW - timedelta(days=50),
+            active_days_7d=6, active_days_14d=12, active_days_30d=25,
+            login_count_7d=9, login_count_30d=40,
+            distinct_feature_count=5,
+        )
+        row.usage_score = compute_usage_score(row, now=self.NOW)
+        db.add(row)
+        db.commit()
+
+        inflated_result = compute_health_score(test_organization.id, self.EMAIL, db)
+
+        # Re-derive the windows the way the daily task now does — no events
+        # in the last 30 days means genuine zero activity, not a frozen 25.
+        row.active_days_7d = 0
+        row.active_days_14d = 0
+        row.active_days_30d = 0
+        row.login_count_7d = 0
+        row.login_count_30d = 0
+        row.usage_score = compute_usage_score(row, now=self.NOW)
+        db.commit()
+
+        genuine_result = compute_health_score(test_organization.id, self.EMAIL, db)
+
+        assert genuine_result["usage_component"] < inflated_result["usage_component"]
+        assert genuine_result["health_score"] < inflated_result["health_score"], (
+            f"expected the corrected (genuine-inactivity) health_score "
+            f"{genuine_result['health_score']} to be lower than the inflated, "
+            f"pre-fix health_score {inflated_result['health_score']}"
+        )
