@@ -347,21 +347,28 @@ class TestProcessUsageEventHealthRecompute:
 class TestRecomputeUsageScores:
     def test_stale_rollup_score_drops_on_recompute(self, db):
         """
-        A customer whose last_active_at is >30 days ago should have their
-        usage_score lowered by recompute_usage_scores(), simulating no new events.
+        A customer who WAS active — high active_days_30d/7d and login counts
+        from a previous burst of usage — but whose last_active_at is now 50
+        days ago and who has NO usage_event rows in the last 30 days, must
+        have their rolling-window fields re-derived to zero (not frozen at
+        their stale high values) and their usage_score drop below 40.
+
+        The fixture deliberately does NOT hand-set the window fields to 0 —
+        that would presuppose the re-windowing this test exists to prove.
         """
         org = _make_org(db)
-        # Create a CustomerUsage row with an artificially high (stale) score
+        # Create a CustomerUsage row reflecting a customer who WAS active —
+        # no usage_event rows back it (none within the 30d window, none at all).
         rollup = CustomerUsage(
             organization_id=org.id,
             customer_email="bob@example.com",
             last_active_at=datetime.utcnow() - timedelta(days=50),  # very stale
-            active_days_30d=0,
-            active_days_7d=0,
+            active_days_30d=25,
+            active_days_7d=6,
             distinct_feature_count=1,
             distinct_features=["feat-x"],
-            login_count_7d=0,
-            login_count_30d=0,
+            login_count_7d=9,
+            login_count_30d=40,
             events_total=5,
             usage_score=75,  # artificially high — should drop on recompute
             first_seen_at=datetime.utcnow() - timedelta(days=100),
@@ -383,10 +390,197 @@ class TestRecomputeUsageScores:
 
         db.expire(rollup)
         db.refresh(rollup)
+        assert rollup.active_days_30d == 0, (
+            f"active_days_30d frozen at stale value: got {rollup.active_days_30d}"
+        )
+        assert rollup.active_days_7d == 0, (
+            f"active_days_7d frozen at stale value: got {rollup.active_days_7d}"
+        )
+        assert rollup.login_count_30d == 0, (
+            f"login_count_30d frozen at stale value: got {rollup.login_count_30d}"
+        )
+        assert rollup.login_count_7d == 0, (
+            f"login_count_7d frozen at stale value: got {rollup.login_count_7d}"
+        )
         assert rollup.usage_score < old_score, (
             f"Score should have dropped from {old_score}, got {rollup.usage_score}"
         )
         assert rollup.usage_score < 40, f"Stale score expected <40, got {rollup.usage_score}"
+
+    def test_lifetime_aggregates_survive_recompute(self, db):
+        """
+        Lifetime aggregates — events_total, first_seen_at, distinct_features —
+        must NOT change when recompute_usage_scores re-derives the rolling-
+        window fields. This is the guard against the bounded-read trap: the
+        window re-derivation is meant to read only the last 30 days of
+        usage_event rows, and if that bounded dict were ever written back in
+        place of the full rollup, events_total would collapse to the 30-day
+        count, first_seen_at would jump forward, and long-tail
+        distinct_features would vanish. first_seen_at is unrecoverable once
+        overwritten, so this must hold before any re-derivation logic exists.
+        """
+        org = _make_org(db)
+        # Spread events across ~200 days so the lifetime aggregates (5 total
+        # events, 5 distinct features, first_seen_at ~200 days back) are
+        # clearly distinguishable from anything a 30-day-bounded read would see.
+        for i in range(5):
+            _make_event(
+                db, org.id,
+                external_event_id=f"evt-lifetime-{i}",
+                event_name=f"feat-{i}",
+                days_ago=200 - i * 40,  # 200, 160, 120, 80, 40 days ago
+            )
+        # Build the rollup via the real upsert path (full-history read).
+        _run_impl(org.id, "alice@example.com", "evt-lifetime-4", event_name="feat-4")
+
+        rollup = _get_rollup(db, org.id, "alice@example.com")
+        assert rollup.events_total == 5
+        assert len(rollup.distinct_features) == 5
+        events_total_before = rollup.events_total
+        first_seen_at_before = rollup.first_seen_at
+        distinct_features_before = list(rollup.distinct_features)
+
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            um.recompute_usage_scores()
+
+        db.expire(rollup)
+        db.refresh(rollup)
+
+        assert rollup.events_total == events_total_before, (
+            f"events_total truncated by bounded window read: "
+            f"expected {events_total_before}, got {rollup.events_total}"
+        )
+        assert rollup.first_seen_at == first_seen_at_before, (
+            f"first_seen_at overwritten by bounded window read: "
+            f"expected {first_seen_at_before}, got {rollup.first_seen_at}"
+        )
+        assert list(rollup.distinct_features) == distinct_features_before, (
+            f"distinct_features truncated by bounded window read: "
+            f"expected {distinct_features_before}, got {rollup.distinct_features}"
+        )
+
+    def test_active_customer_windows_unchanged(self, db):
+        """
+        A customer with steady, CURRENT activity has identical window field
+        values after a recompute_usage_scores run — no spurious churn for
+        someone who is still engaged.
+
+        The rollup's window fields are hand-set to exactly match the
+        usage_event rows seeded below, so this test is meaningful both
+        before re-derivation lands (fields are simply left alone) and after
+        (fields are recomputed from real events but land on the same
+        numbers).
+        """
+        org = _make_org(db)
+        email = "carol@example.com"
+
+        # 5 distinct days within the last 7 days (one event each).
+        recent_days = [0, 1, 2, 3, 4]
+        # 15 more distinct days within the 30-day window but older than 7
+        # days (one event each) -> 20 distinct active days total in 30d.
+        older_days = list(range(8, 23))
+
+        for day in recent_days + older_days:
+            _make_event(
+                db, org.id,
+                email=email,
+                external_event_id=f"evt-active-{day}",
+                event_name="feat-a",
+                days_ago=day,
+            )
+
+        rollup = CustomerUsage(
+            organization_id=org.id,
+            customer_email=email,
+            last_active_at=datetime.utcnow(),
+            active_days_30d=20,
+            active_days_7d=5,
+            distinct_feature_count=1,
+            distinct_features=["feat-a"],
+            login_count_7d=5,
+            login_count_30d=20,
+            events_total=20,
+            usage_score=50,
+            first_seen_at=datetime.utcnow() - timedelta(days=max(older_days)),
+        )
+        db.add(rollup)
+        db.commit()
+        db.refresh(rollup)
+
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            um.recompute_usage_scores()
+
+        db.expire(rollup)
+        db.refresh(rollup)
+
+        assert rollup.active_days_7d == 5
+        assert rollup.active_days_30d == 20
+        assert rollup.login_count_7d == 5
+        assert rollup.login_count_30d == 20
+
+    def test_recompute_is_idempotent(self, db):
+        """
+        Running recompute_usage_scores twice in a row must produce identical
+        rollup values on the second pass as on the first — no drift from
+        re-deriving the same underlying window on repeated runs.
+        """
+        org = _make_org(db)
+        rollup = CustomerUsage(
+            organization_id=org.id,
+            customer_email="dave@example.com",
+            last_active_at=datetime.utcnow() - timedelta(days=50),
+            active_days_30d=25,
+            active_days_7d=6,
+            distinct_feature_count=1,
+            distinct_features=["feat-x"],
+            login_count_7d=9,
+            login_count_30d=40,
+            events_total=5,
+            usage_score=75,
+            first_seen_at=datetime.utcnow() - timedelta(days=100),
+        )
+        db.add(rollup)
+        db.commit()
+        db.refresh(rollup)
+
+        def _snapshot():
+            db.expire(rollup)
+            db.refresh(rollup)
+            return {
+                "active_days_7d": rollup.active_days_7d,
+                "active_days_30d": rollup.active_days_30d,
+                "login_count_7d": rollup.login_count_7d,
+                "login_count_30d": rollup.login_count_30d,
+                "usage_score": rollup.usage_score,
+                "events_total": rollup.events_total,
+                "first_seen_at": rollup.first_seen_at,
+                "distinct_features": list(rollup.distinct_features),
+            }
+
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            um.recompute_usage_scores()
+        snapshot_after_first = _snapshot()
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            um.recompute_usage_scores()
+        snapshot_after_second = _snapshot()
+
+        assert snapshot_after_second == snapshot_after_first, (
+            f"recompute is not idempotent: first={snapshot_after_first} "
+            f"second={snapshot_after_second}"
+        )
 
     def test_fresh_rollup_score_unchanged_on_recompute(self, db):
         """
