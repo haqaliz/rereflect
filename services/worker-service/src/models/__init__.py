@@ -6,7 +6,7 @@ Note: In production, these should be in a shared package.
 For now, we duplicate the essential models.
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Time, Index, JSON, Numeric, UniqueConstraint, ForeignKey, text
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, Date, Time, Index, JSON, Numeric, UniqueConstraint, ForeignKey, text
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -994,6 +994,42 @@ class CustomerUsage(Base):
             name="uq_customer_usage_org_email",
         ),
         Index("ix_customer_usage_org_score", "organization_id", "usage_score"),
+    )
+
+
+class CustomerUsageHistory(Base):
+    """Daily per-customer usage snapshot — lightweight mirror of backend-api
+    model (no FKs). Column parity with the backend-api model is enforced by
+    test_worker_and_backend_customer_usage_history_columns_match
+    (worker-service/tests/test_usage_metrics.py)."""
+    __tablename__ = "customer_usage_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False, index=True)
+    customer_email = Column(String(255), nullable=False, index=True)
+    snapshot_date = Column(Date, nullable=False)
+    active_days_7d = Column(Integer, nullable=True)
+    active_days_14d = Column(Integer, nullable=True)
+    active_days_30d = Column(Integer, nullable=True)
+    login_count_30d = Column(Integer, nullable=True)
+    distinct_feature_count = Column(Integer, nullable=True)
+    usage_score = Column(Integer, nullable=True)
+    last_active_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "customer_email",
+            "snapshot_date",
+            name="uq_customer_usage_history_org_email_date",
+        ),
+        Index(
+            "ix_customer_usage_history_lookback",
+            "organization_id",
+            "customer_email",
+            "snapshot_date",
+        ),
     )
 
 

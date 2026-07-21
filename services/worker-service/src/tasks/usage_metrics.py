@@ -1,19 +1,27 @@
 """
-Celery tasks for product-usage rollup and scoring (aspect 3).
+Celery tasks for product-usage rollup and scoring (aspect 3), plus the
+usage-history-snapshot aspect's daily storage and pruning.
 
 Tasks:
-  process_usage_event  — triggered per event from ingestion-receiver; upserts
-                          the customer_usage rollup and recomputes usage_score.
-  recompute_usage_scores — scheduled daily to apply recency decay even when no
-                            new events arrive.
+  process_usage_event      — triggered per event from ingestion-receiver;
+                              upserts the customer_usage rollup and
+                              recomputes usage_score.
+  recompute_usage_scores   — scheduled daily to apply recency decay even when
+                              no new events arrive; also writes a daily
+                              customer_usage_history snapshot row per
+                              scanned customer (usage-history-snapshot
+                              aspect).
+  purge_old_usage_history  — scheduled weekly to delete snapshot rows older
+                              than USAGE_HISTORY_RETENTION_DAYS.
 
-Beat registration: see celery_app.py (``recompute-usage-scores-daily``).
+Beat registration: see celery_app.py (``recompute-usage-scores-daily``,
+``purge-old-usage-history``).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from celery import shared_task
@@ -29,6 +37,17 @@ logger = logging.getLogger(__name__)
 # Score change threshold that warrants a health-score recompute during the
 # scheduled decay pass (avoids spamming unnecessary health refreshes).
 _HEALTH_RECOMPUTE_DELTA: int = 2
+
+# Retention window for customer_usage_history rows (usage-history-snapshot
+# aspect). 180 days comfortably exceeds the 12-16 day lookback band the
+# trend-detection-and-health aspect will use. Single edit point if an
+# operator ever wants a shorter window; no per-org configurability.
+USAGE_HISTORY_RETENTION_DAYS: int = 180
+
+# Batch size for the daily snapshot write's bulk insert (AC 7 — not N+1: a
+# large first-run population is chunked rather than issued as one
+# unboundedly large INSERT).
+_SNAPSHOT_CHUNK_SIZE: int = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +217,64 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
         )
 
 
+def _write_usage_history_snapshots(
+    db, snapshot_rows: List[Dict[str, Any]], today: "date",
+) -> int:
+    """
+    Batched, idempotent daily write of ``customer_usage_history`` rows
+    (usage-history-snapshot aspect).
+
+    ``snapshot_rows`` is a list of pre-built plain dicts (organization_id,
+    customer_email, and the payload fields) captured from the caller's
+    already-recomputed CustomerUsage rows — NOT ORM instances — so this
+    function has no dependency on those instances staying unexpired across
+    the caller's own commit boundary.
+
+    Not N+1 (AC 7): exactly one query to resolve which (org, email) pairs
+    already have a snapshot for ``today`` (scoped to the orgs present in
+    ``snapshot_rows``), then one ``bulk_insert_mappings`` call per chunk of
+    ``_SNAPSHOT_CHUNK_SIZE`` rows — independent of the total row count for
+    ordinary daily volumes.
+
+    Same-day idempotency (AC 3): rows whose (org, email) key already has a
+    snapshot for ``today`` are skipped, so re-running on the same UTC date
+    leaves exactly one row per (org, email, today) and raises no
+    IntegrityError. No ON CONFLICT — no precedent in this codebase and
+    SQLite-backed tests could not exercise a Postgres-dialect upsert.
+
+    Returns the number of rows actually inserted.
+    """
+    from src.models import CustomerUsageHistory
+
+    if not snapshot_rows:
+        return 0
+
+    org_ids = {row["organization_id"] for row in snapshot_rows}
+    existing_keys = {
+        (org_id, email)
+        for org_id, email in db.query(
+            CustomerUsageHistory.organization_id, CustomerUsageHistory.customer_email
+        ).filter(
+            CustomerUsageHistory.snapshot_date == today,
+            CustomerUsageHistory.organization_id.in_(org_ids),
+        )
+    }
+
+    mappings = [
+        {**row, "snapshot_date": today}
+        for row in snapshot_rows
+        if (row["organization_id"], row["customer_email"]) not in existing_keys
+    ]
+
+    written = 0
+    for i in range(0, len(mappings), _SNAPSHOT_CHUNK_SIZE):
+        chunk = mappings[i : i + _SNAPSHOT_CHUNK_SIZE]
+        db.bulk_insert_mappings(CustomerUsageHistory, chunk)
+        written += len(chunk)
+
+    return written
+
+
 def _do_process_usage_event(
     org_id: int,
     customer_email: Optional[str],
@@ -362,20 +439,29 @@ def recompute_usage_scores() -> Dict[str, int]:
     ``update_customer_health`` is also called so the health score reflects the
     new usage component.
 
+    After the per-row recompute loop, also writes one customer_usage_history
+    snapshot row per scanned customer for today's UTC date (usage-history-
+    snapshot aspect) — see ``_write_usage_history_snapshots``.
+
     Beat schedule: daily — see celery_app.py ``recompute-usage-scores-daily``.
 
     Returns:
-        dict with ``updated`` (rows whose score changed) and ``total`` (rows scanned).
+        dict with ``updated`` (rows whose score changed), ``total`` (rows
+        scanned), and ``snapshot_written`` (rows newly inserted into
+        customer_usage_history — 0 on a same-day re-run, AC 3).
     """
     from src.models import CustomerUsage
     from src.services.usage_score_service import compute_usage_score
 
     updated = 0
     total = 0
+    snapshot_written = 0
+    snapshot_rows: List[Dict[str, Any]] = []
 
     with get_db_session() as db:
         rows = db.query(CustomerUsage).all()
         now = datetime.utcnow()
+        today = now.date()
 
         for row in rows:
             total += 1
@@ -390,6 +476,25 @@ def recompute_usage_scores() -> Dict[str, int]:
             new_score = compute_usage_score(row, now=now)
             old_score = row.usage_score if row.usage_score is not None else 50
 
+            # usage-history-snapshot aspect: capture the RE-DERIVED
+            # (post-window-update) values for today's snapshot before any
+            # early `continue` below — every scanned row is snapshotted
+            # regardless of whether its score/windows actually changed
+            # (AC 1, 2). Plain dicts, not the ORM row itself, so this
+            # survives the score-update commit below without needing the
+            # row to stay unexpired.
+            snapshot_rows.append({
+                "organization_id": row.organization_id,
+                "customer_email": row.customer_email,
+                "active_days_7d": row.active_days_7d,
+                "active_days_14d": row.active_days_14d,
+                "active_days_30d": row.active_days_30d,
+                "login_count_30d": row.login_count_30d,
+                "distinct_feature_count": row.distinct_feature_count,
+                "usage_score": new_score,
+                "last_active_at": row.last_active_at,
+            })
+
             if new_score == old_score and not windows_changed:
                 continue
 
@@ -403,7 +508,67 @@ def recompute_usage_scores() -> Dict[str, int]:
         if updated:
             db.commit()
 
+        # Daily snapshot write — a SEPARATE transaction from the score-update
+        # commit above, and run UNCONDITIONALLY (not gated on `updated`): a
+        # steady population with no score changes must still get a daily
+        # snapshot, or the trend detector's history never warms up. A
+        # failure here is caught, logged, and does NOT roll back the score
+        # updates already committed above — this task's long-shipped
+        # behaviour (recency decay) must not regress because the newer
+        # snapshot feature had a bad day (see D3 in the aspect spec: a
+        # silently swallowed failure is the thing to avoid, not the fact of
+        # catching it).
+        try:
+            snapshot_written = _write_usage_history_snapshots(db, snapshot_rows, today)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            snapshot_written = 0
+            logger.error(
+                "recompute_usage_scores: snapshot write failed for %d scanned rows: %s",
+                total, exc, exc_info=True,
+            )
+
     logger.info(
-        "recompute_usage_scores: scanned=%s updated=%s", total, updated
+        "recompute_usage_scores: scanned=%s updated=%s snapshot_written=%s",
+        total, updated, snapshot_written,
     )
-    return {"updated": updated, "total": total}
+    return {"updated": updated, "total": total, "snapshot_written": snapshot_written}
+
+
+# ---------------------------------------------------------------------------
+# usage-history-snapshot aspect — prune task
+# ---------------------------------------------------------------------------
+
+
+@shared_task(name="src.tasks.usage_metrics.purge_old_usage_history")
+def purge_old_usage_history() -> Dict[str, Any]:
+    """
+    Delete customer_usage_history rows with snapshot_date strictly older
+    than USAGE_HISTORY_RETENTION_DAYS (180) days before now.
+
+    Runs weekly (see celery_app.py ``purge-old-usage-history``). Safe to run
+    multiple times — idempotent DELETE with a cutoff date; a second
+    immediate run deletes 0.
+
+    Returns:
+        dict — {"status": "complete", "deleted": N}
+    """
+    from src.models import CustomerUsageHistory
+
+    cutoff = datetime.utcnow().date() - timedelta(days=USAGE_HISTORY_RETENTION_DAYS)
+
+    with get_db_session() as db:
+        deleted = (
+            db.query(CustomerUsageHistory)
+            .filter(CustomerUsageHistory.snapshot_date < cutoff)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+
+    logger.info(
+        "purge_old_usage_history: deleted %d CustomerUsageHistory rows older than %s",
+        deleted, cutoff,
+    )
+
+    return {"status": "complete", "deleted": deleted}
