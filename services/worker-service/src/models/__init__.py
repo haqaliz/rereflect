@@ -977,6 +977,7 @@ class CustomerUsage(Base):
     login_count_7d = Column(Integer, nullable=True, default=0)
     login_count_30d = Column(Integer, nullable=True, default=0)
     active_days_7d = Column(Integer, nullable=True, default=0)
+    active_days_14d = Column(Integer, nullable=True, default=0)
     active_days_30d = Column(Integer, nullable=True, default=0)
     distinct_features = Column(JSON, nullable=True, default=list)
     distinct_feature_count = Column(Integer, nullable=True, default=0)

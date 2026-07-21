@@ -52,6 +52,7 @@ class CustomerUsage(Base):
 
     # Active-day counts (distinct calendar days with at least one event)
     active_days_7d = Column(Integer, nullable=True, default=0)
+    active_days_14d = Column(Integer, nullable=True, default=0)
     active_days_30d = Column(Integer, nullable=True, default=0)
 
     # Feature breadth
