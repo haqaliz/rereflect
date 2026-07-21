@@ -116,6 +116,13 @@ export interface CustomerProfileData {
   frequency_component: number;
   // Usage health component (0-100; undefined on older payloads → treat as 50/neutral)
   usage_component?: number;
+  // Usage trend (trend-detection-and-health aspect): direction of this customer's
+  // active_days_14d vs. their own activity ~14 days ago. Absent entirely on older
+  // backends predating this feature; null when no customer_usage row exists yet
+  // for this customer. usage_trend_pct is always null when state is
+  // 'insufficient_history'.
+  usage_trend_state?: 'insufficient_history' | 'stable' | 'declining' | 'sharp_decline' | null;
+  usage_trend_pct?: number | null;
   // Structured LLM analysis fields
   llm_analysis_summary: string | null;
   llm_recommended_actions: string[] | null;
