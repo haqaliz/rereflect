@@ -8,6 +8,22 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Fixed — Health-score weights: usage is now editable, and saving no longer wipes usage/CRM
+
+The **Settings → AI → Health Score Weights** editor showed four weights but the health score has
+six components (the usage and CRM weights were added with the product-usage and CRM-enrichment
+features). Two consequences, both now fixed:
+
+- **You can now set the Usage Activity weight from the UI.** Previously it could only be changed
+  through the API, and the in-app instructions pointed at a page that had no weight editor.
+- **Saving weights no longer silently resets your usage and CRM weights to 0.** Because the save
+  only sent four of the six weights, any usage or CRM weight you had configured was wiped on the
+  next save — with a success message and no warning. The editor now sends all six, and the
+  "must sum to 100" total counts all six.
+
+If a weights load fails, saving is now blocked rather than proceeding from defaults — so a
+transient error can't overwrite a configured weight with 0.
+
 ### Fixed — Product-usage metrics now track elapsed time
 
 **If you have opted into usage weighting, some customer health scores will go down after this
