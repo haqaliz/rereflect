@@ -8,6 +8,33 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Fixed — Product-usage metrics now track elapsed time
+
+**If you have opted into usage weighting, some customer health scores will go down after this
+upgrade. That is a correction, not a regression** — those scores were overstated.
+
+The rolling-window fields on a customer's usage rollup (`active_days_7d/30d`,
+`login_count_7d/30d`) were only ever recomputed when a new usage event arrived. For a customer
+whose product usage slowed or stopped, they stayed frozen at their last-event values
+indefinitely — only the recency signal decayed. Two consequences:
+
+- **Health scores were inflated** for quiet customers, because the frequency part of the usage
+  score (30% of it) kept reporting activity that had long since stopped.
+- **The `silent_churner` segment could never fire.** It requires fewer than 5 active days in the
+  last 30, and that number never fell. The segment built specifically to surface silent
+  customers was unreachable for exactly those customers; they showed up as `dormant` instead.
+
+The daily 04:00 UTC recompute now re-derives these windows against the current time, so a
+customer who goes quiet — or merely slows down — is reflected in their usage score, health
+score, and segment.
+
+**Orgs that have not opted into usage weighting are unaffected.** The usage weight defaults to
+0, and health scores in that case are byte-identical before and after; this is locked by a
+characterization test.
+
+Also adds an `active_days_14d` window field (nullable, populated on the first daily run after
+upgrade; no backfill and no migration downtime).
+
 ### Added — Single sign-on (OIDC)
 
 Self-hosted deployments can now wire in their own identity provider for login. It sits **alongside**
