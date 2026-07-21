@@ -388,9 +388,41 @@ profile — giving you a real engagement signal alongside feedback-based health 
    and active-days.
 
 4. **Optionally factor usage into health scores**: go to
-   **Settings → Preferences** and raise the **Usage Activity** weight above 0
-   (the five weights must sum to 100). The default is 0 so existing scores are
+   **Settings → AI → Health Score Weights** and raise the **Usage Activity** weight above 0
+   (all six weights must sum to 100). The default is 0 so existing scores are
    unchanged until you opt in.
+
+### Usage trend (decline detection)
+
+Once usage events are flowing, Rereflect tracks the **direction** of a customer's engagement,
+not just its current level. The **Usage Activity** card shows a trend state:
+
+- **Stable** — engagement is holding steady (or rising).
+- **Declining** / **Sharp Decline** — the customer's active-days over the last two weeks have
+  fallen meaningfully versus their *own* activity about two weeks earlier, shown with the signed
+  percentage change. This is the case a level-only score misses: a customer disengaging while
+  still nominally active.
+- **Warming up** — the trend needs about two weeks of daily history before it can report. A
+  freshly-installed instance shows "Warming up" for its first ~2 weeks. **This is expected, not a
+  fault** — there is no back-fill; history accumulates one daily snapshot at a time.
+
+When you have opted into usage weighting (step 4), a declining trend applies a small, bounded
+penalty to the **usage component of the health score only**. It never affects churn probability
+or its calibration.
+
+**Honest caveats.** This is a heuristic decline signal computed on your own data — there is no
+accuracy-lift claim, and nothing is compared across tenants. A company-wide event (a holiday, a
+seasonal lull) can read as a decline for many customers at once; per-org tuning and seasonality
+handling are not yet implemented.
+
+> **Upgrade note.** This release also corrected a defect where a customer's activity counters
+> stopped decaying once they went quiet. If you had already opted into usage weighting, some
+> health scores will **drop** after upgrading — those scores were previously overstated. Scores
+> for organizations at the default usage weight of 0 are unchanged. Because a lower score can
+> cross a risk-level boundary, the **first daily recompute after upgrade may fire a burst of
+> health-drop alerts and health/risk automation runs** for customers whose scores were inflated —
+> all correct, but arriving at once. If you run automations on health score or risk level,
+> consider pausing them for the first daily cycle after upgrade.
 
 ### Schema reference
 

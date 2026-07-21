@@ -23,6 +23,7 @@ from .feedback_workflow_event import FeedbackWorkflowEvent
 from .assignment_rule import AssignmentRule
 from .customer_health import CustomerHealth
 from .customer_health_history import CustomerHealthHistory
+from .customer_usage_history import CustomerUsageHistory
 from .customer_analysis_action import CustomerAnalysisAction
 from .dashboard_layout import UserDashboardLayout
 from .org_api_key import OrgApiKey
@@ -90,6 +91,7 @@ __all__ = [
     "AssignmentRule",
     "CustomerHealth",
     "CustomerHealthHistory",
+    "CustomerUsageHistory",
     "CustomerAnalysisAction",
     "UserDashboardLayout",
     "OrgApiKey",

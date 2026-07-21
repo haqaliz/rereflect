@@ -21,20 +21,21 @@ export interface CustomCategoryUpdate {
   is_active?: boolean;
 }
 
+/** All six weights the backend persists (`categories.py` `HealthWeightsUpdate`), summing to 100.
+ *  `usage` is 0 until an operator opts in via Settings → AI → Health Score Weights.
+ *  `crm` is not surfaced as an editable field anywhere in the UI, but must still round-trip
+ *  through every read/write of this type — omitting it on a PUT zeros it server-side (D4). */
 export interface HealthWeights {
   churn: number;
   sentiment: number;
   resolution: number;
   frequency: number;
+  usage: number;
+  crm: number;
 }
 
-/** Extended response that includes the usage-activity weight returned by the backend.
- *  The four base weights (churn/sentiment/resolution/frequency) remain in `HealthWeights`
- *  so existing callers (e.g. HealthWeightsEditor) are unaffected.
- *  `usage` is 0 until an operator opts in via Settings → Preferences. */
-export interface HealthWeightsResponse extends HealthWeights {
-  usage: number;
-}
+/** Response from GET /health-weights. Identical shape to `HealthWeights` on the wire. */
+export type HealthWeightsResponse = HealthWeights;
 
 export const categoriesAPI = {
   list: async (categoryType?: string): Promise<CustomCategory[]> => {

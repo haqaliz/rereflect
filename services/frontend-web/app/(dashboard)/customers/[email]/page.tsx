@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, Eye, Square, CheckSquare, X, Flag, UserX } from 'lucide-react';
+import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, TrendingDown, Eye, Square, CheckSquare, X, Flag, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { customersAPI, CustomerProfileData, ActionItem } from '@/lib/api/customers';
@@ -108,6 +108,39 @@ function getUrgencyStyle(urgency: string) {
     default:
       return { color: 'var(--muted-foreground)', label: urgency, icon: Clock };
   }
+}
+
+function getUsageTrendStyle(state: string) {
+  switch (state) {
+    case 'stable':
+      return {
+        label: 'Stable',
+        icon: CheckCircle2,
+        color: 'var(--chart-5)',
+        bgTint: 'color-mix(in oklch, var(--chart-5) 8%, transparent)',
+      };
+    case 'declining':
+      return {
+        label: 'Declining',
+        icon: TrendingDown,
+        color: 'var(--chart-2)',
+        bgTint: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
+      };
+    case 'sharp_decline':
+      return {
+        label: 'Sharp Decline',
+        icon: AlertTriangle,
+        color: 'var(--destructive)',
+        bgTint: 'color-mix(in oklch, var(--destructive) 12%, transparent)',
+      };
+    default:
+      return null;
+  }
+}
+
+function formatSignedPct(pct: number): string {
+  const rounded = Math.round(pct * 10) / 10;
+  return rounded > 0 ? `+${rounded}%` : `${rounded}%`;
 }
 
 function getAnalysisTypeStyle(analysisType: string | null) {
@@ -473,7 +506,58 @@ function FlagDialog({ open, onOpenChange, healthScore }: FlagDialogProps) {
 
 // ─── Usage Activity Card ────────────────────────────────────────────────────
 
-function UsageActivityCard({ email }: { email: string }) {
+// Trend fields ride on the customer profile response (GET /{email}), not on
+// the card's own getUsage query — see lib/api/customers.ts. That query has no
+// `days` param, so the rendered trend is unaffected by the embedded
+// UsageTimeline's 30/60/90d period selector by construction.
+function UsageTrendIndicator({ state, pct }: { state: string; pct: number | null }) {
+  if (state === 'insufficient_history') {
+    return (
+      <div
+        data-testid="usage-trend-insufficient_history"
+        className="flex items-start gap-2 text-sm rounded-md px-3 py-2 w-fit"
+        style={{
+          color: 'var(--muted-foreground)',
+          backgroundColor: 'color-mix(in oklch, var(--muted-foreground) 8%, transparent)',
+        }}
+      >
+        <Clock className="w-4 h-4 mt-0.5 shrink-0" />
+        <div>
+          <p className="font-medium text-foreground">Warming up</p>
+          <p className="text-xs text-muted-foreground">
+            Usage trend needs about two weeks of history before it can be shown.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const style = getUsageTrendStyle(state);
+  if (!style) return null;
+  const Icon = style.icon;
+
+  return (
+    <div
+      data-testid={`usage-trend-${state}`}
+      className="flex items-center gap-2 text-sm rounded-md px-3 py-2 w-fit"
+      style={{ color: style.color, backgroundColor: style.bgTint }}
+    >
+      <Icon className="w-4 h-4 shrink-0" />
+      <span className="font-medium">{style.label}</span>
+      {pct !== null && <span className="font-mono">{formatSignedPct(pct)}</span>}
+    </div>
+  );
+}
+
+function UsageActivityCard({
+  email,
+  usageTrendState,
+  usageTrendPct,
+}: {
+  email: string;
+  usageTrendState?: string | null;
+  usageTrendPct?: number | null;
+}) {
   const [days, setDays] = useState(30);
 
   const { data, isLoading } = useQuery({
@@ -517,24 +601,29 @@ function UsageActivityCard({ email }: { email: string }) {
             to start tracking engagement.
           </p>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground">Last Active</p>
-              <p className="font-medium">{relativeTime(rollup?.last_active_at ?? null)}</p>
+          <>
+            {usageTrendState != null && (
+              <UsageTrendIndicator state={usageTrendState} pct={usageTrendPct ?? null} />
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground">Last Active</p>
+                <p className="font-medium">{relativeTime(rollup?.last_active_at ?? null)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Logins (30d)</p>
+                <p className="font-mono font-medium">{rollup?.login_count_30d ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Active Days (30d)</p>
+                <p className="font-mono font-medium">{rollup?.active_days_30d ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Features Used</p>
+                <p className="font-mono font-medium">{rollup?.distinct_feature_count ?? 0}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Logins (30d)</p>
-              <p className="font-mono font-medium">{rollup?.login_count_30d ?? 0}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Active Days (30d)</p>
-              <p className="font-mono font-medium">{rollup?.active_days_30d ?? 0}</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Features Used</p>
-              <p className="font-mono font-medium">{rollup?.distinct_feature_count ?? 0}</p>
-            </div>
-          </div>
+          </>
         )}
         <UsageTimeline email={email} />
       </CardContent>
@@ -799,7 +888,11 @@ export default function CustomerProfilePage() {
             </Card>
 
             {/* Usage Activity */}
-            <UsageActivityCard email={profile.customer_email} />
+            <UsageActivityCard
+              email={profile.customer_email}
+              usageTrendState={profile.usage_trend_state}
+              usageTrendPct={profile.usage_trend_pct}
+            />
 
             {/* LLM Analysis */}
             <LLMSection

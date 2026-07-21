@@ -91,6 +91,7 @@ const copilotBullets = [
 const customer360Bullets = [
   'Health score dashboard',
   '9-factor churn risk',
+  'Product-usage decline detection',
   'Unified activity timeline — feedback, usage & churn',
   'Automated recovery alerts',
   'Push health scores back to your CRM (HubSpot)',

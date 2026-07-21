@@ -8,6 +8,81 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Added — Product-usage trend as a churn signal
+
+Rereflect now detects when a customer's product engagement is **declining**, not just whether
+it's currently high or low — the case where a customer is quietly disengaging while still
+nominally active, which the health score previously couldn't see.
+
+- Each customer carries a **usage trend** — Stable, Declining, or Sharp Decline — derived daily
+  by comparing their active-days over the last two weeks against their *own* activity about two
+  weeks earlier. It shows on the **Usage Activity** card on the customer profile, with the signed
+  change.
+- A declining trend applies a **bounded penalty to the usage component of the health score** (and
+  only that component). It never touches churn probability or its calibration — those remain
+  driven by feedback signals, so existing churn models are unaffected.
+- **Warm-up is honest.** The trend needs about two weeks of daily history before it can say
+  anything; until then a customer shows **"Warming up"** rather than a fabricated "stable". A
+  fresh install therefore shows warm-up for its first ~2 weeks — that's expected, not a fault.
+- History is stored in a new bounded, self-pruning table (180-day retention), so it can't grow
+  without limit.
+
+This is a heuristic decline signal on your own data, stated as such — no accuracy-lift claim, and
+nothing is shared across tenants. A company-wide holiday can read as a decline; per-org tuning and
+seasonality handling are future work.
+
+### Fixed — Health-score weights: usage is now editable, and saving no longer wipes usage/CRM
+
+The **Settings → AI → Health Score Weights** editor showed four weights but the health score has
+six components (the usage and CRM weights were added with the product-usage and CRM-enrichment
+features). Two consequences, both now fixed:
+
+- **You can now set the Usage Activity weight from the UI.** Previously it could only be changed
+  through the API, and the in-app instructions pointed at a page that had no weight editor.
+- **Saving weights no longer silently resets your usage and CRM weights to 0.** Because the save
+  only sent four of the six weights, any usage or CRM weight you had configured was wiped on the
+  next save — with a success message and no warning. The editor now sends all six, and the
+  "must sum to 100" total counts all six.
+
+If a weights load fails, saving is now blocked rather than proceeding from defaults — so a
+transient error can't overwrite a configured weight with 0.
+
+### Fixed — Product-usage metrics now track elapsed time
+
+**If you have opted into usage weighting, some customer health scores will go down after this
+upgrade. That is a correction, not a regression** — those scores were overstated.
+
+The rolling-window fields on a customer's usage rollup (`active_days_7d/30d`,
+`login_count_7d/30d`) were only ever recomputed when a new usage event arrived. For a customer
+whose product usage slowed or stopped, they stayed frozen at their last-event values
+indefinitely — only the recency signal decayed. Two consequences:
+
+- **Health scores were inflated** for quiet customers, because the frequency part of the usage
+  score (30% of it) kept reporting activity that had long since stopped.
+- **The `silent_churner` segment could never fire.** It requires fewer than 5 active days in the
+  last 30, and that number never fell. The segment built specifically to surface silent
+  customers was unreachable for exactly those customers; they showed up as `dormant` instead.
+
+The daily 04:00 UTC recompute now re-derives these windows against the current time, so a
+customer who goes quiet — or merely slows down — is reflected in their usage score, health
+score, and segment.
+
+**Orgs that have not opted into usage weighting are unaffected.** The usage weight defaults to
+0, and health scores in that case are byte-identical before and after; this is locked by a
+characterization test.
+
+> **If you have opted in, read this before upgrading.** The correction can move a customer's
+> `risk_level` (in our test fixture, `moderate` → `at_risk`), not just their numeric score. A
+> risk-level downgrade is on its own sufficient to dispatch a health-drop alert, and
+> `health_score_threshold` / `churn_risk_level_change` automation rules key off the same
+> transitions. So the **first daily recompute after upgrading may produce a burst of alerts and
+> automation runs** for customers whose scores were previously inflated — correct outcomes, all
+> at once. If you run automations against health or risk level, consider pausing them for the
+> first run after upgrade.
+
+Also adds an `active_days_14d` window field (nullable, populated on the first daily run after
+upgrade; no backfill and no migration downtime).
+
 ### Added — Single sign-on (OIDC)
 
 Self-hosted deployments can now wire in their own identity provider for login. It sits **alongside**

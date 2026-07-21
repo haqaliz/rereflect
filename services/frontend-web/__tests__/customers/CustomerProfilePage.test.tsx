@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Mock next/navigation
@@ -327,6 +327,165 @@ describe('CustomerProfilePage - tags + CS owner', () => {
     await waitFor(() => {
       expect(screen.getByText('Unassigned')).toBeInTheDocument();
     });
+  });
+});
+
+describe('CustomerProfilePage - usage trend (Usage Activity card)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: vi.fn(() => 'mock-token'), setItem: vi.fn(), removeItem: vi.fn() },
+      writable: true,
+    });
+    (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
+    (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
+    (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getTimeline as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [], next_cursor: null });
+    // Card's own getUsage query — has usage activity, but carries no trend fields
+    // (the trend rides on the profile response; see lib/api/customers.ts).
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rollup: {
+        customer_email: 'john@acme.com',
+        usage_score: 65,
+        events_total: 5,
+        last_active_at: '2026-06-01T10:00:00Z',
+        first_seen_at: '2026-01-01T00:00:00Z',
+        login_count_7d: 3,
+        login_count_30d: 12,
+        active_days_7d: 3,
+        active_days_30d: 9,
+        distinct_features: ['dashboard'],
+        distinct_feature_count: 1,
+        updated_at: '2026-06-01T10:00:00Z',
+      },
+      time_series: [{ date: '2026-06-01', event_count: 5 }],
+      period_days: 30,
+    });
+  });
+
+  it('renders a declining indicator with the signed percentage (AC 1)', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      usage_trend_state: 'declining',
+      usage_trend_pct: -45,
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('usage-trend-declining')).toBeInTheDocument();
+    });
+    const el = screen.getByTestId('usage-trend-declining');
+    expect(within(el).getByText(/declining/i)).toBeInTheDocument();
+    expect(within(el).getByText('-45%')).toBeInTheDocument();
+  });
+
+  it('renders sharp_decline as a visually distinct, stronger state than declining (AC 2)', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      usage_trend_state: 'sharp_decline',
+      usage_trend_pct: -72,
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('usage-trend-sharp_decline')).toBeInTheDocument();
+    });
+    const el = screen.getByTestId('usage-trend-sharp_decline');
+    expect(within(el).getByText(/sharp decline/i)).toBeInTheDocument();
+    expect(within(el).getByText('-72%')).toBeInTheDocument();
+    expect(screen.queryByTestId('usage-trend-declining')).not.toBeInTheDocument();
+  });
+
+  it('renders a stable state and no decline warning (AC 3)', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      usage_trend_state: 'stable',
+      usage_trend_pct: 4,
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('usage-trend-stable')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/declining/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sharp decline/i)).not.toBeInTheDocument();
+  });
+
+  it('renders an explicit "Warming up" state with no percentage when insufficient_history (AC 4)', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      usage_trend_state: 'insufficient_history',
+      usage_trend_pct: null,
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('usage-trend-insufficient_history')).toBeInTheDocument();
+    });
+    const el = screen.getByTestId('usage-trend-insufficient_history');
+    expect(within(el).getByText(/warming up/i)).toBeInTheDocument();
+    expect(el.textContent).toMatch(/two weeks/i);
+    expect(el.textContent).not.toMatch(/%/);
+  });
+
+  it('shows the no-usage empty state, not the warm-up state, when the customer has no usage at all (AC 5)', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      usage_trend_state: 'insufficient_history',
+      usage_trend_pct: null,
+    });
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rollup: {
+        customer_email: 'john@acme.com',
+        usage_score: 50,
+        events_total: 0,
+        last_active_at: null,
+        first_seen_at: null,
+        login_count_7d: 0,
+        login_count_30d: 0,
+        active_days_7d: 0,
+        active_days_30d: 0,
+        distinct_features: null,
+        distinct_feature_count: 0,
+        updated_at: null,
+      },
+      time_series: [],
+      period_days: 30,
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByText(/No product-usage events recorded yet/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('usage-trend-insufficient_history')).not.toBeInTheDocument();
+  });
+
+  it('renders without crashing and without inventing a trend state when usage_trend_state is absent — older backend (AC 6)', async () => {
+    // mockProfile carries no usage_trend_state/usage_trend_pct keys at all.
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(mockProfile);
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByText('John Doe')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId(/usage-trend-/)).not.toBeInTheDocument();
+  });
+
+  it('does not change the rendered trend when the embedded UsageTimeline period is switched to 60d (AC 7)', async () => {
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      usage_trend_state: 'declining',
+      usage_trend_pct: -45,
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('usage-trend-declining')).toBeInTheDocument();
+    });
+
+    // Scope to the embedded UsageTimeline's own period selector — HealthTimeline
+    // (rendered earlier on the page) has an identically-labelled 30/60/90d control.
+    const usageControls = screen.getByText('Product Usage Over Time').parentElement as HTMLElement;
+    fireEvent.click(within(usageControls).getByRole('button', { name: '60d' }));
+
+    await waitFor(() => {
+      expect(customersAPI.getUsage).toHaveBeenCalledWith('john@acme.com', 60);
+    });
+    const el = screen.getByTestId('usage-trend-declining');
+    expect(within(el).getByText('-45%')).toBeInTheDocument();
   });
 });
 

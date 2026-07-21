@@ -207,12 +207,12 @@ export default function UsageEventsPage() {
             </li>
             <li>
               To factor usage into the health score, go to{' '}
-              <Link href="/settings/preferences" className="underline underline-offset-2">
-                Settings → Preferences
+              <Link href="/settings/ai" className="underline underline-offset-2">
+                Settings → AI → Health Score Weights
               </Link>{' '}
               and raise the{' '}
-              <strong className="text-foreground">Usage Activity</strong> weight above 0 (the
-              five weights must sum to 100).
+              <strong className="text-foreground">Usage Activity</strong> weight above 0 (all
+              six weights must sum to 100).
             </li>
           </ol>
           <p className="text-xs pt-2">

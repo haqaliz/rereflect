@@ -186,6 +186,14 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.automation.purge_old_automation_executions",
         "schedule": crontab(hour=2, minute=30, day_of_week=0),
     },
+    # Purge usage-history snapshots older than USAGE_HISTORY_RETENTION_DAYS
+    # (180 days) — weekly on Sunday at 2:45 AM (free slot between
+    # purge-old-automation-executions at 2:30 and purge-playbook-executions
+    # at 3:00).
+    "purge-old-usage-history": {
+        "task": "src.tasks.usage_metrics.purge_old_usage_history",
+        "schedule": crontab(hour=2, minute=45, day_of_week=0),
+    },
     # Purge churn playbook execution logs older than 90 days — Sundays 03:00 UTC
     "purge-playbook-executions": {
         "task": "tasks.churn_playbooks.purge_old_executions",
