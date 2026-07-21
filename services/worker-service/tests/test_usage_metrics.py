@@ -586,19 +586,44 @@ class TestRecomputeUsageScores:
         """
         A customer who was very recently active and already has the correct
         score should NOT be marked as updated.
+
+        The fixture is backed by real usage_event rows (not just hand-set
+        window fields) so that window re-derivation is a genuine no-op —
+        otherwise this would just be another instance of the honesty bug
+        the RED test in this class exists to catch (see
+        test_stale_rollup_score_drops_on_recompute).
         """
         from src.services.usage_score_service import compute_usage_score
 
         org = _make_org(db)
+        email = "fresh@example.com"
+
+        # 5 distinct days within the last 7 days (one event each).
+        recent_days = [0, 1, 2, 3, 4]
+        # 15 more distinct days within the 30-day window, kept well clear of
+        # the 14-day cutoff (>=15 days ago) so active_days_14d == 5 with no
+        # boundary-timing flakiness between the two utcnow() calls.
+        older_days = list(range(15, 30))
+
+        for day in recent_days + older_days:
+            _make_event(
+                db, org.id,
+                email=email,
+                external_event_id=f"evt-fresh-{day}",
+                event_name="feat-a",
+                days_ago=day,
+            )
+
         rollup = CustomerUsage(
             organization_id=org.id,
-            customer_email="fresh@example.com",
+            customer_email=email,
             last_active_at=datetime.utcnow() - timedelta(hours=6),
             active_days_30d=20,
+            active_days_14d=5,
             active_days_7d=5,
-            distinct_feature_count=5,
-            distinct_features=["a", "b", "c", "d", "e"],
-            login_count_7d=10,
+            distinct_feature_count=1,
+            distinct_features=["feat-a"],
+            login_count_7d=5,
             login_count_30d=20,
             events_total=30,
             first_seen_at=datetime.utcnow() - timedelta(days=60),

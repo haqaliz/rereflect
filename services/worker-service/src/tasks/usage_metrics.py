@@ -53,13 +53,16 @@ def _compute_rollup_from_events(
     dict with keys matching CustomerUsage columns.
     """
     cutoff_7d = now - timedelta(days=7)
+    cutoff_14d = now - timedelta(days=14)
     cutoff_30d = now - timedelta(days=30)
 
     events_7d = [e for e in events if e.occurred_at and e.occurred_at >= cutoff_7d]
+    events_14d = [e for e in events if e.occurred_at and e.occurred_at >= cutoff_14d]
     events_30d = [e for e in events if e.occurred_at and e.occurred_at >= cutoff_30d]
 
     # Distinct calendar days with at least one event
     active_days_7d = len(set(e.occurred_at.date() for e in events_7d if e.occurred_at))
+    active_days_14d = len(set(e.occurred_at.date() for e in events_14d if e.occurred_at))
     active_days_30d = len(set(e.occurred_at.date() for e in events_30d if e.occurred_at))
 
     # Login/activity counts: any track or identify event counts as activity
@@ -81,11 +84,53 @@ def _compute_rollup_from_events(
         "last_active_at": last_active_at,
         "first_seen_at": first_seen_at,
         "active_days_7d": active_days_7d,
+        "active_days_14d": active_days_14d,
         "active_days_30d": active_days_30d,
         "login_count_7d": login_count_7d,
         "login_count_30d": login_count_30d,
         "distinct_features": distinct_features,
         "distinct_feature_count": distinct_feature_count,
+    }
+
+
+def _rederive_windows(db, org_id: int, customer_email: str, now: datetime) -> dict:
+    """
+    Re-derive ONLY the rolling-window fields for a customer against ``now``,
+    from a bounded (30-day) ``usage_event`` read.
+
+    This deliberately does NOT read the customer's full event history — the
+    daily recompute does not need lifetime aggregates, and feeding a bounded
+    event list through ``_compute_rollup_from_events`` would silently
+    truncate ``events_total``, ``first_seen_at``, and ``distinct_features``
+    if the full returned dict were written back (see plan §6.1). Callers
+    must assign only the keys returned here.
+
+    Returns
+    -------
+    dict with exactly: active_days_7d, active_days_14d, active_days_30d,
+    login_count_7d, login_count_30d.
+    """
+    from src.models import UsageEvent
+
+    cutoff_30d = now - timedelta(days=30)
+    events_30d = (
+        db.query(UsageEvent)
+        .filter(
+            UsageEvent.organization_id == org_id,
+            UsageEvent.customer_email == customer_email,
+            UsageEvent.occurred_at != None,  # noqa: E711 — preserve NULL guard
+            UsageEvent.occurred_at >= cutoff_30d,
+        )
+        .all()
+    )
+
+    fields = _compute_rollup_from_events(events_30d, now)
+    return {
+        "active_days_7d": fields["active_days_7d"],
+        "active_days_14d": fields["active_days_14d"],
+        "active_days_30d": fields["active_days_30d"],
+        "login_count_7d": fields["login_count_7d"],
+        "login_count_30d": fields["login_count_30d"],
     }
 
 
@@ -114,6 +159,7 @@ def _upsert_rollup(db, org_id: int, customer_email: str, fields: dict, usage_sco
     rollup.events_total = fields["events_total"]
     rollup.last_active_at = fields["last_active_at"]
     rollup.active_days_7d = fields["active_days_7d"]
+    rollup.active_days_14d = fields["active_days_14d"]
     rollup.active_days_30d = fields["active_days_30d"]
     rollup.login_count_7d = fields["login_count_7d"]
     rollup.login_count_30d = fields["login_count_30d"]
@@ -333,10 +379,18 @@ def recompute_usage_scores() -> Dict[str, int]:
 
         for row in rows:
             total += 1
+
+            windows = _rederive_windows(db, row.organization_id, row.customer_email, now)
+            windows_changed = any(
+                getattr(row, field) != value for field, value in windows.items()
+            )
+            for field, value in windows.items():
+                setattr(row, field, value)
+
             new_score = compute_usage_score(row, now=now)
             old_score = row.usage_score if row.usage_score is not None else 50
 
-            if new_score == old_score:
+            if new_score == old_score and not windows_changed:
                 continue
 
             row.usage_score = new_score
