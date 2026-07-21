@@ -32,6 +32,15 @@ score, and segment.
 0, and health scores in that case are byte-identical before and after; this is locked by a
 characterization test.
 
+> **If you have opted in, read this before upgrading.** The correction can move a customer's
+> `risk_level` (in our test fixture, `moderate` → `at_risk`), not just their numeric score. A
+> risk-level downgrade is on its own sufficient to dispatch a health-drop alert, and
+> `health_score_threshold` / `churn_risk_level_change` automation rules key off the same
+> transitions. So the **first daily recompute after upgrading may produce a burst of alerts and
+> automation runs** for customers whose scores were previously inflated — correct outcomes, all
+> at once. If you run automations against health or risk level, consider pausing them for the
+> first run after upgrade.
+
 Also adds an `active_days_14d` window field (nullable, populated on the first daily run after
 upgrade; no backfill and no migration downtime).
 
