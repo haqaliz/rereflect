@@ -33,6 +33,10 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
         churn_risk_component, sentiment_component, resolution_component,
         frequency_component, usage_component
 
+    Usage trend (trend-detection-and-health aspect)
+        usage_trend_state, usage_trend_pct — both None when no
+        customer_usage row exists for this customer.
+
     Churn prediction
         churn_probability, churn_probability_low, churn_probability_high,
         time_to_churn_bucket
@@ -86,6 +90,8 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
         "llm_analysis": record.llm_analysis,        # legacy text field
         # ── CRM enrichment (HubSpot / Salesforce) ────────────────────────────
         **_read_crm_fields(record, db),
+        # ── Usage trend (trend-detection-and-health aspect) ──────────────────
+        **_read_usage_trend_fields(record, db),
     }
 
 
@@ -129,4 +135,56 @@ def _read_crm_fields(record: CustomerHealth, db) -> dict:
         "crm_deal_stage":      crm.deal_stage      if crm else None,
         "crm_deal_amount":     _f(crm.deal_amount)  if crm else None,
         "crm_provider":        crm.provider        if crm else None,
+    }
+
+
+def _read_usage_trend_fields(record: CustomerHealth, db) -> dict:
+    """Read usage-trend fields (trend-detection-and-health aspect) for this
+    customer; both None when unavailable.
+
+    Contract: this function NEVER raises. Same SAVEPOINT pattern as
+    _read_crm_fields — a missing customer_usage table/row (or a raising
+    query) cannot abort the outer transaction and must not 500 the endpoint
+    (AC 16).
+
+    Stated choice (AC 16's "or NULL, per the tech-plan's stated choice"): a
+    customer with NO customer_usage row returns usage_trend_state = None
+    (not the string "insufficient_history") — mirroring how usage_component
+    is already None (not 50) when uncollected, rather than the neutral
+    fallback value used elsewhere. A row that exists always carries a real
+    state string (server_default 'insufficient_history'), so None here
+    unambiguously means "no rollup at all", distinct from "rollup exists but
+    hasn't warmed up yet".
+    """
+    trend_state = None
+    trend_pct = None
+
+    if db is not None:
+        from sqlalchemy import text
+        sp = db.begin_nested()  # SAVEPOINT — isolates this read from the outer transaction
+        try:
+            row = db.execute(
+                text(
+                    "SELECT usage_trend_state, usage_trend_pct FROM customer_usage "
+                    "WHERE organization_id = :org_id AND customer_email = :email "
+                    "ORDER BY updated_at DESC LIMIT 1"
+                ),
+                {"org_id": record.organization_id, "email": record.customer_email},
+            ).fetchone()
+            sp.commit()
+            if row is not None:
+                trend_state, trend_pct = row[0], row[1]
+        except Exception:
+            # Table does not exist yet or any other DB error — roll back only
+            # the SAVEPOINT so the outer transaction remains usable (avoids
+            # PendingRollbackError on the next query in the same request).
+            try:
+                sp.rollback()
+            except Exception:
+                pass
+            trend_state, trend_pct = None, None
+
+    return {
+        "usage_trend_state": trend_state,
+        "usage_trend_pct": float(trend_pct) if trend_pct is not None else None,
     }

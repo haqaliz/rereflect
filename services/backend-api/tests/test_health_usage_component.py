@@ -750,3 +750,192 @@ class TestUsageWeightNonzeroCorrectsQuietCustomer:
             f"{genuine_result['health_score']} to be lower than the inflated, "
             f"pre-fix health_score {inflated_result['health_score']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# trend-detection-and-health aspect — Phase E: penalty wired into
+# _compute_usage_component (health-component only).
+# ---------------------------------------------------------------------------
+
+
+class TestComputeUsageComponentAppliesTrendPenalty:
+    """
+    _compute_usage_component must read usage_trend_state alongside
+    usage_score and return apply_trend_penalty(usage_score, trend_state) —
+    the health COMPONENT only. The stored customer_usage.usage_score row
+    value is asserted unchanged (AC 11 belongs to the wiring aspect, but the
+    read-path guarantee is checked here too for defense in depth).
+    """
+
+    def _make_rollup(self, db, org_id, email, usage_score, trend_state, trend_pct=None):
+        row = CustomerUsage(
+            organization_id=org_id,
+            customer_email=email,
+            usage_score=usage_score,
+            usage_trend_state=trend_state,
+            usage_trend_pct=trend_pct,
+            active_days_30d=10,
+            active_days_14d=5,
+            distinct_feature_count=2,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    def test_stable_trend_is_unpenalised(self, db: Session, test_organization: Organization):
+        self._make_rollup(db, test_organization.id, "trend_stable@example.com", 80, "stable")
+        result = _compute_usage_component(
+            db, test_organization.id, "trend_stable@example.com", datetime.utcnow()
+        )
+        assert result == 80
+
+    def test_insufficient_history_is_unpenalised(self, db: Session, test_organization: Organization):
+        self._make_rollup(
+            db, test_organization.id, "trend_insuff@example.com", 80, "insufficient_history"
+        )
+        result = _compute_usage_component(
+            db, test_organization.id, "trend_insuff@example.com", datetime.utcnow()
+        )
+        assert result == 80
+
+    def test_declining_trend_applies_named_penalty(self, db: Session, test_organization: Organization):
+        from src.services.usage_score_service import TREND_PENALTY_DECLINING
+
+        self._make_rollup(db, test_organization.id, "trend_declining@example.com", 80, "declining")
+        result = _compute_usage_component(
+            db, test_organization.id, "trend_declining@example.com", datetime.utcnow()
+        )
+        assert result == 80 - TREND_PENALTY_DECLINING
+
+    def test_sharp_decline_trend_applies_named_penalty(self, db: Session, test_organization: Organization):
+        from src.services.usage_score_service import TREND_PENALTY_SHARP_DECLINE
+
+        self._make_rollup(db, test_organization.id, "trend_sharp@example.com", 80, "sharp_decline")
+        result = _compute_usage_component(
+            db, test_organization.id, "trend_sharp@example.com", datetime.utcnow()
+        )
+        assert result == 80 - TREND_PENALTY_SHARP_DECLINE
+
+    def test_stored_usage_score_row_untouched_by_penalty_read(
+        self, db: Session, test_organization: Organization
+    ):
+        """AC 11 (read-path guarantee): computing the penalised health
+        component must never write back to customer_usage.usage_score."""
+        row = self._make_rollup(db, test_organization.id, "trend_readonly@example.com", 80, "sharp_decline")
+        _compute_usage_component(
+            db, test_organization.id, "trend_readonly@example.com", datetime.utcnow()
+        )
+        db.expire(row)
+        db.refresh(row)
+        assert row.usage_score == 80
+
+
+class TestComputeUsageComponentFallbackNeverPenalised:
+    """AC 8 (explicit): the neutral 50 fallback is returned UNPENALISED,
+    regardless of any trend value — because the fallback path is only ever
+    reached when NO real rollup row was read (missing table, missing row, or
+    a raising query), so there is no trend value to apply a penalty from."""
+
+    def test_missing_row_returns_50_not_penalised(
+        self, db: Session, test_organization: Organization
+    ):
+        result = _compute_usage_component(
+            db, test_organization.id, "no_such_customer@example.com", datetime.utcnow()
+        )
+        assert result == 50
+
+    def test_raising_query_returns_50_not_penalised(
+        self, db: Session, test_organization: Organization
+    ):
+        """Even if the underlying query raises (simulated), the fallback
+        is exactly 50 — never adjusted by any would-be trend value."""
+        with patch.object(db, "execute", side_effect=Exception("simulated DB error")):
+            result = _compute_usage_component(
+                db, test_organization.id, "raises@example.com", datetime.utcnow()
+            )
+        assert result == 50
+
+
+# ---------------------------------------------------------------------------
+# trend-detection-and-health aspect — AC 9: byte-stability at usage weight 0
+# extended across all four trend states.
+# ---------------------------------------------------------------------------
+
+
+class TestByteStabilityAtUsageWeightZeroAcrossTrendStates:
+    """
+    Extends TestByteStabilityAtUsageWeightZero: with health_weight_usage=0,
+    compute_health_score() must be IDENTICAL across customers whose
+    usage_trend_state is insufficient_history, stable, declining, or
+    sharp_decline — trend only ever reaches the health score through the
+    usage component, and that component's weight is 0.
+    """
+
+    STABLE_EMAIL = "trend_byte_stable@example.com"
+    DECLINING_EMAIL = "trend_byte_declining@example.com"
+    SHARP_EMAIL = "trend_byte_sharp@example.com"
+    INSUFFICIENT_EMAIL = "trend_byte_insufficient@example.com"
+    NOW = datetime(2026, 6, 1, 12, 0, 0)
+
+    @pytest.fixture(autouse=True)
+    def seed(self, db: Session, test_organization: Organization):
+        for email in (
+            self.STABLE_EMAIL, self.DECLINING_EMAIL, self.SHARP_EMAIL, self.INSUFFICIENT_EMAIL,
+        ):
+            _seed_feedback_trio(db, test_organization.id, email)
+
+        config = OrgAIConfig(
+            organization_id=test_organization.id,
+            health_weight_churn=35,
+            health_weight_sentiment=25,
+            health_weight_resolution=25,
+            health_weight_frequency=15,
+            health_weight_usage=0,
+            health_weight_crm=0,
+        )
+        db.add(config)
+        db.commit()
+
+        for email, trend_state in (
+            (self.STABLE_EMAIL, "stable"),
+            (self.DECLINING_EMAIL, "declining"),
+            (self.SHARP_EMAIL, "sharp_decline"),
+            (self.INSUFFICIENT_EMAIL, "insufficient_history"),
+        ):
+            row = CustomerUsage(
+                organization_id=test_organization.id,
+                customer_email=email,
+                last_active_at=self.NOW - timedelta(days=1),
+                active_days_7d=6, active_days_14d=12, active_days_30d=25,
+                login_count_7d=9, login_count_30d=40,
+                distinct_feature_count=5,
+                usage_trend_state=trend_state,
+                usage_trend_pct=-40.0 if trend_state != "stable" else 0.0,
+            )
+            row.usage_score = compute_usage_score(row, now=self.NOW)
+            db.add(row)
+        db.commit()
+
+    def test_health_score_identical_regardless_of_trend_state(
+        self, db: Session, test_organization: Organization
+    ):
+        emails = (
+            self.STABLE_EMAIL, self.DECLINING_EMAIL, self.SHARP_EMAIL, self.INSUFFICIENT_EMAIL,
+        )
+        results = {email: compute_health_score(test_organization.id, email, db) for email in emails}
+
+        # Sanity: the usage_component itself DOES move with trend state (the
+        # penalty is real), so this test isn't vacuous.
+        assert results[self.DECLINING_EMAIL]["usage_component"] < results[self.STABLE_EMAIL]["usage_component"]
+        assert results[self.SHARP_EMAIL]["usage_component"] < results[self.DECLINING_EMAIL]["usage_component"]
+
+        baseline_score = results[self.STABLE_EMAIL]["health_score"]
+        for email in emails:
+            assert results[email]["health_score"] == baseline_score, email
+            for key in (
+                "churn_risk_component", "sentiment_component",
+                "resolution_component", "frequency_component",
+                "risk_level", "feedback_count", "confidence_level",
+            ):
+                assert results[email][key] == results[self.STABLE_EMAIL][key], (email, key)

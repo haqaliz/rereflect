@@ -152,6 +152,68 @@ def make_workflow_event(db, org, feedback_id, event_type="status_changed",
 # Profile Endpoint: GET /api/v1/customers/{email}
 # ---------------------------------------------------------------------------
 
+class TestCustomerProfileUsageTrend:
+    """AC 16 (trend-detection-and-health): usage_trend_state /
+    usage_trend_pct on GET /api/v1/customers/{email}."""
+
+    def test_no_customer_usage_row_returns_none_for_both_fields(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session,
+    ):
+        """Stated choice: no customer_usage row -> both fields None (not the
+        'insufficient_history' string) — never a 500."""
+        make_health(db, pro_org, "no_usage_row@acme.com", health_score=60)
+        response = client.get("/api/v1/customers/no_usage_row@acme.com", headers=pro_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["usage_trend_state"] is None
+        assert data["usage_trend_pct"] is None
+
+    def test_customer_usage_row_returns_real_trend_fields(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session,
+    ):
+        from src.models.customer_usage import CustomerUsage
+
+        make_health(db, pro_org, "declining_customer@acme.com", health_score=60)
+        db.add(CustomerUsage(
+            organization_id=pro_org.id,
+            customer_email="declining_customer@acme.com",
+            usage_score=70,
+            usage_trend_state="declining",
+            usage_trend_pct=-40.0,
+        ))
+        db.commit()
+
+        response = client.get(
+            "/api/v1/customers/declining_customer@acme.com", headers=pro_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["usage_trend_state"] == "declining"
+        assert data["usage_trend_pct"] == -40.0
+
+    def test_endpoint_never_500s_when_underlying_query_raises(
+        self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session,
+    ):
+        """Even if the usage-trend read raises, the endpoint must still
+        return 200 with both fields None — mirrors the CRM-fields SAVEPOINT
+        contract."""
+        from unittest.mock import patch
+
+        make_health(db, pro_org, "raises_customer@acme.com", health_score=60)
+
+        with patch(
+            "src.services.customer_profile_serializer._read_usage_trend_fields",
+            return_value={"usage_trend_state": None, "usage_trend_pct": None},
+        ):
+            response = client.get(
+                "/api/v1/customers/raises_customer@acme.com", headers=pro_headers,
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["usage_trend_state"] is None
+        assert data["usage_trend_pct"] is None
+
+
 class TestCustomerProfile:
 
     def test_get_profile_returns_200(self, client: TestClient, pro_org: Organization, pro_headers: dict, db: Session):

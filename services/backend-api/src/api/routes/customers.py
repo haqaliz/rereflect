@@ -116,6 +116,11 @@ class CustomerProfileResponse(BaseModel):
     resolution_component: int
     frequency_component: int
     usage_component: Optional[int] = None
+    # Usage trend (trend-detection-and-health aspect): direction of this
+    # customer's active_days_14d vs. their own activity ~14 days ago. Both
+    # None when no customer_usage row exists for this customer.
+    usage_trend_state: Optional[str] = None
+    usage_trend_pct: Optional[float] = None
     # Structured LLM analysis fields
     llm_analysis_summary: Optional[str] = None
     llm_recommended_actions: Optional[List[str]] = None

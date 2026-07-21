@@ -21,8 +21,9 @@ Beat registration: see celery_app.py (``recompute-usage-scores-daily``,
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from celery import shared_task
 
@@ -275,6 +276,68 @@ def _write_usage_history_snapshots(
     return written
 
 
+def _load_trend_baselines(
+    db, customers: List[Tuple[int, str]], today: "date",
+) -> Dict[Tuple[int, str], Tuple[Optional[int], Optional[int]]]:
+    """
+    One batched query resolving every scanned customer's trend baseline
+    (trend-detection-and-health aspect).
+
+    Not per-row (spec's lookback-query-cost risk): a single SELECT against
+    ``customer_usage_history``, scoped to the calendar-date window
+    ``[today - TREND_LOOKBACK_MAX_DAYS, today - TREND_LOOKBACK_MIN_DAYS]`` —
+    every row it returns is already in-band by construction — using the
+    ``(organization_id, customer_email, snapshot_date)`` index the
+    usage-history-snapshot aspect created. Results are grouped in Python by
+    ``(organization_id, customer_email)`` and reduced via the pure
+    ``select_nearest_in_band_snapshot`` (nearest-to-target + deterministic
+    tie-break) exactly once per customer.
+
+    Returns a dict keyed by ``(organization_id, customer_email)`` ->
+    ``(baseline_active_days_14d, baseline_age_days)``. A customer absent
+    from the dict has no in-band snapshot — the caller treats a missing key
+    the same as ``(None, None)`` (-> ``insufficient_history``).
+    """
+    from src.models import CustomerUsageHistory
+    from src.services.usage_score_service import (
+        TREND_LOOKBACK_MAX_DAYS,
+        TREND_LOOKBACK_MIN_DAYS,
+        select_nearest_in_band_snapshot,
+    )
+
+    if not customers:
+        return {}
+
+    org_ids = {org_id for org_id, _ in customers}
+    earliest_date = today - timedelta(days=TREND_LOOKBACK_MAX_DAYS)
+    latest_date = today - timedelta(days=TREND_LOOKBACK_MIN_DAYS)
+
+    history_rows = (
+        db.query(
+            CustomerUsageHistory.organization_id,
+            CustomerUsageHistory.customer_email,
+            CustomerUsageHistory.snapshot_date,
+            CustomerUsageHistory.active_days_14d,
+        )
+        .filter(
+            CustomerUsageHistory.organization_id.in_(org_ids),
+            CustomerUsageHistory.snapshot_date >= earliest_date,
+            CustomerUsageHistory.snapshot_date <= latest_date,
+        )
+        .all()
+    )
+
+    candidates: Dict[Tuple[int, str], List[Tuple[int, Optional[int]]]] = defaultdict(list)
+    for org_id, email, snapshot_date, active_days_14d in history_rows:
+        age_days = (today - snapshot_date).days
+        candidates[(org_id, email)].append((age_days, active_days_14d))
+
+    return {
+        key: select_nearest_in_band_snapshot(ages)
+        for key, ages in candidates.items()
+    }
+
+
 def _do_process_usage_event(
     org_id: int,
     customer_email: Optional[str],
@@ -437,7 +500,11 @@ def recompute_usage_scores() -> Dict[str, int]:
 
     When the recomputed score changes by >= ``_HEALTH_RECOMPUTE_DELTA`` points,
     ``update_customer_health`` is also called so the health score reflects the
-    new usage component.
+    new usage component. A usage-TREND-STATE transition (trend-detection-and-
+    health aspect) also triggers ``update_customer_health``, even when the
+    score itself moved by < ``_HEALTH_RECOMPUTE_DELTA`` — otherwise the trend
+    penalty (applied downstream in health_score_service._compute_usage_component)
+    would not reach the health score until an unrelated event nudged it.
 
     After the per-row recompute loop, also writes one customer_usage_history
     snapshot row per scanned customer for today's UTC date (usage-history-
@@ -446,22 +513,32 @@ def recompute_usage_scores() -> Dict[str, int]:
     Beat schedule: daily — see celery_app.py ``recompute-usage-scores-daily``.
 
     Returns:
-        dict with ``updated`` (rows whose score changed), ``total`` (rows
-        scanned), and ``snapshot_written`` (rows newly inserted into
-        customer_usage_history — 0 on a same-day re-run, AC 3).
+        dict with ``updated`` (rows whose score/windows changed), ``total``
+        (rows scanned), ``snapshot_written`` (rows newly inserted into
+        customer_usage_history — 0 on a same-day re-run, AC 3), and
+        ``trend_updated`` (rows whose usage_trend_state/usage_trend_pct
+        changed this run).
     """
     from src.models import CustomerUsage
-    from src.services.usage_score_service import compute_usage_score
+    from src.services.usage_score_service import classify_usage_trend, compute_usage_score
 
     updated = 0
     total = 0
     snapshot_written = 0
+    trend_updated = 0
     snapshot_rows: List[Dict[str, Any]] = []
 
     with get_db_session() as db:
         rows = db.query(CustomerUsage).all()
         now = datetime.utcnow()
         today = now.date()
+
+        # trend-detection-and-health aspect: ONE batched query resolves every
+        # scanned customer's trend baseline up front (not per-row — see
+        # `_load_trend_baselines`'s docstring for the lookback-cost rationale).
+        trend_baselines = _load_trend_baselines(
+            db, [(row.organization_id, row.customer_email) for row in rows], today,
+        )
 
         for row in rows:
             total += 1
@@ -495,17 +572,43 @@ def recompute_usage_scores() -> Dict[str, int]:
                 "last_active_at": row.last_active_at,
             })
 
-            if new_score == old_score and not windows_changed:
+            # trend-detection-and-health aspect: classify + persist for EVERY
+            # scanned row — same "before any early continue" placement as the
+            # snapshot capture above, so trend state warms up daily even for
+            # customers whose score/windows didn't move. Uses row.active_days_14d
+            # AFTER the re-windowing assignment just above (current, not stale).
+            # Never touches row.usage_score (AC 11) and never reads/writes
+            # anything under health.churn_risk_component / churn_probability
+            # (AC 10) — this loop's only DB writes are to customer_usage.
+            baseline_value, baseline_age = trend_baselines.get(
+                (row.organization_id, row.customer_email), (None, None)
+            )
+            new_trend_state, new_trend_pct = classify_usage_trend(
+                row.active_days_14d, baseline_value, baseline_age,
+            )
+            trend_state_changed = new_trend_state != row.usage_trend_state
+            if trend_state_changed or new_trend_pct != row.usage_trend_pct:
+                row.usage_trend_state = new_trend_state
+                row.usage_trend_pct = new_trend_pct
+                trend_updated += 1
+
+            score_or_windows_changed = new_score != old_score or windows_changed
+            if not score_or_windows_changed and not trend_state_changed:
                 continue
 
-            row.usage_score = new_score
-            row.updated_at = now
-            updated += 1
+            if score_or_windows_changed:
+                row.usage_score = new_score
+                row.updated_at = now
+                updated += 1
 
-            if abs(new_score - old_score) >= _HEALTH_RECOMPUTE_DELTA:
+            # AC 12 — extend the health-refresh trigger: a usage_score move
+            # >= _HEALTH_RECOMPUTE_DELTA OR a genuine trend-STATE transition
+            # (not a pct-only wobble within the same state — health only
+            # reads usage_trend_state, never usage_trend_pct) refreshes health.
+            if abs(new_score - old_score) >= _HEALTH_RECOMPUTE_DELTA or trend_state_changed:
                 _call_update_health(row.organization_id, row.customer_email, db)
 
-        if updated:
+        if updated or trend_updated:
             db.commit()
 
         # Daily snapshot write — a SEPARATE transaction from the score-update
@@ -530,10 +633,15 @@ def recompute_usage_scores() -> Dict[str, int]:
             )
 
     logger.info(
-        "recompute_usage_scores: scanned=%s updated=%s snapshot_written=%s",
-        total, updated, snapshot_written,
+        "recompute_usage_scores: scanned=%s updated=%s snapshot_written=%s trend_updated=%s",
+        total, updated, snapshot_written, trend_updated,
     )
-    return {"updated": updated, "total": total, "snapshot_written": snapshot_written}
+    return {
+        "updated": updated,
+        "total": total,
+        "snapshot_written": snapshot_written,
+        "trend_updated": trend_updated,
+    }
 
 
 # ---------------------------------------------------------------------------

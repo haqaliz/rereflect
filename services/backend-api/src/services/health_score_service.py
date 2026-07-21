@@ -64,13 +64,19 @@ def _get_org_weights(org_id: int, db: Session) -> dict:
 
 def _compute_usage_component(db: Session, org_id: int, customer_email: str, now: datetime) -> int:
     """
-    Fetch the pre-computed usage_score from customer_usage rollup table.
+    Fetch the pre-computed usage_score from customer_usage rollup table and
+    apply the bounded usage-trend penalty (trend-detection-and-health
+    aspect) — health-component-only; the stored customer_usage.usage_score
+    itself is never mutated here (segment_service.py's power_user rule must
+    see the unpenalised score).
 
     Returns 50 (neutral) when:
       - The customer_usage table does not yet exist (aspect usage-rollup-and-score
         creates it later in the feature chain).
       - No rollup row exists for this customer.
       - Any other error occurs during the query.
+    The 50 fallback is returned UNPENALISED — the trend penalty only ever
+    applies when a real rollup row was read (AC 8).
 
     Contract: this function NEVER raises; it is always safe to call.
     The actual usage_score is computed by aspect `usage-rollup-and-score`.
@@ -81,11 +87,14 @@ def _compute_usage_component(db: Session, org_id: int, customer_email: str, now:
              component functions (all receive the same timestamp from the caller).
     """
     from sqlalchemy import text
+
+    from src.services.usage_score_service import apply_trend_penalty
+
     try:
         sp = db.begin_nested()  # SAVEPOINT — isolates this read from the outer transaction
         row = db.execute(
             text(
-                "SELECT usage_score FROM customer_usage "
+                "SELECT usage_score, usage_trend_state FROM customer_usage "
                 "WHERE organization_id = :org_id AND customer_email = :email "
                 "ORDER BY updated_at DESC LIMIT 1"
             ),
@@ -93,7 +102,10 @@ def _compute_usage_component(db: Session, org_id: int, customer_email: str, now:
         ).fetchone()
         sp.commit()
         if row is not None and row[0] is not None:
-            return int(row[0])
+            usage_score = int(row[0])
+            trend_state = row[1]
+            penalised = apply_trend_penalty(usage_score, trend_state)
+            return max(0, min(100, penalised))
     except Exception:
         # Table does not exist yet or any other DB error — roll back only the
         # SAVEPOINT so the outer transaction remains usable (avoids

@@ -982,6 +982,10 @@ class CustomerUsage(Base):
     distinct_features = Column(JSON, nullable=True, default=list)
     distinct_feature_count = Column(Integer, nullable=True, default=0)
     usage_score = Column(Integer, nullable=False, default=50)
+    # Usage trend (trend-detection-and-health aspect) — mirror of the
+    # backend-api model column. See src.services.usage_score_service.
+    usage_trend_state = Column(String(30), nullable=False, default="insufficient_history")
+    usage_trend_pct = Column(Float, nullable=True)
     events_total = Column(Integer, nullable=False, default=0)
     first_seen_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -61,6 +62,16 @@ class CustomerUsage(Base):
 
     # Computed health proxy (0-100; higher = more engaged)
     usage_score = Column(Integer, nullable=False, default=50)
+
+    # Usage trend (trend-detection-and-health aspect): direction of this
+    # customer's active_days_14d vs. their own activity ~14 days ago. See
+    # src.services.usage_score_service.classify_usage_trend. NOT NULL with a
+    # server_default so existing rows warm up to "insufficient_history"
+    # rather than NULL; usage_trend_pct is NULL until a baseline resolves.
+    usage_trend_state = Column(
+        String(30), nullable=False, server_default="insufficient_history"
+    )
+    usage_trend_pct = Column(Float, nullable=True)
 
     # Lifetime totals
     events_total = Column(Integer, nullable=False, default=0)
