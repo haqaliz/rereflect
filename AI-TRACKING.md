@@ -213,6 +213,15 @@
 - [x] Operator setup docs (`docs/SELF_HOSTING.md`) + `settings/usage-events` panel
 - [x] Plan gate: removed — all features unlocked in the open-source self-hosted edition
 
+#### M3.2b — Product-usage trend (decline) signal — COMPLETE (shipped 2026-07-22, as `usage-trend-churn-signal`)
+> The explicit v2 of M3.2 (`product-usage-enrichment/prd.md:67`, "usage factor to the churn scorer"), re-shaped to a **health-component** signal after the dig showed the per-feedback 9-factor scorer can't fire for a silent customer. See `docs/planning/usage-trend-churn-signal/`.
+- [x] **Fixed a latent M3.2 defect (D1):** the rolling-window fields (`active_days_7d/14d/30d`, `login_count_*`) only re-derived on a new event, freezing for a customer who went quiet — which also made the `silent_churner` segment unreachable. The daily `recompute_usage_scores` now re-derives them against `now`. **This corrects (lowers) inflated health scores for orgs at a non-zero usage weight** — see CHANGELOG.
+- [x] Durable, bounded daily snapshot (`customer_usage_history`, 180-day retention + prune task) — the missing history that `AI-TRACKING.md`'s M5.3 note called out as the blocker (below).
+- [x] Per-customer `usage_trend_state` (insufficient_history/stable/declining/sharp_decline) + signed `usage_trend_pct`, from the nearest snapshot in a 12–16-day band; bounded penalty on the **usage health component only** — `churn_risk_component`/`churn_probability`/the isotonic calibration are provably untouched.
+- [x] Surfaced on the Customer 360 Usage Activity card (incl. an explicit "Warming up" state); trend fields on the internal customer profile API.
+- [x] **Also fixed D4:** the usage (and CRM) health weight was editable nowhere in the UI and was silently zeroed on every weights save — now editable + preserved.
+- Deferred (honest): a `usage_trend` automation trigger + timeline event (N1/N2), seasonality dampening, per-org thresholds; `usage_event` retention (D2) and swallowed-enqueue (D3) remain open on their own branch.
+
 #### M3.3 — AI Trust: Human-in-the-Loop (2 weeks) — COMPLETE
 - [x] Feedback on AI outputs: thumbs up/down on copilot answers, health scores, categorizations
 - [x] Category correction: user can override AI category → stored as training signal
@@ -428,9 +437,12 @@
 > anyone builds against the number. This does not block: more human-confirmed labels help under any
 > threshold.
 >
-> **Not viable as label sources**, so not planned: **Stripe** (dead post-OSS-pivot) and
-> **Segment/product-usage drop** (blocked — `customer_usage` keeps no history to detect a drop
-> against).
+> **Not viable as label sources**, so not planned: **Stripe** (dead post-OSS-pivot). ~~**Segment/product-usage
+> drop** (blocked — `customer_usage` keeps no history to detect a drop against).~~ **Update
+> 2026-07-22:** the no-history blocker is resolved — `usage-trend-churn-signal` (M3.2b) added the durable
+> `customer_usage_history` snapshot and a usage-decline signal. That signal currently feeds the **health
+> score**, not churn labels; using a sustained usage decline as a churn-label *source* is now feasible but
+> remains **unplanned** (it would need a confirm-in-review step like `crm-churn-labels`, not auto-labelling).
 
 #### M5.4 — Local embedding quality (Track D) — parked / nice-to-have
 - [ ] Better local embedding model for copilot/template matching (incremental; fully offline).

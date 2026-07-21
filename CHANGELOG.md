@@ -8,6 +8,29 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Added — Product-usage trend as a churn signal
+
+Rereflect now detects when a customer's product engagement is **declining**, not just whether
+it's currently high or low — the case where a customer is quietly disengaging while still
+nominally active, which the health score previously couldn't see.
+
+- Each customer carries a **usage trend** — Stable, Declining, or Sharp Decline — derived daily
+  by comparing their active-days over the last two weeks against their *own* activity about two
+  weeks earlier. It shows on the **Usage Activity** card on the customer profile, with the signed
+  change.
+- A declining trend applies a **bounded penalty to the usage component of the health score** (and
+  only that component). It never touches churn probability or its calibration — those remain
+  driven by feedback signals, so existing churn models are unaffected.
+- **Warm-up is honest.** The trend needs about two weeks of daily history before it can say
+  anything; until then a customer shows **"Warming up"** rather than a fabricated "stable". A
+  fresh install therefore shows warm-up for its first ~2 weeks — that's expected, not a fault.
+- History is stored in a new bounded, self-pruning table (180-day retention), so it can't grow
+  without limit.
+
+This is a heuristic decline signal on your own data, stated as such — no accuracy-lift claim, and
+nothing is shared across tenants. A company-wide holiday can read as a decline; per-org tuning and
+seasonality handling are future work.
+
 ### Fixed — Health-score weights: usage is now editable, and saving no longer wipes usage/CRM
 
 The **Settings → AI → Health Score Weights** editor showed four weights but the health score has
