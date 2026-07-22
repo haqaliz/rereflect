@@ -63,6 +63,9 @@ function StatusBadge({ status }: { status: AutomationExecution['status'] }) {
   if (status === 'partial_failure') {
     return <Badge className="bg-yellow-500 text-white hover:bg-yellow-600">partial</Badge>;
   }
+  if (status === 'shadow') {
+    return <Badge className="bg-blue-500 text-white hover:bg-blue-600">shadow</Badge>;
+  }
   return <Badge variant="destructive">failed</Badge>;
 }
 
@@ -232,6 +235,43 @@ function TriggerConfigFields({ triggerType, config, onChange, disabled }: Trigge
     );
   }
 
+  if (triggerType === 'usage_trend') {
+    const states: string[] = config.states ?? [];
+    const usageTrendStates: { value: string; label: string }[] = [
+      { value: 'declining', label: 'Declining' },
+      { value: 'sharp_decline', label: 'Sharp decline' },
+    ];
+
+    const toggleState = (state: string) => {
+      const next = states.includes(state)
+        ? states.filter(s => s !== state)
+        : [...states, state];
+      onChange({ ...config, states: next });
+    };
+
+    return (
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">Fires when usage trend becomes</label>
+        <div className="space-y-2">
+          {usageTrendStates.map(({ value, label }) => (
+            <div key={value} className="flex items-center gap-2">
+              <Checkbox
+                data-testid={`trigger-config-state-${value}`}
+                checked={states.includes(value)}
+                onCheckedChange={() => !disabled && toggleState(value)}
+                disabled={disabled}
+              />
+              <label className="text-sm">{label}</label>
+            </div>
+          ))}
+        </div>
+        {states.length === 0 && (
+          <p className="text-xs text-destructive">Select at least one state.</p>
+        )}
+      </div>
+    );
+  }
+
   return null;
 }
 
@@ -341,6 +381,17 @@ const MODE_LABELS: Record<'off' | 'shadow' | 'active', string> = {
   active: 'Active',
 };
 
+// Per-trigger-type default rule mode. usage_trend defaults to shadow so an
+// operator watches the execution log before it can take real actions; every
+// other trigger type keeps the global 'active' default. Mirrors new/page.tsx.
+const TRIGGER_DEFAULT_MODE: Partial<Record<TriggerType, 'off' | 'shadow' | 'active'>> = {
+  usage_trend: 'shadow',
+};
+
+function defaultModeForTrigger(triggerType: string): 'off' | 'shadow' | 'active' {
+  return TRIGGER_DEFAULT_MODE[triggerType as TriggerType] ?? 'active';
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AutomationDetailPage() {
@@ -408,6 +459,10 @@ export default function AutomationDetailPage() {
 
   const handleSave = useCallback(async () => {
     if (!rule) return;
+    if (triggerType === 'usage_trend' && (!triggerConfig.states || triggerConfig.states.length === 0)) {
+      toast.error('Select at least one usage trend state');
+      return;
+    }
     setSaving(true);
     try {
       const updated = await automationsAPI.update(rule.id, {
@@ -615,8 +670,10 @@ export default function AutomationDetailPage() {
                         churn_risk_level_change: { target_level: 'at_risk' },
                         feedback_category_match: { categories: [], is_urgent: false },
                         churn_probability_threshold: { threshold: 0.7, direction: 'above' },
+                        usage_trend: { states: ['declining', 'sharp_decline'] },
                       };
                       setTriggerConfig(triggerDefaults[val] || {});
+                      setMode(defaultModeForTrigger(val));
                     }}
                     disabled={!isAdminOrOwner}
                   >

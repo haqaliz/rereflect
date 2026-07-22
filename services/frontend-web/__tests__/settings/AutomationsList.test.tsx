@@ -35,12 +35,15 @@ vi.mock('@/lib/api/automations', () => ({
     sentiment_pattern: 'Sentiment Pattern',
     churn_risk_level_change: 'Churn Risk Level Change',
     feedback_category_match: 'Category Match',
+    churn_probability_threshold: 'Churn probability threshold',
+    usage_trend: 'Usage Trend',
   },
   ACTION_TYPE_LABELS: {
     auto_assign: 'Auto-Assign',
     change_status: 'Change Status',
     send_notification: 'Send Notification',
     draft_response: 'Draft AI Response',
+    run_playbook: 'Run churn playbook',
   },
   PLAN_AUTOMATION_LIMITS: {
     free: 0,
