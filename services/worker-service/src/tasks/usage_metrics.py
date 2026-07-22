@@ -560,7 +560,19 @@ def recompute_usage_scores() -> Dict[str, int]:
             # (AC 1, 2). Plain dicts, not the ORM row itself, so this
             # survives the score-update commit below without needing the
             # row to stay unexpired.
-            snapshot_rows.append({
+            #
+            # snapshot-trend-columns aspect: usage_trend_state/usage_trend_pct
+            # are deliberately NOT set in this literal — trend classification
+            # hasn't run yet at this point in the loop. Setting them here
+            # would snapshot the PREVIOUS run's value (row.usage_trend_state
+            # still holds whatever the last commit left it at). The dict is
+            # bound to a local and amended below, immediately after
+            # classification and before the `if trend_state_changed ...`
+            # block, so the snapshot always carries the value just
+            # classified for THIS run — whether or not it changed the stored
+            # state. snapshot_rows holds a reference to this dict, so
+            # mutating it here updates the already-queued entry.
+            snapshot_row: Dict[str, Any] = {
                 "organization_id": row.organization_id,
                 "customer_email": row.customer_email,
                 "active_days_7d": row.active_days_7d,
@@ -570,7 +582,8 @@ def recompute_usage_scores() -> Dict[str, int]:
                 "distinct_feature_count": row.distinct_feature_count,
                 "usage_score": new_score,
                 "last_active_at": row.last_active_at,
-            })
+            }
+            snapshot_rows.append(snapshot_row)
 
             # trend-detection-and-health aspect: classify + persist for EVERY
             # scanned row — same "before any early continue" placement as the
@@ -586,6 +599,14 @@ def recompute_usage_scores() -> Dict[str, int]:
             new_trend_state, new_trend_pct = classify_usage_trend(
                 row.active_days_14d, baseline_value, baseline_age,
             )
+
+            # snapshot-trend-columns aspect: amend the queued snapshot dict
+            # with the just-classified state/pct, unconditionally — both
+            # keys are always present so bulk_insert_mappings never silently
+            # omits them regardless of whether the state actually changed.
+            snapshot_row["usage_trend_state"] = new_trend_state
+            snapshot_row["usage_trend_pct"] = new_trend_pct
+
             trend_state_changed = new_trend_state != row.usage_trend_state
             if trend_state_changed or new_trend_pct != row.usage_trend_pct:
                 row.usage_trend_state = new_trend_state
