@@ -220,7 +220,47 @@
 - [x] Per-customer `usage_trend_state` (insufficient_history/stable/declining/sharp_decline) + signed `usage_trend_pct`, from the nearest snapshot in a 12–16-day band; bounded penalty on the **usage health component only** — `churn_risk_component`/`churn_probability`/the isotonic calibration are provably untouched.
 - [x] Surfaced on the Customer 360 Usage Activity card (incl. an explicit "Warming up" state); trend fields on the internal customer profile API.
 - [x] **Also fixed D4:** the usage (and CRM) health weight was editable nowhere in the UI and was silently zeroed on every weights save — now editable + preserved.
-- Deferred (honest): a `usage_trend` automation trigger + timeline event (N1/N2), seasonality dampening, per-org thresholds; `usage_event` retention (D2) and swallowed-enqueue (D3) remain open on their own branch.
+- ~~Deferred (honest): a `usage_trend` automation trigger + timeline event (N1/N2)~~ — **N1 + N2 shipped 2026-07-23** as `usage-trend-automation-trigger` (see M3.2c below). Still deferred: seasonality dampening (N3), per-org thresholds (N4); `usage_event` retention (D2) and swallowed-enqueue (D3) remain open on their own branch.
+
+#### M3.2c — Usage-trend timeline event + automation trigger — COMPLETE (shipped 2026-07-23, as `usage-trend-automation-trigger`)
+> Closes M3.2b's N1 + N2 (`docs/planning/usage-trend-churn-signal/prd.md:158-160`), which named N2
+> verbatim as "the natural follow-on that reconnects the signal to the action loop". Built on the
+> M4.1.5 `churn-triggered-playbooks` pattern. See `docs/planning/usage-trend-automation-trigger/`.
+- [x] **`usage_trend` automation trigger** — **edge-triggered**: fires only on a strictly-worsening
+      transition over `stable(0) < declining(1) < sharp_decline(2)` into a configured state.
+      **`insufficient_history` has no rank**, so every transition touching it (either direction) is a
+      silent baseline observation — the same non-destructive first-observation rule as the
+      Jira/Zendesk/Asana status-syncs, and what prevents the whole population firing on the day
+      snapshot history matures. Recoveries do not fire (deferred v2).
+- [x] **No activation-time cooldown seeding, deliberately.** `seed_churn_cooldowns` exists because
+      `churn_probability_threshold` is *level-based* and re-fires while the level persists; an
+      edge-triggered rule has no such stampede mode. It stays churn-only, pinned by a test asserting a
+      `usage_trend` rule going active seeds nothing.
+- [x] **Worker-side evaluator** (`automation_usage_trend_trigger.py`) mirroring
+      `automation_churn_trigger.py` — the worker cannot import backend-api code. Shares Redis db=1 and
+      the identical cooldown key scheme; `run_playbook` only; `usage_trend_severity.py` duplicated
+      verbatim per the `usage_score_service.py` precedent.
+- [x] **Fires strictly after the commit.** `recompute_usage_scores` scans all orgs and commits once at
+      the end, so transitions are accumulated in-loop and drained post-commit; an in-loop regression
+      fails loudly via an in-`side_effect` assertion.
+- [x] **`usage_trend_change` timeline event** — derived at read time from consecutive
+      `customer_usage_history` rows (two new nullable columns; no new table). Reports **all** state
+      changes in both directions, unlike the trigger. `_fetch_playbook_runs`' `triggered_by` filter
+      widened to include `auto_usage_trend` so usage-trend auto-runs are visible.
+- [x] **Fixed a latent M3.2b defect:** the daily snapshot payload was assembled *before* trend
+      classification, so persisting trend state naively would have recorded the previous run's value.
+- [x] **Fixed a pre-existing M4.1.5 defect:** shadow-mode executions rendered as a red "failed" badge
+      with an empty actions column. Affects all shadow rules, not just this trigger.
+- [x] **Shadow is the default mode for this trigger type only** (~14-day warm-up), plus a pre-built
+      "Usage Decline Outreach" template for discoverability and a readiness count of customers holding
+      a real trend state.
+- [x] **Churn stack provably untouched** — `test_usage_trend_churn_boundary.py` green and unmodified.
+- **Honest limits:** ~14-day warm-up; **the ≥5 active-day baseline floor permanently excludes
+      light-usage customers**, so the trigger structurally cannot fire for the quietest accounts
+      (inherited from M3.2b, not changed here); ~24h latency via the daily beat. **No claim is made
+      about churn-prediction quality** — this changes what happens when an existing signal changes
+      state. And the whole feature sits downstream of an operator having instrumented usage events,
+      which is **unvalidated** — the readiness count exists to measure that rather than assume it.
 
 #### M3.3 — AI Trust: Human-in-the-Loop (2 weeks) — COMPLETE
 - [x] Feedback on AI outputs: thumbs up/down on copilot answers, health scores, categorizations

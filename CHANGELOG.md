@@ -8,6 +8,61 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Added — Usage-trend timeline event and automation trigger
+
+The usage-decline signal now reaches the action loop. Previously a declining customer only
+nudged the usage health component — and since the usage weight defaults to `0`, for most
+operators nothing observable happened at all.
+
+**New `usage_trend` automation trigger.** Fires when a customer enters a worse trend state,
+and can run a churn playbook via the existing `run_playbook` action (composing with the
+churn-triggered playbooks shipped earlier).
+
+- **Edge-triggered.** It fires on the *transition* into `declining` / `sharp_decline`, not for
+  as long as the customer sits there. A customer who stays `declining` fires once, on the day
+  they get there.
+- **The first classification never fires.** A customer moving out of `insufficient_history` is
+  a baseline observation, not a change — the same non-destructive first-observation rule the
+  Jira/Zendesk/Asana status-syncs use. Without it, every customer whose history matured on the
+  same day would fire at once.
+- **Recoveries don't fire.** `declining → stable` is visible on the timeline but triggers
+  nothing, for now.
+- **Defaults to shadow mode** — uniquely among trigger types. Because the trend needs ~14 days
+  of snapshot history before it can classify anything, a rule armed on day one would sit silent
+  and then execute unobserved. Shadow lets you watch it first, then arm it.
+
+**New `usage_trend_change` timeline event** on the Customer 360 profile, so an automated
+outreach has a visible cause. Unlike the trigger, the timeline records *every* state change in
+both directions, including recoveries.
+
+**Pre-built "Usage Decline Outreach" template** in Settings → Automations, so the trigger is
+findable without knowing it exists. It ships with a notification action rather than a playbook
+action — playbook IDs are per-install, so a static template can't reference one; add your own.
+
+**Readiness count.** The AI readiness surface now reports how many of your customers hold a real
+(non-`insufficient_history`) trend state — i.e. whether this trigger can fire for you at all.
+
+#### Known limits, stated plainly
+
+- **~14-day warm-up.** Snapshot history only began accumulating recently, so expect little to
+  happen at first.
+- **Light-usage customers are permanently excluded.** Trend classification requires a baseline
+  of at least 5 active days in the prior 14-day window. A customer below that never receives a
+  trend state, so this trigger cannot fire for your quietest accounts. Inherited from the trend
+  detector itself; not a bug, and not something this release changes.
+- **Up to ~24h latency.** The trigger rides the daily 04:00 UTC recompute. There is no
+  real-time path, and a 14-day-window trend wouldn't benefit from one.
+- **This does not change churn prediction.** `churn_probability`, its confidence interval, and
+  the calibration model are provably untouched — enforced by a test that drives a real trend
+  transition and asserts every churn field is byte-identical.
+
+### Fixed — Shadow-mode automation runs no longer look like failures
+
+Automation executions in shadow mode were logged by the backend with status `shadow`, but the
+frontend's status type didn't include it, so they rendered as a red **failed** badge with an
+empty actions column — indistinguishable from a real failure. Shadow runs now render as their
+own state. Affects all shadow-mode rules, not just the new trigger.
+
 ### Added — Product-usage trend as a churn signal
 
 Rereflect now detects when a customer's product engagement is **declining**, not just whether
