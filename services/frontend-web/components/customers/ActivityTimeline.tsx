@@ -6,6 +6,7 @@ import {
   MessageSquarePlus,
   ArrowRightLeft,
   TrendingDown,
+  TrendingUp,
   Sparkles,
   CheckCircle2,
   UserMinus,
@@ -112,6 +113,14 @@ export const eventIconMap: Record<ActivityEvent['type'], EventIconConfig> = {
     icon: PlayCircle,
     color: 'var(--chart-2)',
     bg: 'color-mix(in oklch, var(--chart-2) 10%, transparent)',
+  },
+  // Usage-trend state changes, derived at read time (timeline-trend-event, N1).
+  // One static icon/color regardless of direction (worsened/improved) — same
+  // convention as health_score_changed, whose icon doesn't flip on direction.
+  usage_trend_change: {
+    icon: TrendingUp,
+    color: 'var(--chart-1)',
+    bg: 'color-mix(in oklch, var(--chart-1) 10%, transparent)',
   },
 };
 

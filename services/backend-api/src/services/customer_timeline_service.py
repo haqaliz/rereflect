@@ -72,6 +72,10 @@ class TimelineEvent:
     renewal_date: Optional[datetime] = None
     deal_stage: Optional[str] = None
     arr: Optional[float] = None
+    # usage_trend_change payload fields (timeline-trend-event aspect)
+    old_trend_state: Optional[str] = None
+    new_trend_state: Optional[str] = None
+    usage_trend_pct: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -440,14 +444,23 @@ def _fetch_churn_events(
     return events
 
 
+# Auto-run sources that must surface as playbook_auto_run timeline events.
+# Manual and scheduled runs are intentionally excluded per PRD — an auto-run
+# invisible on the timeline defeats the purpose of this feature, so every
+# automation-triggered source (churn-probability, usage-trend, ...) belongs
+# here.
+_PLAYBOOK_AUTO_RUN_TRIGGERED_BY = ("auto_probability", "auto_usage_trend")
+
+
 def _fetch_playbook_runs(
     db: Session,
     org_id: int,
     email: str,
 ) -> List[TimelineEvent]:
-    """Auto-triggered playbook runs (triggered_by == 'auto_probability' only).
-    Manual runs are intentionally excluded per PRD. Few rows per customer, so
-    (like churn events) we fetch all rows and rely on build_timeline's Python
+    """Auto-triggered playbook runs (triggered_by in
+    _PLAYBOOK_AUTO_RUN_TRIGGERED_BY only). Manual/scheduled runs are
+    intentionally excluded per PRD. Few rows per customer, so (like churn
+    events) we fetch all rows and rely on build_timeline's Python
     _after_cursor filter for cursor correctness.
     """
     from src.models.churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
@@ -455,7 +468,7 @@ def _fetch_playbook_runs(
     rows = db.query(ChurnPlaybookExecution).filter(
         ChurnPlaybookExecution.organization_id == org_id,
         ChurnPlaybookExecution.customer_email == email,
-        ChurnPlaybookExecution.triggered_by == "auto_probability",
+        ChurnPlaybookExecution.triggered_by.in_(_PLAYBOOK_AUTO_RUN_TRIGGERED_BY),
     ).order_by(desc(ChurnPlaybookExecution.created_at)).all()
 
     events: List[TimelineEvent] = []
@@ -482,6 +495,112 @@ def _fetch_playbook_runs(
             description=description,
             source="churn_playbook_executions",
             source_id=row.id,
+        ))
+    return events
+
+
+# ---------------------------------------------------------------------------
+# usage_trend_change (timeline-trend-event aspect)
+# ---------------------------------------------------------------------------
+
+# Severity ordering for the ranked trend states. insufficient_history has
+# deliberately NO rank here — it means "we don't know yet", not a point on
+# the severity scale, so it is handled as a separate case below (never
+# compared numerically against a ranked state).
+_TREND_STATE_SEVERITY = {"stable": 0, "declining": 1, "sharp_decline": 2}
+
+_TREND_STATE_LABELS = {
+    "stable": "Stable",
+    "declining": "Declining",
+    "sharp_decline": "Sharp Decline",
+    "insufficient_history": "Insufficient History",
+}
+
+
+def _trend_label(state: str) -> str:
+    return _TREND_STATE_LABELS.get(state, state)
+
+
+def _describe_trend_transition(old_state: str, new_state: str) -> str:
+    """Server-generated copy for a usage_trend_change event.
+
+    The timeline reports every transition in both directions (unlike the
+    trigger). insufficient_history is phrased specially in both directions
+    so it never reads as a decline/improvement it isn't.
+    """
+    old_label = _trend_label(old_state)
+    new_label = _trend_label(new_state)
+
+    if old_state == "insufficient_history":
+        # First exit from insufficient_history: the trend becoming
+        # measurable, NOT a decline — even if new_state is sharp_decline.
+        return f"Usage trend is now measurable: {new_label}"
+
+    if new_state == "insufficient_history":
+        # Baseline floor stopped being cleared — the trend state is no
+        # longer known, not a recovery and not a decline.
+        return f"Usage trend is no longer measurable (was {old_label})"
+
+    old_rank = _TREND_STATE_SEVERITY.get(old_state)
+    new_rank = _TREND_STATE_SEVERITY.get(new_state)
+    if old_rank is not None and new_rank is not None and new_rank > old_rank:
+        return f"Usage trend worsened from {old_label} to {new_label}"
+    return f"Usage trend improved from {old_label} to {new_label}"
+
+
+def _fetch_usage_trend_changes(
+    db: Session,
+    org_id: int,
+    email: str,
+) -> List[TimelineEvent]:
+    """Derive usage_trend_change events by comparing CONSECUTIVE ROWS (not
+    consecutive calendar dates) of customer_usage_history, ordered by
+    snapshot_date.  The worker can miss a day, so a gap between rows must
+    neither fabricate nor suppress a transition — comparing rows handles
+    this correctly.
+
+    NULL usage_trend_state on either side of a pair means "unknown" (either
+    a pre-existing row from before the columns existed, or a genuine schema
+    NULL) and is always skipped, never treated as a transition.
+
+    Unlike the automation trigger (which fires only on a worsening edge and
+    treats insufficient_history as a silent baseline seed), the timeline
+    reports EVERY state change in both directions, including recovery and
+    the first exit from insufficient_history — phrased as the trend
+    becoming measurable, not as a decline.
+
+    Bounded by the worker's 180-day retention on customer_usage_history, so
+    (like playbook auto-runs) this fetches all rows for the customer and
+    relies on build_timeline's Python _after_cursor filter for cursor
+    correctness.
+    """
+    from src.models.customer_usage_history import CustomerUsageHistory
+
+    rows = db.query(CustomerUsageHistory).filter(
+        CustomerUsageHistory.organization_id == org_id,
+        CustomerUsageHistory.customer_email == email,
+    ).order_by(asc(CustomerUsageHistory.snapshot_date), asc(CustomerUsageHistory.id)).all()
+
+    events: List[TimelineEvent] = []
+    for prev_row, row in zip(rows, rows[1:]):
+        old_state = prev_row.usage_trend_state
+        new_state = row.usage_trend_state
+
+        if old_state is None or new_state is None:
+            continue  # AC4 — NULL on either side is never a transition
+        if old_state == new_state:
+            continue  # AC3 — no transition
+
+        ts = datetime.combine(row.snapshot_date, datetime.min.time())
+        events.append(TimelineEvent(
+            type="usage_trend_change",
+            timestamp=ts,
+            description=_describe_trend_transition(old_state, new_state),
+            source="customer_usage_history",
+            source_id=row.id,
+            old_trend_state=old_state,
+            new_trend_state=new_state,
+            usage_trend_pct=row.usage_trend_pct,
         ))
     return events
 
@@ -700,6 +819,12 @@ def build_timeline(
     # Playbook auto-runs use Python-only cursor filtering (few rows per customer)
     all_events.extend(
         _fetch_playbook_runs(db, org_id, email)
+    )
+
+    # usage_trend_change uses Python-only cursor filtering (bounded by the
+    # 180-day retention on customer_usage_history, few rows per customer)
+    all_events.extend(
+        _fetch_usage_trend_changes(db, org_id, email)
     )
 
     # Notable usage: always scan full window, cursor applied below
