@@ -1,68 +1,83 @@
-# Card — usage-trend-churn-signal (freeform feat, no GitHub issue)
+# Card — usage-trend-automation-trigger (freeform feat, no GitHub issue)
 
 **Type:** feat
-**Slug:** usage-trend-churn-signal
-**Branch:** `feat/usage-trend-churn-signal`
-**Source:** Freeform task selected via `rereflect-next` on 2026-07-21. No GitHub issue.
+**Slug:** usage-trend-automation-trigger
+**Branch:** `feat/usage-trend-automation-trigger`
+**Source:** Freeform task selected via `rereflect-next` on 2026-07-23. No GitHub issue.
 
 ## Brief (from rereflect-next handoff, verbatim)
 
-> Build product-usage trend/drop detection as a customer-level churn signal. M3.2
-> (product-usage-enrichment, shipped 2026-06-29) gave us a usage LEVEL —
-> `customer_usage.usage_score` as an opt-in 5th health component at default weight 0 — but
-> no history, which `AI-TRACKING.md:432` names as the explicit blocker for usage-drop
-> detection, and `docs/planning/product-usage-enrichment/prd.md:67` lists the churn-scorer
-> usage factor as explicit v2. Caveat to resolve in the dig: the 9-factor scorer is
-> per-feedback-item (`FeedbackItem.churn_risk_factors`), which cannot fire for a silent
-> customer — the signal must land on the customer-level `CustomerHealth` recompute path, and
-> you must choose between deriving the trend from the rolling 90-day `usage_event` log versus
-> adding a durable daily snapshot table mirroring `customer_health_history`. Keep it opt-in
-> and byte-stable for orgs with usage weight 0, exactly as M3.2 did. Stretch: expose the drop
-> as an automation trigger so it composes with the shipped churn-playbook auto-run (M4.1.5).
+> Build N1+N2 from `docs/planning/usage-trend-churn-signal/prd.md:158-160` — the deferred
+> follow-on to M3.2b (merged `6270adc`): a `usage_trend_change` customer-timeline event plus a
+> new `usage_trend` automation trigger that composes with churn-playbook auto-run. Model it
+> directly on M4.1.5 `churn-triggered-playbooks` (`AI-TRACKING.md:260-273`, commits
+> `9aa6650`..`f133ccf`): same `AutomationRule.mode` off/shadow/active, same per-(rule, customer)
+> Redis cooldown, same cooldown-seeding-on-activation so an already-declining cohort doesn't
+> stampede — fire it from the daily `recompute_usage_scores` seam instead of the
+> churn-probability recompute. Do NOT let this touch `churn_risk_component`,
+> `churn_probability`, or the isotonic calibration; the trend stays a usage-health-component
+> signal. Caveat to design around, not discover: the `customer_usage_history` snapshot only
+> began 2026-07-22, so most customers are `insufficient_history` for ~2 more weeks — that state
+> must be an explicit non-fire, and shadow should be the sensible default mode. Out of scope:
+> D2 (`usage_event` retention / O(lifetime) re-read) and D3 (swallowed enqueue) — those get
+> their own branch.
 
 ## Why this was picked (citations)
 
-- `docs/planning/product-usage-enrichment/prd.md:67` — *Nice-to-have (explicit v2)*: "Add a
-  usage factor to the 9-factor churn scorer." Repeated at `:126`.
-- `AI-TRACKING.md:432` — lists "Segment/product-usage drop" as **not viable** as an M5.3
-  churn-label source, blocker stated verbatim as: "blocked — `customer_usage` keeps no
-  history to detect a drop against."
-- `AI-TRACKING.md:207-214` — M3.2 Product Usage Enrichment COMPLETE (shipped 2026-06-29);
-  usage is an **opt-in 5th health component**, `health_weight_usage` **default 0**, described
-  as a "byte-for-byte-stable upgrade".
-- `docs/planning/product-usage-enrichment/prd.md:91` — `usage_event` raw log retention is
-  "rolling **90 days** (raw); rollup is the durable record."
+- `docs/planning/usage-trend-churn-signal/prd.md:158-160` — deferred **N1** (`usage_trend_change`
+  customer-timeline event) and **N2** (a `usage_trend` automation trigger composing with
+  churn-playbook auto-run), with N2 described verbatim as "the natural follow-on that
+  reconnects the signal to the action loop."
+- `AI-TRACKING.md:216-223` — M3.2b `usage-trend-churn-signal` COMPLETE (shipped 2026-07-22);
+  its deferred list names "a `usage_trend` automation trigger + timeline event (N1/N2)".
+- `AI-TRACKING.md:260-273` — M4.1.5 `churn-triggered-playbooks` COMPLETE (2026-07-19): the
+  exact pattern to reuse (new trigger type, `run_playbook` action, `AutomationRule.mode`,
+  per-(rule, customer) Redis cooldown, cooldown seeding on activation).
+- `services/backend-api/src/models/automation_rule.py:59` — `trigger_type` comment enumerates
+  the 5 existing triggers; **no `usage_trend`**.
+- `services/backend-api/src/services/automation_engine.py:221,693-716` — the
+  `churn_probability_threshold` evaluation branch and the activation-time cooldown seeding
+  guarded on `rule.trigger_type != "churn_probability_threshold"`.
 
 ## Moat rationale
 
-Dead-center of the stated moat: the churn → health → playbook → automation loop is all
-shipped and all consumes **customer-level** signals (`CustomerHealth.churn_probability`, the
-`churn_probability_threshold` automation trigger at `automation_engine.py:326`, auto-run
-playbooks per M4.1.5). A usage-drop input feeds every one of them without new surfaces. Fits
-OSS/self-hosted/BYOK — the usage receiver is a plain authenticated POST, not a Segment OAuth
-connection (`AI-TRACKING.md:207`).
+The trend signal currently terminates in the usage **health component** only
+(`AI-TRACKING.md:220`), and usage weight defaults to 0 — so for most operators it ships
+dormant and nothing acts on it. Wiring it into the automation engine reconnects it to the
+already-shipped churn → health → playbook → automation loop without touching the calibrated
+churn math. Fits OSS/self-hosted (no plan gate, no SMTP requirement — `run_playbook` is
+already SMTP-free per `AI-TRACKING.md:273`).
 
 ## Known caveats to resolve in the dig / PRD
 
-1. **Wrong-shape trap.** `FeedbackItem.churn_risk_factors` is per-feedback (aggregated in
-   `api/routes/customers.py:1191-1259`). A customer who goes silent files no feedback, so a
-   per-feedback factor can *never* fire for the exact case this feature exists to catch. The
-   signal must attach to the customer-level recompute path.
-2. **Storage choice is open.** Derive the trend from the rolling 90-day `usage_event` log, or
-   add a durable daily snapshot table mirroring `customer_health_history`? `customer_usage`
-   itself is one mutable row per `(org, email)` — confirmed no history.
-3. **Byte-stability.** Orgs that have not opted into usage (weight 0) must see unchanged
-   health scores and unchanged churn probabilities, exactly as M3.2 guaranteed.
-4. **Stretch, not committed.** Expose the drop as an automation trigger so it composes with
-   the shipped churn-playbook auto-run (M4.1.5, `AI-TRACKING.md:251`).
+1. **Cold start is the default state, not an edge case.** `customer_usage_history` began
+   accumulating 2026-07-22, so most customers sit in `insufficient_history` for ~2 more weeks.
+   That state must be an **explicit non-fire** (never coerced to `stable`), or the trigger
+   looks broken on day one.
+2. **Fire on *change*, not on every daily pass.** The dig must confirm whether a previous
+   `usage_trend_state` is persisted; without it, a naive evaluator re-fires daily for every
+   declining customer (the cooldown mitigates but does not fix the semantics).
+3. **Scope fence.** `churn_risk_component`, `churn_probability`, and the isotonic calibration
+   are out of bounds — M3.2b's guarantee that they are "provably untouched"
+   (`AI-TRACKING.md:220`) must survive this branch.
+4. **Shadow as the sensible default.** `AutomationRule.mode` already supports
+   `off`/`shadow`/`active`; operators should be able to watch the trigger before arming it.
+5. **Stampede on activation.** M4.1.5 seeds per-customer cooldowns when a rule activates
+   (`automation_engine.py:693-716`); the same guard is needed here or an already-declining
+   cohort all fires at once on the first recompute.
 
 ## Open questions for the interview
 
-- What counts as a "drop"? Relative % decline, absolute inactivity streak, or both?
-- Over what comparison window, and what minimum history before the signal may fire
-  (cold-start guard)?
-- Does the drop feed the health score, the churn probability, or both?
-- New opt-in knob, or does it ride the existing `health_weight_usage` opt-in?
+1. What is the trigger's *condition* surface — fire on entering `declining` / `sharp_decline`,
+   on any state worsening, on a `usage_trend_pct` threshold, or a combination?
+2. Should recovery (declining → stable) be a fireable transition too, or is this
+   decline-only?
+3. Does N1's `usage_trend_change` timeline event write on **every** state change (including
+   improvements and the first transition out of `insufficient_history`), or only on declines?
+4. Where does the evaluator run — inline in the daily `recompute_usage_scores` task, or as a
+   separate task fanned out after it?
+5. Does the automations UI need a new config form for the trigger, and what are the field
+   labels/defaults?
 
 **NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE
 (pre-OSS-pivot). All features are unlocked (MIT, self-hosted, BYOK). Do not gate this feature
