@@ -513,11 +513,19 @@ def enable_template(
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
     now = datetime.utcnow()
+    # `mode` is optional per-template (defaults to "active" — today's
+    # behavior, unchanged for the 5 pre-existing templates). Setting `mode`
+    # directly (rather than `is_active=True`) lets AutomationRule's own
+    # `@validates("mode")` derive `is_active` for us, since is_active is a
+    # write-through alias of mode (`models/automation_rule.py`). Passing
+    # `is_active=True` here as before would *promote* mode to "active"
+    # unconditionally and silently discard an explicit "shadow" template
+    # default (M7's shadow-by-default guarantee).
     rule = AutomationRule(
         organization_id=current_org.id,
         name=tmpl["name"],
         description=tmpl["description"],
-        is_active=True,
+        mode=tmpl.get("mode", "active"),
         trigger_type=tmpl["trigger"]["type"],
         trigger_config=tmpl["trigger"]["config"],
         actions=tmpl["actions"],

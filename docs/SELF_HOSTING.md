@@ -424,6 +424,69 @@ handling are not yet implemented.
 > all correct, but arriving at once. If you run automations on health score or risk level,
 > consider pausing them for the first daily cycle after upgrade.
 
+### Usage-trend automation trigger (`usage_trend`)
+
+Once the trend state above is live for a customer, you can also **act** on it: a
+`usage_trend` automation rule (**Settings → Automations**) fires when a customer's trend
+gets *worse* — not on every recompute where they merely sit in a bad state.
+
+**What it fires on.** The trigger watches for a transition into a strictly worse state on
+the daily 04:00 UTC recompute: `stable → declining`, `stable → sharp_decline`, or
+`declining → sharp_decline`. A customer who is *already* `declining` and stays `declining`
+produces no transition and stays silent — the rule doesn't re-fire on every recompute just
+because the bad state persists. Recovery (`sharp_decline → declining`,
+`declining → stable`) never fires an action in this release; it's a nice-to-have for a
+later version. There is no real-time path — a decline detected at 04:00 acts at 04:00, so
+expect up to a ~24h delay between the underlying activity drop and the automation firing.
+
+**The first classification never fires (baseline-seed rule).** `insufficient_history` means
+"we don't know yet," not "healthy" — it has no severity rank. A customer's transition *out
+of* `insufficient_history`, in either direction, is treated as seeding a baseline, not as a
+worsening transition, and never fires the rule. Without this, every customer whose history
+matured into `declining`/`sharp_decline` on the same day would fire at once — a warm-up
+stampede on a freshly-configured trigger. This also means the trigger stays quiet if you
+enable it before your history has matured — that's expected, not evidence it's broken; see
+the ~14-day warm-up below.
+
+**The ~14-day warm-up.** Same rule as the Usage Activity card above: a customer's trend
+can't classify as anything but `insufficient_history` until roughly two weeks of daily
+snapshots exist. Practically: if you enable this trigger on a fresh install (or right after
+wiring up usage events for the first time), expect it to fire nothing for about two weeks.
+That silence is the baseline-seed rule and the warm-up compounding, not a misconfiguration.
+
+**The ≥5 active-day baseline floor permanently excludes light-usage customers.** A
+customer whose 14-day baseline never reaches 5 active days **never receives a real trend
+state** — they stay `insufficient_history` indefinitely, however long the trigger runs.
+This is inherited unchanged from the underlying trend classifier (the
+usage-trend-churn-signal feature) and is **not a bug you can fix by waiting longer, and not
+in scope to change here**. It means the trigger structurally cannot fire for your
+lightest-usage customers — arguably a segment worth watching — and the `usage_trend_*`
+fields on `GET /api/v1/analytics/ai-readiness` exist precisely so you can see, per org, how
+many of your customers currently hold a real (non-`insufficient_history`) state — i.e.
+whether this trigger can fire for you at all — before you invest in wiring it up further.
+
+**Why shadow is the default.** A new `usage_trend` rule defaults to **shadow mode**, unlike
+every other trigger type in this product, which defaults to active. Shadow mode evaluates
+the rule and logs what it *would have done* to the execution log, without sending anything
+or running a playbook. Given the warm-up and the baseline-seed rule above, an operator who
+arms this trigger in week one of a fresh install has no way to distinguish "working
+correctly, just quiet" from "silently misconfigured" by watching for real actions — shadow
+mode gives you a log to read instead. Once the log looks right, flip the rule to active from
+the rule's edit page.
+
+**Pre-built template.** **Settings → Automations → Templates** includes a "Usage Decline
+Outreach" starter template targeting `declining` + `sharp_decline`, in shadow mode. Read its
+description before relying on it: it ships a `send_notification` action only, **not**
+`run_playbook` — a playbook's id is a per-install autoincrement integer a static template
+can't know ahead of time. The template demonstrates the trigger; it does not by itself wire
+a save motion. Edit the rule after enabling it and add a `run_playbook` action pointing at
+your own churn playbook to connect it to an actual outreach flow.
+
+**What this trigger is not.** It does not feed into churn probability, its calibration, or
+any churn-prediction accuracy metric — the trend signal never enters the churn model, by
+design. It only changes what happens when an already-computed trend classification changes
+state.
+
 ### Schema reference
 
 | Field | Required | Notes |
