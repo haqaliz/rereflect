@@ -24,6 +24,7 @@ from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
 from src.models.customer_health import CustomerHealth
 from src.models.feedback import FeedbackItem
+from src.services.usage_trend_severity import is_worsening_transition
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class AutomationEngine:
         churn_risk_level_change:     {"new_risk_level": str, "old_risk_level": str, "customer_email": str, "feedback_id": int}
         feedback_category_match:     {"customer_email": str, "feedback_id": int}
         churn_probability_threshold: {"churn_probability": float, "customer_email": str}
+        usage_trend:                 {"old_trend_state": str, "new_trend_state": str, "customer_email": str}
 
     Rule `mode` gating (see AutomationRule.mode):
         off:    rule is never selected by evaluate().
@@ -220,6 +222,8 @@ class AutomationEngine:
             return self._trigger_feedback_category(cfg, context)
         if t == "churn_probability_threshold":
             return self._trigger_churn_probability(cfg, context)
+        if t == "usage_trend":
+            return self._trigger_usage_trend(cfg, context)
 
         logger.warning("AutomationEngine: unknown trigger type '%s'", t)
         return False
@@ -329,6 +333,21 @@ class AutomationEngine:
         if p is None:
             return False
         return float(p) >= float(cfg.get("threshold", 0.7))
+
+    def _trigger_usage_trend(self, cfg: dict, context: dict) -> bool:
+        """Fire on a strictly-worsening trend transition into a configured state.
+
+        Edge-triggered: an already-declining customer produces no transition, so
+        unlike churn_probability_threshold this needs no activation-time cooldown
+        seeding. Any transition touching `insufficient_history` is a baseline
+        observation, not a change, and never fires (PRD M2).
+        """
+        states = cfg.get("states") or []
+        old_state = context.get("old_trend_state")
+        new_state = context.get("new_trend_state")
+        if new_state not in states:
+            return False
+        return is_worsening_transition(old_state, new_state)
 
     # ------------------------------------------------------------------
     # Internal — cooldown

@@ -52,6 +52,7 @@ VALID_TRIGGER_TYPES = frozenset({
     "churn_risk_level_change",
     "feedback_category_match",
     "churn_probability_threshold",
+    "usage_trend",
 })
 
 VALID_ACTION_TYPES = frozenset({
@@ -110,6 +111,28 @@ class ChurnProbabilityConfig(BaseModel):
     def direction_must_be_above(cls, v: str) -> str:
         if v != "above":
             raise ValueError("direction must be 'above'")
+        return v
+
+
+VALID_USAGE_TREND_STATES = frozenset({"declining", "sharp_decline"})
+
+
+class UsageTrendConfig(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    states: List[str] = Field(..., min_length=1)
+
+    @field_validator("states")
+    @classmethod
+    def validate_states(cls, v: List[str]) -> List[str]:
+        invalid = [s for s in v if s not in VALID_USAGE_TREND_STATES]
+        if invalid:
+            raise ValueError(
+                f"states must each be one of {sorted(VALID_USAGE_TREND_STATES)}; "
+                f"got {invalid}. 'stable' and 'insufficient_history' cannot be "
+                f"entered as a worsening transition, so a rule targeting them "
+                f"could never fire."
+            )
         return v
 
 
@@ -197,6 +220,8 @@ class TriggerSchema(BaseModel):
             FeedbackCategoryConfig(**cfg)
         elif t == "churn_probability_threshold":
             ChurnProbabilityConfig(**cfg)
+        elif t == "usage_trend":
+            UsageTrendConfig(**cfg)
 
         return self
 
