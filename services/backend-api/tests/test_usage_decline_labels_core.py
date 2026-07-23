@@ -434,3 +434,63 @@ def test_outage_suspected_uses_module_level_defaults():
         is True
     )
 
+
+# ===========================================================================
+# Phase 5 — mirror parity (worker-service cannot be tested here, but this
+# backend test can read both paths and diff them byte-for-byte).
+# ===========================================================================
+
+import os as _os_module
+
+
+def test_worker_mirror_is_byte_identical_to_backend_copy():
+    here = _os_module.path.dirname(_os_module.path.abspath(__file__))
+    backend_path = _os_module.path.join(
+        here, "..", "src", "services", "usage_decline_labels_core.py"
+    )
+    worker_path = _os_module.path.join(
+        here, "..", "..", "worker-service", "src", "services", "usage_decline_labels_core.py"
+    )
+    with open(backend_path, "r", encoding="utf-8") as fh:
+        backend_text = fh.read()
+    with open(worker_path, "r", encoding="utf-8") as fh:
+        worker_text = fh.read()
+
+    assert backend_text == worker_text, (
+        "usage_decline_labels_core.py has drifted between backend-api and "
+        "worker-service -- both copies must be byte-identical."
+    )
+
+
+class TestPurityGuard:
+    """Source-level drift guard: usage_decline_labels_core.py must never grow
+    a Celery/SQLAlchemy/FastAPI/httpx/client import in either service.
+    Mirrors services/worker-service/tests/test_churn_harvest_core.py::TestPurityGuard.
+    """
+
+    FORBIDDEN_TOKENS = ("celery", "sqlalchemy", "fastapi", "httpx", "client")
+
+    def _source_lines(self, relative_path: str) -> list:
+        here = _os_module.path.dirname(_os_module.path.abspath(__file__))
+        full_path = _os_module.path.join(here, "..", relative_path)
+        with open(full_path, "r", encoding="utf-8") as fh:
+            return fh.readlines()
+
+    def _assert_no_forbidden_imports(self, relative_path: str) -> None:
+        for line in self._source_lines(relative_path):
+            stripped = line.strip()
+            if not (stripped.startswith("import ") or stripped.startswith("from ")):
+                continue
+            lowered = stripped.lower()
+            for token in self.FORBIDDEN_TOKENS:
+                assert token not in lowered, (
+                    f"{relative_path} imports forbidden token {token!r}: {stripped!r}"
+                )
+
+    def test_backend_copy_has_no_forbidden_imports(self):
+        self._assert_no_forbidden_imports("src/services/usage_decline_labels_core.py")
+
+    def test_worker_copy_has_no_forbidden_imports(self):
+        self._assert_no_forbidden_imports(
+            "../worker-service/src/services/usage_decline_labels_core.py"
+        )
