@@ -18,6 +18,13 @@ vi.mock('@/lib/api/ai-settings', () => ({
   },
 }));
 
+// AISettingsGeneral mounts UsageChurnLabelsCard, which calls this for its
+// precision read-out — mock it so this file's tests don't issue real HTTP
+// requests.
+vi.mock('@/lib/api/churn-suggestions', () => ({
+  listChurnSuggestions: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 1 }),
+}));
+
 import { aiSettingsAPI } from '@/lib/api/ai-settings';
 import { AISettingsGeneral } from '@/components/settings/AISettingsGeneral';
 
@@ -40,6 +47,7 @@ const mockSettings = {
   classifier_mode: 'off',
   category_classifier_mode: 'off',
   urgency_classifier_mode: 'off',
+  usage_churn_labels_mode: 'off',
   models: {
     categorization: 'gpt-4o-mini',
     analysis: 'gpt-4o-mini',

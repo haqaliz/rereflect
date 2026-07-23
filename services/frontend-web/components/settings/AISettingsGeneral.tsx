@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Brain, Sparkles, Wand2, Tags, AlertTriangle } from 'lucide-react';
 import { aiSettingsAPI, type AISettings, type SentimentStatus } from '@/lib/api/ai-settings';
+import { UsageChurnLabelsCard } from '@/components/settings/UsageChurnLabelsCard';
 
 const CLASSIFIER_MODE_LABELS: Record<string, string> = {
   off: 'Off',
@@ -327,6 +328,9 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
           )}
         </CardContent>
       </Card>
+
+      {/* Usage-Decline Churn Labels (usage-decline-churn-labels aspect) */}
+      <UsageChurnLabelsCard settings={settings} onUpdate={onUpdate} />
     </div>
   );
 }
