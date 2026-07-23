@@ -5,7 +5,7 @@ import type { ChurnReasonCode } from './churn-events';
 // the ONLY path that turns one of these into a trainable CustomerChurnEvent.
 
 export type ChurnSuggestionStatus = 'pending' | 'confirmed' | 'rejected';
-export type ChurnSuggestionProvider = 'hubspot' | 'salesforce';
+export type ChurnSuggestionProvider = 'hubspot' | 'salesforce' | 'usage_decline';
 
 export interface ChurnSuggestion {
   id: number;
