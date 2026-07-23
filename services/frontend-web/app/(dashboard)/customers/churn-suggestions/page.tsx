@@ -175,11 +175,12 @@ export default function ChurnSuggestionsPage() {
         <div>
           <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
             <Inbox className="w-6 h-6" style={{ color: 'var(--chart-3)' }} />
-            CRM churn suggestions
+            Churn suggestions
           </h1>
           <p className="text-muted-foreground mt-1">
-            Review CRM-sourced closed-lost deals. Confirming writes a real churn label — nothing
-            here trains the model until a human confirms it.
+            Review suggested churn labels from your connected sources and product usage.
+            Confirming writes a real churn label — nothing here trains the model until a human
+            confirms it.
           </p>
         </div>
 
