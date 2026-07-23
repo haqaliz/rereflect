@@ -91,8 +91,8 @@ const copilotBullets = [
 const customer360Bullets = [
   'Health score dashboard',
   '9-factor churn risk',
-  'Product-usage decline detection',
-  'Unified activity timeline — feedback, usage & churn',
+  'Product-usage decline detection — can auto-run a save playbook',
+  'Unified activity timeline — feedback, usage, trend shifts & churn',
   'Automated recovery alerts',
   'Push health scores back to your CRM (HubSpot)',
 ];
@@ -187,7 +187,7 @@ const smallCards: {
     icon: Zap,
     title: 'AI Workflow Automation',
     description:
-      'Create IF/THEN rules that auto-assign, escalate, notify, and draft responses when churn risk spikes, bugs are reported, or sentiment drops.',
+      'Create IF/THEN rules that auto-assign, escalate, notify, run a save playbook, and draft responses when churn risk spikes, product usage starts declining, bugs are reported, or sentiment drops. Run any rule in shadow mode first to see what it would have done.',
     animation: 'pulse',
   },
   {
