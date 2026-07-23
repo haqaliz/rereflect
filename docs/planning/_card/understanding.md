@@ -1,186 +1,185 @@
-# Understanding — usage-trend-automation-trigger (Phase 2 dig)
+# Understanding — usage-decline-churn-labels (Phase 2 dig)
 
 **Date:** 2026-07-23
-**Method:** 4 parallel read-only agents over the trend compute path, the automation engine,
-the customer timeline, and the automations UI. Paths are relative to the worktree
-`.claude/worktrees/feat-usage-trend-automation-trigger/`. Every claim below is cited.
+**Branch:** `feat/usage-decline-churn-labels`
+**Method:** 2 read-only agents (suggestion-queue pipeline; usage-history/trend stack) + direct reads of
+`docs/planning/crm-churn-labels/prd.md` and a live environment check.
+**Environment verified:** venv rebuilt on **Python 3.12** (system `python3` is 3.9.6 and cannot install
+`Authlib==1.7.2`); `alembic heads` run **live** → **single head `a1c2d3e4f5a6`**; baseline
+`pytest` over the 6 affected suites → **95 passed**.
 
 ---
 
-## What the task is really asking
+## What this feature really is
 
-Reconnect the M3.2b usage-decline signal to the action loop, via two deferred items:
+Not a new idea — the **unblocking of a written-down deferral**. `crm-churn-labels`' own
+Out of Scope section says:
 
-- **N1** — a `usage_trend_change` customer-timeline event.
-- **N2** — a `usage_trend` automation trigger that composes with `run_playbook` (M4.1.5).
+> **Usage/Segment-derived churn labels.** Blocked: `customer_usage` keeps only current 7d/30d
+> counters with no history (`customer-360-unified-timeline` R1, "we will not fabricate a drop
+> event").
 
-Both are additive. Neither may touch `churn_risk_component`, `churn_probability`, or the
-isotonic calibration.
+M3.2b (`usage-trend-churn-signal`, 2026-07-22) added the durable `customer_usage_history` snapshot.
+`AI-TRACKING.md:480-485` records the blocker as resolved and the work as "feasible but **unplanned**
+… it would need a confirm-in-review step like `crm-churn-labels`, not auto-labelling."
 
----
-
-## Affected services
-
-| Service | What changes |
-|---|---|
-| `worker-service` | The firing seam in `recompute_usage_scores`; a new isolated trigger evaluator (mirror pattern) |
-| `backend-api` | Trigger registration (whitelist + Pydantic config + engine checker), timeline assembly, likely a model/migration |
-| `frontend-web` | Trigger-type union + label + two duplicated config forms; timeline icon; (candidate) shadow-badge fix |
-| `analysis-engine` | Unaffected |
+**Why it matters:** the shipped CRM label source produces **nothing** for a self-hoster with no
+HubSpot/Salesforce — the default OSS deployment. This is the only label supply that works CRM-free.
 
 ---
 
-## Key findings that shape the design
+## Finding 1 — The backend genuinely needs no migration and no route changes
 
-### F1 — Transition detection is nearly free, but the old value is thrown away
+- `models/churn_label_suggestion.py:47` — `provider` is `String(50)`, **no CHECK, no enum, no DB
+  whitelist**. Enum values are Python-list-validated by house convention, and `provider` isn't even
+  in such a list.
+- `routes/churn_suggestions.py` — `provider` appears in exactly 3 places, all opaque string
+  handling: list filter (`:262-263`), bulk cohort filter (`:219-220`), response passthrough. Only
+  `status` is validated (`:251-255`). **Zero changes needed.**
+- The natural key `UniqueConstraint(organization_id, provider, external_opportunity_id)` (`:84-101`)
+  gives idempotent re-detection for free — a new provider just needs a **stable synthesized id**.
 
-`recompute_usage_scores` (`services/worker-service/src/tasks/usage_metrics.py:543-609`) already
-computes the transition boolean **before** overwriting:
+## Finding 2 — Confirm is provider-blind, so labels are trainable on identical footing
 
-```python
-trend_state_changed = new_trend_state != row.usage_trend_state   # :589  (old value still live)
-if trend_state_changed or new_trend_pct != row.usage_trend_pct:
-    row.usage_trend_state = new_trend_state                       # :591  (old value now gone)
-```
+`_confirm_one` (`routes/churn_suggestions.py:70-127`) always writes
+`CustomerChurnEvent(source="manual", marked_by_user_id=<confirming user>)` — **`provider` is never
+propagated into the churn event**. Since `ai_readiness.py:91-99` excludes only
+`source == "auto_suggested"` from `trainable`, a confirmed usage-decline label counts exactly like a
+confirmed CRM one. And `_pending_suggestion_count` (`:160-178`) has **no provider filter**, so
+`pending_suggestions` picks up the new provider automatically while staying out of
+`churn_labels_ready` (`:244`). The readiness-honesty requirement is satisfied by construction.
 
-The old state is in memory at line 589 but never captured into a variable, and **is not
-persisted anywhere** — there is no `previous_trend_state` column, no trend history table, and
-`customer_usage_history` has **no trend columns**
-(`services/backend-api/src/models/customer_usage_history.py:48-55`). Capturing
-`old_trend_state` into a local at the seam is a one-line change.
+## Finding 3 — The opt-in home is the one real collision with "no migration"
 
-### F2 — The loop is all-orgs and commits once, in bulk
+Default-deny today lives on the CRM integration rows themselves:
+`HubSpotIntegration.churn_labels_enabled` + `churn_label_config` (`models/hubspot_integration.py:47-48`)
+and the Salesforce twin (`:49-50`), mirrored in `worker-service/src/models/__init__.py:1133-1134,1187-1188`.
 
-Line 532 loads `db.query(CustomerUsage).all()` with **no org filter**; all mutations commit
-once after the loop (`usage_metrics.py:611-612`). `row.organization_id` is available per
-iteration (used at :583-584, :609), so org scope is free — but a hook fired *inside* the loop
-would act on uncommitted state. Transitions must be **collected during the loop and drained
-after the commit**. The existing `_call_update_health` hook (`usage_metrics.py:604-609`) is
-called inside the loop and is the local precedent — but it is a health recompute, not an
-action-executing trigger, so its placement is not automatically the right precedent for us.
+**There is no non-CRM row to hang a flag off.** The nearest org-level home is `OrgAIConfig`
+(`models/org_ai_config.py`), which already carries `health_weight_usage` and the classifier-mode
+columns — but adding a column there is a migration. This is a genuine fork, not a detail:
+**default-deny is non-negotiable (it is the house pattern and the safety property), so if honoring it
+costs a migration, the migration wins over the "no migration" aspiration.**
 
-### F3 — The worker cannot import the backend's AutomationEngine
+## Finding 4 — `crm_churn_label_options.py` is a fence, not a tool
 
-M4.1.5 hit this exact wall and solved it with a deliberate, narrow mirror:
-`services/worker-service/src/services/automation_churn_trigger.py` implements **only** the
-`churn_probability_threshold` trigger + `run_playbook` action, with its own lightweight
-`AutomationRule` mirror model (no FKs, since the worker doesn't own migrations), sharing
-**Redis db=1** and the identical key scheme `automation_cooldown:{rule_id}:{customer_email}`
-so cooldowns are honored across both processes (`automation_churn_trigger.py:22-26,49,88,101`).
-Our trigger fires from a worker task, so it inherits this constraint and should follow the
-same mirror pattern rather than growing the mirror into a general engine — the module docstring
-at `automation_churn_trigger.py:16-21` explicitly warns against that.
+`CHURN_LABEL_CONFIG_KEYS` (`:43-46`) is hardwired to exactly hubspot/salesforce;
+`_validate_churn_label_config:244` would `KeyError` on a third key, and `fetch_renewal_options:64-65`
+returns `("options_fetch_failed")` for anything else. **Never route this provider through
+`/integrations/{provider}/churn-labels`.** Write it into the PRD as an explicit out-of-scope fence.
 
-### F4 — Registering a new trigger type is a known, enumerated checklist
+## Finding 5 — Correction: where the trend logic actually lives
 
-Backend (`services/backend-api/`):
-1. `src/api/routes/automations.py:49-55` — `VALID_TRIGGER_TYPES` frozenset
-2. `src/api/routes/automations.py:74-127,180-201` — a new `*Config` Pydantic class + a branch in `TriggerSchema.validate_trigger`
-3. `src/services/automation_engine.py:208-225` — a `_trigger_*` checker + dispatch branch
-4. `src/services/automation_engine.py:76-81` — context-shape docstring parity
+The card/handoff said "reusing `usage_trend_severity.py`". **Imprecise.** That module
+(`services/backend-api/src/services/usage_trend_severity.py`, byte-identical worker duplicate) is
+*only* `TREND_SEVERITY = {stable:0, declining:1, sharp_decline:2}` + `is_worsening_transition` —
+`insufficient_history` is deliberately absent so every transition touching it returns `False`.
 
-Frontend (`services/frontend-web/`):
-5. `lib/api/automations.ts:5-10` — `TriggerType` union
-6. `lib/api/automations.ts:134-140` — `TRIGGER_TYPE_LABELS`
-7. `app/(dashboard)/settings/automations/new/page.tsx:98-194` + `:343-350` — config form + defaults
-8. `app/(dashboard)/settings/automations/[id]/page.tsx:78-236` + `:611-619` — the **duplicated** config form + defaults (with `disabled={!isAdminOrOwner}` wiring)
-9. Every test file that mocks `TRIGGER_TYPE_LABELS` — the mock is hand-duplicated per file, so a new option is invisible in mocked renders until each is updated
+The **classification** lives in `usage_score_service.py:203-366` (byte-identical worker duplicate):
+- `select_nearest_in_band_snapshot` (`:245-285`) — baseline from history rows aged
+  `[12, 16]` days, nearest to 14, ties → older. Never widens the band.
+- `classify_usage_trend` (`:288-331`) — `pct <= -60` → `sharp_decline`; `pct <= -30` → `declining`;
+  else `stable`. Returns `("insufficient_history", None)` when there's no in-band baseline, or when
+  **`baseline_active_days_14d < 5`** (the floor).
+- `apply_trend_penalty` (`:334-366`) — `-8` / `-15` on the **health usage component only**.
 
-The list page needs no change — `TriggerBadge` is label-driven and generic.
+## Finding 6 — Edge-triggered vs. sustained: the central design fork
 
-### F5 — Cooldown seeding on activation is route-driven and currently churn-only
+The post-commit drain seam M3.2c added (`worker-service/src/tasks/usage_metrics.py:659-681`) is
+**edge-triggered**: `pending_trend_transitions` is appended to **only on a genuine state change**
+(`:635-638`). It is exception-isolated per transition and fires strictly after `db.commit()` — an
+excellent seam, and the closest precedent is
+`worker-service/src/services/automation_usage_trend_trigger.py` (332 lines, `TRIGGERED_BY =
+"auto_usage_trend"`).
 
-`seed_churn_cooldowns(db, rule)` (`automation_engine.py:697-747`) is called from three route
-sites in `automations.py` (`create_rule` :571-586, `update_rule` :640-654, `toggle_rule`
-:695-708), each guarded on an `old_mode != active → active` transition and each wrapped in
-try/except so seeding failure never fails the request. It hard-returns 0 for any trigger type
-other than `churn_probability_threshold` (`automation_engine.py:716`).
+**But "sustained decline" is a level-based concept, and the seam cannot express it.** A customer who
+enters `sharp_decline` and stays there produces exactly **one** transition, on day one — which is the
+*least* evidence-backed moment. A detector wanting "declining held for N consecutive days" must read
+`usage_trend_state` per scanned row each day, independent of the transitions list. This is the single
+biggest open design question and it is **not** resolvable from the files.
 
-**The stampede rationale applies to us only conditionally.** Its docstring (`:701-711`) explains
-the churn trigger is *level-based* — it re-fires as long as probability stays ≥ threshold.
-Whether our trigger is level-based or edge-based is the central design question (Q2): an
-**edge-triggered** (fire-on-transition) design is inherently stampede-resistant, because an
-already-`declining` customer produces no transition on the next pass. If we go edge-triggered,
-seeding may be unnecessary — a simplification, not a gap.
+## Finding 7 — Hard scope fence (executable, not just convention)
 
-### F6 — The timeline has no events table; N1 has no natural backing row
+`tests/test_usage_trend_churn_boundary.py` (216 lines) asserts a `stable → sharp_decline` transition
+with zero new feedback leaves `churn_risk_component`, `churn_probability`,
+`churn_probability_low/high`, `calibration_model_id`, `time_to_churn_bucket` **byte-for-byte
+unchanged**, while proving non-vacuity (the usage component *does* drop by exactly 15). M3.2b and
+M3.2c both kept it green and unmodified. **This branch must too.**
+Confirmed by grep: `usage_score_service.py` has **zero** matches for
+`churn_probability|churn_risk_component|isotonic|calibrat`.
 
-`services/backend-api/src/services/customer_timeline_service.py` assembles all 13 event types
-**at read time** by unioning existing source tables (`build_timeline`, :637-730). Every
-existing event type is derived from a durable row that already exists for another reason
-(`FeedbackItem`, `CustomerHealthHistory`, `ChurnPlaybookExecution`, `CrmEnrichment`, …).
+## Finding 8 — Plan gating is inert, correctly
 
-A trend *change* has no such row: `customer_usage` holds only the current state (F1), and
-`customer_usage_history` snapshots carry no trend columns. So **N1 requires new persistence** —
-a real design decision, not an implementation detail. See Q1.
+`routes/churn_suggestions.py:51-58` carries a router-level
+`require_feature("advanced_churn_prediction")`. This is **not** a live plan gate:
+`plans.py:329-330` — `has_feature` returns `True` unconditionally in self-hosted mode. Inheriting it
+is consistent with the OSS pivot. Do not add a new gate; do not remove this one.
 
-### F7 — Shadow mode is misrendered as a failure in the UI
+## Finding 9 — Frontend is cosmetic-only, plus one contained type edit
 
-`AutomationExecution.status` is typed `'success' | 'partial_failure' | 'failed'`
-(`lib/api/automations.ts:50`) — it is **missing `'shadow'`**, which the backend does write
-(`automation_engine.py:85-86,163-165`). `StatusBadge`
-(`app/(dashboard)/settings/automations/[id]/page.tsx:59-67`) branches only on
-`success`/`partial_failure` and falls through to `destructive` / "failed".
+- **Needs editing:** `lib/api/churn-suggestions.ts:8` —
+  `ChurnSuggestionProvider = 'hubspot' | 'salesforce'`. TS-only, not runtime-validated, so a new
+  provider *renders* fine; but filtering by it type-safely requires widening the union.
+- **Renders fine, reads wrong (cosmetic):** page header "CRM churn suggestions" + subtitle
+  (`customers/churn-suggestions/page.tsx:127-132`); the `provider` badge is plain text (`:198-207`,
+  no provider-keyed icon/link, so no break); `EvidenceCell` (`:27-47`) reads CRM-shaped keys
+  (`deal_name`/`amount`/`stage`) and falls back to *"No CRM detail captured"*; the
+  `ConfirmSuggestionDialog.tsx:88` field is hardcoded-labeled **"CRM close date"**.
+- The `/customers` pending-count StatCard (`customers/page.tsx:219-220`) is provider-agnostic and
+  picks the new provider up for free.
 
-Net effect, verified in code: a shadow evaluation renders with an **empty "Actions Taken"
-column and a red "failed" badge** — indistinguishable from a genuine failure.
-`trigger_snapshot` is never displayed anywhere in the frontend.
+## Finding 10 — Reusable pure core, with a caveat
 
-This collides directly with making shadow the sensible default for a trigger that cannot fire
-for ~2 more weeks: the one screen that would show it working currently reports it as broken.
-Carried as a **candidate must-have**, flagged rather than silently fixed. It is a pre-existing
-M4.1.5 defect, not one this feature introduces.
+`worker-service/src/services/churn_harvest_core.py:decide_suggestion` (`:24-52`) is generic by
+signature (`is_closed, is_won, discriminator, renewal_set, customer_email, known_emails`) and
+deny-ordered. `_process_raw_record` (`churn_suggestion_harvester.py:82-161`) takes `adapt` as an
+**injected callable**, so a new adapter slots in **without editing shared code**; only
+`_fetch_raw_candidates` (`:39-45`) and the `_ADAPTERS` dict (`:33-36`) are hardwired, and a
+usage-decline path simply wouldn't call them. Dedup + `begin_nested()`/`IntegrityError` race backstop
+(`:142-161`) are reusable verbatim.
 
-### F8 — The churn fence is already enforced by a load-bearing test
-
-`services/backend-api/tests/test_usage_trend_churn_boundary.py` drives a real
-`stable → sharp_decline` transition through two `update_customer_health()` calls and asserts
-`churn_risk_component`, `churn_probability`, `churn_probability_low/high`,
-`calibration_model_id`, `time_to_churn_bucket` are byte-unchanged — with a paired non-vacuity
-test proving `usage_component`/`health_score` *do* move. Keeping this green is the scope fence.
-
-### F9 — Cold start is structural, and there is no "improving" state
-
-`classify_usage_trend` (`usage_score_service.py:288-331`) returns `insufficient_history` unless
-an in-band (12–16 day) snapshot exists **and** the baseline clears
-`TREND_MIN_BASELINE_ACTIVE_DAYS = 5`. Snapshots began 2026-07-22.
-
-Note the floor guard is **permanent, not merely a warm-up effect**: a low-activity customer
-whose 14-day baseline is under 5 active days is never eligible for a trend state at all, so a
-decline-triggered playbook structurally cannot fire for light users. That is a real coverage
-limit worth stating honestly in the PRD.
-
-There are only four states, and increases classify as `stable`
-(`usage_score_service.py:307,326-329`) — so "recovery" can only mean `declining → stable`, and
-there is no way to trigger on growth.
+**Caveat:** `test_churn_harvest_core.py` has a `TestPurityGuard` asserting no
+Celery/SQLAlchemy/FastAPI/httpx/CRM imports. Any reuse must preserve that. And bending
+`is_closed=True, is_won=False, discriminator=<trend state>` onto a usage signal may be forcing a
+CRM-shaped abstraction onto a non-CRM one — worth deciding deliberately rather than by default.
 
 ---
 
 ## Contradictions / corrections to the brief
 
-1. **"fire it from the daily `recompute_usage_scores` seam"** — correct, but the brief implies
-   an in-loop hook like `_call_update_health`. F2 shows the bulk commit makes in-loop action
-   execution wrong; transitions must be drained post-commit.
-2. **"same cooldown-seeding-on-activation so an already-declining cohort doesn't stampede"** —
-   may be unnecessary rather than required. Seeding exists because the churn trigger is
-   level-based (F5); an edge-triggered usage trend has no such failure mode. Decide
-   deliberately instead of copying.
-3. **N1 is not "just a timeline event."** F6 shows it needs new persistence, so it is not the
-   cheap half of this feature — it may be the larger half.
-
----
+1. **`usage_trend_severity.py` is not the classifier** (Finding 5). The brief named the wrong module.
+2. **"No migration" may be unattainable** without abandoning default-deny (Finding 3). The brief
+   framed no-migration as the target; the dig says default-deny is worth more.
+3. **The M3.2c seam does not give "sustained"** (Finding 6). The brief assumed the trend stack would
+   supply the signal directly; it supplies *edges*, and sustained-ness must be built.
 
 ## Open questions for the interview
 
-- **Q1 (N1 storage):** the timeline is read-time-assembled and a trend change has no backing
-  row. Add trend columns to the existing `customer_usage_history` snapshot and derive
-  transitions by comparing consecutive snapshots at read time (no new table, forward-only), or
-  write a dedicated trend-change row from the daily task?
-- **Q2 (trigger semantics):** edge-triggered (fire on entering a worse state) or level-based
-  (fire while state is bad, cooldown-gated)? Does `usage_trend_pct` enter the condition, or is
-  it state-only? Is `declining → stable` recovery fireable?
-- **Q3 (default mode):** should a `usage_trend` rule default to `shadow` given the ~2-week
-  warm-up, diverging from the current `active` default for all rules (`new/page.tsx:319`)?
-- **Q4 (scope):** fix the shadow "failed" badge (F7) on this branch, or leave it and file it?
-- **Q5 (N1 breadth):** does the timeline event fire on every state change including recovery
-  and the first exit from `insufficient_history`, or on declines only?
+1. **Detection rule** — edge on entering `sharp_decline`, or level-based "held N consecutive days"?
+   (Finding 6. Materially changes where the detector hangs and what it reads.)
+2. **Opt-in home** — new `OrgAIConfig` column (migration, honors default-deny) vs. always-on?
+   (Finding 3.)
+3. **`suggested_churned_at` semantics** — decline start, last active day, or detection date? The CRM
+   source uses the *close date* explicitly because stability makes re-harvest idempotent; the
+   usage analogue needs the same stability property.
+4. **Synthetic `external_opportunity_id`** — determines whether a customer who declines, is
+   rejected, recovers, and declines again months later can ever produce a second suggestion.
+5. **`evidence` payload** — what does a reviewer need to adjudicate honestly (usage series? pct?
+   baseline? last active day? recent feedback)? Note the frontend renders CRM keys or falls back.
+6. **Reuse `decide_suggestion` or write a parallel core?** (Finding 10 caveat.)
+7. **Distinguishable provenance for M5.3 backtests** — should confirmed usage-sourced labels be
+   separable from CRM-sourced ones later? (`churn_event_id` back-link exists; `source` is `manual`
+   for both.)
+
+## Honest limits to carry into the PRD (unchanged by the dig, now precisely located)
+
+- **A usage decline is not churn.** The review queue is the entire safety mechanism.
+- **≥5 active-day baseline floor** (`usage_score_service.py:288-331`) permanently excludes
+  light-usage customers — arguably the likeliest churners. Structural, inherited, must be stated.
+- **~12-16 day warm-up** minimum before any decline can be classified (band is `[12,16]` days).
+- **180-day retention** (`usage_metrics.py:46`, weekly `purge_old_usage_history`) — ample vs. the
+  16-day lookback, but caps longer-window analysis.
+- **Unvalidated upstream dependency**: requires the operator to have instrumented usage events.
+- **No claim about churn-prediction quality.** This changes label *supply* only.
+- **The 500-label gate is under review** (`AI-TRACKING.md:467-478`); do not restate it as settled and
+  do not justify this feature by "it gets you to 500".
