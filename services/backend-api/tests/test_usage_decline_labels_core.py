@@ -377,3 +377,60 @@ def test_build_evidence_none_trend_pct_serializes_as_null_not_string():
     assert "None" not in serialized
 
 
+# ===========================================================================
+# Phase 4 — outage_suspected
+# ===========================================================================
+
+
+def test_outage_suspected_below_min_population_returns_false_even_if_share_high():
+    from src.services.usage_decline_labels_core import outage_suspected
+
+    # 2 of 6 = 33% > 25% share, but eligible (6) < min_population (20).
+    assert outage_suspected(qualifying=2, eligible=6, max_share=0.25, min_population=20) is False
+
+
+def test_outage_suspected_true_when_share_strictly_exceeds_max_share():
+    from src.services.usage_decline_labels_core import outage_suspected
+
+    # 6 of 20 = 30% > 25%, eligible == min_population.
+    assert outage_suspected(qualifying=6, eligible=20, max_share=0.25, min_population=20) is True
+
+
+def test_outage_suspected_false_when_share_below_max_share():
+    from src.services.usage_decline_labels_core import outage_suspected
+
+    assert outage_suspected(qualifying=3, eligible=20, max_share=0.25, min_population=20) is False
+
+
+def test_outage_suspected_exactly_at_threshold_does_not_suppress():
+    from src.services.usage_decline_labels_core import outage_suspected
+
+    # 5 of 20 == exactly 0.25 -> strict `>` means this is NOT an outage.
+    assert outage_suspected(qualifying=5, eligible=20, max_share=0.25, min_population=20) is False
+
+
+def test_outage_suspected_eligible_zero_returns_false_never_divides():
+    from src.services.usage_decline_labels_core import outage_suspected
+
+    assert outage_suspected(qualifying=0, eligible=0, max_share=0.25, min_population=20) is False
+
+
+def test_outage_suspected_uses_module_level_defaults():
+    from src.services.usage_decline_labels_core import (
+        DEFAULT_MAX_QUALIFYING_SHARE,
+        DEFAULT_MIN_POPULATION,
+        outage_suspected,
+    )
+
+    assert DEFAULT_MAX_QUALIFYING_SHARE == 0.25
+    assert DEFAULT_MIN_POPULATION == 20
+    assert (
+        outage_suspected(
+            qualifying=10,
+            eligible=25,
+            max_share=DEFAULT_MAX_QUALIFYING_SHARE,
+            min_population=DEFAULT_MIN_POPULATION,
+        )
+        is True
+    )
+

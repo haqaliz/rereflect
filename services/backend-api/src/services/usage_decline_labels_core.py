@@ -27,6 +27,11 @@ SUGGESTION_KEY_MAX_LENGTH = 64
 # a streak exactly like "stable" does.
 QUALIFYING_STATE = "sharp_decline"
 
+# outage_suspected() defaults (PRD M3b). Constants for v1 — neither value is
+# validated; promote to config only if worker-detector finds a reason.
+DEFAULT_MAX_QUALIFYING_SHARE = 0.25
+DEFAULT_MIN_POPULATION = 20
+
 
 def qualifying_streak(
     states: List[Tuple[date, str]],
@@ -145,3 +150,29 @@ def build_evidence(
             for snap_date, active_days in sorted_series
         ],
     }
+
+
+def outage_suspected(
+    qualifying: int,
+    eligible: int,
+    max_share: float = DEFAULT_MAX_QUALIFYING_SHARE,
+    min_population: int = DEFAULT_MIN_POPULATION,
+) -> bool:
+    """Return True iff the population-level share of qualifying customers
+    looks like an instrumentation outage rather than a genuine wave of
+    churn risk (PRD M3b).
+
+    Below `min_population` the ratio is meaningless (2 of 6 customers is
+    33%), so this always returns False there regardless of share — wrongly
+    suppressing a small org's only signal would be worse than the noise.
+
+    `eligible == 0` returns False and never raises ZeroDivisionError.
+
+    Otherwise, True iff `qualifying / eligible > max_share` — strict `>`,
+    so a share exactly at the threshold does NOT suppress.
+    """
+    if eligible <= 0:
+        return False
+    if eligible < min_population:
+        return False
+    return (qualifying / eligible) > max_share
