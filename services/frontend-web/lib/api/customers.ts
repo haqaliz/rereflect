@@ -230,7 +230,8 @@ export interface ActivityEvent {
     | 'usage_reactivated'
     | 'crm_contact_synced'
     | 'crm_renewal_upcoming'
-    | 'playbook_auto_run';
+    | 'playbook_auto_run'
+    | 'usage_trend_change';
   description: string;
   timestamp: string;
   // Existing optional fields
@@ -248,6 +249,10 @@ export interface ActivityEvent {
   renewal_date?: string;
   deal_stage?: string;
   arr?: number;
+  // usage_trend_change payload fields (timeline-trend-event, N1)
+  old_trend_state?: string;
+  new_trend_state?: string;
+  usage_trend_pct?: number;
 }
 
 export interface CustomerActivityResponse {

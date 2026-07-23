@@ -20,9 +20,11 @@ from src.database.session import get_db
 from src.models.ai_correction import AICorrection
 from src.models.churn_event import CustomerChurnEvent
 from src.models.churn_label_suggestion import CHURN_SUGGESTION_STATUSES, ChurnLabelSuggestion
+from src.models.customer_usage import CustomerUsage
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.schemas.ai_readiness import AIReadinessResponse
+from src.services.usage_score_service import TREND_STATE_INSUFFICIENT_HISTORY
 
 analytics_router = APIRouter(prefix="/api/v1/analytics", tags=["ai-readiness"])
 router = analytics_router  # match churn_accuracy.py's `router = analytics_router` export convention
@@ -125,6 +127,36 @@ def _churn_label_counts(org_id: int, db: Session) -> dict:
     }
 
 
+def _usage_trend_counts(org_id: int, db: Session) -> dict:
+    """SM1 (usage-trend-automation-trigger PRD): breakdown of the org's
+    `customer_usage.usage_trend_state` values, plus the "addressable"
+    count/flag the trigger's discoverability depends on.
+
+    "Addressable" == holds any state other than
+    `TREND_STATE_INSUFFICIENT_HISTORY` ("we don't know yet" — not a real
+    classification, per M2's baseline-seed rule). A fresh install with zero
+    `customer_usage` rows (no usage events ever ingested via
+    `POST /api/v1/webhooks/usage`) naturally reports 0 / {} / False here —
+    there is no separate "no data" branch to get wrong.
+    """
+    rows = (
+        db.query(CustomerUsage.usage_trend_state, func.count(CustomerUsage.id))
+        .filter(CustomerUsage.organization_id == org_id)
+        .group_by(CustomerUsage.usage_trend_state)
+        .all()
+    )
+    by_state: Dict[str, int] = {state: cnt for state, cnt in rows}
+    total = sum(by_state.values())
+    addressable = sum(
+        cnt for state, cnt in by_state.items() if state != TREND_STATE_INSUFFICIENT_HISTORY
+    )
+    return {
+        "total": total,
+        "addressable": addressable,
+        "by_state": by_state,
+    }
+
+
 def _pending_suggestion_count(org_id: int, db: Session) -> int:
     """Count of the org's ChurnLabelSuggestion rows awaiting review.
 
@@ -176,12 +208,24 @@ def get_ai_readiness(
     gates on `trainable`, not `total` — the gap between the two numbers is the
     honesty; a report that gated on `total` could say "ready" on rows the fit
     drops or trains as negatives.
+
+    `usage_trend_*` fields (SM1, usage-trend-automation-trigger): the
+    addressable population for the `usage_trend` automation trigger — how
+    many of the org's `customer_usage` rows hold a real classification
+    (anything other than `insufficient_history`, which means "no verdict
+    yet", not "healthy"). `usage_trend_addressable_ready` is a plain
+    `addressable > 0` flag, same honest-count spirit as
+    `correction_volume_ready`/`churn_labels_ready` above: it answers "can
+    this trigger fire for me at all?" rather than asserting it does. An org
+    that has never ingested a usage event via `POST /api/v1/webhooks/usage`
+    reports 0 / {} / False here, not an error.
     """
     org_id = current_org.id
     feedback_volume = _feedback_volume(org_id, db)
     corrections_total, corrections_by_type = _correction_counts(org_id, db)
     churn = _churn_label_counts(org_id, db)
     pending_suggestions = _pending_suggestion_count(org_id, db)
+    usage_trend = _usage_trend_counts(org_id, db)
     return AIReadinessResponse(
         organization_id=org_id,
         generated_at=datetime.utcnow(),
@@ -198,4 +242,8 @@ def get_ai_readiness(
         churn_label_target=CHURN_LABEL_TARGET,
         correction_volume_ready=corrections_total >= CORRECTION_VOLUME_TARGET,
         churn_labels_ready=churn["trainable"] >= CHURN_LABEL_TARGET,
+        usage_trend_customers_total=usage_trend["total"],
+        usage_trend_addressable=usage_trend["addressable"],
+        usage_trend_addressable_ready=usage_trend["addressable"] > 0,
+        usage_trend_by_state=usage_trend["by_state"],
     )

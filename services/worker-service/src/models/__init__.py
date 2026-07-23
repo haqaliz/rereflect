@@ -1019,6 +1019,12 @@ class CustomerUsageHistory(Base):
     distinct_feature_count = Column(Integer, nullable=True)
     usage_score = Column(Integer, nullable=True)
     last_active_at = Column(DateTime, nullable=True)
+    # Trend state/pct in effect for this customer on snapshot_date.
+    # Nullable, no server_default — mirrors backend-api's
+    # customer_usage_history.usage_trend_state/usage_trend_pct
+    # (snapshot-trend-columns aspect, usage-trend-automation-trigger M3).
+    usage_trend_state = Column(String(30), nullable=True)
+    usage_trend_pct = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (

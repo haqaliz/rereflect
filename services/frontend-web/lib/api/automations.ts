@@ -7,7 +7,8 @@ export type TriggerType =
   | 'sentiment_pattern'
   | 'churn_risk_level_change'
   | 'feedback_category_match'
-  | 'churn_probability_threshold';
+  | 'churn_probability_threshold'
+  | 'usage_trend';
 
 export type ActionType =
   | 'auto_assign'
@@ -47,7 +48,7 @@ export interface AutomationExecution {
   customer_email: string | null;
   trigger_snapshot: Record<string, any>;
   actions_executed: { type: string; result: string; error: string | null }[];
-  status: 'success' | 'partial_failure' | 'failed';
+  status: 'success' | 'partial_failure' | 'failed' | 'shadow';
   executed_at: string;
 }
 
@@ -137,6 +138,7 @@ export const TRIGGER_TYPE_LABELS: Record<TriggerType, string> = {
   churn_risk_level_change: 'Churn Risk Level Change',
   feedback_category_match: 'Category Match',
   churn_probability_threshold: 'Churn probability threshold',
+  usage_trend: 'Usage Trend',
 };
 
 export const ACTION_TYPE_LABELS: Record<ActionType, string> = {

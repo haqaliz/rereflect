@@ -528,6 +528,16 @@ def recompute_usage_scores() -> Dict[str, int]:
     trend_updated = 0
     snapshot_rows: List[Dict[str, Any]] = []
 
+    # worker-trend-evaluator aspect (usage-trend-automation-trigger M1):
+    # (organization_id, customer_email, old_trend_state, new_trend_state)
+    # tuples for rows whose trend STATE changed this run. Accumulated here,
+    # during the scan loop, but NEVER drained/fired here — the loop scans
+    # every customer_usage row across ALL orgs with no per-org filter and
+    # commits once after the loop, so firing an automation action inside
+    # the loop would act on uncommitted state. Drained strictly AFTER
+    # `db.commit()` below (AC4).
+    pending_trend_transitions: List[Tuple[int, str, Optional[str], str]] = []
+
     with get_db_session() as db:
         rows = db.query(CustomerUsage).all()
         now = datetime.utcnow()
@@ -560,7 +570,19 @@ def recompute_usage_scores() -> Dict[str, int]:
             # (AC 1, 2). Plain dicts, not the ORM row itself, so this
             # survives the score-update commit below without needing the
             # row to stay unexpired.
-            snapshot_rows.append({
+            #
+            # snapshot-trend-columns aspect: usage_trend_state/usage_trend_pct
+            # are deliberately NOT set in this literal — trend classification
+            # hasn't run yet at this point in the loop. Setting them here
+            # would snapshot the PREVIOUS run's value (row.usage_trend_state
+            # still holds whatever the last commit left it at). The dict is
+            # bound to a local and amended below, immediately after
+            # classification and before the `if trend_state_changed ...`
+            # block, so the snapshot always carries the value just
+            # classified for THIS run — whether or not it changed the stored
+            # state. snapshot_rows holds a reference to this dict, so
+            # mutating it here updates the already-queued entry.
+            snapshot_row: Dict[str, Any] = {
                 "organization_id": row.organization_id,
                 "customer_email": row.customer_email,
                 "active_days_7d": row.active_days_7d,
@@ -570,7 +592,8 @@ def recompute_usage_scores() -> Dict[str, int]:
                 "distinct_feature_count": row.distinct_feature_count,
                 "usage_score": new_score,
                 "last_active_at": row.last_active_at,
-            })
+            }
+            snapshot_rows.append(snapshot_row)
 
             # trend-detection-and-health aspect: classify + persist for EVERY
             # scanned row — same "before any early continue" placement as the
@@ -586,11 +609,33 @@ def recompute_usage_scores() -> Dict[str, int]:
             new_trend_state, new_trend_pct = classify_usage_trend(
                 row.active_days_14d, baseline_value, baseline_age,
             )
-            trend_state_changed = new_trend_state != row.usage_trend_state
+
+            # snapshot-trend-columns aspect: amend the queued snapshot dict
+            # with the just-classified state/pct, unconditionally — both
+            # keys are always present so bulk_insert_mappings never silently
+            # omits them regardless of whether the state actually changed.
+            snapshot_row["usage_trend_state"] = new_trend_state
+            snapshot_row["usage_trend_pct"] = new_trend_pct
+
+            # worker-trend-evaluator aspect: capture the OLD trend state into
+            # a local BEFORE it is overwritten below — `row.usage_trend_state`
+            # is still the pre-classification value at this point (same
+            # "before any early continue" placement as the rest of this
+            # block). Captured unconditionally (not just when it changes)
+            # so `old_trend_state` always reflects what was actually
+            # overwritten, not a value read after the fact.
+            old_trend_state = row.usage_trend_state
+
+            trend_state_changed = new_trend_state != old_trend_state
             if trend_state_changed or new_trend_pct != row.usage_trend_pct:
                 row.usage_trend_state = new_trend_state
                 row.usage_trend_pct = new_trend_pct
                 trend_updated += 1
+
+            if trend_state_changed:
+                pending_trend_transitions.append(
+                    (row.organization_id, row.customer_email, old_trend_state, new_trend_state)
+                )
 
             score_or_windows_changed = new_score != old_score or windows_changed
             if not score_or_windows_changed and not trend_state_changed:
@@ -610,6 +655,30 @@ def recompute_usage_scores() -> Dict[str, int]:
 
         if updated or trend_updated:
             db.commit()
+
+        # worker-trend-evaluator aspect (usage-trend-automation-trigger
+        # M1/M5, AC4): drain the accumulated transitions STRICTLY AFTER the
+        # commit above — never inside the scan loop. `pending_trend_transitions`
+        # is only ever non-empty when `trend_updated` was incremented for a
+        # STATE change, which always takes the `db.commit()` branch above,
+        # so every fired transition here is already durably committed and
+        # visible before `evaluate_usage_trend_triggers` runs. Per-transition
+        # exception isolation (on top of the evaluator's own per-rule
+        # isolation) so one broken evaluation can never fail this task.
+        if pending_trend_transitions:
+            from src.services.automation_usage_trend_trigger import (
+                evaluate_usage_trend_triggers,
+            )
+
+            for t_org_id, t_email, t_old_state, t_new_state in pending_trend_transitions:
+                try:
+                    evaluate_usage_trend_triggers(t_org_id, t_email, t_old_state, t_new_state, db)
+                except Exception as exc:
+                    logger.error(
+                        "recompute_usage_scores: usage_trend trigger evaluation failed for "
+                        "org=%s email=%s (%s -> %s): %s",
+                        t_org_id, t_email, t_old_state, t_new_state, exc, exc_info=True,
+                    )
 
         # Daily snapshot write — a SEPARATE transaction from the score-update
         # commit above, and run UNCONDITIONALLY (not gated on `updated`): a

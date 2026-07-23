@@ -52,6 +52,7 @@ VALID_TRIGGER_TYPES = frozenset({
     "churn_risk_level_change",
     "feedback_category_match",
     "churn_probability_threshold",
+    "usage_trend",
 })
 
 VALID_ACTION_TYPES = frozenset({
@@ -110,6 +111,28 @@ class ChurnProbabilityConfig(BaseModel):
     def direction_must_be_above(cls, v: str) -> str:
         if v != "above":
             raise ValueError("direction must be 'above'")
+        return v
+
+
+VALID_USAGE_TREND_STATES = frozenset({"declining", "sharp_decline"})
+
+
+class UsageTrendConfig(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    states: List[str] = Field(..., min_length=1)
+
+    @field_validator("states")
+    @classmethod
+    def validate_states(cls, v: List[str]) -> List[str]:
+        invalid = [s for s in v if s not in VALID_USAGE_TREND_STATES]
+        if invalid:
+            raise ValueError(
+                f"states must each be one of {sorted(VALID_USAGE_TREND_STATES)}; "
+                f"got {invalid}. 'stable' and 'insufficient_history' cannot be "
+                f"entered as a worsening transition, so a rule targeting them "
+                f"could never fire."
+            )
         return v
 
 
@@ -197,6 +220,8 @@ class TriggerSchema(BaseModel):
             FeedbackCategoryConfig(**cfg)
         elif t == "churn_probability_threshold":
             ChurnProbabilityConfig(**cfg)
+        elif t == "usage_trend":
+            UsageTrendConfig(**cfg)
 
         return self
 
@@ -488,11 +513,19 @@ def enable_template(
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
     now = datetime.utcnow()
+    # `mode` is optional per-template (defaults to "active" — today's
+    # behavior, unchanged for the 5 pre-existing templates). Setting `mode`
+    # directly (rather than `is_active=True`) lets AutomationRule's own
+    # `@validates("mode")` derive `is_active` for us, since is_active is a
+    # write-through alias of mode (`models/automation_rule.py`). Passing
+    # `is_active=True` here as before would *promote* mode to "active"
+    # unconditionally and silently discard an explicit "shadow" template
+    # default (M7's shadow-by-default guarantee).
     rule = AutomationRule(
         organization_id=current_org.id,
         name=tmpl["name"],
         description=tmpl["description"],
-        is_active=True,
+        mode=tmpl.get("mode", "active"),
         trigger_type=tmpl["trigger"]["type"],
         trigger_config=tmpl["trigger"]["config"],
         actions=tmpl["actions"],

@@ -2,10 +2,14 @@
 Tests for customer timeline endpoints:
   Phase 0: Characterization test — locks /activity contract before refactor.
   Phase 5: Tests for new GET /api/v1/customers/{email}/timeline endpoint.
+  Phase 6: usage_trend_change on the internal /timeline AND the public
+           /api/public/v1/customers/{email}/timeline mirror (timeline-trend-event).
 """
 import base64
+import hashlib
+import secrets
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
@@ -17,6 +21,8 @@ from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.churn_event import CustomerChurnEvent
 from src.models.customer_usage import CustomerUsage
 from src.models.usage_event import UsageEvent
+from src.models.customer_usage_history import CustomerUsageHistory
+from src.models.api_key import ApiKey
 from src.models.organization import Organization
 from src.models.user import User
 from src.api.auth import hash_password, create_access_token
@@ -194,6 +200,38 @@ def _make_usage_event(
     db.commit()
     db.refresh(ue)
     return ue
+
+
+def _make_usage_snapshot(
+    db, org, email, snapshot_date, trend_state=None, trend_pct=None
+) -> CustomerUsageHistory:
+    row = CustomerUsageHistory(
+        organization_id=org.id,
+        customer_email=email,
+        snapshot_date=snapshot_date,
+        usage_trend_state=trend_state,
+        usage_trend_pct=trend_pct,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _make_api_key(db: Session, org_id: int, scopes: str = "read") -> str:
+    """Create a stored ApiKey row and return the raw key."""
+    raw = f"rrf_{secrets.token_urlsafe(24)}"
+    row = ApiKey(
+        organization_id=org_id,
+        name="test key",
+        key_prefix=raw[:10],
+        key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+        scopes=scopes,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -658,3 +696,98 @@ class TestTimelineEndpoint:
         headers = {"Authorization": f"Bearer {token}"}
         resp = client.get("/api/v1/customers/x@x.com/timeline", headers=headers)
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — usage_trend_change on the internal /timeline AND the public mirror
+# (timeline-trend-event aspect)
+# ---------------------------------------------------------------------------
+
+class TestTimelineUsageTrendEvent:
+
+    def test_usage_trend_change_appears_on_internal_timeline(
+        self, client: TestClient, tl_org: Organization, tl_headers: dict, db: Session
+    ):
+        _make_health(db, tl_org, "utrend@acme.com")
+        _make_usage_snapshot(db, tl_org, "utrend@acme.com", date(2026, 7, 1), trend_state="stable", trend_pct=0.0)
+        _make_usage_snapshot(db, tl_org, "utrend@acme.com", date(2026, 7, 2), trend_state="declining", trend_pct=-33.0)
+
+        resp = client.get(
+            "/api/v1/customers/utrend@acme.com/timeline?limit=50",
+            headers=tl_headers,
+        )
+        assert resp.status_code == 200
+        events = resp.json()["events"]
+        types = {e["type"] for e in events}
+        assert "usage_trend_change" in types
+
+        ev = next(e for e in events if e["type"] == "usage_trend_change")
+        assert ev["old_trend_state"] == "stable"
+        assert ev["new_trend_state"] == "declining"
+        assert ev["usage_trend_pct"] == -33.0
+        assert isinstance(ev["description"], str) and ev["description"]
+
+    def test_usage_trend_change_null_pair_produces_no_event(
+        self, client: TestClient, tl_org: Organization, tl_headers: dict, db: Session
+    ):
+        """AC4 at the endpoint level — pre-existing NULL rows never fabricate
+        an event visible over the wire."""
+        _make_health(db, tl_org, "utrendnull@acme.com")
+        _make_usage_snapshot(db, tl_org, "utrendnull@acme.com", date(2026, 7, 1), trend_state=None, trend_pct=None)
+        _make_usage_snapshot(db, tl_org, "utrendnull@acme.com", date(2026, 7, 2), trend_state=None, trend_pct=None)
+
+        resp = client.get(
+            "/api/v1/customers/utrendnull@acme.com/timeline?limit=50",
+            headers=tl_headers,
+        )
+        assert resp.status_code == 200
+        types = {e["type"] for e in resp.json()["events"]}
+        assert "usage_trend_change" not in types
+
+    def test_usage_trend_change_appears_on_public_timeline_same_shape(
+        self, client: TestClient, tl_org: Organization, db: Session
+    ):
+        """AC7 — present on both the internal /timeline and the public
+        /api/public/v1/customers/{email}/timeline, with the same shape."""
+        email = "utrendpublic@acme.com"
+        _make_health(db, tl_org, email)
+        _make_usage_snapshot(db, tl_org, email, date(2026, 7, 1), trend_state="declining", trend_pct=-31.0)
+        _make_usage_snapshot(db, tl_org, email, date(2026, 7, 2), trend_state="stable", trend_pct=0.0)
+
+        raw_key = _make_api_key(db, tl_org.id, scopes="read")
+        resp = client.get(
+            f"/api/public/v1/customers/{email}/timeline?limit=50",
+            headers={"Authorization": f"Bearer {raw_key}"},
+        )
+        assert resp.status_code == 200
+        events = resp.json()["events"]
+        types = {e["type"] for e in events}
+        assert "usage_trend_change" in types
+
+        ev = next(e for e in events if e["type"] == "usage_trend_change")
+        assert ev["old_trend_state"] == "declining"
+        assert ev["new_trend_state"] == "stable"
+        assert ev["usage_trend_pct"] == 0.0
+        assert "description" in ev and "timestamp" in ev and "type" in ev
+
+    def test_usage_trend_change_cross_org_isolation(
+        self, client: TestClient, tl_org: Organization, tl_headers: dict, db: Session
+    ):
+        """AC6 — another org's snapshots never appear."""
+        other_org = Organization(name="Other Trend Org", plan="pro")
+        db.add(other_org)
+        db.commit()
+        db.refresh(other_org)
+
+        email = "utrendisolated@acme.com"
+        _make_health(db, tl_org, email)
+        _make_usage_snapshot(db, other_org, email, date(2026, 7, 1), trend_state="stable", trend_pct=0.0)
+        _make_usage_snapshot(db, other_org, email, date(2026, 7, 2), trend_state="declining", trend_pct=-31.0)
+
+        resp = client.get(
+            f"/api/v1/customers/{email}/timeline?limit=50",
+            headers=tl_headers,
+        )
+        assert resp.status_code == 200
+        types = {e["type"] for e in resp.json()["events"]}
+        assert "usage_trend_change" not in types

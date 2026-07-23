@@ -335,7 +335,8 @@ def test_list_templates(client: TestClient, db: Session, test_organization: Orga
     assert response.status_code == 200
     templates = response.json()
     assert isinstance(templates, list)
-    assert len(templates) == 5
+    # 5 original (M4.4) + 1 (M10, usage-trend-automation-trigger)
+    assert len(templates) == 6
 
     ids = {t["id"] for t in templates}
     assert "churn_prevention" in ids
@@ -343,6 +344,7 @@ def test_list_templates(client: TestClient, db: Session, test_organization: Orga
     assert "feature_request_triage" in ids
     assert "negative_sentiment_alert" in ids
     assert "positive_feedback_followup" in ids
+    assert "usage_decline_outreach" in ids
 
 
 # ---------------------------------------------------------------------------

@@ -1063,6 +1063,10 @@ class PublicActivityEvent(BaseModel):
     renewal_date: Optional[datetime] = None
     deal_stage: Optional[str] = None
     arr: Optional[float] = None
+    # usage_trend_change payload fields (timeline-trend-event, additive — all Optional)
+    old_trend_state: Optional[str] = None
+    new_trend_state: Optional[str] = None
+    usage_trend_pct: Optional[float] = None
 
 
 class PublicTimelineResponse(BaseModel):

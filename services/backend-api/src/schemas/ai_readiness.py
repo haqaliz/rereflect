@@ -53,5 +53,18 @@ class AIReadinessResponse(BaseModel):
     correction_volume_ready: bool
     churn_labels_ready: bool
 
+    # Usage-trend addressable population (usage-trend-automation-trigger, SM1).
+    # "Addressable" == the `usage_trend` automation trigger could in principle
+    # fire for this customer, i.e. the customer holds a real classification
+    # rather than the "we don't know yet" placeholder. `usage_trend_by_state`
+    # is a dynamic dict of ONLY observed states (mirrors corrections_by_type /
+    # churn_labels_by_reason) — a fresh install with zero CustomerUsage rows
+    # (no usage events ever ingested) reports every field as 0 / {} / False,
+    # never an error.
+    usage_trend_customers_total: int
+    usage_trend_addressable: int
+    usage_trend_addressable_ready: bool
+    usage_trend_by_state: Dict[str, int]
+
     class Config:
         from_attributes = True

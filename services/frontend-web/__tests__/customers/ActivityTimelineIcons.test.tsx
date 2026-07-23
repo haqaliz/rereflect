@@ -109,3 +109,39 @@ describe('eventIconMap — CRM event types (F2)', () => {
     expect(eventIconMap[unknownType]).toBeUndefined();
   });
 });
+
+describe('eventIconMap — usage_trend_change (timeline-trend-event, N1)', () => {
+  it('has an icon defined', () => {
+    expect(eventIconMap.usage_trend_change).toBeDefined();
+    expect(eventIconMap.usage_trend_change.icon).toBeDefined();
+  });
+
+  it('has a CSS-var color (not a hardcoded hex/rgb)', () => {
+    expect(eventIconMap.usage_trend_change.color).toMatch(/^var\(--/);
+  });
+
+  it('has a CSS-var bg via color-mix', () => {
+    expect(eventIconMap.usage_trend_change.bg).toMatch(/color-mix/);
+  });
+
+  it('all 13 event types (incl. usage_trend_change) are in the map', () => {
+    const allTypes = [
+      'feedback_created',
+      'status_changed',
+      'health_score_changed',
+      'llm_analysis_generated',
+      'action_completed',
+      'churned',
+      'churn_recovered',
+      'usage_first_seen',
+      'usage_feature_adopted',
+      'usage_reactivated',
+      'crm_contact_synced',
+      'crm_renewal_upcoming',
+      'usage_trend_change',
+    ] as const;
+    for (const type of allTypes) {
+      expect(eventIconMap[type], `Missing icon config for: ${type}`).toBeDefined();
+    }
+  });
+});

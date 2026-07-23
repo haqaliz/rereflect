@@ -45,6 +45,7 @@ vi.mock('@/lib/api/automations', () => ({
     churn_risk_level_change: 'Churn Risk Level Change',
     feedback_category_match: 'Category Match',
     churn_probability_threshold: 'Churn probability threshold',
+    usage_trend: 'Usage Trend',
   },
   ACTION_TYPE_LABELS: {
     auto_assign: 'Auto-Assign',

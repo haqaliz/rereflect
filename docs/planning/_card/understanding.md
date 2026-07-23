@@ -1,160 +1,186 @@
-# Understanding — usage-trend-churn-signal (Phase 2 dig synthesis)
+# Understanding — usage-trend-automation-trigger (Phase 2 dig)
 
-Synthesis of three read-only digs (usage subsystem, churn/health recompute path, frontend
-surfaces) plus direct verification by the integrator. All paths are relative to the worktree
-`.claude/worktrees/feat-usage-trend-churn-signal/`. This note is input to the requirements
-interview.
+**Date:** 2026-07-23
+**Method:** 4 parallel read-only agents over the trend compute path, the automation engine,
+the customer timeline, and the automations UI. Paths are relative to the worktree
+`.claude/worktrees/feat-usage-trend-automation-trigger/`. Every claim below is cited.
 
-## What the feature is really asking
+---
 
-Detect that a customer's **product usage has fallen** and turn that into a churn signal at the
-**customer level**, so a customer who goes quiet is caught even though they file no feedback.
+## What the task is really asking
 
-The brief's own framing — "add a usage factor to the 9-factor churn scorer"
-(`docs/planning/product-usage-enrichment/prd.md:67`, `:126`) — is **the wrong shape**, and the
-dig confirms why. `FeedbackItem.churn_risk_factors` is produced per feedback item and
-aggregated for display in `api/routes/customers.py:1191-1259`. A silent customer produces no
-feedback, so a per-feedback factor can never fire for the exact population this feature exists
-to catch. The signal must attach to the customer-level path.
+Reconnect the M3.2b usage-decline signal to the action loop, via two deferred items:
 
-## The blocker, precisely characterised
+- **N1** — a `usage_trend_change` customer-timeline event.
+- **N2** — a `usage_trend` automation trigger that composes with `run_playbook` (M4.1.5).
 
-`AI-TRACKING.md:432` rules out product-usage drop as an M5.3 label source: "blocked —
-`customer_usage` keeps no history to detect a drop against."
+Both are additive. Neither may touch `churn_risk_component`, `churn_probability`, or the
+isotonic calibration.
 
-That is **true of the rollup and false of the raw log**:
+---
 
-- `customer_usage` is one mutable row per `(organization_id, customer_email)`
-  (`models/customer_usage.py:81-86`) — no history. Correct.
-- `usage_event` retains **every** event. The documented "rolling 90 days (raw)" retention
-  (`product-usage-enrichment/prd.md:91`) is **never implemented** — there is no prune task
-  anywhere, while the beat has purges for webhook deliveries, automation executions, playbook
-  executions, calibration models and notifications (`worker-service/src/celery_app.py:170-212`).
-  `prd.md:118` still lists the retention default as an open question.
-- `GET /api/v1/customers/{email}/usage?days=30|60|90` already builds a daily-bucketed time
-  series live from `usage_event` (`api/routes/customers.py:1345-1370`).
+## Affected services
 
-So trend is derivable **today** — but resting on a table with an unbounded-growth defect.
+| Service | What changes |
+|---|---|
+| `worker-service` | The firing seam in `recompute_usage_scores`; a new isolated trigger evaluator (mirror pattern) |
+| `backend-api` | Trigger registration (whitelist + Pydantic config + engine checker), timeline assembly, likely a model/migration |
+| `frontend-web` | Trigger-type union + label + two duplicated config forms; timeline icon; (candidate) shadow-badge fix |
+| `analysis-engine` | Unaffected |
 
-## Four pre-existing defects sitting in this feature's path
+---
 
-All verified directly, not merely reported.
+## Key findings that shape the design
 
-### D1 — Rolling-window fields never re-window (highest impact)
+### F1 — Transition detection is nearly free, but the old value is thrown away
 
-`_compute_rollup_from_events` (`worker-service/src/tasks/usage_metrics.py:39-89`) computes
-`active_days_7d/30d` and `login_count_7d/30d` against `now`. It has **exactly one call site**,
-on the event-processing path (`:208`). The daily `recompute_usage_scores` (`:306-355`) only
-calls `compute_usage_score(row, now)` — it never re-derives the window fields.
+`recompute_usage_scores` (`services/worker-service/src/tasks/usage_metrics.py:543-609`) already
+computes the transition boolean **before** overwriting:
 
-Consequence: for a customer who stops sending events, the frequency fields **freeze at their
-last-event values forever**. Only the recency band moves with time.
+```python
+trend_state_changed = new_trend_state != row.usage_trend_state   # :589  (old value still live)
+if trend_state_changed or new_trend_pct != row.usage_trend_pct:
+    row.usage_trend_state = new_trend_state                       # :591  (old value now gone)
+```
 
-- `usage_score`'s frequency term (weight 0.30, `usage_score_service.py:80-82`) stays inflated
-  indefinitely.
-- **`silent_churner` becomes unreachable.** That segment gates on `active_days_30d <
-  FREQUENCY_LOW_MOD_DAYS` (=5) (`segment_service.py:120-130`) — the segment purpose-built to
-  catch silent customers can never fire for one. `dormant` (`:133-137`) still works because it
-  reads `last_active_at`, which is time-relative.
-- The existing regression test passes only because its fixture hand-sets `active_days_30d=0`
-  (`worker-service/tests/test_usage_metrics.py:359`), presupposing the very re-windowing that
-  does not happen. Green test, wrong production behaviour.
+The old state is in memory at line 589 but never captured into a variable, and **is not
+persisted anywhere** — there is no `previous_trend_state` column, no trend history table, and
+`customer_usage_history` has **no trend columns**
+(`services/backend-api/src/models/customer_usage_history.py:48-55`). Capturing
+`old_trend_state` into a local at the seam is a one-line change.
 
-**Fixing D1 delivers a meaningful share of this feature's value on its own.**
+### F2 — The loop is all-orgs and commits once, in bulk
 
-### D2 — No retention + O(lifetime) reprocessing
+Line 532 loads `db.query(CustomerUsage).all()` with **no org filter**; all mutations commit
+once after the loop (`usage_metrics.py:611-612`). `row.organization_id` is available per
+iteration (used at :583-584, :609), so org scope is free — but a hook fired *inside* the loop
+would act on uncommitted state. Transitions must be **collected during the loop and drained
+after the commit**. The existing `_call_update_health` hook (`usage_metrics.py:604-609`) is
+called inside the loop and is the local precedent — but it is a health recompute, not an
+action-executing trigger, so its placement is not automatically the right precedent for us.
 
-No `usage_event` pruning exists (above). Meanwhile `_do_process_usage_event` re-reads **all**
-events for the customer on **every** event, with no time bound
-(`usage_metrics.py:202-206`), and full-re-aggregates. That is O(lifetime events) per single
-event against an unbounded table — the cost compounds with tenure.
+### F3 — The worker cannot import the backend's AutomationEngine
 
-### D3 — Celery enqueue failure is swallowed
+M4.1.5 hit this exact wall and solved it with a deliberate, narrow mirror:
+`services/worker-service/src/services/automation_churn_trigger.py` implements **only** the
+`churn_probability_threshold` trigger + `run_playbook` action, with its own lightweight
+`AutomationRule` mirror model (no FKs, since the worker doesn't own migrations), sharing
+**Redis db=1** and the identical key scheme `automation_cooldown:{rule_id}:{customer_email}`
+so cooldowns are honored across both processes (`automation_churn_trigger.py:22-26,49,88,101`).
+Our trigger fires from a worker task, so it inherits this constraint and should follow the
+same mirror pattern rather than growing the mirror into a general engine — the module docstring
+at `automation_churn_trigger.py:16-21` explicitly warns against that.
 
-`api/routes/usage_webhooks.py:172-180` logs a warning and still counts the event `accepted`
-when `send_task` fails. Nothing ever re-scans `usage_events` for un-rolled-up rows, so a Redis
-blip silently and permanently drops events from the rollup. The inline comment claims "worker
-can retry"; no such retry path exists.
+### F4 — Registering a new trigger type is a known, enumerated checklist
 
-### D4 — The usage opt-in is unreachable, and destroyed if weights are ever saved
+Backend (`services/backend-api/`):
+1. `src/api/routes/automations.py:49-55` — `VALID_TRIGGER_TYPES` frozenset
+2. `src/api/routes/automations.py:74-127,180-201` — a new `*Config` Pydantic class + a branch in `TriggerSchema.validate_trigger`
+3. `src/services/automation_engine.py:208-225` — a `_trigger_*` checker + dispatch branch
+4. `src/services/automation_engine.py:76-81` — context-shape docstring parity
 
-- Backend accepts six weights, `usage` and `crm` as `Field(default=0)`, sum-to-100 validated
-  (`api/routes/categories.py:145-158`), persisting `config.health_weight_usage = data.usage`
-  (`:201`).
-- Frontend `HealthWeightsEditor` is a **four-key** form (`components/settings/HealthWeightsEditor.tsx:10-29`),
-  mounted only at Settings → AI (`app/(dashboard)/settings/ai/page.tsx:378`), and
-  `updateHealthWeights` sends only those four keys (`lib/api/categories.ts:65-68`).
+Frontend (`services/frontend-web/`):
+5. `lib/api/automations.ts:5-10` — `TriggerType` union
+6. `lib/api/automations.ts:134-140` — `TRIGGER_TYPE_LABELS`
+7. `app/(dashboard)/settings/automations/new/page.tsx:98-194` + `:343-350` — config form + defaults
+8. `app/(dashboard)/settings/automations/[id]/page.tsx:78-236` + `:611-619` — the **duplicated** config form + defaults (with `disabled={!isAdminOrOwner}` wiring)
+9. Every test file that mocks `TRIGGER_TYPE_LABELS` — the mock is hand-duplicated per file, so a new option is invisible in mocked renders until each is updated
 
-Two consequences. The usage weight is **editable nowhere in the product** — M3.2's opt-in is
-reachable only via the API. And because the PUT model defaults the omitted keys to 0, **any
-operator who saves health weights in the UI silently zeroes their usage and CRM weights**,
-wiping an API-configured opt-in. This is silent data loss affecting two shipped features (M3.2
-usage, M3.1 CRM component).
+The list page needs no change — `TriggerBadge` is label-driven and generic.
 
-In-product copy compounds it: `settings/usage-events/page.tsx:208-216` and
-`ComponentProgressBars.tsx:32` both direct operators to Settings → Preferences to raise the
-usage weight; that page has no weight editor (`settings/preferences/page.tsx`).
+### F5 — Cooldown seeding on activation is route-driven and currently churn-only
 
-## The central architectural constraint (calibration trap)
+`seed_churn_cooldowns(db, rule)` (`automation_engine.py:697-747`) is called from three route
+sites in `automations.py` (`create_rule` :571-586, `update_rule` :640-654, `toggle_rule`
+:695-708), each guarded on an `old_mode != active → active` transition and each wrapped in
+try/except so seeding failure never fails the request. It hard-returns 0 for any trigger type
+other than `churn_probability_threshold` (`automation_engine.py:716`).
 
-`churn_probability` is **not** derived from the health score. `probability_updater.update`
-computes it from `health.churn_risk_component` **alone**
-(`worker-service/src/services/probability_updater.py:75`), then applies the org's isotonic
-calibration model and a bootstrap CI, and derives `time_to_churn_bucket` from probability ×
-sentiment trend (`:76-85`).
+**The stampede rationale applies to us only conditionally.** Its docstring (`:701-711`) explains
+the churn trigger is *level-based* — it re-fires as long as probability stays ≥ threshold.
+Whether our trigger is level-based or edge-based is the central design question (Q2): an
+**edge-triggered** (fire-on-transition) design is inherently stampede-resistant, because an
+already-`declining` customer produces no transition on the next pass. If we go edge-triggered,
+seeding may be unnecessary — a simplification, not a gap.
 
-`churn_risk_component` is the inverted average of feedback-level `churn_risk_score`
-(`health_score_service.py:190`) — **purely feedback-derived**. Usage does not feed churn
-probability at all today, even at a non-zero usage weight: usage moves `health_score`, not
-`churn_risk_component`.
+### F6 — The timeline has no events table; N1 has no natural backing row
 
-Therefore:
+`services/backend-api/src/services/customer_timeline_service.py` assembles all 13 event types
+**at read time** by unioning existing source tables (`build_timeline`, :637-730). Every
+existing event type is derived from a durable row that already exists for another reason
+(`FeedbackItem`, `CustomerHealthHistory`, `ChurnPlaybookExecution`, `CrmEnrichment`, …).
 
-1. **Naively folding usage into `churn_risk_component` would silently corrupt every org's
-   calibration.** The isotonic model was fitted against the distribution of the feedback-only
-   score; changing what that input means invalidates the fitted mapping without any error
-   surfacing. Any such change needs an explicit refit/versioning story.
-2. **The hysteresis guard hides silent customers.** `_should_skip` returns True when
-   `churn_risk_component` moved < 2 points versus the latest history snapshot
-   (`probability_updater.py:118-141`). A customer with no new feedback has an unchanged
-   component → skip → **probability frozen**. Same theme as D1: the silent customer is
-   structurally invisible.
+A trend *change* has no such row: `customer_usage` holds only the current state (F1), and
+`customer_usage_history` snapshots carry no trend columns. So **N1 requires new persistence** —
+a real design decision, not an implementation detail. See Q1.
 
-## Useful existing seams
+### F7 — Shadow mode is misrendered as a failure in the UI
 
-- **Daily scan hook.** `recompute_usage_scores` already iterates every `customer_usage` row
-  daily at 04:00 UTC (`celery_app.py:216-219`) and calls `update_customer_health` when the
-  score moves ≥ 2 points (`usage_metrics.py:346-347`). A durable daily snapshot, or a
-  re-windowing fix, lands here cheaply.
-- **Drop-detection precedent.** `_check_health_drop_alert` (`health_score_service.py`, called
-  from `update_customer_health`) is an existing drop-alert pattern to mirror. Note it passes
-  only the four base components and omits `usage`/`crm`.
-- **History-table precedent.** `customer_health_history` is the shape a durable
-  `customer_usage_history` would mirror.
-- **Automation trigger seam.** Trigger types are centralized: engine dispatch at
-  `automation_engine.py:221-222`, worker-side evaluator `automation_churn_trigger` fired from
-  `probability_updater.py:95-96`, per-(rule, customer) Redis cooldown, and `mode`
-  off/shadow/active. Frontend adds a type via `TRIGGER_TYPE_LABELS` (`lib/api/automations.ts:134-140`)
-  plus a config branch in both the new and edit pages — and three existing automations specs
-  mock `TRIGGER_TYPE_LABELS` inline, so they need updating too.
-- **Timeline event seam.** Add to the `ActivityEvent['type']` union (`lib/api/customers.ts:212-226`)
-  and `eventIconMap` (`components/customers/ActivityTimeline.tsx:46-116`); copy is
-  server-generated and rendered verbatim. `playbook_auto_run` is the worked example.
+`AutomationExecution.status` is typed `'success' | 'partial_failure' | 'failed'`
+(`lib/api/automations.ts:50`) — it is **missing `'shadow'`**, which the backend does write
+(`automation_engine.py:85-86,163-165`). `StatusBadge`
+(`app/(dashboard)/settings/automations/[id]/page.tsx:59-67`) branches only on
+`success`/`partial_failure` and falls through to `destructive` / "failed".
+
+Net effect, verified in code: a shadow evaluation renders with an **empty "Actions Taken"
+column and a red "failed" badge** — indistinguishable from a genuine failure.
+`trigger_snapshot` is never displayed anywhere in the frontend.
+
+This collides directly with making shadow the sensible default for a trigger that cannot fire
+for ~2 more weeks: the one screen that would show it working currently reports it as broken.
+Carried as a **candidate must-have**, flagged rather than silently fixed. It is a pre-existing
+M4.1.5 defect, not one this feature introduces.
+
+### F8 — The churn fence is already enforced by a load-bearing test
+
+`services/backend-api/tests/test_usage_trend_churn_boundary.py` drives a real
+`stable → sharp_decline` transition through two `update_customer_health()` calls and asserts
+`churn_risk_component`, `churn_probability`, `churn_probability_low/high`,
+`calibration_model_id`, `time_to_churn_bucket` are byte-unchanged — with a paired non-vacuity
+test proving `usage_component`/`health_score` *do* move. Keeping this green is the scope fence.
+
+### F9 — Cold start is structural, and there is no "improving" state
+
+`classify_usage_trend` (`usage_score_service.py:288-331`) returns `insufficient_history` unless
+an in-band (12–16 day) snapshot exists **and** the baseline clears
+`TREND_MIN_BASELINE_ACTIVE_DAYS = 5`. Snapshots began 2026-07-22.
+
+Note the floor guard is **permanent, not merely a warm-up effect**: a low-activity customer
+whose 14-day baseline is under 5 active days is never eligible for a trend state at all, so a
+decline-triggered playbook structurally cannot fire for light users. That is a real coverage
+limit worth stating honestly in the PRD.
+
+There are only four states, and increases classify as `stable`
+(`usage_score_service.py:307,326-329`) — so "recovery" can only mean `declining → stable`, and
+there is no way to trigger on growth.
+
+---
+
+## Contradictions / corrections to the brief
+
+1. **"fire it from the daily `recompute_usage_scores` seam"** — correct, but the brief implies
+   an in-loop hook like `_call_update_health`. F2 shows the bulk commit makes in-loop action
+   execution wrong; transitions must be drained post-commit.
+2. **"same cooldown-seeding-on-activation so an already-declining cohort doesn't stampede"** —
+   may be unnecessary rather than required. Seeding exists because the churn trigger is
+   level-based (F5); an edge-triggered usage trend has no such failure mode. Decide
+   deliberately instead of copying.
+3. **N1 is not "just a timeline event."** F6 shows it needs new persistence, so it is not the
+   cheap half of this feature — it may be the larger half.
+
+---
 
 ## Open questions for the interview
 
-1. **Scope of the defects.** D1 is arguably a prerequisite (a drop detector built on frozen
-   frequency fields is built on sand) and may be the best first slice on its own. D4 decides
-   whether the signal is reachable by an operator at all. D2/D3 are adjacent reliability debt.
-   Which are in scope?
-2. **Where the signal lands.** Health score only (safe, but usage weight defaults to 0 and is
-   uneditable — see D4), or churn probability (high value, but the calibration trap above)?
-3. **Storage.** Derive trend from raw `usage_event` (works today, unbounded table) vs. a
-   durable `customer_usage_history` snapshot written by the existing daily task (bounded, but
-   starts empty — no retroactive history)?
-4. **Drop definition.** Relative decline vs. inactivity streak vs. both; comparison window;
-   and the cold-start guard (minimum history before the signal may fire) — a new customer with
-   two days of data must not read as a "drop".
-5. **Byte-stability.** M3.2 guaranteed unchanged scores at usage weight 0. Does a D1 fix
-   count as an acceptable break of that guarantee? It *will* change existing scores for orgs
-   that opted in — correctly, but visibly.
+- **Q1 (N1 storage):** the timeline is read-time-assembled and a trend change has no backing
+  row. Add trend columns to the existing `customer_usage_history` snapshot and derive
+  transitions by comparing consecutive snapshots at read time (no new table, forward-only), or
+  write a dedicated trend-change row from the daily task?
+- **Q2 (trigger semantics):** edge-triggered (fire on entering a worse state) or level-based
+  (fire while state is bad, cooldown-gated)? Does `usage_trend_pct` enter the condition, or is
+  it state-only? Is `declining → stable` recovery fireable?
+- **Q3 (default mode):** should a `usage_trend` rule default to `shadow` given the ~2-week
+  warm-up, diverging from the current `active` default for all rules (`new/page.tsx:319`)?
+- **Q4 (scope):** fix the shadow "failed" badge (F7) on this branch, or leave it and file it?
+- **Q5 (N1 breadth):** does the timeline event fire on every state change including recovery
+  and the first exit from `insufficient_history`, or on declines only?

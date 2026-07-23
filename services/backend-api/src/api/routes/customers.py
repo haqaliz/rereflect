@@ -201,6 +201,10 @@ class ActivityEvent(BaseModel):
     renewal_date: Optional[datetime] = None
     deal_stage: Optional[str] = None
     arr: Optional[float] = None
+    # usage_trend_change payload fields (timeline-trend-event, additive — all Optional)
+    old_trend_state: Optional[str] = None
+    new_trend_state: Optional[str] = None
+    usage_trend_pct: Optional[float] = None
 
 
 class CustomerActivityResponse(BaseModel):
@@ -945,6 +949,9 @@ def _timeline_event_to_activity(event) -> ActivityEvent:
         renewal_date=getattr(event, "renewal_date", None),
         deal_stage=getattr(event, "deal_stage", None),
         arr=getattr(event, "arr", None),
+        old_trend_state=getattr(event, "old_trend_state", None),
+        new_trend_state=getattr(event, "new_trend_state", None),
+        usage_trend_pct=getattr(event, "usage_trend_pct", None),
     )
 
 

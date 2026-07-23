@@ -8,10 +8,12 @@ Phase 2: Add churned + churn_recovered.
 Phase 3: Notable usage events (usage_first_seen, usage_reactivated,
          usage_feature_adopted). Flood guard.
 Phase 4: Cursor correctness — equal-timestamp events never skipped/duplicated.
+Phase 7: usage_trend_change — derived at read time from consecutive
+         customer_usage_history snapshots (timeline-trend-event aspect).
 """
 import uuid
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from src.models.customer_health import CustomerHealth
@@ -23,6 +25,7 @@ from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.churn_event import CustomerChurnEvent
 from src.models.customer_usage import CustomerUsage
 from src.models.usage_event import UsageEvent
+from src.models.customer_usage_history import CustomerUsageHistory
 from src.models.organization import Organization
 from src.models.churn_playbook import ChurnPlaybook, ChurnPlaybookExecution
 
@@ -812,6 +815,22 @@ def _playbook_execution(
     return ex
 
 
+def _usage_snapshot(
+    db, org, email, snapshot_date, trend_state=None, trend_pct=None,
+) -> CustomerUsageHistory:
+    row = CustomerUsageHistory(
+        organization_id=org.id,
+        customer_email=email,
+        snapshot_date=snapshot_date,
+        usage_trend_state=trend_state,
+        usage_trend_pct=trend_pct,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def _crm(db, org, email, *, last_synced_at, renewal_date=None, **cols) -> CrmEnrichment:
     row = CrmEnrichment(
         organization_id=org.id,
@@ -1103,6 +1122,25 @@ class TestTimelinePhase6:
         ev = next(e for e in events if e.type == "playbook_auto_run")
         assert f"#{pb_id}" in ev.description
 
+    def test_auto_usage_trend_run_appears(self, db: Session):
+        """triggered_by='auto_usage_trend' (usage-trend-automation-trigger, N2)
+        must surface exactly like 'auto_probability' — an auto-run invisible on
+        the timeline defeats the purpose of this feature."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        pb = _playbook(db, org, name="Usage Decline Outreach")
+        ts = datetime.utcnow() - timedelta(hours=1)
+        _playbook_execution(
+            db, org, pb, "p6usagetrend@acme.com",
+            triggered_by="auto_usage_trend", status="done", created_at=ts,
+        )
+
+        events, _ = build_timeline(db, org.id, "p6usagetrend@acme.com", limit=50)
+        types = [e.type for e in events]
+        assert "playbook_auto_run" in types
+        ev = next(e for e in events if e.type == "playbook_auto_run")
+        assert "Usage Decline Outreach" in ev.description
+
     def test_manual_run_not_surfaced(self, db: Session):
         """triggered_by='manual' executions must NOT appear on the timeline."""
         from src.services.customer_timeline_service import build_timeline
@@ -1233,4 +1271,248 @@ class TestTimelinePhase6:
         events, _ = build_timeline(db, org_a.id, email, limit=50)
         assert all(e.type != "playbook_auto_run" for e in events), (
             "Playbook auto-run event from org B leaked into org A's timeline"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — usage_trend_change (timeline-trend-event aspect)
+# ---------------------------------------------------------------------------
+
+class TestTimelinePhase7:
+    """usage_trend_change events, derived at read time by comparing consecutive
+    customer_usage_history rows (not consecutive dates). Mirrors the
+    _fetch_playbook_runs / TestTimelinePhase6 pattern: few rows per customer,
+    fetch-all + Python cursor filtering."""
+
+    def test_stable_to_declining_yields_one_event_dated_to_declining_snapshot(self, db: Session):
+        """AC1 — stable, stable, declining yields exactly one event, dated to
+        the declining snapshot."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7ac1@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="stable", trend_pct=0.0)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="stable", trend_pct=-2.0)
+        row3 = _usage_snapshot(db, org, email, date(2026, 7, 3), trend_state="declining", trend_pct=-35.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        trend_events = [e for e in events if e.type == "usage_trend_change"]
+        assert len(trend_events) == 1
+        ev = trend_events[0]
+        assert ev.timestamp.date() == row3.snapshot_date
+        assert ev.old_trend_state == "stable"
+        assert ev.new_trend_state == "declining"
+
+    def test_recovery_reads_as_improvement_not_decline(self, db: Session):
+        """AC2 — declining -> stable must read as an improvement."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7ac2@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="declining", trend_pct=-35.0)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="stable", trend_pct=0.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        ev = next(e for e in events if e.type == "usage_trend_change")
+        desc_lower = ev.description.lower()
+        assert "improv" in desc_lower, (
+            f"Recovery description must read as an improvement: {ev.description!r}"
+        )
+        assert "worsened" not in desc_lower, (
+            f"Recovery description must not read as a decline: {ev.description!r}"
+        )
+        assert ev.old_trend_state == "declining"
+        assert ev.new_trend_state == "stable"
+
+    def test_sharp_decline_to_declining_partial_recovery_reported(self, db: Session):
+        """Q1 — sharp_decline -> declining (partial recovery) IS reported by the
+        timeline, unlike the trigger."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7partial@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="sharp_decline", trend_pct=-70.0)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="declining", trend_pct=-35.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        trend_events = [e for e in events if e.type == "usage_trend_change"]
+        assert len(trend_events) == 1
+        assert trend_events[0].old_trend_state == "sharp_decline"
+        assert trend_events[0].new_trend_state == "declining"
+
+    def test_equal_consecutive_states_yield_zero_events(self, db: Session):
+        """AC3 — declining, declining yields zero events (no transition)."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7ac3@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="declining", trend_pct=-32.0)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="declining", trend_pct=-33.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        assert all(e.type != "usage_trend_change" for e in events)
+
+    def test_null_on_new_side_skipped(self, db: Session):
+        """AC4 — NULL trend state on the new side of a pair yields zero events."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7ac4a@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="stable", trend_pct=0.0)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state=None, trend_pct=None)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        assert all(e.type != "usage_trend_change" for e in events)
+
+    def test_null_on_old_side_skipped(self, db: Session):
+        """AC4 — NULL trend state on the old side of a pair yields zero events
+        (this is the common pre-existing-row case: NULL then a real first
+        classification is handled separately as insufficient_history -> X,
+        never a bare NULL -> X transition)."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7ac4b@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state=None, trend_pct=None)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="declining", trend_pct=-31.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        assert all(e.type != "usage_trend_change" for e in events)
+
+    def test_both_sides_null_yields_zero_events(self, db: Session):
+        """AC4 — pre-existing rows with NULL on both sides never fabricate a
+        transition."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7bothnull@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state=None, trend_pct=None)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state=None, trend_pct=None)
+        _usage_snapshot(db, org, email, date(2026, 7, 3), trend_state=None, trend_pct=None)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        assert all(e.type != "usage_trend_change" for e in events)
+
+    def test_missing_days_gap_compares_rows_not_dates(self, db: Session):
+        """The worker can miss a day — comparing consecutive ROWS (not
+        consecutive calendar dates) must not fabricate or suppress a
+        transition across the gap."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7gap@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="stable", trend_pct=0.0)
+        # Gap: no snapshot for 2026-07-02 through 2026-07-04 (worker downtime)
+        row2 = _usage_snapshot(db, org, email, date(2026, 7, 5), trend_state="declining", trend_pct=-40.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        trend_events = [e for e in events if e.type == "usage_trend_change"]
+        assert len(trend_events) == 1
+        assert trend_events[0].timestamp.date() == row2.snapshot_date
+
+    def test_insufficient_history_to_real_state_phrased_as_measurable(self, db: Session):
+        """The first exit from insufficient_history is phrased as the trend
+        becoming measurable, NOT as a decline — even when the newly-measured
+        state is sharp_decline."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7warmup@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="insufficient_history", trend_pct=None)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="sharp_decline", trend_pct=-70.0)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        ev = next(e for e in events if e.type == "usage_trend_change")
+        desc_lower = ev.description.lower()
+        assert "measurable" in desc_lower, (
+            f"insufficient_history exit must read as becoming measurable: {ev.description!r}"
+        )
+        assert "worsened" not in desc_lower, (
+            f"insufficient_history exit must not read as a decline: {ev.description!r}"
+        )
+        assert ev.old_trend_state == "insufficient_history"
+        assert ev.new_trend_state == "sharp_decline"
+
+    def test_real_state_to_insufficient_history_reported(self, db: Session):
+        """X -> insufficient_history (baseline floor stops being cleared) is
+        reported, unlike the trigger which never fires on it."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7floor@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="declining", trend_pct=-31.0)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="insufficient_history", trend_pct=None)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        trend_events = [e for e in events if e.type == "usage_trend_change"]
+        assert len(trend_events) == 1
+        assert trend_events[0].old_trend_state == "declining"
+        assert trend_events[0].new_trend_state == "insufficient_history"
+
+    def test_usage_trend_pct_populated_on_event(self, db: Session):
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7pct@acme.com"
+        _usage_snapshot(db, org, email, date(2026, 7, 1), trend_state="stable", trend_pct=1.5)
+        _usage_snapshot(db, org, email, date(2026, 7, 2), trend_state="declining", trend_pct=-38.5)
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        ev = next(e for e in events if e.type == "usage_trend_change")
+        assert ev.usage_trend_pct == -38.5
+
+    def test_interleaved_with_other_event_types_sorts_correctly(self, db: Session):
+        """AC5 — usage_trend_change must interleave correctly with other
+        event types in timestamp DESC order."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7interleave@acme.com"
+        now = datetime.utcnow()
+        _feedback(db, org, email, ts=now - timedelta(hours=5))
+        _usage_snapshot(db, org, email, (now - timedelta(days=2)).date(), trend_state="stable", trend_pct=0.0)
+        _usage_snapshot(db, org, email, (now - timedelta(days=1)).date(), trend_state="declining", trend_pct=-33.0)
+        _churn(db, org, email, churned_at=now - timedelta(hours=20))
+
+        events, _ = build_timeline(db, org.id, email, limit=50)
+        types = [e.type for e in events]
+        assert "usage_trend_change" in types
+        assert "feedback_created" in types
+        assert "churned" in types
+
+    def test_cursor_pagination_no_dup_no_gap(self, db: Session):
+        """AC5 — cursor pagination over a mixed timeline (trend changes +
+        other sources) produces no duplicates and no gaps. Mirrors
+        test_timeline_pagination_no_dup_no_gap."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        email = "p7page@acme.com"
+        base_day = date(2026, 6, 1)
+        states = ["stable", "declining", "stable", "sharp_decline", "declining", "stable"]
+        for i, state in enumerate(states):
+            _usage_snapshot(db, org, email, base_day + timedelta(days=i), trend_state=state, trend_pct=0.0)
+        for i in range(3):
+            _feedback(db, org, email, ts=datetime.utcnow() - timedelta(hours=i + 1))
+
+        all_events, _ = build_timeline(db, org.id, email, limit=100)
+        assert len([e for e in all_events if e.type == "usage_trend_change"]) >= 3
+
+        collected = []
+        cursor = None
+        for _ in range(50):
+            page, cursor = build_timeline(db, org.id, email, before=cursor, limit=2)
+            collected.extend(page)
+            if cursor is None:
+                break
+
+        composite = [(e.type, e.timestamp, e.source_id) for e in collected]
+        assert len(composite) == len(set(composite)), "Duplicates detected in usage_trend_change pagination"
+        assert len(collected) == len(all_events), (
+            f"Paginated ({len(collected)}) != full ({len(all_events)})"
+        )
+
+    def test_cross_org_isolation(self, db: Session):
+        """AC6 — another org's snapshots never appear."""
+        from src.services.customer_timeline_service import build_timeline
+        org_a = _org(db)
+        org_b = Organization(name="Org B Usage Trend", plan="pro")
+        db.add(org_b)
+        db.commit()
+        db.refresh(org_b)
+
+        email = "shared-trend@acme.com"
+        _usage_snapshot(db, org_b, email, date(2026, 7, 1), trend_state="stable", trend_pct=0.0)
+        _usage_snapshot(db, org_b, email, date(2026, 7, 2), trend_state="declining", trend_pct=-35.0)
+
+        events, _ = build_timeline(db, org_a.id, email, limit=50)
+        assert all(e.type != "usage_trend_change" for e in events), (
+            "usage_trend_change from org B leaked into org A's timeline"
         )

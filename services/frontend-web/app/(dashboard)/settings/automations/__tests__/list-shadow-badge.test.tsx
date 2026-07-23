@@ -34,6 +34,7 @@ vi.mock('@/lib/api/automations', () => ({
   TRIGGER_TYPE_LABELS: {
     health_score_threshold: 'Health Score Threshold',
     churn_probability_threshold: 'Churn probability threshold',
+    usage_trend: 'Usage Trend',
   },
   ACTION_TYPE_LABELS: {
     auto_assign: 'Auto-Assign',

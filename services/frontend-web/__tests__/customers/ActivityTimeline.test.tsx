@@ -125,6 +125,25 @@ describe('ActivityTimeline', () => {
     });
   });
 
+  it('renders a usage_trend_change event with its description', async () => {
+    (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      events: [
+        {
+          type: 'usage_trend_change' as const,
+          description: 'Usage trend worsened from Stable to Declining',
+          old_trend_state: 'stable',
+          new_trend_state: 'declining',
+          usage_trend_pct: -33.0,
+          timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+        },
+      ],
+    });
+    renderWithQueryClient(<ActivityTimeline email="john@acme.com" />);
+    await waitFor(() => {
+      expect(screen.getByText('Usage trend worsened from Stable to Declining')).toBeInTheDocument();
+    });
+  });
+
   it('renders empty state when no events', async () => {
     (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [] });
     renderWithQueryClient(<ActivityTimeline email="john@acme.com" />);

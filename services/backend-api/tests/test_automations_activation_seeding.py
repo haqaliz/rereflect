@@ -391,3 +391,40 @@ def test_shadow_executions_visible_via_executions_endpoint(
     assert len(executions) == 1
     assert executions[0]["status"] == "shadow"
     assert executions[0]["customer_email"] == "shadow-customer@test.com"
+
+
+# ---------------------------------------------------------------------------
+# 6. Pin: a usage_trend rule going active must NOT seed cooldowns
+# (trigger-registration) — edge-triggering removes the stampede mode that
+# seed_churn_cooldowns guards against, so seed_churn_cooldowns stays
+# deliberately churn-only (PRD M2). This test pins that decision.
+# ---------------------------------------------------------------------------
+
+def _usage_trend_rule(db: Session, org: Organization, mode: str = "shadow") -> AutomationRule:
+    rule = AutomationRule(
+        organization_id=org.id,
+        name="Usage Trend Alert",
+        trigger_type="usage_trend",
+        trigger_config={"states": ["declining", "sharp_decline"]},
+        actions=[{"type": "send_notification", "config": {"recipients": "admins", "channels": ["dashboard"]}}],
+        cooldown_hours=24,
+        mode=mode,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+def test_update_rule_usage_trend_going_active_does_not_seed(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict, fake_redis: FakeRedis
+):
+    rule = _usage_trend_rule(db, test_organization, mode="shadow")
+    _make_health(db, test_organization, "above@test.com", 0.99)
+
+    response = client.put(
+        f"/api/v1/automations/{rule.id}", json={"mode": "active"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "active"
+    assert fake_redis.setex_calls == []
