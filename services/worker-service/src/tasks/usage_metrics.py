@@ -701,6 +701,54 @@ def recompute_usage_scores() -> Dict[str, int]:
                 total, exc, exc_info=True,
             )
 
+        # usage-decline-churn-labels aspect (worker-detector, Phase 5):
+        # invoked STRICTLY AFTER the daily snapshot commit above, NEVER at
+        # the M3.2c drain seam a few lines up — today's snapshot row does
+        # not exist until that commit lands, and the detector's streak
+        # window read would be silently one day stale otherwise (plan
+        # section 1's placement correction). Skipped entirely when
+        # `snapshot_written == 0`: a failed snapshot write means today's row
+        # is genuinely absent, and the core's own calendar-gap rule already
+        # reads that as a broken streak — going quiet here just avoids a
+        # wasted scan, it does not change the outcome.
+        #
+        # No explicit `db.commit()` here: any ChurnLabelSuggestion rows the
+        # detector writes ride along with `get_db_session()`'s own commit
+        # when this `with` block exits normally — same convention as the
+        # `pending_trend_transitions` drain above, which also relies on the
+        # outer session's commit rather than committing itself.
+        if snapshot_written == 0:
+            logger.info(
+                "recompute_usage_scores: usage_decline_label_detector skipped — "
+                "snapshot_written=0 this run",
+            )
+        else:
+            from src.services.usage_decline_label_detector import (
+                detect_usage_decline_labels,
+            )
+
+            # `rows` was already loaded (the full customer_usage scan above)
+            # — reusing it here avoids a second query just to enumerate
+            # org_ids. Sorted for deterministic iteration order.
+            org_ids = sorted({row.organization_id for row in rows})
+
+            for detector_org_id in org_ids:
+                try:
+                    detect_usage_decline_labels(detector_org_id, db, today=today)
+                except Exception as exc:
+                    # Per-org isolation (mirrors the drain seam's
+                    # try/except idiom above): one broken org must never
+                    # fail this task or stop other orgs from being
+                    # evaluated. Roll back so a half-applied nested
+                    # transaction from the failing org can't taint the
+                    # next org's writes.
+                    db.rollback()
+                    logger.error(
+                        "recompute_usage_scores: usage_decline_label_detector failed "
+                        "for org=%s: %s",
+                        detector_org_id, exc, exc_info=True,
+                    )
+
     logger.info(
         "recompute_usage_scores: scanned=%s updated=%s snapshot_written=%s trend_updated=%s",
         total, updated, snapshot_written, trend_updated,
