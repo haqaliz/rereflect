@@ -261,3 +261,94 @@ class TestModeGate:
         result = detect_usage_decline_labels(1, db, today=TODAY)
 
         assert result["would_suggest"] == 1
+
+
+# ===========================================================================
+# Phase 2 — batched history load
+# ===========================================================================
+
+
+class TestBatchedHistoryLoad:
+    def test_history_query_count_does_not_scale_with_customer_count(self, db):
+        _org_config(db, org_id=1, mode="shadow")
+        for i in range(50):
+            _qualifying_customer(db, org_id=1, email=f"customer{i}@example.com")
+
+        with _QueryCounter("customer_usage_history") as history_counter:
+            result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["would_suggest"] == 50
+        # A small constant, not one-per-customer: 50 customers must not
+        # produce 50 history queries.
+        assert history_counter.count <= 1, (
+            f"expected <=1 history query for 50 customers, got "
+            f"{history_counter.count}"
+        )
+
+    def test_history_query_count_constant_regardless_of_small_or_large_org(self, db):
+        _org_config(db, org_id=1, mode="shadow")
+        _qualifying_customer(db, org_id=1, email="solo@example.com")
+
+        with _QueryCounter("customer_usage_history") as small_org_counter:
+            detect_usage_decline_labels(1, db, today=TODAY)
+
+        _org_config(db, org_id=2, mode="shadow")
+        for i in range(50):
+            _qualifying_customer(db, org_id=2, email=f"customer{i}@example.com")
+
+        with _QueryCounter("customer_usage_history") as large_org_counter:
+            detect_usage_decline_labels(2, db, today=TODAY)
+
+        assert small_org_counter.count == large_org_counter.count
+
+    def test_window_is_calendar_days_not_last_n_existing_rows(self, db):
+        """A stale, already-ended streak from long before the current
+        window must NOT be mistaken for a current one. If the query pulled
+        "the last N existing rows" instead of filtering to the calendar
+        window, a gap right before `today` would cause it to reach past the
+        gap into this old block and incorrectly qualify a stale streak.
+        """
+        _org_config(db, org_id=1, mode="shadow", sustain_days=7)
+        _customer_usage(
+            db, 1, "alice@example.com",
+            last_active_at=datetime(2026, 6, 1),
+            trend_state=QUALIFYING_STATE,
+        )
+        # A solid 7-day streak that ENDED 20 days before `today` — well
+        # outside the calendar window — followed by a gap covering the rest
+        # of the days up to `today` (no rows at all near `today`).
+        stale_streak_end = TODAY - timedelta(days=20)
+        _history_rows(db, 1, "alice@example.com", end_date=stale_streak_end, num_days=7)
+
+        result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["would_suggest"] == 0
+
+    def test_gap_within_window_breaks_streak(self, db):
+        """A single missing calendar day inside the sustain window must
+        break the streak — proves the window is date-filtered, not just
+        row-count-limited."""
+        _org_config(db, org_id=1, mode="shadow", sustain_days=7)
+        _customer_usage(
+            db, 1, "alice@example.com",
+            last_active_at=datetime(2026, 7, 10),
+            trend_state=QUALIFYING_STATE,
+        )
+        # 7 rows ending today, but skip day TODAY-3 entirely (gap).
+        for offset in range(7):
+            if offset == 3:
+                continue
+            db.add(
+                CustomerUsageHistory(
+                    organization_id=1,
+                    customer_email="alice@example.com",
+                    snapshot_date=TODAY - timedelta(days=offset),
+                    usage_trend_state=QUALIFYING_STATE,
+                    active_days_14d=2,
+                )
+            )
+        db.commit()
+
+        result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["would_suggest"] == 0

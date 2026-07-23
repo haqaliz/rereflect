@@ -13,9 +13,11 @@ module's `detect_usage_decline_labels` is meant to eventually be invoked from
 section 1. Today's snapshot row does not exist until that final commit, so a
 detector run before it would read history missing the current day.
 
-This file currently implements only Phase 1 of that plan: the detector
-skeleton + the off/shadow/active mode gate. `active` mode computes and logs
-exactly like `shadow` for now — the write path (Phase 4) does not exist yet.
+This file currently implements Phases 1-2 of that plan: the detector
+skeleton + the off/shadow/active mode gate (Phase 1), and a batched,
+org-scoped (never per-customer) history load (Phase 2). `active` mode
+computes and logs exactly like `shadow` for now — the write path (Phase 4)
+does not exist yet.
 
 Hard fences (never touched by this module): churn_risk_component,
 churn_probability, churn_probability_low/high, calibration_model_id,
@@ -25,8 +27,9 @@ apply_trend_penalty, churn_suggestion_harvester.py, churn_harvest_core.py.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from typing import List, Optional, Tuple
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+from typing import Dict, List, Optional, Tuple
 
 from src.services.usage_decline_labels_core import qualifying_streak
 
@@ -92,30 +95,59 @@ def _load_customers(
     return [(email, last_active_at, trend_state) for email, last_active_at, trend_state in rows]
 
 
-def _load_history_for_customer(
-    org_id: int, db, email: str, today: date, sustain_days: int
-) -> List[Tuple[date, str]]:
-    """Phase 1 placeholder: one query per customer. Phase 2 replaces this
-    with a single org-scoped batched query — see that phase's docstring for
-    why "batched" matters at customer-count scale.
-    """
-    from datetime import timedelta
+def _load_streak_window_history(
+    org_id: int,
+    db,
+    customer_emails: List[str],
+    today: date,
+    sustain_days: int,
+) -> Dict[str, List[Tuple[date, str]]]:
+    """One batched query resolving the streak window for EVERY customer in
+    `customer_emails` — mirrors `_load_trend_baselines`
+    (usage_metrics.py:279-338): a single SELECT scoped to the org and a
+    calendar-date window, grouped in Python by customer_email. Never query
+    per customer. Uses the composite index
+    `ix_customer_usage_history_lookback (organization_id, customer_email,
+    snapshot_date)`.
 
+    The window is CALENDAR days — `[today - (sustain_days - 1), today]` —
+    not "the last N existing rows". This distinction matters: if the query
+    instead pulled the N most-recent existing rows (ORDER BY snapshot_date
+    DESC LIMIT N per customer), a gap near today (e.g. from a worker outage)
+    would cause it to silently reach past the gap into an older, already-
+    ended streak and hand `qualifying_streak` a run that LOOKS complete but
+    is stale. Calendar-window filtering instead returns fewer than
+    `sustain_days` rows whenever there's a gap in that exact window, which
+    `qualifying_streak`'s own length check correctly reads as "does not
+    qualify" — conservative under our own downtime, by construction.
+    """
     from src.models import CustomerUsageHistory
+
+    if not customer_emails:
+        return {}
 
     earliest_date = today - timedelta(days=sustain_days - 1)
 
     rows = (
-        db.query(CustomerUsageHistory.snapshot_date, CustomerUsageHistory.usage_trend_state)
+        db.query(
+            CustomerUsageHistory.customer_email,
+            CustomerUsageHistory.snapshot_date,
+            CustomerUsageHistory.usage_trend_state,
+        )
         .filter(
             CustomerUsageHistory.organization_id == org_id,
-            CustomerUsageHistory.customer_email == email,
+            CustomerUsageHistory.customer_email.in_(customer_emails),
             CustomerUsageHistory.snapshot_date >= earliest_date,
             CustomerUsageHistory.snapshot_date <= today,
         )
         .all()
     )
-    return [(snapshot_date, trend_state) for snapshot_date, trend_state in rows]
+
+    history: Dict[str, List[Tuple[date, str]]] = defaultdict(list)
+    for email, snapshot_date, trend_state in rows:
+        history[email].append((snapshot_date, trend_state))
+
+    return history
 
 
 def detect_usage_decline_labels(
@@ -127,15 +159,14 @@ def detect_usage_decline_labels(
     """Evaluate one org's customers for sustained usage-decline churn-label
     candidates.
 
-    Phase 1 only: mode gate + a working (not yet batched) evaluation loop.
-    No write path exists yet — 'active' mode currently only computes and
-    logs the same counts as 'shadow'; both write zero `ChurnLabelSuggestion`
-    rows.
+    Phases 1-2 only: mode gate + batched history load. No write path exists
+    yet — 'active' mode currently only computes and logs the same counts as
+    'shadow'; both write zero `ChurnLabelSuggestion` rows.
 
     Args:
         org_id: organization to evaluate.
         db: SQLAlchemy session. Caller owns the transaction — this function
-            never commits (there is nothing to commit yet in Phase 1).
+            never commits (there is nothing to commit yet in Phases 1-2).
         today: override for the "as of" calendar date (tests only); defaults
             to `datetime.utcnow().date()`.
 
@@ -163,10 +194,15 @@ def detect_usage_decline_labels(
         today = datetime.utcnow().date()
 
     customers = _load_customers(org_id, db)
+    customer_emails = [email for email, _, _ in customers]
+
+    history_by_email = _load_streak_window_history(
+        org_id, db, customer_emails, today, sustain_days
+    )
 
     qualifying: List[Tuple[str, date, Optional[datetime]]] = []
     for email, last_active_at, _trend_state in customers:
-        states = _load_history_for_customer(org_id, db, email, today, sustain_days)
+        states = history_by_email.get(email, [])
         streak_start = qualifying_streak(states, sustain_days)
         if streak_start is not None:
             qualifying.append((email, streak_start, last_active_at))
