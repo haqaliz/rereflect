@@ -44,6 +44,17 @@ LOCAL_PROVIDERS = {"ollama", "openai_compatible"}
 # PATCH endpoint.
 VALID_CLASSIFIER_MODES = {"off", "shadow", "auto"}
 
+# Per-org usage-decline churn-label suggestion mode (usage-decline-churn-labels,
+# M2). 'off' | 'shadow' | 'active' — deliberately NOT VALID_CLASSIFIER_MODES:
+# this column gates writing rows into the churn-suggestion review queue (mirrors
+# AutomationRule.mode), not an auto-applying classifier, so 'active' replaces
+# 'auto' and 'auto' must be rejected. See plan_20260723.md section 2.
+VALID_USAGE_CHURN_LABEL_MODES = {"off", "shadow", "active"}
+
+USAGE_CHURN_SUSTAIN_DAYS_MIN = 1
+USAGE_CHURN_SUSTAIN_DAYS_MAX = 90
+USAGE_CHURN_SUSTAIN_DAYS_DEFAULT = 7
+
 
 def _is_valid_url(value: str) -> bool:
     """Return True if value is a well-formed http/https URL with a netloc."""
@@ -69,6 +80,8 @@ class AISettingsResponse(BaseModel):
     classifier_mode: str = "off"
     category_classifier_mode: str = "off"
     urgency_classifier_mode: str = "off"
+    usage_churn_labels_mode: str = "off"
+    usage_churn_label_config: Optional[dict] = None
     models: ModelConfig
 
 
@@ -81,6 +94,8 @@ class AISettingsUpdate(BaseModel):
     classifier_mode: Optional[str] = None
     category_classifier_mode: Optional[str] = None
     urgency_classifier_mode: Optional[str] = None
+    usage_churn_labels_mode: Optional[str] = None
+    usage_churn_label_config: Optional[dict] = None
     model_categorization: Optional[str] = None
     model_analysis: Optional[str] = None
     model_insights: Optional[str] = None
@@ -233,6 +248,8 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
     classifier_mode = getattr(config, "classifier_mode", None) or "off" if config else "off"
     category_classifier_mode = getattr(config, "category_classifier_mode", None) or "off" if config else "off"
     urgency_classifier_mode = getattr(config, "urgency_classifier_mode", None) or "off" if config else "off"
+    usage_churn_labels_mode = getattr(config, "usage_churn_labels_mode", None) or "off" if config else "off"
+    usage_churn_label_config = getattr(config, "usage_churn_label_config", None) if config else None
 
     return AISettingsResponse(
         ai_analysis_enabled=org.ai_analysis_enabled,
@@ -243,6 +260,8 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         classifier_mode=classifier_mode,
         category_classifier_mode=category_classifier_mode,
         urgency_classifier_mode=urgency_classifier_mode,
+        usage_churn_labels_mode=usage_churn_labels_mode,
+        usage_churn_label_config=usage_churn_label_config,
         models=model_config,
     )
 
@@ -601,6 +620,58 @@ def update_ai_settings(
             )
         if hasattr(config, "urgency_classifier_mode"):
             config.urgency_classifier_mode = data.urgency_classifier_mode
+
+    # ── Usage-decline churn-label mode validation ─────────────────────────────
+    # Uses VALID_USAGE_CHURN_LABEL_MODES (off|shadow|active) — NOT
+    # VALID_CLASSIFIER_MODES and NOT gated by _classifier_deps_available(): this
+    # column has no scikit-learn dependency (see plan_20260723.md section 2).
+    if "usage_churn_labels_mode" in data.model_fields_set:
+        if (
+            data.usage_churn_labels_mode is not None
+            and data.usage_churn_labels_mode not in VALID_USAGE_CHURN_LABEL_MODES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid usage_churn_labels_mode. Must be one of: "
+                    f"{', '.join(sorted(VALID_USAGE_CHURN_LABEL_MODES))}"
+                ),
+            )
+        if hasattr(config, "usage_churn_labels_mode"):
+            config.usage_churn_labels_mode = data.usage_churn_labels_mode
+
+    # ── Usage-decline churn-label config validation ───────────────────────────
+    # {"sustain_days": int}. sustain_days must be an int (not bool — bool is an
+    # int subclass in Python) within [MIN, MAX]. Unknown keys are rejected so a
+    # typo'd knob fails loudly rather than being silently ignored.
+    if "usage_churn_label_config" in data.model_fields_set:
+        if data.usage_churn_label_config is not None:
+            allowed_keys = {"sustain_days"}
+            unknown_keys = set(data.usage_churn_label_config.keys()) - allowed_keys
+            if unknown_keys:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"Unknown key(s) in usage_churn_label_config: "
+                        f"{', '.join(sorted(unknown_keys))}. Allowed: {', '.join(sorted(allowed_keys))}"
+                    ),
+                )
+            if "sustain_days" in data.usage_churn_label_config:
+                sustain_days = data.usage_churn_label_config["sustain_days"]
+                if (
+                    isinstance(sustain_days, bool)
+                    or not isinstance(sustain_days, int)
+                    or not (USAGE_CHURN_SUSTAIN_DAYS_MIN <= sustain_days <= USAGE_CHURN_SUSTAIN_DAYS_MAX)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=(
+                            f"sustain_days must be an integer between "
+                            f"{USAGE_CHURN_SUSTAIN_DAYS_MIN} and {USAGE_CHURN_SUSTAIN_DAYS_MAX}."
+                        ),
+                    )
+        if hasattr(config, "usage_churn_label_config"):
+            config.usage_churn_label_config = data.usage_churn_label_config
 
     if data.model_categorization is not None:
         config.model_categorization = data.model_categorization
