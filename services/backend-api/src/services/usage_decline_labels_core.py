@@ -11,8 +11,14 @@ cannot import backend-api code).
 See docs/planning/usage-decline-churn-labels/detector-core/spec.md
 """
 
+import hashlib
 from datetime import date, timedelta
 from typing import List, Optional, Tuple
+
+# ChurnLabelSuggestion.external_opportunity_id is String(64)
+# (src/models/churn_label_suggestion.py). This is the natural-key budget
+# that suggestion_key() must respect.
+SUGGESTION_KEY_MAX_LENGTH = 64
 
 # States that count toward a qualifying sustained-decline streak. Anything
 # else — "stable", "declining", "insufficient_history", or an unrecognised
@@ -69,5 +75,25 @@ def qualifying_streak(
 
 
 def suggestion_key(email: str, streak_start: date) -> str:
-    """Phase 2 stub — implemented after Phase 1 sign-off."""
-    raise NotImplementedError("suggestion_key is implemented in Phase 2")
+    """Return a deterministic natural key for a sustained-decline streak.
+
+    Stable while a streak continues (same email + streak_start -> same key),
+    which is what makes re-detection idempotent. A new episode after
+    recovery (a different streak_start) mints a new key.
+
+    Must fit `ChurnLabelSuggestion.external_opportunity_id`, a
+    `String(64)` column, even though `customer_email` is `String(255)` and
+    can overflow the natural form. When the natural
+    `usage:{email}:{iso_date}` form would exceed
+    `SUGGESTION_KEY_MAX_LENGTH`, this falls back to a deterministic SHA-256
+    hash of the *full* email (never a truncation of it — truncating the
+    email itself could silently collide two customers sharing a long
+    prefix onto the same suggestion).
+    """
+    iso_date = streak_start.isoformat()
+    natural_key = f"usage:{email}:{iso_date}"
+    if len(natural_key) <= SUGGESTION_KEY_MAX_LENGTH:
+        return natural_key
+
+    email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()[:32]
+    return f"usage:{email_hash}:{iso_date}"
