@@ -12,7 +12,7 @@ See docs/planning/usage-decline-churn-labels/detector-core/spec.md
 """
 
 import hashlib
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import List, Optional, Tuple
 
 # ChurnLabelSuggestion.external_opportunity_id is String(64)
@@ -97,3 +97,51 @@ def suggestion_key(email: str, streak_start: date) -> str:
 
     email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()[:32]
     return f"usage:{email_hash}:{iso_date}"
+
+
+def build_evidence(
+    trend_state: str,
+    trend_pct: Optional[float],
+    baseline_active_days_14d: Optional[int],
+    current_active_days_14d: Optional[int],
+    streak_start_date: date,
+    as_of_date: date,
+    last_active_at: Optional[datetime],
+    snapshot_series: List[Tuple[date, int]],
+) -> dict:
+    """Return the JSON-serializable evidence payload a human uses to judge a
+    suggestion.
+
+    `as_of_date` is the date the detector is evaluating (normally the most
+    recent snapshot date processed) and is used, together with
+    `streak_start_date`, to derive `streak_days` — this keeps the function
+    pure (no wall-clock access) while still producing a value that matches
+    the span implied by `streak_start_date`.
+
+    `snapshot_series` is sorted defensively by date before being emitted, so
+    `snapshot_series` in the output is always chronological regardless of
+    input order — mirroring the defensive-sort convention in
+    `qualifying_streak`.
+
+    Every `date`/`datetime` value is rendered as an ISO-8601 string (or
+    `None`) so the result survives `json.dumps`/`json.loads` unchanged. The
+    key names are a contract consumed by the frontend `EvidenceCell` and must
+    not change.
+    """
+    streak_days = (as_of_date - streak_start_date).days + 1
+
+    sorted_series = sorted(snapshot_series, key=lambda row: row[0])
+
+    return {
+        "trend_state": trend_state,
+        "trend_pct": trend_pct,
+        "baseline_active_days_14d": baseline_active_days_14d,
+        "current_active_days_14d": current_active_days_14d,
+        "streak_days": streak_days,
+        "streak_start_date": streak_start_date.isoformat(),
+        "last_active_at": last_active_at.isoformat() if last_active_at is not None else None,
+        "snapshot_series": [
+            {"date": snap_date.isoformat(), "active_days_14d": active_days}
+            for snap_date, active_days in sorted_series
+        ],
+    }

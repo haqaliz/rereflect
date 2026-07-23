@@ -258,3 +258,122 @@ def test_two_long_emails_sharing_200_char_prefix_produce_different_keys():
     assert key_a != key_b
     assert len(key_a) <= 64
     assert len(key_b) <= 64
+
+
+# ===========================================================================
+# Phase 3 — build_evidence
+#
+# Each test imports build_evidence locally (not added to the module-level
+# import at the top of this file) so that, during the RED step, only these
+# tests fail with a real ImportError/NameError -- the rest of the file keeps
+# collecting and passing. This lets `-k` isolate a genuine failure instead of
+# a whole-file collection error.
+# ===========================================================================
+
+import datetime as _datetime_module
+import json
+
+
+def test_build_evidence_round_trips_through_json_with_no_date_objects():
+    from src.services.usage_decline_labels_core import build_evidence
+
+    out = build_evidence(
+        trend_state="sharp_decline",
+        trend_pct=-42.5,
+        baseline_active_days_14d=10,
+        current_active_days_14d=2,
+        streak_start_date=d(0),
+        as_of_date=d(4),
+        last_active_at=_datetime_module.datetime(2026, 1, 3, 12, 30, 0),
+        snapshot_series=[
+            (d(0), 10),
+            (d(1), 8),
+            (d(2), 5),
+        ],
+    )
+
+    # Must survive a full JSON round-trip.
+    round_tripped = json.loads(json.dumps(out))
+    assert round_tripped == out
+
+    # No raw date/datetime objects anywhere in the output.
+    def _assert_no_date_objects(value):
+        assert not isinstance(value, (_datetime_module.date, _datetime_module.datetime))
+        if isinstance(value, dict):
+            for v in value.values():
+                _assert_no_date_objects(v)
+        elif isinstance(value, list):
+            for v in value:
+                _assert_no_date_objects(v)
+
+    _assert_no_date_objects(out)
+
+    assert out["streak_start_date"] == d(0).isoformat()
+    assert isinstance(out["streak_start_date"], str)
+    assert out["last_active_at"] == "2026-01-03T12:30:00"
+    for row in out["snapshot_series"]:
+        assert isinstance(row["date"], str)
+
+
+def test_build_evidence_snapshot_series_preserves_chronological_order():
+    from src.services.usage_decline_labels_core import build_evidence
+
+    out = build_evidence(
+        trend_state="sharp_decline",
+        trend_pct=-10.0,
+        baseline_active_days_14d=9,
+        current_active_days_14d=3,
+        streak_start_date=d(0),
+        as_of_date=d(2),
+        last_active_at=None,
+        snapshot_series=[
+            (d(2), 3),
+            (d(0), 9),
+            (d(1), 6),
+        ],
+    )
+
+    dates = [row["date"] for row in out["snapshot_series"]]
+    assert dates == [d(0).isoformat(), d(1).isoformat(), d(2).isoformat()]
+
+
+def test_build_evidence_streak_days_matches_span_implied_by_streak_start_date():
+    from src.services.usage_decline_labels_core import build_evidence
+
+    out = build_evidence(
+        trend_state="sharp_decline",
+        trend_pct=-30.0,
+        baseline_active_days_14d=10,
+        current_active_days_14d=1,
+        streak_start_date=d(0),
+        as_of_date=d(4),
+        last_active_at=None,
+        snapshot_series=[(d(0), 10), (d(4), 1)],
+    )
+
+    # d(0)..d(4) inclusive is a 5-day span.
+    assert out["streak_days"] == 5
+    assert out["streak_start_date"] == d(0).isoformat()
+
+
+def test_build_evidence_none_trend_pct_serializes_as_null_not_string():
+    from src.services.usage_decline_labels_core import build_evidence
+
+    out = build_evidence(
+        trend_state="insufficient_history",
+        trend_pct=None,
+        baseline_active_days_14d=None,
+        current_active_days_14d=None,
+        streak_start_date=d(0),
+        as_of_date=d(0),
+        last_active_at=None,
+        snapshot_series=[],
+    )
+
+    serialized = json.dumps(out)
+    round_tripped = json.loads(serialized)
+    assert round_tripped["trend_pct"] is None
+    assert round_tripped["last_active_at"] is None
+    assert "None" not in serialized
+
+
