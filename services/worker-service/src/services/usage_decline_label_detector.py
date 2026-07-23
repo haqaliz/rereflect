@@ -13,11 +13,13 @@ module's `detect_usage_decline_labels` is meant to eventually be invoked from
 section 1. Today's snapshot row does not exist until that final commit, so a
 detector run before it would read history missing the current day.
 
-This file currently implements Phases 1-2 of that plan: the detector
-skeleton + the off/shadow/active mode gate (Phase 1), and a batched,
-org-scoped (never per-customer) history load (Phase 2). `active` mode
-computes and logs exactly like `shadow` for now — the write path (Phase 4)
-does not exist yet.
+This file currently implements Phases 1-3 of that plan: the detector
+skeleton + the off/shadow/active mode gate (Phase 1), a batched, org-scoped
+(never per-customer) history load (Phase 2), and the M3b population-level
+outage guard (Phase 3) — computed and enforced BEFORE any write path exists.
+`active` mode computes and logs exactly like `shadow` for now — the write
+path (Phase 4) does not exist yet. A human checkpoint is required after
+Phase 3, before Phase 4 is started (plan section 7).
 
 Hard fences (never touched by this module): churn_risk_component,
 churn_probability, churn_probability_low/high, calibration_model_id,
@@ -31,7 +33,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from src.services.usage_decline_labels_core import qualifying_streak
+from src.services.usage_decline_labels_core import outage_suspected, qualifying_streak
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,14 @@ DEFAULT_SUSTAIN_DAYS = 7
 # value outside this set (including NULL / no OrgAIConfig row at all) is
 # treated as 'off' — defence in depth.
 _VALID_MODES = {"off", "shadow", "active"}
+
+# A customer whose current usage_trend_state is this value has not been
+# classified into a real trend yet (insufficient warm-up data) and is
+# deliberately excluded from the M3b "trend-eligible" population — mirrors
+# how usage_trend_severity.py's TREND_SEVERITY omits this state entirely,
+# because it is an absence of evidence, not evidence of anything. Neither
+# inflating nor deflating the population denominator with these rows.
+_NOT_TREND_ELIGIBLE_STATE = "insufficient_history"
 
 
 def _resolve_mode_and_sustain_days(org_id: int, db) -> Tuple[str, int]:
@@ -159,21 +169,23 @@ def detect_usage_decline_labels(
     """Evaluate one org's customers for sustained usage-decline churn-label
     candidates.
 
-    Phases 1-2 only: mode gate + batched history load. No write path exists
-    yet — 'active' mode currently only computes and logs the same counts as
-    'shadow'; both write zero `ChurnLabelSuggestion` rows.
+    Phases 1-3 only: mode gate, batched history load, and the M3b
+    population-level outage guard. No write path exists yet — 'active' mode
+    currently only computes and logs the same counts as 'shadow'; both write
+    zero `ChurnLabelSuggestion` rows (Phase 4 is a separate, later task).
 
     Args:
         org_id: organization to evaluate.
         db: SQLAlchemy session. Caller owns the transaction — this function
-            never commits (there is nothing to commit yet in Phases 1-2).
+            never commits (there is nothing to commit yet in Phases 1-3).
         today: override for the "as of" calendar date (tests only); defaults
             to `datetime.utcnow().date()`.
 
     Returns:
         dict with at least a `status` key: `skipped` (mode='off', no
-        customer/history query performed at all), `shadow`, or `evaluated`
-        (mode='active' — no writes yet).
+        customer/history query performed at all), `suppressed` (M3b outage
+        guard tripped — see `reason`, `qualifying`, `eligible`), `shadow`, or
+        `evaluated` (mode='active' — no writes yet).
     """
     mode, sustain_days = _resolve_mode_and_sustain_days(org_id, db)
 
@@ -200,8 +212,15 @@ def detect_usage_decline_labels(
         org_id, db, customer_emails, today, sustain_days
     )
 
+    eligible = 0
     qualifying: List[Tuple[str, date, Optional[datetime]]] = []
-    for email, last_active_at, _trend_state in customers:
+    for email, last_active_at, trend_state in customers:
+        if trend_state is None or trend_state == _NOT_TREND_ELIGIBLE_STATE:
+            # Not trend-eligible: excluded from the M3b denominator
+            # entirely — never counted toward `eligible` or `qualifying`.
+            continue
+        eligible += 1
+
         states = history_by_email.get(email, [])
         streak_start = qualifying_streak(states, sustain_days)
         if streak_start is not None:
@@ -209,17 +228,36 @@ def detect_usage_decline_labels(
 
     qualifying_count = len(qualifying)
 
+    if outage_suspected(qualifying_count, eligible):
+        # House rule: no silent caps/suppressions — this must be LOUD.
+        logger.warning(
+            "usage_decline_label_detector: possible usage-instrumentation "
+            "outage — org=%s qualifying=%s of eligible=%s trend-eligible "
+            "customers declined simultaneously (mode=%s); suppressing the "
+            "entire run for this org, writing nothing",
+            org_id, qualifying_count, eligible, mode,
+        )
+        return {
+            "status": "suppressed",
+            "reason": "outage_suspected",
+            "org_id": org_id,
+            "mode": mode,
+            "qualifying": qualifying_count,
+            "eligible": eligible,
+        }
+
     if mode == "shadow":
         logger.info(
             "usage_decline_label_detector: org=%s mode=shadow would_suggest=%s "
-            "(no ChurnLabelSuggestion rows written)",
-            org_id, qualifying_count,
+            "eligible=%s (no ChurnLabelSuggestion rows written)",
+            org_id, qualifying_count, eligible,
         )
         return {
             "status": "shadow",
             "org_id": org_id,
             "mode": mode,
             "would_suggest": qualifying_count,
+            "eligible": eligible,
         }
 
     # mode == "active": Phase 4 (out of scope here) will write
@@ -228,12 +266,13 @@ def detect_usage_decline_labels(
     # exists (plan section 7).
     logger.info(
         "usage_decline_label_detector: org=%s mode=active qualifying=%s "
-        "(write path not yet implemented — Phase 4)",
-        org_id, qualifying_count,
+        "eligible=%s (write path not yet implemented — Phase 4)",
+        org_id, qualifying_count, eligible,
     )
     return {
         "status": "evaluated",
         "org_id": org_id,
         "mode": mode,
         "qualifying": qualifying_count,
+        "eligible": eligible,
     }

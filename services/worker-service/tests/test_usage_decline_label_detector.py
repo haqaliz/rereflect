@@ -169,6 +169,26 @@ def _qualifying_customer(db: Session, org_id: int, email: str, sustain_days: int
     _history_rows(db, org_id, email, end_date=TODAY, num_days=sustain_days)
 
 
+def _trend_eligible_non_qualifying_customer(db: Session, org_id: int, email: str) -> None:
+    """Trend-eligible (a real, non-'insufficient_history' current state) but
+    does NOT have a qualifying streak — counts toward `eligible` but not
+    `qualifying` in the M3b denominator/numerator."""
+    _customer_usage(
+        db, org_id, email,
+        last_active_at=datetime(2026, 7, 10, 12, 0, 0),
+        trend_state="stable",
+    )
+
+
+def _not_trend_eligible_customer(db: Session, org_id: int, email: str) -> None:
+    """insufficient_history — excluded entirely from the M3b population."""
+    _customer_usage(
+        db, org_id, email,
+        last_active_at=datetime(2026, 7, 10, 12, 0, 0),
+        trend_state="insufficient_history",
+    )
+
+
 # ===========================================================================
 # Phase 1 — detector skeleton + mode gate
 # ===========================================================================
@@ -273,12 +293,18 @@ class TestBatchedHistoryLoad:
         _org_config(db, org_id=1, mode="shadow")
         for i in range(50):
             _qualifying_customer(db, org_id=1, email=f"customer{i}@example.com")
+        # Dilute the qualifying share well below the M3b 25% outage-guard
+        # threshold (Phase 3) so this Phase 2 test only exercises the
+        # batching property, not the guard — 50 / 250 = 20%.
+        for i in range(200):
+            _trend_eligible_non_qualifying_customer(db, org_id=1, email=f"stable{i}@example.com")
 
         with _QueryCounter("customer_usage_history") as history_counter:
             result = detect_usage_decline_labels(1, db, today=TODAY)
 
+        assert result["status"] == "shadow"
         assert result["would_suggest"] == 50
-        # A small constant, not one-per-customer: 50 customers must not
+        # A small constant, not one-per-customer: 250 customers must not
         # produce 50 history queries.
         assert history_counter.count <= 1, (
             f"expected <=1 history query for 50 customers, got "
@@ -352,3 +378,93 @@ class TestBatchedHistoryLoad:
         result = detect_usage_decline_labels(1, db, today=TODAY)
 
         assert result["would_suggest"] == 0
+
+
+# ===========================================================================
+# Phase 3 — M3b population-level outage guard (BEFORE any write path exists)
+# ===========================================================================
+
+
+class TestOutageGuard:
+    def test_above_threshold_share_with_sufficient_population_is_suppressed(self, db, caplog):
+        _org_config(db, org_id=1, mode="active")
+        # 24 trend-eligible customers (population >= min_population=20).
+        # 7 of them qualify -> 7/24 = 29.2% > 25% -> suppressed.
+        for i in range(7):
+            _qualifying_customer(db, org_id=1, email=f"decliner{i}@example.com")
+        for i in range(17):
+            _trend_eligible_non_qualifying_customer(db, org_id=1, email=f"stable{i}@example.com")
+
+        with caplog.at_level(logging.WARNING):
+            result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["status"] == "suppressed"
+        assert result["reason"] == "outage_suspected"
+        assert result["qualifying"] == 7
+        assert result["eligible"] == 24
+        assert db.query(ChurnLabelSuggestion).count() == 0
+
+        warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warning_records, "expected a WARNING log for the outage suppression"
+        message = warning_records[0].getMessage()
+        assert "7" in message
+        assert "24" in message
+
+    def test_same_share_in_tiny_org_is_not_suppressed(self, db):
+        _org_config(db, org_id=1, mode="active")
+        # 2 of 6 qualify (33%, same ballpark share as above) but population
+        # (6) < min_population (20) -> NOT suppressed.
+        for i in range(2):
+            _qualifying_customer(db, org_id=1, email=f"decliner{i}@example.com")
+        for i in range(4):
+            _trend_eligible_non_qualifying_customer(db, org_id=1, email=f"stable{i}@example.com")
+
+        result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["status"] == "evaluated"
+        assert result["qualifying"] == 2
+        assert result["eligible"] == 6
+
+    def test_exactly_at_threshold_is_not_suppressed(self, db):
+        _org_config(db, org_id=1, mode="active")
+        # 5 of 20 qualify -> exactly 25% -> strict `>` means NOT suppressed.
+        for i in range(5):
+            _qualifying_customer(db, org_id=1, email=f"decliner{i}@example.com")
+        for i in range(15):
+            _trend_eligible_non_qualifying_customer(db, org_id=1, email=f"stable{i}@example.com")
+
+        result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["status"] == "evaluated"
+        assert result["qualifying"] == 5
+        assert result["eligible"] == 20
+
+    def test_not_trend_eligible_customers_excluded_from_population(self, db):
+        """insufficient_history customers must not inflate (or deflate) the
+        M3b denominator at all."""
+        _org_config(db, org_id=1, mode="active")
+        for i in range(7):
+            _qualifying_customer(db, org_id=1, email=f"decliner{i}@example.com")
+        for i in range(17):
+            _trend_eligible_non_qualifying_customer(db, org_id=1, email=f"stable{i}@example.com")
+        # These must not appear in `eligible` at all — if they did, the
+        # share above would dilute below the suppression threshold.
+        for i in range(100):
+            _not_trend_eligible_customer(db, org_id=1, email=f"newcust{i}@example.com")
+
+        result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["status"] == "suppressed"
+        assert result["eligible"] == 24
+
+    def test_shadow_mode_also_honors_outage_guard(self, db):
+        _org_config(db, org_id=1, mode="shadow")
+        for i in range(7):
+            _qualifying_customer(db, org_id=1, email=f"decliner{i}@example.com")
+        for i in range(17):
+            _trend_eligible_non_qualifying_customer(db, org_id=1, email=f"stable{i}@example.com")
+
+        result = detect_usage_decline_labels(1, db, today=TODAY)
+
+        assert result["status"] == "suppressed"
+        assert db.query(ChurnLabelSuggestion).count() == 0
