@@ -8,6 +8,51 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Added — Usage-decline churn-label suggestions
+
+A second, CRM-free source of churn-label *suggestions* for the review queue introduced by
+`crm-churn-labels`. Aimed at self-hosters with product usage telemetry but no HubSpot/Salesforce
+connection — previously their only way to record a churned customer was typing it into "Mark
+as churned" one at a time.
+
+A customer qualifies only when their usage trend has held in `sharp_decline` for a configurable
+number of **consecutive calendar days** (`sustain_days`, default 7, range 1–90) — the milder
+`declining` state never qualifies, and it's a level-based streak read off the daily usage-trend
+snapshot, not a one-shot edge trigger. Qualifying customers become a pending suggestion in the
+**existing** churn-suggestions queue (`provider=usage_decline`), alongside CRM suggestions. **A
+suggestion is never a label** — a human still has to confirm it from the review queue before it
+becomes a real, trainable churn event. Nothing is auto-applied.
+
+- **Off by default, with a shadow mode** (Settings → AI → Usage-Decline Churn Labels). Shadow
+  evaluates and logs what it would suggest without writing anything — recommended first, since
+  a sustained usage decline is weaker evidence than a lost renewal and more prone to false
+  positives (seasonal dips, one customer on leave).
+- **Population-level outage guard.** If more than 25% of an org's trend-eligible customers (once
+  there are at least 20 of them) qualify in the same run, the entire run is suppressed and
+  logged loudly instead of writing suggestions — the far more likely explanation at that scale
+  is a broken usage pipeline, not simultaneous, independent churn.
+- **Idempotent per decline episode.** Re-detecting the same ongoing streak never creates a
+  duplicate suggestion; a genuinely new episode after a recovery can suggest again.
+- **Runs after the daily usage-snapshot commit**, in its own transaction, isolated per customer
+  so a single bad row can't fail the parent job.
+- **Settings card shows a live precision read-out** — confirmed / rejected / pending counts for
+  this source, since a self-hosted product has no way to report an aggregate number back to us.
+
+#### Known limits, stated plainly
+
+- **~12–16 day warm-up, plus the `sustain_days` window on top.** With the default of 7 days,
+  routinely three weeks or more between an actual drop in activity and a suggestion appearing.
+- **The ≥5 active-day baseline floor permanently excludes light-usage customers.** Inherited
+  from the underlying trend classifier — a customer who was never very active can never produce
+  a suggestion, which is also plausibly your most churn-prone segment.
+- **Only recently-declining customers are visible.** A customer who went quiet or churned before
+  the detector's lookback window has no baseline to compare against and will never surface here.
+- **Requires usage events to already be flowing.** Inert if you haven't wired up the usage
+  webhook.
+- **This does not change churn prediction.** It changes label *supply*, not the churn model —
+  whether more labels improve any model is a separate, open question, and no particular label
+  count is promised.
+
 ### Added — Usage-trend timeline event and automation trigger
 
 The usage-decline signal now reaches the action loop. Previously a declining customer only

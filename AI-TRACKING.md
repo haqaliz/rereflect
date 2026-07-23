@@ -262,6 +262,70 @@
       state. And the whole feature sits downstream of an operator having instrumented usage events,
       which is **unvalidated** — the readiness count exists to measure that rather than assume it.
 
+#### M3.2d — Usage-decline churn-label suggestions — COMPLETE (shipped 2026-07-24, as `usage-decline-churn-labels`)
+> Resolves the M5.3 "unplanned" deferral (below) — a self-hoster with product usage telemetry
+> but no CRM connected gets a **second** churn-label producer, on the same confirm-in-review
+> pattern `crm-churn-labels` established. See `docs/planning/usage-decline-churn-labels/`.
+- [x] **Per-org opt-in on `OrgAIConfig`**: `usage_churn_labels_mode` (`off`/`shadow`/`active`,
+      default **`off`**, not shadow — unlike M3.2c, this writes into a review queue an operator
+      must trust, so silent shadow accumulation by default was rejected) +
+      `usage_churn_label_config` (`{"sustain_days": N}`, `N` in `[1, 90]`, default `7`). One
+      migration (`0a3382154c27`), chained off a live-verified single head.
+- [x] **Sustained-decline detector, level-based not edge-based.** A customer qualifies only when
+      `usage_trend_state == "sharp_decline"` has held for `sustain_days` **consecutive calendar
+      days** read off `customer_usage_history` — deliberately *not* M3.2c's edge-triggered
+      post-commit drain seam, which would fire once on the day of least evidence and never
+      again. The milder `declining` state never qualifies; `insufficient_history` breaks a
+      streak like `stable` does (absence of evidence, not evidence of stability). Pure core
+      (`usage_decline_labels_core.py`) mirrored byte-identically into the worker, same as
+      `usage_trend_severity.py`.
+- [x] **Writes into the existing `crm-churn-labels` review queue**, not a new table/endpoint:
+      `ChurnLabelSuggestion(provider='usage_decline')`, `suggested_churned_at =
+      customer_usage.last_active_at` (deny — never fabricate a date — when `last_active_at` is
+      `NULL`), idempotent via `external_opportunity_id = "usage:{email}:{streak_start_date}"` (a
+      new decline episode after recovery mints a new key; a rejected suggestion is never
+      re-suggested while the same episode continues). Denies on an existing active churn event
+      or an existing suggestion row, reusing the CRM harvester's denial semantics (copied, not
+      imported — the worker cannot import backend-api code, and this module never touches
+      `churn_suggestion_harvester.py`). Per-run cap of 10 with a logged, non-silent dropped
+      count.
+- [x] **Confirm-in-review only — nothing auto-labels.** A human confirming a suggestion writes
+      `CustomerChurnEvent(source='manual')` via the pre-existing confirm path, unchanged.
+      Suggestions stay out of `churn_labels_ready`, counted only in `pending_suggestions` —
+      identically to the CRM source, with no code change required to make that true.
+- [x] **M3b population-level outage guard.** If usage instrumentation breaks (webhook
+      misconfigured, deploy drops events, API key rotated), every customer's activity collapses
+      together and — ~12-16 days later — the whole base crosses into `sharp_decline`
+      simultaneously; the sustain window *confirms* that artifact rather than protecting
+      against it. Before writing anything, the detector computes the qualifying share of that
+      org's trend-eligible population; above 25% (only once that population is ≥20 — the ratio
+      is meaningless smaller) it **suppresses the entire run**, writes nothing, and logs a loud,
+      surfaced warning instead of failing silently.
+- [x] **Runs off `recompute_usage_scores`, strictly after the daily snapshot commit** (today's
+      history row does not exist until that commit lands), in its own transaction with
+      per-customer isolation; skipped outright when `snapshot_written == 0`.
+- [x] **Settings → AI card**: mode selector + `sustain_days` input, a precision read-out
+      (confirmed/rejected/pending counts for this provider, since a self-hosted product has no
+      other way to see whether the signal is worth trusting), and the honest-limits copy below,
+      stated in the UI itself so an operator doesn't have to read source to understand an empty
+      queue.
+- [x] Source-neutral queue copy (the shared churn-suggestions page/dialog no longer says "CRM"
+      unconditionally) + a provider-aware evidence renderer for `usage_decline` suggestions
+      (trend %, active-days-14d before/after, streak length, last active date) — the generic
+      CRM evidence cell is untouched for CRM-sourced rows.
+- [x] **Churn stack provably untouched** — `test_usage_trend_churn_boundary.py` green and
+      unmodified; the trend classifier, its thresholds, and the ≥5 active-day floor are read,
+      never changed.
+- **Honest limits:** ~12-16 day warm-up **plus** the configured `sustain_days` on top (≥3 weeks
+      of silence is normal at the default of 7); **the ≥5 active-day baseline floor permanently
+      excludes light-usage customers** from ever producing a suggestion (inherited from M3.2b,
+      not changed here — and plausibly the most churn-prone segment); the detector only ever
+      sees customers declining *recently* — a customer who went quiet months ago has no in-band
+      baseline and can never surface; inert without usage events already flowing. **No claim of
+      improved churn-prediction accuracy** — this changes label *supply*, not the model, and the
+      PRD's own 0.6 precision target is a hypothesis, not a measurement (nobody has run this
+      against real data).
+
 #### M3.3 — AI Trust: Human-in-the-Loop (2 weeks) — COMPLETE
 - [x] Feedback on AI outputs: thumbs up/down on copilot answers, health scores, categorizations
 - [x] Category correction: user can override AI category → stored as training signal
@@ -477,12 +541,25 @@
 > anyone builds against the number. This does not block: more human-confirmed labels help under any
 > threshold.
 >
-> **Not viable as label sources**, so not planned: **Stripe** (dead post-OSS-pivot). ~~**Segment/product-usage
+> **Not viable as label source:** **Stripe** (dead post-OSS-pivot). ~~**Segment/product-usage
 > drop** (blocked — `customer_usage` keeps no history to detect a drop against).~~ **Update
 > 2026-07-22:** the no-history blocker is resolved — `usage-trend-churn-signal` (M3.2b) added the durable
-> `customer_usage_history` snapshot and a usage-decline signal. That signal currently feeds the **health
-> score**, not churn labels; using a sustained usage decline as a churn-label *source* is now feasible but
-> remains **unplanned** (it would need a confirm-in-review step like `crm-churn-labels`, not auto-labelling).
+> `customer_usage_history` snapshot and a usage-decline signal.
+>
+> **Update 2026-07-24 — shipped as a third label source (`usage-decline-churn-labels`), no
+> longer unplanned.** See M3.2d below for the full record. In short: a per-org opt-in
+> (default **off**, with a **shadow** mode) detects a sustained (`sustain_days`-consecutive-day,
+> default 7) `sharp_decline` and writes a **suggestion** — `provider='usage_decline'` — into the
+> **same** review queue `crm-churn-labels` built. Exactly like the CRM source, a suggestion is
+> never a label until a human confirms it; `pending_suggestions` stays excluded from
+> `churn_labels_ready`. **This is weaker evidence than a lost renewal** (the PRD's own precision
+> target is 0.6, not the CRM source's 0.8, and is an unvalidated hypothesis, not a measurement),
+> and it inherits the trend classifier's blind spots verbatim — most notably the **≥5
+> active-day baseline floor**, which permanently excludes light-usage customers (plausibly the
+> most churn-prone segment) from ever producing a suggestion. **This is still a label-*supply*
+> change, not a claim about churn-prediction quality**, and it does not touch the 500-label gate
+> question immediately below — that gate remains under review regardless of how many sources
+> feed it.
 
 #### M5.4 — Local embedding quality (Track D) — parked / nice-to-have
 - [ ] Better local embedding model for copilot/template matching (incremental; fully offline).
