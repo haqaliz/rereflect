@@ -426,7 +426,7 @@ class TestProviderAwareSeeding:
         existing_mapping.embedding_provider = "openai"
         existing_mapping.embedding_dimension = 1536
 
-        def find_template_side_effect(sql_query, org_id, db, provider=None, dim=None):
+        def find_template_side_effect(sql_query, org_id, db, provider=None, dim=None, model=None):
             # Return a "found" template whose first mapping matches current provider/dim
             mock_tmpl = MagicMock()
             mock_mapping = MagicMock()
@@ -490,3 +490,270 @@ class TestProviderAwareSeeding:
 
         # Must not raise
         saver.seed_system_templates(db=mock_db, embedder=mock_embedder_openai)
+
+
+# ── MODEL PERSISTENCE + RESEED-ON-MODEL-CHANGE (local-embedding-quality) ─────
+
+class TestModelPersistence:
+    """
+    Verify _create_mapping persists embedding_model, and that
+    seed_system_templates is model-aware: a model change re-embeds even
+    when the provider is unchanged, and is a no-op when both match.
+    """
+
+    def test_create_mapping_sets_embedding_model_via_orm(self, saver, db):
+        """
+        With a real SQLite DB, _create_mapping writes the embedding_model column
+        on the ORM path.
+        """
+        from src.models.query_template import QueryTemplate
+        from src.models.query_template_mapping import QueryTemplateMapping
+
+        template = QueryTemplate(
+            sql_query="SELECT 1",
+            description="test",
+            parameter_schema={},
+            created_by="system",
+            organization_id=None,
+            usage_count=0,
+            is_active=True,
+        )
+        db.add(template)
+        db.flush()
+
+        embedding = [0.5] * 384
+        saver._create_mapping(
+            template_id=template.id,
+            question="test question",
+            embedding=embedding,
+            provider="local",
+            model="bge-small-en-v1.5",
+            db=db,
+        )
+        db.commit()
+
+        fetched = db.query(QueryTemplateMapping).filter_by(template_id=template.id).first()
+        assert fetched is not None
+        assert fetched.embedding_model == "bge-small-en-v1.5"
+
+    def test_create_mapping_sets_embedding_model_via_raw_sql_fallback(self, saver, mock_db):
+        """
+        When the ORM model import fails (raw-SQL fallback path), embedding_model
+        must still be bound and included in the INSERT statement.
+        """
+        import sys
+
+        with patch.dict(sys.modules, {"src.models.query_template_mapping": None}):
+            saver._create_mapping(
+                template_id=1,
+                question="test question",
+                embedding=[0.1, 0.2, 0.3],
+                provider="local",
+                model="bge-small-en-v1.5",
+                db=mock_db,
+            )
+
+        assert mock_db.execute.called
+        args, _ = mock_db.execute.call_args
+        sql_text = str(args[0])
+        bind_params = args[1]
+        assert "embedding_model" in sql_text
+        assert ":model" in sql_text
+        assert bind_params.get("model") == "bge-small-en-v1.5"
+
+    def test_create_mapping_model_none_is_stored_as_is(self, saver, db):
+        """embedder.model may be None (e.g. openai_compatible with no configured
+        model) — _create_mapping must store None, not invent a default."""
+        from src.models.query_template import QueryTemplate
+        from src.models.query_template_mapping import QueryTemplateMapping
+
+        template = QueryTemplate(
+            sql_query="SELECT 2",
+            description="test2",
+            parameter_schema={},
+            created_by="system",
+            organization_id=None,
+            usage_count=0,
+            is_active=True,
+        )
+        db.add(template)
+        db.flush()
+
+        saver._create_mapping(
+            template_id=template.id,
+            question="another question",
+            embedding=[0.1] * 384,
+            provider="openai_compatible",
+            model=None,
+            db=db,
+        )
+        db.commit()
+
+        fetched = db.query(QueryTemplateMapping).filter_by(template_id=template.id).first()
+        assert fetched is not None
+        assert fetched.embedding_model is None
+
+    def test_save_template_passes_embedder_model_to_create_mapping(
+        self, saver, mock_db, sample_sql, mock_embedder_local
+    ):
+        """save_template must pass embedder.model through to _create_mapping."""
+        mock_db.query.return_value.filter_by.return_value.first.return_value = None
+        mock_embedder_local.model = "bge-small-en-v1.5"
+
+        with patch.object(saver, '_create_mapping') as mock_create_mapping:
+            saver.save_template(
+                sql_query=sample_sql,
+                question="count feedbacks",
+                description="Count feedbacks",
+                parameter_schema={},
+                created_by="llm",
+                org_id=1,
+                db=mock_db,
+                embedder=mock_embedder_local,
+            )
+
+        mock_create_mapping.assert_called_once()
+        call_kwargs = mock_create_mapping.call_args
+        assert call_kwargs.kwargs.get('model') == "bge-small-en-v1.5"
+
+
+class TestModelAwareSeeding:
+    """seed_system_templates re-embeds on a model change, no-ops when unchanged."""
+
+    def test_seed_reembeds_when_model_changes_same_provider(self, saver, mock_db, mock_embedder_local):
+        """
+        Same provider, different model (e.g. local embedder swapped from
+        'bge-small-en-v1.5' to 'bge-base-en-v1.5') must trigger a re-embed:
+        _find_template_by_sql_with_mapping returns None for the new model,
+        so seed_system_templates proceeds to call embedder.embed.
+        """
+        mock_embedder_local.model = "bge-base-en-v1.5"
+
+        # No mapping exists for (local, bge-base-en-v1.5) -> lookup returns None
+        with patch.object(saver, '_find_template_by_sql_with_mapping', return_value=None):
+            with patch.object(saver, '_find_template_by_sql', return_value=None):
+                saver.seed_system_templates(db=mock_db, embedder=mock_embedder_local)
+
+        assert mock_embedder_local.embedder.embed.called
+
+    def test_seed_is_noop_when_provider_and_model_unchanged(self, saver, mock_db, mock_embedder_local):
+        """
+        If a mapping already exists for the exact (provider, model) pair,
+        seed_system_templates must not re-embed (no-op).
+        """
+        mock_embedder_local.model = "bge-small-en-v1.5"
+
+        with patch.object(saver, '_find_template_by_sql_with_mapping', return_value=MagicMock()):
+            saver.seed_system_templates(db=mock_db, embedder=mock_embedder_local)
+
+        mock_embedder_local.embedder.embed.assert_not_called()
+
+    def test_seed_passes_model_to_idempotency_check(self, saver, mock_db, mock_embedder_local):
+        """seed_system_templates must pass model=embedder.model into the
+        idempotency lookup, not just provider."""
+        mock_embedder_local.model = "bge-small-en-v1.5"
+
+        with patch.object(
+            saver, '_find_template_by_sql_with_mapping', return_value=MagicMock()
+        ) as mock_lookup:
+            saver.seed_system_templates(db=mock_db, embedder=mock_embedder_local)
+
+        assert mock_lookup.called
+        _, kwargs = mock_lookup.call_args
+        assert kwargs.get('model') == "bge-small-en-v1.5"
+
+    def test_seed_passes_model_to_create_mapping(self, saver, mock_db, mock_embedder_local):
+        """When re-embedding, seed_system_templates must pass model=embedder.model
+        into each _create_mapping call."""
+        mock_embedder_local.model = "bge-small-en-v1.5"
+
+        with patch.object(saver, '_find_template_by_sql_with_mapping', return_value=None):
+            with patch.object(saver, '_find_template_by_sql', return_value=None):
+                with patch.object(saver, '_create_mapping') as mock_create_mapping:
+                    saver.seed_system_templates(db=mock_db, embedder=mock_embedder_local)
+
+        assert mock_create_mapping.called
+        for c in mock_create_mapping.call_args_list:
+            assert c.kwargs.get('model') == "bge-small-en-v1.5"
+
+
+class TestFindTemplateByModelFiltering:
+    """_find_template_by_sql_with_mapping must filter on BOTH provider and model."""
+
+    def test_orm_filter_includes_embedding_model(self, saver, db):
+        """
+        A mapping matching provider but with a DIFFERENT (or NULL) embedding_model
+        must NOT count as "already seeded" for the new model — the ORM
+        .filter_by(...) call must include embedding_model=model.
+        """
+        from src.models.query_template import QueryTemplate
+        from src.models.query_template_mapping import QueryTemplateMapping
+
+        template = QueryTemplate(
+            sql_query="SELECT 3",
+            description="test3",
+            parameter_schema={},
+            created_by="system",
+            organization_id=None,
+            usage_count=0,
+            is_active=True,
+        )
+        db.add(template)
+        db.flush()
+
+        mapping = QueryTemplateMapping(
+            template_id=template.id,
+            question_pattern="old pattern",
+            question_embedding=[0.1] * 768,
+            embedding_provider="local",
+            embedding_dimension=768,
+            embedding_model="bge-small-en-v1.5",  # OLD model
+            match_count=0,
+        )
+        db.add(mapping)
+        db.commit()
+
+        # Lookup for the SAME provider but a DIFFERENT model must return None
+        result = saver._find_template_by_sql_with_mapping(
+            "SELECT 3", None, db, provider="local", model="bge-base-en-v1.5"
+        )
+        assert result is None
+
+        # Lookup for the exact same (provider, model) must find it
+        result_match = saver._find_template_by_sql_with_mapping(
+            "SELECT 3", None, db, provider="local", model="bge-small-en-v1.5"
+        )
+        assert result_match is not None
+
+    def test_mock_fallback_loop_checks_embedding_model(self, saver, mock_db):
+        """
+        Fallback loop (used when DB query path doesn't apply, e.g. mock objects
+        in tests) must also require embedding_model == model.
+        """
+        template = MagicMock()
+        template.id = 1
+
+        matching_mapping = MagicMock()
+        matching_mapping.embedding_provider = "local"
+        matching_mapping.embedding_model = "bge-small-en-v1.5"
+
+        stale_mapping = MagicMock()
+        stale_mapping.embedding_provider = "local"
+        stale_mapping.embedding_model = "bge-base-en-v1.5"
+
+        template.mappings = [stale_mapping]
+
+        with patch.object(saver, '_find_template_by_sql', return_value=template):
+            # DB query path returns nothing (mock_db.query(...).filter_by(...).first() -> MagicMock truthy by default)
+            mock_db.query.return_value.filter_by.return_value.first.return_value = None
+
+            result = saver._find_template_by_sql_with_mapping(
+                "SELECT 4", None, mock_db, provider="local", model="bge-small-en-v1.5"
+            )
+            assert result is None  # only stale mapping present -> no match
+
+            template.mappings = [stale_mapping, matching_mapping]
+            result_match = saver._find_template_by_sql_with_mapping(
+                "SELECT 4", None, mock_db, provider="local", model="bge-small-en-v1.5"
+            )
+            assert result_match is template
