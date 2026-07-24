@@ -19,8 +19,15 @@ pending suggestions in the existing review queue.
 - New worker module (e.g. `services/worker-service/src/services/usage_decline_label_detector.py`)
   with a `detect_usage_decline_labels(org_id, db, ...)` entrypoint.
 - **Placement:** runs off the daily `recompute_usage_scores` pass
-  (`services/worker-service/src/tasks/usage_metrics.py:492-713`), **strictly after** its commits, in
-  its own transaction — mirroring the M3.2c post-commit drain seam (`:659-681`).
+  (`services/worker-service/src/tasks/usage_metrics.py:492-713`), in its own transaction,
+  **after the daily snapshot commit at `:693-694`**.
+  > **Correction (2026-07-23).** An earlier draft of this spec said to mirror "the M3.2c post-commit
+  > drain seam (`:659-681`)". **That placement is wrong.** Verified order is: score/trend commit
+  > (`:655-657`) → M3.2c drain seam (`:667-681`) → **snapshot write + commit (`:693-694`, separate
+  > transaction, last)**. Today's snapshot row does not exist at the drain seam, so a detector there
+  > reads history missing the current day — permanently one day stale, and the symptom would look
+  > like an off-by-one in the sustain window rather than a placement error. See
+  > `./plan_20260723.md` §1.
   - Per-org and per-customer `try/except` isolation: **one broken org or customer must never fail
     the parent task.** M3.2c pinned this shape; copy it.
   - It does **not** consume `pending_trend_transitions` (edge-triggered, wrong semantics — see PRD
