@@ -85,8 +85,8 @@ export function ConfirmSuggestionDialog({
 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label>CRM close date</Label>
-            {/* Read-only — the CRM close date is stable, which keeps
+            <Label>Suggested churn date</Label>
+            {/* Read-only — the suggested churn date is stable, which keeps
                 re-harvest idempotent (PRD M2). Not an editable date input. */}
             <p className="text-sm text-foreground rounded-md border border-border bg-muted/40 px-3 py-2">
               {formatCloseDate(suggestion.suggested_churned_at)}

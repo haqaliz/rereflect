@@ -618,6 +618,13 @@ class OrgAIConfig(Base):
     # backend-api; urgency-classifier-head). 'off' | 'shadow' | 'auto'.
     # Independent of classifier_mode (sentiment) and category_classifier_mode.
     urgency_classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
+    # Per-org usage-decline churn-label suggestions (usage-decline-churn-labels, M2).
+    # 'off' | 'shadow' | 'active' — NOT the classifier off/shadow/auto triple:
+    # this gates writing rows into the churn-suggestion review queue, so it
+    # mirrors AutomationRule.mode. NULL/unrecognized treated as 'off'.
+    usage_churn_labels_mode = Column(String(20), nullable=True, server_default='off', default='off')
+    # {"sustain_days": 7}. NULL => defaults applied in code.
+    usage_churn_label_config = Column(JSON, nullable=True)
     # Per-org customer-health-score component weights (must sum to 100)
     health_weight_churn = Column(Integer, default=35, nullable=False)
     health_weight_sentiment = Column(Integer, default=25, nullable=False)

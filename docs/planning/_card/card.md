@@ -1,84 +1,92 @@
-# Card — usage-trend-automation-trigger (freeform feat, no GitHub issue)
+# Card — usage-decline-churn-labels (freeform feat, no GitHub issue)
 
 **Type:** feat
-**Slug:** usage-trend-automation-trigger
-**Branch:** `feat/usage-trend-automation-trigger`
+**Slug:** usage-decline-churn-labels
+**Branch:** `feat/usage-decline-churn-labels`
 **Source:** Freeform task selected via `rereflect-next` on 2026-07-23. No GitHub issue.
 
 ## Brief (from rereflect-next handoff, verbatim)
 
-> Build N1+N2 from `docs/planning/usage-trend-churn-signal/prd.md:158-160` — the deferred
-> follow-on to M3.2b (merged `6270adc`): a `usage_trend_change` customer-timeline event plus a
-> new `usage_trend` automation trigger that composes with churn-playbook auto-run. Model it
-> directly on M4.1.5 `churn-triggered-playbooks` (`AI-TRACKING.md:260-273`, commits
-> `9aa6650`..`f133ccf`): same `AutomationRule.mode` off/shadow/active, same per-(rule, customer)
-> Redis cooldown, same cooldown-seeding-on-activation so an already-declining cohort doesn't
-> stampede — fire it from the daily `recompute_usage_scores` seam instead of the
-> churn-probability recompute. Do NOT let this touch `churn_risk_component`,
-> `churn_probability`, or the isotonic calibration; the trend stays a usage-health-component
-> signal. Caveat to design around, not discover: the `customer_usage_history` snapshot only
-> began 2026-07-22, so most customers are `insufficient_history` for ~2 more weeks — that state
-> must be an explicit non-fire, and shadow should be the sensible default mode. Out of scope:
-> D2 (`usage_event` retention / O(lifetime) re-read) and D3 (swallowed enqueue) — those get
-> their own branch.
+> Add product-usage decline as a third churn-label SUGGESTION source, feeding the existing
+> review queue shipped by `crm-churn-labels` (docs/planning/crm-churn-labels/). AI-TRACKING.md:480-485
+> names this as newly feasible-but-unplanned now that M3.2b's `customer_usage_history` snapshot exists.
+> A worker detector reads `customer_usage_history` (reusing `usage_trend_severity.py`) and, on a
+> sustained decline, writes a `ChurnLabelSuggestion` with `provider='usage_decline'` and a deterministic
+> synthetic `external_opportunity_id` — the unique constraint is (org, provider, external_opportunity_id)
+> and `churn_suggestions.py` filters provider as a free string with no whitelist, so aim for no migration
+> and no route changes in slice 1. Default-deny + opt-in per org, confirm-in-review only (never
+> auto-applied), and these must stay excluded from `churn_labels_ready` on the readiness card exactly as
+> CRM suggestions are. Be honest in the docs: a usage decline is not churn, the ≥5 active-day baseline
+> floor permanently excludes quiet accounts, there's a ~14-day warm-up, this makes no claim about
+> churn-prediction quality, and the 500-label M5.3 gate remains under review (AI-TRACKING.md:467-478).
 
 ## Why this was picked (citations)
 
-- `docs/planning/usage-trend-churn-signal/prd.md:158-160` — deferred **N1** (`usage_trend_change`
-  customer-timeline event) and **N2** (a `usage_trend` automation trigger composing with
-  churn-playbook auto-run), with N2 described verbatim as "the natural follow-on that
-  reconnects the signal to the action loop."
-- `AI-TRACKING.md:216-223` — M3.2b `usage-trend-churn-signal` COMPLETE (shipped 2026-07-22);
-  its deferred list names "a `usage_trend` automation trigger + timeline event (N1/N2)".
-- `AI-TRACKING.md:260-273` — M4.1.5 `churn-triggered-playbooks` COMPLETE (2026-07-19): the
-  exact pattern to reuse (new trigger type, `run_playbook` action, `AutomationRule.mode`,
-  per-(rule, customer) Redis cooldown, cooldown seeding on activation).
-- `services/backend-api/src/models/automation_rule.py:59` — `trigger_type` comment enumerates
-  the 5 existing triggers; **no `usage_trend`**.
-- `services/backend-api/src/services/automation_engine.py:221,693-716` — the
-  `churn_probability_threshold` evaluation branch and the activation-time cooldown seeding
-  guarded on `rule.trigger_type != "churn_probability_threshold"`.
+- `AI-TRACKING.md:480-485` — the M5.3 note's **Update 2026-07-22**: the old "no history to detect a
+  drop against" blocker is resolved by M3.2b's `customer_usage_history`; using a sustained usage
+  decline as a churn-label *source* is "now feasible but remains **unplanned** (it would need a
+  confirm-in-review step like `crm-churn-labels`, not auto-labelling)."
+- `AI-TRACKING.md:446-451` — **M5.3 (Per-org churn ML model)** is the one open Track, and it is
+  gated purely on **label supply**.
+- `AI-TRACKING.md:453-461` — `crm-churn-labels` (shipped 2026-07-15) established the exact pattern
+  to reuse: suggestions are **not labels**, they enter a review queue, become `source='manual'`
+  churn events only on operator confirmation with a reason code, default-deny, and
+  `pending_suggestions` is **deliberately excluded** from `churn_labels_ready`.
+- `AI-TRACKING.md:216-263` — M3.2b (`usage-trend-churn-signal`, 2026-07-22) and M3.2c
+  (`usage-trend-automation-trigger`, 2026-07-23) built the durable snapshot + trend classification
+  this detector reads.
+- `services/backend-api/src/models/churn_label_suggestion.py` — unique constraint is
+  `(organization_id, provider, external_opportunity_id)`; `provider` is a plain `String(50)` with
+  no enum/whitelist.
+- `services/backend-api/src/api/routes/churn_suggestions.py:219,262` — `provider` is used purely as
+  a free-string **filter**; no validation list to extend.
 
 ## Moat rationale
 
-The trend signal currently terminates in the usage **health component** only
-(`AI-TRACKING.md:220`), and usage weight defaults to 0 — so for most operators it ships
-dormant and nothing acts on it. Wiring it into the automation engine reconnects it to the
-already-shipped churn → health → playbook → automation loop without touching the calibrated
-churn math. Fits OSS/self-hosted (no plan gate, no SMTP requirement — `run_playbook` is
-already SMTP-free per `AI-TRACKING.md:273`).
+The shipped CRM label source produces **nothing** for a self-hoster with no HubSpot/Salesforce —
+which is the default OSS deployment. A usage-decline source is the only label supply that works
+CRM-free, and it reuses telemetry the operator already instruments. It also closes the loop the
+last two branches opened: M3.2b built the trend signal, M3.2c wired it to actions, and this wires
+it to *learning*. No plan gate, no SMTP, no cross-tenant data.
 
 ## Known caveats to resolve in the dig / PRD
 
-1. **Cold start is the default state, not an edge case.** `customer_usage_history` began
-   accumulating 2026-07-22, so most customers sit in `insufficient_history` for ~2 more weeks.
-   That state must be an **explicit non-fire** (never coerced to `stable`), or the trigger
-   looks broken on day one.
-2. **Fire on *change*, not on every daily pass.** The dig must confirm whether a previous
-   `usage_trend_state` is persisted; without it, a naive evaluator re-fires daily for every
-   declining customer (the cooldown mitigates but does not fix the semantics).
-3. **Scope fence.** `churn_risk_component`, `churn_probability`, and the isotonic calibration
-   are out of bounds — M3.2b's guarantee that they are "provably untouched"
-   (`AI-TRACKING.md:220`) must survive this branch.
-4. **Shadow as the sensible default.** `AutomationRule.mode` already supports
-   `off`/`shadow`/`active`; operators should be able to watch the trigger before arming it.
-5. **Stampede on activation.** M4.1.5 seeds per-customer cooldowns when a rule activates
-   (`automation_engine.py:693-716`); the same guard is needed here or an already-declining
-   cohort all fires at once on the first recompute.
+1. **A usage decline is not churn.** This changes label *supply*, not label *quality*. False
+   positives land on a human reviewer — the review queue is the whole safety mechanism, and the
+   suggestion's `evidence` payload has to be good enough for a human to actually adjudicate.
+2. **Inherited structural blind spot.** M3.2b's **≥5 active-day baseline floor permanently excludes
+   light-usage customers** (`AI-TRACKING.md:258-263`), so the quietest accounts — arguably the most
+   likely to churn — structurally cannot produce a suggestion. This must be stated, not hidden.
+3. **Warm-up.** `customer_usage_history` began 2026-07-22; most customers are
+   `insufficient_history` for ~2 more weeks. `insufficient_history` must be an explicit non-source.
+4. **Unvalidated upstream dependency.** The whole feature sits downstream of the operator having
+   instrumented usage events — `AI-TRACKING.md:262` calls that unvalidated.
+5. **No migration is the goal, not a guarantee.** The dig must confirm `provider='usage_decline'`
+   and a synthetic `external_opportunity_id` genuinely satisfy the existing NOT NULL + unique
+   constraint and the existing review/confirm path, incl. the readiness card's
+   `pending_suggestions` split.
+6. **Scope fence.** `churn_risk_component`, `churn_probability`, and the isotonic calibration stay
+   untouched — same guarantee M3.2b and M3.2c both preserved.
+7. **The 500-label gate is under review** (`AI-TRACKING.md:467-478`) — do not restate it as settled,
+   and do not justify this feature by "it gets you to 500".
 
 ## Open questions for the interview
 
-1. What is the trigger's *condition* surface — fire on entering `declining` / `sharp_decline`,
-   on any state worsening, on a `usage_trend_pct` threshold, or a combination?
-2. Should recovery (declining → stable) be a fireable transition too, or is this
-   decline-only?
-3. Does N1's `usage_trend_change` timeline event write on **every** state change (including
-   improvements and the first transition out of `insufficient_history`), or only on declines?
-4. Where does the evaluator run — inline in the daily `recompute_usage_scores` task, or as a
-   separate task fanned out after it?
-5. Does the automations UI need a new config form for the trigger, and what are the field
-   labels/defaults?
+1. What counts as a **sustained** decline worth suggesting — `sharp_decline` only, or `declining`
+   held for N consecutive days? Is there a minimum absolute-usage floor on top of the trend state?
+2. **Re-suggestion semantics.** The synthetic `external_opportunity_id` determines whether a
+   customer who declines, is rejected, and declines again months later can produce a second
+   suggestion. What is the intended key (email + decline-start date? + episode counter?)?
+3. What is `suggested_churned_at` for a usage decline — the decline start, the last active day, or
+   the detection date?
+4. What goes in `evidence` so a reviewer can actually judge it (usage series? trend pct? last
+   active day? feedback/health context)?
+5. Where does the detector run — inline in the daily `recompute_usage_scores` seam (like M3.2c's
+   evaluator) or as its own scheduled task?
+6. Does the review-queue UI need a provider-specific evidence renderer, or does the CRM renderer
+   degrade acceptably?
+7. Should a confirmed usage-decline suggestion record a distinguishable churn-event reason code so
+   later M5.3 backtests can separate CRM-sourced from usage-sourced labels?
 
-**NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE
-(pre-OSS-pivot). All features are unlocked (MIT, self-hosted, BYOK). Do not gate this feature
-behind a plan tier.
+**NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE (pre-OSS-pivot).
+All features are unlocked (MIT, self-hosted, BYOK). Do not gate this feature behind a plan tier.

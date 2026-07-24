@@ -487,6 +487,82 @@ any churn-prediction accuracy metric — the trend signal never enters the churn
 design. It only changes what happens when an already-computed trend classification changes
 state.
 
+### Usage-decline churn-label suggestions
+
+Building on the trend signal above, Rereflect can turn a **sustained** usage decline into a
+**suggestion** in the same operator-reviewed queue that CRM-sourced (HubSpot/Salesforce) lost
+renewals already use (**Customers → Churn suggestions**). This is aimed at the self-hoster who
+has product telemetry but no CRM connected — otherwise the only way to record a churned
+customer is typing it into the "Mark as churned" dialog one at a time.
+
+**What it does — and does not do.** A sustained decline is **evidence**, not a churn label.
+The detector never writes a churn event by itself: it writes a *pending suggestion*, and a
+human with admin/owner access must confirm it (**Customers → Churn suggestions**) before it
+becomes a real, trainable churn label. Rejected and pending suggestions never count toward
+label readiness — only a confirmed suggestion does, identically to a manually-entered label.
+**A usage decline is not churn.** Seasonal dips, a single power user going on leave, or a
+temporary product issue can all look like a sustained decline; the review queue is the entire
+safety mechanism, and it is not optional.
+
+**How to enable it.** Go to **Settings → AI** and find the **Usage-Decline Churn Labels** card.
+The mode selector is **off → shadow → active**, mirroring the trend automation trigger above:
+
+- **Off** (default) — the detector does not run at all for your org. Zero cost, zero rows.
+- **Shadow** — the detector evaluates every day and logs what it *would* suggest, but writes
+  nothing into the review queue. Turn this on first. Because this signal is weaker evidence
+  than a lost renewal (a decline can be explained away far more often than a cancelled
+  contract), you want to see how much volume it would generate — and whether it looks
+  reasonable — before anything lands in front of a reviewer.
+- **Active** — writes real, pending suggestions into the queue for confirmation or rejection.
+
+**`sustain_days` (default 7, range 1–90).** How many *consecutive calendar days* a customer's
+usage trend must sit in `sharp_decline` (not the milder `declining` state — that never
+qualifies) before it is suggested. Lower values surface suggestions sooner but on thinner
+evidence; higher values wait longer for a stronger, more sustained pattern before asking a
+human to look at it. Changing it does not retroactively affect suggestions already in the
+queue.
+
+**Honest limits — read these before enabling.**
+
+- **~12–16 day warm-up, plus your `sustain_days` window on top.** A customer's usage trend
+  can't classify as anything but "warming up" until roughly two weeks of daily snapshot history
+  exist (the same warm-up as the trend signal itself). Only after that can the sustain-day
+  clock start. With the default of 7, that's routinely **three weeks or more** between a real
+  drop in activity and a suggestion appearing — fine for retrospective label collection, not
+  something to rely on for timely intervention.
+- **The ≥5 active-day baseline floor permanently excludes light-usage customers.** A customer
+  whose usage never reached at least 5 active days in a 14-day window never gets a real trend
+  state at all — they stay "insufficient history" indefinitely and can **never** produce a
+  suggestion, no matter how long you run this. This is inherited unchanged from the underlying
+  trend classifier (`usage-trend-churn-signal`) and is not something this feature changes or
+  can work around. It is also, plausibly, your quietest and most churn-prone segment — a real
+  blind spot, not a bug.
+- **Only recently-declining customers are visible.** The detector reads a rolling window of
+  recent snapshots; a customer who went quiet or churned before that window has no baseline to
+  compare against and will never surface here, however genuinely churned they are. An empty
+  queue does not mean "no churn" — it means "no *recent, in-window* decline."
+- **Requires usage events to be flowing at all.** If you have not wired up
+  `POST /api/v1/webhooks/usage` (see above), this feature is inert by construction — there is
+  no fallback signal.
+- **A population-level outage guard can suppress an entire run.** If a large share of your
+  customers all cross into `sharp_decline` at once — the signature of a broken usage pipeline
+  (a misconfigured webhook, a dropped deploy, a rotated API key) rather than real, individually
+  distinct churn — the detector suppresses the *entire* run for your org that day and writes
+  nothing, logging a loud warning instead ("possible usage-instrumentation outage"). This only
+  evaluates once your org has a reasonably-sized trend-eligible population; it is not something
+  you can see directly in the UI today, so if you enable this, get real usage data flowing, and
+  still see no suggestions where you expected some, check your worker logs for this warning
+  before assuming the feature is broken.
+
+**Suggestion precision read-out.** The settings card shows live confirmed / rejected / pending
+counts for this source, so you can judge for yourself whether the signal is worth the review
+time on your own data — there is no aggregate number to quote, because this is a self-hosted
+product with no cross-tenant telemetry.
+
+**What this does not claim.** This feature does not improve churn-prediction accuracy — it
+changes label *supply*, not the churn model itself, and whether more labels help your model is
+a separate, open question. It also makes no promise about reaching any particular label count.
+
 ### Schema reference
 
 | Field | Required | Notes |

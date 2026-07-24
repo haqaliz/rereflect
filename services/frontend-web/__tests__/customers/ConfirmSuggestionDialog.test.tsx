@@ -47,7 +47,7 @@ describe('ConfirmSuggestionDialog', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('shows the CRM close date as read-only, not an editable date input', () => {
+  it('shows the suggested churn date as read-only, not an editable date input', () => {
     renderDialog();
     expect(screen.queryByLabelText(/churned date/i)).not.toBeInTheDocument();
     expect(screen.getByText(/2026-05-20|may 20, 2026/i)).toBeInTheDocument();
