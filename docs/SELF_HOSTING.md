@@ -249,6 +249,32 @@ correction counts and whether each type is ready.
 This is an honest gate — real-org self-improvement needs enough training data to be
 meaningful.
 
+### Rolling back & pausing auto-promotion
+
+Every trained version is kept. The **Accuracy tab** shows a version-history list
+(fit date, macro-F1, label count, which one is live) per classifier type. If an
+auto-promoted model misbehaves, an admin/owner can **roll back to any prior
+version** — click "Roll back to this" on that row and confirm.
+
+Rolling back **pauses auto-promotion** for that classifier type (a per-type hold).
+This matters because the classifier refits **weekly (Mondays 06:30 UTC)** and, left
+unchecked, would re-promote a fresh challenger over your manual choice within a
+week. While paused:
+
+- the card shows **"Auto-promotion paused"** for that type;
+- the weekly refit still trains and still records the incumbent-vs-challenger delta
+  (so you can see whether resuming would help) but **does not** change the live
+  model;
+- when a newer candidate would beat your held version, the card nudges you to
+  resume.
+
+Click **Resume auto-promotion** to clear the hold and let the weekly self-improvement
+take over again. The hold is per classifier type — pausing sentiment never affects
+category or urgency. (A *disable-only* rollback — when there's no prior version to
+return to — simply turns the classifier off and does **not** pause auto-promotion,
+so a first model can still be trained.) Rollback, pause, and resume are all recorded
+in the audit log.
+
 ### How to read the accuracy card
 
 Once you've collected enough corrections, the **Accuracy tab** (Settings → AI) shows:
