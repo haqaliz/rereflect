@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace as _dataclasses_replace
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
@@ -40,7 +41,7 @@ from sqlalchemy.orm import Session
 
 from src.config import get_redis_url
 from src.database import get_db_session
-from src.models import Organization, OrgClassifierEvalRun, OrgClassifierModel
+from src.models import Organization, OrgAIConfig, OrgClassifierEvalRun, OrgClassifierModel
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,15 @@ _DEFAULT_CLASSIFIER_TYPE = "sentiment"
 _CLASSIFIER_TYPES: tuple[str, ...] = ("sentiment", "category", "urgency")
 _PURGE_AFTER_DAYS = 90
 _LOCK_TIMEOUT_SECONDS = 600
+
+# classifier_type -> the matching OrgAIConfig "pause auto-promotion" hold column
+# (classifier-model-versioning-rollback, M1/M2/M3a). See OrgAIConfig's docstring
+# comment in src/models/__init__.py for the durable-manual-rollback contract.
+_HOLD_COLUMN_BY_TYPE: dict[str, str] = {
+    "sentiment": "sentiment_autopromote_hold",
+    "category": "category_autopromote_hold",
+    "urgency": "urgency_autopromote_hold",
+}
 
 # Redis client for per-org advisory locking — mirrors tasks/analysis.py's _get_redis().
 _redis_client = None
@@ -251,6 +261,24 @@ def _insert_eval_run(org_id: int, model_id: Optional[int], result, duration_ms: 
     db.add(eval_run)
 
 
+def _autopromote_held(org_id: int, db: Session, classifier_type: str) -> bool:
+    """Row-locked read (.with_for_update()) of the org's `*_autopromote_hold` column
+    for this classifier_type, taken inside retrain_org's single transaction so a
+    concurrently-committed hold-flip is observed before the promote-or-not decision.
+    .with_for_update() is a safe no-op on SQLite (ignored) -- only matters on Postgres.
+    No OrgAIConfig row for the org -> not held (column default is False)."""
+    hold_column = _HOLD_COLUMN_BY_TYPE[classifier_type]
+    config = (
+        db.query(OrgAIConfig)
+        .filter(OrgAIConfig.organization_id == org_id)
+        .with_for_update()
+        .first()
+    )
+    if config is None:
+        return False
+    return bool(getattr(config, hold_column))
+
+
 def _no_builtin_overlap_result(n: int):
     """Synthetic EvalResult for the fair-A/B empty-intersection guard (design decision #2):
     the org's category corrections cleared MIN_LABELS but none of the corrected labels are
@@ -357,6 +385,15 @@ def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSI
 
         result = evaluate(dataset, incumbent_predict, **eval_kwargs)
         duration_ms = int((time.monotonic() - start) * 1000)
+
+        # Re-read the hold flag immediately before the promote decision, row-locked,
+        # in the SAME transaction that (maybe) promotes + always inserts the eval run
+        # (single db.commit() below) -- a concurrently-committed rollback (hold flip)
+        # is observed here (worker-hold-guard aspect, M2/M3a). Never call _promote
+        # when held; the eval run persists decision="held" (real macro_f1_delta/n
+        # still recorded -- disclosure only, doesn't freeze the A/B signal).
+        if _autopromote_held(org_id, db, classifier_type):
+            result = _dataclasses_replace(result, decision="held")
 
         model_id: Optional[int] = None
         if result.decision == "promoted":

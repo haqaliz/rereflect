@@ -13,7 +13,9 @@ vi.mock('@/lib/api-client', () => {
 import apiClient from '@/lib/api-client';
 import {
   getClassifierAccuracy,
+  getClassifierVersions,
   rollbackClassifier,
+  resumeClassifier,
   formatMetricPercent,
   formatDelta,
 } from '@/lib/api/classifier-accuracy';
@@ -57,6 +59,60 @@ describe('classifier-accuracy API client — classifierType threading', () => {
 
     expect(mockPost).toHaveBeenCalledWith(
       '/api/v1/settings/ai/classifier/rollback?classifier_type=category'
+    );
+  });
+
+  it('rollbackClassifier() with a toVersionId appends &to_version_id=', async () => {
+    mockPost.mockResolvedValue({ data: {} });
+    await rollbackClassifier('sentiment', 42);
+
+    expect(mockPost).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/rollback?classifier_type=sentiment&to_version_id=42'
+    );
+  });
+
+  it('rollbackClassifier() with no toVersionId omits the to_version_id param', async () => {
+    mockPost.mockResolvedValue({ data: {} });
+    await rollbackClassifier('category');
+
+    expect(mockPost).toHaveBeenCalledWith(
+      expect.not.stringContaining('to_version_id')
+    );
+  });
+
+  it('getClassifierVersions() with no arg defaults to classifier_type=sentiment', async () => {
+    mockGet.mockResolvedValue({ data: {} });
+    await getClassifierVersions();
+
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/versions?classifier_type=sentiment'
+    );
+  });
+
+  it("getClassifierVersions('urgency') sends classifier_type=urgency", async () => {
+    mockGet.mockResolvedValue({ data: {} });
+    await getClassifierVersions('urgency');
+
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/versions?classifier_type=urgency'
+    );
+  });
+
+  it('resumeClassifier() with no arg defaults to classifier_type=sentiment', async () => {
+    mockPost.mockResolvedValue({ data: {} });
+    await resumeClassifier();
+
+    expect(mockPost).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/resume?classifier_type=sentiment'
+    );
+  });
+
+  it("resumeClassifier('category') sends classifier_type=category", async () => {
+    mockPost.mockResolvedValue({ data: {} });
+    await resumeClassifier('category');
+
+    expect(mockPost).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/resume?classifier_type=category'
     );
   });
 });

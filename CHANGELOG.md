@@ -8,6 +8,26 @@ This is the first tagged release. Prior work lives in the git history and the tr
 
 ## Unreleased
 
+### Added — Durable classifier rollback + version history
+
+The per-org self-improving classifiers (M5.2) already let you roll back an auto-promoted
+model, but that rollback didn't stick: the classifier refits **weekly (Mondays 06:30 UTC)**
+and would silently re-promote a fresh challenger over your manual choice within a week.
+
+Rollback is now **durable**. Rolling back pauses auto-promotion for that classifier type
+(a per-type hold, shown as **"Auto-promotion paused"** on the Accuracy tab); the weekly
+refit still trains and records the incumbent-vs-challenger delta but no longer changes the
+live model until you click **Resume auto-promotion**. The Accuracy tab now also shows a
+**version-history list** (fit date, macro-F1, labels, which is live) and lets an admin/owner
+**roll back to any prior version**, not just the most recent. A *disable-only* rollback
+(no prior version) does not pause auto-promotion, so a first model can still be trained.
+Rollback, pause, and resume are recorded in the audit log. Holds are per classifier type —
+pausing sentiment never affects category or urgency.
+
+New endpoints (`/api/v1/settings/ai`): `GET /classifier/versions`, `POST /classifier/resume`,
+and `POST /classifier/rollback` now accepts an optional `to_version_id`. Completes the M4.2
+"model versioning / rollback if accuracy drops" item.
+
 ### Added — Usage-decline churn-label suggestions
 
 A second, CRM-free source of churn-label *suggestions* for the review queue introduced by
