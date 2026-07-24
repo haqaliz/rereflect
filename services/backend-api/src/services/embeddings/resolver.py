@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.services.embeddings.base import EmbeddingProvider
+from src.services.embeddings.defaults import default_model_for_provider
 from src.services.embeddings.factory import EmbeddingProviderFactory
 from src.utils.byok import resolve_org_byok_key
 
@@ -53,11 +54,19 @@ class ResolvedEmbedder:
                         For OpenAI text-embedding-3-small this is 1536.
                         Consumers should call embedder.embed() and then read
                         embedder.dimension for a definitive value.
+        model:          Effective embedding model id — the per-org
+                        OrgAIConfig.model_embeddings override if set, else
+                        default_model_for_provider(provider). Always known
+                        up front (unlike dimension_hint for local providers),
+                        so consumers can key stored vectors on it. None only
+                        when the provider has no default and no override was
+                        configured (e.g. openai_compatible).
     """
 
     provider: str
     embedder: EmbeddingProvider
     dimension_hint: int
+    model: Optional[str] = None
 
 
 def resolve_embedding_provider(
@@ -103,6 +112,11 @@ def resolve_embedding_provider(
         # model_embeddings column does not exist yet (added in template-matching-local S1).
         # Use getattr with None default so this aspect doesn't depend on the migration.
         model: Optional[str] = getattr(config, "model_embeddings", None)
+        # The model NAME is always known up front (per-org override or the
+        # provider default), even for local providers whose *dimension* is
+        # only known after the first embed() call — so it's safe to key
+        # stored vectors on this value.
+        effective_model: Optional[str] = model or default_model_for_provider(provider)
 
         if provider in _LOCAL_PROVIDERS:
             # Local / keyless path — no BYOK lookup needed.
@@ -145,6 +159,7 @@ def resolve_embedding_provider(
             provider=provider,
             embedder=embedder,
             dimension_hint=embedder.dimension,
+            model=effective_model,
         )
 
     except Exception as exc:
