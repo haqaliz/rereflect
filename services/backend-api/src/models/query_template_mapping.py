@@ -17,6 +17,10 @@ class QueryTemplateMapping(Base):
     # Nullable so pre-existing rows without provider info are treated as stale
     embedding_provider = Column(String(50), nullable=True)
     embedding_dimension = Column(Integer, nullable=True)
+    # Model name that produced question_embedding (added: local-embedding-quality).
+    # NULL = stale (predates model-keying or model is unknown); skipped by the
+    # matcher's skip-filter, same convention as embedding_provider/dimension.
+    embedding_model = Column(String(100), nullable=True)
     match_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -25,7 +29,7 @@ class QueryTemplateMapping(Base):
 
     __table_args__ = (
         Index('ix_mappings_template_id', 'template_id'),
-        Index('ix_mappings_provider_dim', 'embedding_provider', 'embedding_dimension'),
+        Index('ix_mappings_provider_dim_model', 'embedding_provider', 'embedding_dimension', 'embedding_model'),
     )
 
     def __repr__(self):
