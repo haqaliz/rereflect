@@ -5,8 +5,10 @@ Matching flow:
 1. Normalize user question (lowercase, remove stopwords)
 2. Generate embedding via the injected EmbeddingProvider (pluggable: OpenAI, local, Google)
 3. Cosine similarity search against query_template_mappings
-   - Skip rows whose embedding_provider/embedding_dimension ≠ active provider/dim
-     (never compare vectors across incompatible spaces — zip-truncation gives garbage)
+   - Skip rows whose embedding_provider/embedding_dimension/embedding_model ≠ active
+     provider/dim/model (never compare vectors across incompatible spaces — zip-
+     truncation gives garbage, and a model change within the same provider+dim can
+     still land in a different vector space)
 4. If similarity > threshold (0.85) → return matching template
 5. If no embedder supplied, or no match → return None (fall through to LLM SQL generation)
 
@@ -144,12 +146,29 @@ class TemplateMatcher:
             }
             Or None if no match above threshold, no embedder, or an error.
 
-        Skip rule (cross-provider safety):
-            Rows whose stored embedding_provider ≠ resolved.provider OR whose
-            embedding_dimension ≠ len(query_vector) are EXCLUDED before the
-            cosine comparison.  This prevents comparing vectors from different
-            embedding spaces (which would give meaningless results due to
-            dimensionality mismatch or feature-space incompatibility).
+        Skip rule (cross-provider/model safety):
+            Rows whose stored embedding_provider ≠ resolved.provider, OR whose
+            embedding_dimension ≠ len(query_vector), OR whose embedding_model ≠
+            resolved.model are EXCLUDED before the cosine comparison.  This
+            prevents comparing vectors from different embedding spaces (which
+            would give meaningless results due to dimensionality mismatch,
+            feature-space incompatibility, or a same-dimension model swap that
+            still changes the vector space).
+
+            `resolved.model` may be None (e.g. openai_compatible with no
+            configured model override).  The comparison is a plain
+            `stored_model != active_model` with NO None special-casing:
+            - active_model is None and stored embedding_model is NULL →
+              None != None is False → NOT skipped (preserves today's
+              behaviour for installs with no configured model; matching still
+              relies on provider+dim only).
+            - active_model is None and stored embedding_model is a concrete
+              string → skipped (a real model config now exists on disk that
+              didn't produce this row).
+            - active_model is a concrete string and stored embedding_model is
+              NULL → skipped (stale, pre-Task-3 row).
+            - active_model and stored embedding_model are different concrete
+              strings → skipped (different model = different vector space).
         """
         if embedder is None:
             # No embedding provider configured for this org — degrade gracefully.
@@ -163,6 +182,7 @@ class TemplateMatcher:
         # (not a hint — local providers only know their dim after the first embed call).
         active_provider: str = embedder.provider
         active_dim: int = len(query_embedding)
+        active_model = embedder.model
 
         # 2. Fetch all active mappings from DB
         # We fetch all and compute similarity in Python (fallback for no pgvector)
@@ -170,7 +190,7 @@ class TemplateMatcher:
         from sqlalchemy import text
         try:
             mappings = db.execute(
-                text("SELECT template_id, question_embedding, embedding_provider, embedding_dimension FROM query_template_mappings"),
+                text("SELECT template_id, question_embedding, embedding_provider, embedding_dimension, embedding_model FROM query_template_mappings"),
                 {}
             ).fetchall()
         except Exception:
@@ -189,15 +209,30 @@ class TemplateMatcher:
             stored_embedding = mapping.question_embedding
             stored_provider = mapping.embedding_provider
             stored_dim = mapping.embedding_dimension
+            stored_model = mapping.embedding_model
 
             if not stored_embedding:
                 continue
 
-            # ── Provider/dim skip-filter ────────────────────────────────────
+            # ── Provider/dim/model skip-filter ───────────────────────────────
             # Comparing vectors from different embedding spaces produces garbage
-            # (even if dims coincidentally match, the feature spaces differ).
-            # NULL provider/dim means the row is stale (pre-migration) — skip.
-            if stored_provider != active_provider or stored_dim != active_dim:
+            # (even if dims coincidentally match, the feature spaces differ — a
+            # same-dimension model swap is exactly such a case). NULL provider/
+            # dim/model means the row is stale (pre-migration) — skip.
+            #
+            # `stored_model != active_model` is a plain equality check with NO
+            # None special-casing. When active_model is None (e.g.
+            # openai_compatible with no configured model), None == None is True
+            # for a stored NULL-model row, so it is NOT skipped — this exactly
+            # preserves pre-existing behaviour (matching falls back to
+            # provider+dim only) for installs with no model configured. Any
+            # other pairing (NULL vs concrete, or two different concrete
+            # models) evaluates to "different" and is skipped.
+            if (
+                stored_provider != active_provider
+                or stored_dim != active_dim
+                or stored_model != active_model
+            ):
                 continue
 
             # Convert from JSONB array if needed
