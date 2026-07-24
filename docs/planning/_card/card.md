@@ -1,92 +1,53 @@
-# Card — usage-decline-churn-labels (freeform feat, no GitHub issue)
+# Card — local-embedding-quality (freeform)
 
-**Type:** feat
-**Slug:** usage-decline-churn-labels
-**Branch:** `feat/usage-decline-churn-labels`
-**Source:** Freeform task selected via `rereflect-next` on 2026-07-23. No GitHub issue.
+**Type:** feat · **Slug:** `local-embedding-quality` · **Branch:** `feat/local-embedding-quality`
+**Source:** freeform task from `rereflect-next` handoff on 2026-07-24. No GitHub issue.
+**Roadmap:** `AI-TRACKING.md` — **M5.4 "Local embedding quality"** (`[ ]` "parked / nice-to-have", no blocker stated)
 
-## Brief (from rereflect-next handoff, verbatim)
+---
 
-> Add product-usage decline as a third churn-label SUGGESTION source, feeding the existing
-> review queue shipped by `crm-churn-labels` (docs/planning/crm-churn-labels/). AI-TRACKING.md:480-485
-> names this as newly feasible-but-unplanned now that M3.2b's `customer_usage_history` snapshot exists.
-> A worker detector reads `customer_usage_history` (reusing `usage_trend_severity.py`) and, on a
-> sustained decline, writes a `ChurnLabelSuggestion` with `provider='usage_decline'` and a deterministic
-> synthetic `external_opportunity_id` — the unique constraint is (org, provider, external_opportunity_id)
-> and `churn_suggestions.py` filters provider as a free string with no whitelist, so aim for no migration
-> and no route changes in slice 1. Default-deny + opt-in per org, confirm-in-review only (never
-> auto-applied), and these must stay excluded from `churn_labels_ready` on the readiness card exactly as
-> CRM suggestions are. Be honest in the docs: a usage decline is not churn, the ≥5 active-day baseline
-> floor permanently excludes quiet accounts, there's a ~14-day warm-up, this makes no claim about
-> churn-prediction quality, and the 500-label M5.3 gate remains under review (AI-TRACKING.md:467-478).
+## Brief (from rereflect-next handoff)
 
-## Why this was picked (citations)
+Ship **M5.4**: a better **local** embedding model as an opt-in default for the offline AI
+Copilot's retrieval + template-matching, plugged into the existing embedding-provider layer
+(`services/backend-api/src/services/embeddings/`, per-org `model_embeddings` in `org_ai_config`).
 
-- `AI-TRACKING.md:480-485` — the M5.3 note's **Update 2026-07-22**: the old "no history to detect a
-  drop against" blocker is resolved by M3.2b's `customer_usage_history`; using a sustained usage
-  decline as a churn-label *source* is "now feasible but remains **unplanned** (it would need a
-  confirm-in-review step like `crm-churn-labels`, not auto-labelling)."
-- `AI-TRACKING.md:446-451` — **M5.3 (Per-org churn ML model)** is the one open Track, and it is
-  gated purely on **label supply**.
-- `AI-TRACKING.md:453-461` — `crm-churn-labels` (shipped 2026-07-15) established the exact pattern
-  to reuse: suggestions are **not labels**, they enter a review queue, become `source='manual'`
-  churn events only on operator confirmation with a reason code, default-deny, and
-  `pending_suggestions` is **deliberately excluded** from `churn_labels_ready`.
-- `AI-TRACKING.md:216-263` — M3.2b (`usage-trend-churn-signal`, 2026-07-22) and M3.2c
-  (`usage-trend-automation-trigger`, 2026-07-23) built the durable snapshot + trend classification
-  this detector reads.
-- `services/backend-api/src/models/churn_label_suggestion.py` — unique constraint is
-  `(organization_id, provider, external_opportunity_id)`; `provider` is a plain `String(50)` with
-  no enum/whitelist.
-- `services/backend-api/src/api/routes/churn_suggestions.py:219,262` — `provider` is used purely as
-  a free-string **filter**; no validation list to extend.
+Constraints / gates:
+- Keep the current default **byte-stable** for installs that don't opt in.
+- Keep it **CPU-only / air-gappable** (document a pre-baked model-cache path like M5.1 did).
+- The gate is an **honest offline eval**: build a small labeled retrieval/template-match set and
+  show the new model **measurably beats** the current local default before promoting it — no
+  absolute-accuracy marketing claims (matches the honest OSS brand).
+- Avoid the `status-sync-realtime-mapping` and `feat/classifier-model-versioning-rollback`
+  areas — both are in flight.
 
-## Moat rationale
+## Why this was picked (moat rationale)
 
-The shipped CRM label source produces **nothing** for a self-hoster with no HubSpot/Salesforce —
-which is the default OSS deployment. A usage-decline source is the only label supply that works
-CRM-free, and it reuses telemetry the operator already instruments. It also closes the loop the
-last two branches opened: M3.2b built the trend signal, M3.2c wired it to actions, and this wires
-it to *learning*. No plan gate, no SMTP, no cross-tenant data.
+- The one **unblocked** item left in the Local Model Layer. M5.0/M5.1/M5.2 are `COMPLETE`;
+  M5.3 (per-org churn ML) is **data-gated** (~500 labels, gate under review); M5.4 has no blocker.
+- Deepens the **fully-offline AI Copilot** moat and gets better as base models improve.
+- The embedding-provider abstraction already ships (`local-embeddings-offline-copilot` merged),
+  so this is a **depth-first follow-on**, not net-new plumbing.
 
-## Known caveats to resolve in the dig / PRD
+## Known caveat (carried into the dig)
 
-1. **A usage decline is not churn.** This changes label *supply*, not label *quality*. False
-   positives land on a human reviewer — the review queue is the whole safety mechanism, and the
-   suggestion's `evidence` payload has to be good enough for a human to actually adjudicate.
-2. **Inherited structural blind spot.** M3.2b's **≥5 active-day baseline floor permanently excludes
-   light-usage customers** (`AI-TRACKING.md:258-263`), so the quietest accounts — arguably the most
-   likely to churn — structurally cannot produce a suggestion. This must be stated, not hidden.
-3. **Warm-up.** `customer_usage_history` began 2026-07-22; most customers are
-   `insufficient_history` for ~2 more weeks. `insufficient_history` must be an explicit non-source.
-4. **Unvalidated upstream dependency.** The whole feature sits downstream of the operator having
-   instrumented usage events — `AI-TRACKING.md:262` calls that unvalidated.
-5. **No migration is the goal, not a guarantee.** The dig must confirm `provider='usage_decline'`
-   and a synthetic `external_opportunity_id` genuinely satisfy the existing NOT NULL + unique
-   constraint and the existing review/confirm path, incl. the readiness card's
-   `pending_suggestions` split.
-6. **Scope fence.** `churn_risk_component`, `churn_probability`, and the isotonic calibration stay
-   untouched — same guarantee M3.2b and M3.2c both preserved.
-7. **The 500-label gate is under review** (`AI-TRACKING.md:467-478`) — do not restate it as settled,
-   and do not justify this feature by "it gets you to 500".
+The hard part is **honest proof, not the swap.** Embedding/retrieval quality is harder to
+benchmark than sentiment macro-F1 — needs a small labeled retrieval/template-match eval set to
+show a measurable offline improvement, or it's just a model change dressed as a win. Must stay
+CPU-friendly/air-gappable (a bigger model raises worker image size + inference latency) and keep
+the current default byte-stable.
 
-## Open questions for the interview
+## Grounding pointers (from rereflect-next dig, pre-worktree — verify in Phase 2)
 
-1. What counts as a **sustained** decline worth suggesting — `sharp_decline` only, or `declining`
-   held for N consecutive days? Is there a minimum absolute-usage floor on top of the trend state?
-2. **Re-suggestion semantics.** The synthetic `external_opportunity_id` determines whether a
-   customer who declines, is rejected, and declines again months later can produce a second
-   suggestion. What is the intended key (email + decline-start date? + episode counter?)?
-3. What is `suggested_churned_at` for a usage decline — the decline start, the last active day, or
-   the detection date?
-4. What goes in `evidence` so a reviewer can actually judge it (usage series? trend pct? last
-   active day? feedback/health context)?
-5. Where does the detector run — inline in the daily `recompute_usage_scores` seam (like M3.2c's
-   evaluator) or as its own scheduled task?
-6. Does the review-queue UI need a provider-specific evidence renderer, or does the CRM renderer
-   degrade acceptably?
-7. Should a confirmed usage-decline suggestion record a distinguishable churn-event reason code so
-   later M5.3 backtests can separate CRM-sourced from usage-sourced labels?
+- Embedding layer: `services/backend-api/src/services/embeddings/{base.py,factory.py}`,
+  `providers/` (e.g. `google.py`), `__init__.py`.
+- Per-org override: `org_ai_config.model_embeddings` (`services/backend-api/src/models/org_ai_config.py`).
+- Default resolution: `_default_embedding_model(provider)` in
+  `services/backend-api/src/api/routes/ai_settings.py` (+ `EmbeddingStatusResponse`).
+- Copilot consumers: `services/backend-api/src/api/routes/copilot_ws.py`,
+  `services/backend-api/src/models/query_template_mapping.py`.
+- Prior-art pattern to mirror: M5.1 sentiment-provider layer
+  (`services/analysis-engine/src/analyzer/sentiment_providers/`) + its offline pre-bake path.
 
 **NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE (pre-OSS-pivot).
 All features are unlocked (MIT, self-hosted, BYOK). Do not gate this feature behind a plan tier.
