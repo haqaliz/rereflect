@@ -46,3 +46,25 @@ class ClassifierAccuracyResponse(BaseModel):
     is_ready: bool
     min_labels: int
     history: List[ClassifierEvalRunSummary] = []
+    # Per-type auto-promote hold (classifier-model-versioning-rollback, M1/M3-M5).
+    # True when a manual rollback has paused the weekly retrain job's
+    # auto-promotion for this classifier_type; cleared by POST .../resume.
+    hold: bool = False
+
+
+class ClassifierVersionSummary(BaseModel):
+    """One OrgClassifierModel row, as surfaced by GET .../classifier/versions."""
+
+    id: int
+    fit_at: datetime
+    macro_f1: Optional[float] = None
+    label_count: int
+    is_active: bool
+
+
+class ClassifierVersionsResponse(BaseModel):
+    """Response for GET /api/v1/settings/ai/classifier/versions."""
+
+    classifier_type: str
+    hold: bool
+    versions: List[ClassifierVersionSummary] = []
