@@ -134,6 +134,9 @@ class TestClassifierAccuracyEmptyOrg:
         assert body["model_kind"] == "per-org TF-IDF + logistic regression"
         assert body["macro_f1"] is None
         assert body["fit_at"] is None
+        # No OrgAIConfig row exists yet for this org -> hold defaults to False
+        # (classifier-model-versioning-rollback M1/M3).
+        assert body["hold"] is False
 
 
 class TestClassifierAccuracySeeded:

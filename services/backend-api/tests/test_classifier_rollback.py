@@ -100,6 +100,9 @@ class TestRollbackReactivatesPrior:
         assert body["has_model"] is True
         assert body["label_count"] == 100
         assert body["macro_f1"] == pytest.approx(0.60)
+        # Default-path rollback that reactivates a prior version now engages
+        # the autopromote hold (classifier-model-versioning-rollback M3/M4).
+        assert body["hold"] is True
 
         db.refresh(v1)
         db.refresh(v2)
@@ -133,6 +136,9 @@ class TestRollbackNoPriorVersion:
         body = response.json()
         assert body["has_model"] is False
         assert body["label_count"] == 0
+        # Disable-only rollback (no prior to reactivate) must NOT engage the
+        # hold (PRD R5).
+        assert body["hold"] is False
 
         db.refresh(only_model)
         assert only_model.is_active is False
