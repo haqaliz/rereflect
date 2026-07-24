@@ -30,6 +30,24 @@ export interface ClassifierAccuracyResponse {
   is_ready: boolean;
   min_labels: number;
   history: ClassifierEvalRunSummary[];
+  /** True when a manual rollback has paused the weekly retrain job's
+   * auto-promotion for this classifier_type; cleared by resumeClassifier(). */
+  hold: boolean;
+}
+
+/** One OrgClassifierModel row, as surfaced by getClassifierVersions(). */
+export interface ClassifierVersionSummary {
+  id: number;
+  fit_at: string;
+  macro_f1: number | null;
+  label_count: number;
+  is_active: boolean;
+}
+
+export interface ClassifierVersionsResponse {
+  classifier_type: string;
+  hold: boolean;
+  versions: ClassifierVersionSummary[];
 }
 
 /** Format a 0-1 metric fraction as a whole-number percent string, "—" for null. */
@@ -55,12 +73,41 @@ export async function getClassifierAccuracy(
   return response.data;
 }
 
-/** Roll back the org's active classifier model (reactivate prior version, or disable). Admin/owner only. */
+/** Fetch every stored version of the org's classifier of this type, newest-first. Read access: any authenticated user. */
+export async function getClassifierVersions(
+  classifierType: string = 'sentiment'
+): Promise<ClassifierVersionsResponse> {
+  const response = await apiClient.get<ClassifierVersionsResponse>(
+    `/api/v1/settings/ai/classifier/versions?classifier_type=${classifierType}`
+  );
+  return response.data;
+}
+
+/**
+ * Roll back the org's active classifier model. Admin/owner only.
+ *
+ * With no `toVersionId`: reactivate the most recent prior version, or
+ * disable-only if none exists. With `toVersionId`: reactivate exactly that
+ * (inactive) version. Reactivating a prior/target version engages the
+ * per-type auto-promotion hold on the backend.
+ */
 export async function rollbackClassifier(
+  classifierType: string = 'sentiment',
+  toVersionId?: number
+): Promise<ClassifierAccuracyResponse> {
+  const toVersionParam = toVersionId !== undefined ? `&to_version_id=${toVersionId}` : '';
+  const response = await apiClient.post<ClassifierAccuracyResponse>(
+    `/api/v1/settings/ai/classifier/rollback?classifier_type=${classifierType}${toVersionParam}`
+  );
+  return response.data;
+}
+
+/** Clear the per-type auto-promotion hold, letting the weekly retrain job resume promoting again. Admin/owner only. */
+export async function resumeClassifier(
   classifierType: string = 'sentiment'
 ): Promise<ClassifierAccuracyResponse> {
   const response = await apiClient.post<ClassifierAccuracyResponse>(
-    `/api/v1/settings/ai/classifier/rollback?classifier_type=${classifierType}`
+    `/api/v1/settings/ai/classifier/resume?classifier_type=${classifierType}`
   );
   return response.data;
 }

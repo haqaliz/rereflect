@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
+import { toast } from 'sonner';
 
 // Mock the API client module — include real formatters so the component's
 // non-mocked formatMetricPercent/formatDelta imports still work.
@@ -10,11 +11,25 @@ vi.mock('@/lib/api/classifier-accuracy', async (importOriginal) => {
   return {
     ...actual,
     getClassifierAccuracy: vi.fn(),
+    getClassifierVersions: vi.fn(),
     rollbackClassifier: vi.fn(),
+    resumeClassifier: vi.fn(),
   };
 });
 
-import { getClassifierAccuracy, rollbackClassifier } from '@/lib/api/classifier-accuracy';
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+import {
+  getClassifierAccuracy,
+  getClassifierVersions,
+  rollbackClassifier,
+  resumeClassifier,
+} from '@/lib/api/classifier-accuracy';
 import { ClassifierAccuracyCard } from '@/components/settings/ClassifierAccuracyCard';
 
 const emptyResponse = {
@@ -27,6 +42,7 @@ const emptyResponse = {
   is_ready: false,
   min_labels: 20,
   history: [],
+  hold: false,
 };
 
 const notReadyResponse = {
@@ -44,6 +60,7 @@ const populatedResponse = {
   fit_at: '2026-07-10T12:00:00Z',
   is_ready: true,
   min_labels: 20,
+  hold: false,
   history: [
     {
       incumbent_macro_f1: 0.65,
@@ -64,9 +81,59 @@ const populatedResponse = {
   ],
 };
 
+const heldResponse = {
+  ...populatedResponse,
+  hold: true,
+};
+
+const emptyVersionsResponse = {
+  classifier_type: 'sentiment',
+  hold: false,
+  versions: [],
+};
+
+const versionsResponse = {
+  classifier_type: 'sentiment',
+  hold: false,
+  versions: [
+    {
+      id: 3,
+      fit_at: '2026-07-10T12:00:00Z',
+      macro_f1: 0.71,
+      label_count: 140,
+      is_active: true,
+    },
+    {
+      id: 2,
+      fit_at: '2026-06-25T12:00:00Z',
+      macro_f1: 0.58,
+      label_count: 90,
+      is_active: false,
+    },
+    {
+      id: 1,
+      fit_at: '2026-06-01T12:00:00Z',
+      macro_f1: 0.5,
+      label_count: 40,
+      is_active: false,
+    },
+  ],
+};
+
+const heldVersionsResponse = {
+  ...versionsResponse,
+  hold: true,
+  versions: [
+    { ...versionsResponse.versions[0], is_active: false },
+    { ...versionsResponse.versions[1], is_active: true },
+    versionsResponse.versions[2],
+  ],
+};
+
 describe('ClassifierAccuracyCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getClassifierVersions).mockResolvedValue(emptyVersionsResponse);
   });
 
   it('shows a loading skeleton while the request is pending', () => {
@@ -125,19 +192,25 @@ describe('ClassifierAccuracyCard', () => {
     });
   });
 
-  it('calls rollbackClassifier and refreshes when the Roll back action is used', async () => {
+  it('calls rollbackClassifier and refreshes when a "Roll back to this" action is confirmed', async () => {
     const user = userEvent.setup();
     vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(versionsResponse);
     vi.mocked(rollbackClassifier).mockResolvedValue(emptyResponse);
     vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(emptyResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(emptyVersionsResponse);
 
     render(<ClassifierAccuracyCard isAdminOrOwner />);
 
-    const rollbackButton = await screen.findByRole('button', { name: /roll back/i });
-    await user.click(rollbackButton);
+    const rollbackButtons = await screen.findAllByRole('button', { name: /roll back to this/i });
+    await user.click(rollbackButtons[0]);
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm rollback/i });
+    await user.click(confirmButton);
 
     await waitFor(() => {
-      expect(rollbackClassifier).toHaveBeenCalled();
+      expect(rollbackClassifier).toHaveBeenCalledWith('sentiment', versionsResponse.versions[1].id);
+      expect(toast.success).toHaveBeenCalled();
       expect(screen.getByText(/no model/i)).toBeInTheDocument();
     });
   });
@@ -146,6 +219,7 @@ describe('ClassifierAccuracyCard', () => {
 describe('ClassifierAccuracyCard — category classifierType prop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getClassifierVersions).mockResolvedValue(emptyVersionsResponse);
   });
 
   it('fetches with classifierType="category" when the prop is passed', async () => {
@@ -218,19 +292,24 @@ describe('ClassifierAccuracyCard — category classifierType prop', () => {
     });
   });
 
-  it('rollback with classifierType="category" calls rollbackClassifier("category")', async () => {
+  it('rollback with classifierType="category" calls rollbackClassifier("category", versionId)', async () => {
     const user = userEvent.setup();
     vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(versionsResponse);
     vi.mocked(rollbackClassifier).mockResolvedValue(emptyResponse);
     vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(emptyResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(emptyVersionsResponse);
 
     render(<ClassifierAccuracyCard classifierType="category" isAdminOrOwner />);
 
-    const rollbackButton = await screen.findByRole('button', { name: /roll back/i });
-    await user.click(rollbackButton);
+    const rollbackButtons = await screen.findAllByRole('button', { name: /roll back to this/i });
+    await user.click(rollbackButtons[0]);
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm rollback/i });
+    await user.click(confirmButton);
 
     await waitFor(() => {
-      expect(rollbackClassifier).toHaveBeenCalledWith('category');
+      expect(rollbackClassifier).toHaveBeenCalledWith('category', versionsResponse.versions[1].id);
     });
   });
 });
@@ -238,6 +317,7 @@ describe('ClassifierAccuracyCard — category classifierType prop', () => {
 describe('ClassifierAccuracyCard — urgency classifierType prop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getClassifierVersions).mockResolvedValue(emptyVersionsResponse);
   });
 
   it('fetches with classifierType="urgency" when the prop is passed', async () => {
@@ -317,19 +397,238 @@ describe('ClassifierAccuracyCard — urgency classifierType prop', () => {
     });
   });
 
-  it('rollback with classifierType="urgency" calls rollbackClassifier("urgency")', async () => {
+  it('rollback with classifierType="urgency" calls rollbackClassifier("urgency", versionId)', async () => {
     const user = userEvent.setup();
     vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(versionsResponse);
     vi.mocked(rollbackClassifier).mockResolvedValue(emptyResponse);
     vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(emptyResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(emptyVersionsResponse);
 
     render(<ClassifierAccuracyCard classifierType="urgency" isAdminOrOwner />);
 
-    const rollbackButton = await screen.findByRole('button', { name: /roll back/i });
-    await user.click(rollbackButton);
+    const rollbackButtons = await screen.findAllByRole('button', { name: /roll back to this/i });
+    await user.click(rollbackButtons[0]);
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm rollback/i });
+    await user.click(confirmButton);
 
     await waitFor(() => {
-      expect(rollbackClassifier).toHaveBeenCalledWith('urgency');
+      expect(rollbackClassifier).toHaveBeenCalledWith('urgency', versionsResponse.versions[1].id);
     });
+  });
+});
+
+describe('ClassifierAccuracyCard — version history table', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders a version-history table with an Active badge on the active row and no rollback action on it', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(versionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/active/i)).toBeInTheDocument();
+    });
+    // 2 inactive versions -> 2 "Roll back to this" actions, none on the active row.
+    const rollbackButtons = screen.getAllByRole('button', { name: /roll back to this/i });
+    expect(rollbackButtons).toHaveLength(2);
+  });
+
+  it('renders the table read-only (no rollback actions) when isAdminOrOwner is false, but the table stays visible', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(versionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner={false} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/active/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /roll back to this/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /resume auto-promotion/i })).toBeNull();
+  });
+
+  it('error path toasts the FastAPI detail when rollback fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(versionsResponse);
+    vi.mocked(rollbackClassifier).mockRejectedValue({
+      response: { data: { detail: 'Version already active.' } },
+    });
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    const rollbackButtons = await screen.findAllByRole('button', { name: /roll back to this/i });
+    await user.click(rollbackButtons[0]);
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm rollback/i });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Version already active.');
+    });
+  });
+
+  it('caps the visible rows so the card stays compact even with many versions', async () => {
+    const manyVersions = {
+      classifier_type: 'sentiment',
+      hold: false,
+      versions: Array.from({ length: 15 }, (_, i) => ({
+        id: 15 - i,
+        fit_at: `2026-0${(i % 9) + 1}-01T12:00:00Z`,
+        macro_f1: 0.5,
+        label_count: 30,
+        is_active: i === 0,
+      })),
+    };
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(manyVersions);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('row').length).toBeLessThanOrEqual(11); // header + <=10 rows
+    });
+  });
+});
+
+describe('ClassifierAccuracyCard — hold / resume', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders "Auto-promotion paused" + Resume button when hold is true', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(heldResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(heldVersionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/auto-promotion paused/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /resume auto-promotion/i })).toBeInTheDocument();
+    });
+  });
+
+  it('does not render the hold indicator when hold is false', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(versionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/71%/).length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByText(/auto-promotion paused/i)).toBeNull();
+  });
+
+  it('Resume opens a confirm dialog; confirming calls resumeClassifier and refetches', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(heldResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(heldVersionsResponse);
+    vi.mocked(resumeClassifier).mockResolvedValue(populatedResponse);
+    vi.mocked(getClassifierAccuracy).mockResolvedValueOnce(populatedResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValueOnce(versionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    const resumeButton = await screen.findByRole('button', { name: /resume auto-promotion/i });
+    await user.click(resumeButton);
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm resume/i });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(resumeClassifier).toHaveBeenCalledWith('sentiment');
+      expect(toast.success).toHaveBeenCalled();
+      expect(screen.queryByText(/auto-promotion paused/i)).toBeNull();
+    });
+  });
+
+  it('error path toasts the FastAPI detail when resume fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(heldResponse);
+    vi.mocked(getClassifierVersions).mockResolvedValue(heldVersionsResponse);
+    vi.mocked(resumeClassifier).mockRejectedValue({
+      response: { data: { detail: 'Not allowed.' } },
+    });
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    const resumeButton = await screen.findByRole('button', { name: /resume auto-promotion/i });
+    await user.click(resumeButton);
+
+    const confirmButton = await screen.findByRole('button', { name: /confirm resume/i });
+    await user.click(confirmButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Not allowed.');
+    });
+  });
+
+  it('S1 nudge: shows a resume prompt with the positive delta when held and the latest run beat the held version', async () => {
+    const heldWithPositiveDelta = {
+      ...heldResponse,
+      history: [
+        {
+          incumbent_macro_f1: 0.6,
+          challenger_macro_f1: 0.68,
+          macro_f1_delta: 0.08,
+          decision: 'held',
+          n: 30,
+          created_at: '2026-07-15T12:00:00Z',
+        },
+        ...heldResponse.history,
+      ],
+    };
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(heldWithPositiveDelta);
+    vi.mocked(getClassifierVersions).mockResolvedValue(heldVersionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/would beat your held version/i)).toBeInTheDocument();
+      expect(screen.getByText(/\+8%/)).toBeInTheDocument();
+    });
+  });
+
+  it('S1 nudge: does not render when the latest run has a non-positive delta', async () => {
+    const heldWithNegativeDelta = {
+      ...heldResponse,
+      history: [
+        {
+          incumbent_macro_f1: 0.6,
+          challenger_macro_f1: 0.52,
+          macro_f1_delta: -0.08,
+          decision: 'held',
+          n: 30,
+          created_at: '2026-07-15T12:00:00Z',
+        },
+        ...heldResponse.history,
+      ],
+    };
+    vi.mocked(getClassifierAccuracy).mockResolvedValue(heldWithNegativeDelta);
+    vi.mocked(getClassifierVersions).mockResolvedValue(heldVersionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/auto-promotion paused/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/would beat your held version/i)).toBeNull();
+  });
+
+  it('S1 nudge: degrades gracefully (no crash, no nudge) when history is empty', async () => {
+    vi.mocked(getClassifierAccuracy).mockResolvedValue({ ...heldResponse, history: [] });
+    vi.mocked(getClassifierVersions).mockResolvedValue(heldVersionsResponse);
+
+    render(<ClassifierAccuracyCard isAdminOrOwner />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/auto-promotion paused/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/would beat your held version/i)).toBeNull();
   });
 });
