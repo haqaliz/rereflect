@@ -5,7 +5,7 @@
 {"query": "how does the mix of positive versus negative comments look", "expected": "Count feedbacks by sentiment"}
 {"query": "give me a split of feedback by sentiment category", "expected": "Count feedbacks by sentiment"}
 {"query": "pull up anything flagged as urgent right now", "expected": "List urgent feedbacks"}
-{"query": "what feedback needs immediate attention from us", "expected": "List urgent feedbacks"}
+{"query": "which submissions do we need to jump on right away", "expected": "List urgent feedbacks"}
 {"query": "show me the feedback items marked as high priority", "expected": "List urgent feedbacks"}
 {"query": "which issues are customers complaining about most this month", "expected": "Top pain point categories this month"}
 {"query": "what are the leading frustration categories lately", "expected": "Top pain point categories this month"}
@@ -21,11 +21,11 @@
 {"query": "show me the accounts in the worst shape churn-wise", "expected": "Top churn risk customers"}
 {"query": "who are our most satisfied and stable accounts", "expected": "Healthiest customers"}
 {"query": "which customers are thriving the most", "expected": "Healthiest customers"}
-{"query": "show me the accounts doing the best", "expected": "Healthiest customers"}
+{"query": "which clients have the strongest engagement", "expected": "Healthiest customers"}
 {"query": "how has feedback looked over the past seven days", "expected": "Feedbacks this week"}
 {"query": "give me a rundown of what came in this week", "expected": "Feedbacks this week"}
 {"query": "what's the tally of feedback since Monday", "expected": "Feedbacks this week"}
-{"query": "what came in most recently", "expected": "Recent feedbacks list"}
+{"query": "walk me through everything in the order it came in, newest first", "expected": "Recent feedbacks list"}
 {"query": "pull up the newest submissions", "expected": "Recent feedbacks list"}
 {"query": "show me what customers just sent us", "expected": "Recent feedbacks list"}
 {"query": "how is feedback distributed across our different channels", "expected": "Feedback count by source"}
@@ -36,13 +36,13 @@
 {"query": "show me customers whose scores keep dropping", "expected": "Customers with declining health"}
 {"query": "how serious are the issues customers are reporting", "expected": "Pain points by severity"}
 {"query": "rank complaints by how bad they are", "expected": "Pain points by severity"}
-{"query": "break down pain points by how severe they are", "expected": "Pain points by severity"}
+{"query": "which problems are hurting customers the most", "expected": "Pain points by severity"}
 {"query": "how much feedback came in between these two dates", "expected": "Feedback count in date range"}
 {"query": "give me totals for a specific custom time window", "expected": "Feedback count in date range"}
 {"query": "count feedback for the period I specify", "expected": "Feedback count in date range"}
 {"query": "what kinds of urgent problems are showing up", "expected": "Urgent feedback categories"}
 {"query": "break urgent issues down by category", "expected": "Urgent feedback categories"}
-{"query": "which types of critical issues come up most", "expected": "Urgent feedback categories"}
+{"query": "what buckets do our high-priority complaints fall into", "expected": "Urgent feedback categories"}
 {"query": "export all feedback to CSV", "expected": null}
 {"query": "who is assigned to ticket 42", "expected": null}
 {"query": "change my billing plan", "expected": null}
@@ -65,5 +65,5 @@
 {"query": "how do you determine how severe a complaint category is", "expected": null}
 {"query": "what makes a piece of feedback urgent versus just needing categorization", "expected": null}
 {"query": "how do urgent feedback categories get defined in the first place", "expected": null}
-{"query": "how is the sentiment score calculated for feedback over time", "expected": null}
+{"query": "what's our sentiment breakdown looking like these days", "expected": null}
 {"query": "what's the process for tagging feedback as positive, neutral, or negative", "expected": null}
