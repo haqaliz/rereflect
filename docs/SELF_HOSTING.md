@@ -150,7 +150,7 @@ a wrong-but-confident answer.
 
 The default `nomic-embed-text` above is a reasonable choice, but it isn't the only Ollama
 embedding model that works with the Copilot's template matching. On the same 69-row
-held-out retrieval eval used elsewhere in this doc (0.85 match threshold), two alternative
+held-out retrieval eval used for the local embedding model below (0.85 match threshold), two alternative
 Ollama models were measured against the `nomic-embed-text` baseline (recall@1 **0.089**, MRR
 **0.748**, false-match **0.125**):
 
@@ -161,7 +161,7 @@ Ollama models were measured against the `nomic-embed-text` baseline (recall@1 **
 | `bge-m3` (heavier) | 0.067 | 0.827 | 0.042 | recall −0.022 (worse), MRR +0.08, false-match cut ~66% |
 
 Read this honestly: **neither Ollama candidate clears a meaningful recall@1 margin** over
-`nomic-embed-text` (the bar used elsewhere in this doc is +0.05; `mxbai-embed-large`'s +0.022
+`nomic-embed-text` (the meaningful-improvement bar is +0.05 recall@1; `mxbai-embed-large`'s +0.022
 falls short, and `bge-m3` is actually slightly worse on recall@1). So on the strict
 threshold-match metric there's no strong reason to switch the Ollama default, and
 **`nomic-embed-text` remains a fine default** for self-hosters on this path.
