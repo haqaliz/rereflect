@@ -567,8 +567,9 @@
       required; degrades cleanly if the `sentence-transformers` dep is missing. **Model-keyed
       template matching**: switching the embedding model/provider re-embeds the built-in query
       templates automatically, so vectors from different providers/models are never mixed.
-      Committed, honest retrieval eval + accuracy card (Settings → AI → Accuracy): candidate
-      `bge-small` beats the `nomic-embed-text` baseline by **+0.089 recall@1** (0.178 vs 0.089),
+      Committed, honest retrieval eval + accuracy card (Settings → AI → Accuracy), n=69 (45
+      positives / 24 negatives): candidate `bge-small` beats the `nomic-embed-text` baseline by
+      **+0.089 recall@1** (0.178 vs 0.089),
       no false-match regression — but absolute recall@1 is still low at the strict 0.85 match
       threshold (most held-out paraphrases fall through to the LLM path safely; MRR≈0.75). Same
       air-gap/pre-bake pattern as M5.1: **`BAKE_EMBEDDING_MODEL=true`** at `docker build`

@@ -35,7 +35,8 @@ Ollama/endpoint process required. Set per organization (Settings → AI, embeddi
 #### Known limits, stated plainly
 
 - Candidate `bge-small` beats the `nomic-embed-text` baseline by **+0.089 recall@1** (0.178 vs
-  0.089), with no false-match regression — a real, measured improvement.
+  0.089) on the committed eval set (n=69: 45 held-out paraphrases / 24 negatives), with no
+  false-match regression — a real, measured improvement.
 - **Absolute recall@1 is still low** at the strict 0.85 match threshold the Copilot uses: most
   held-out paraphrases don't clear it and fall through to the LLM path rather than a fast
   template match. That's the safe failure mode (a slower, still-correct answer), not a broken
