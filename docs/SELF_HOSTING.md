@@ -11,6 +11,7 @@ default) treats every instance as fully featured.
 - [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
 - [Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
 - [Local transformer sentiment model (opt-in, air-gap capable)](#local-transformer-sentiment-model-opt-in-air-gap-capable)
+- [Local embedding model (opt-in, air-gap capable)](#local-embedding-model-opt-in-air-gap-capable)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
 - [Send product-usage events](#send-product-usage-events)
 - [Public API — bulk feedback writes & taxonomy CRUD](#public-api--bulk-feedback-writes--taxonomy-crud)
@@ -140,7 +141,9 @@ a wrong-but-confident answer.
 
 > Embeddings are provider/dimension-aware: switching the embedding model re-embeds the
 > built-in query templates automatically on the next startup. Vectors from different
-> providers are never mixed.
+> providers are never mixed. Rereflect also ships an **in-process** embedding option that
+> needs no separate Ollama/endpoint at all — see
+> [Local embedding model](#local-embedding-model-opt-in-air-gap-capable) below.
 
 ## Local transformer sentiment model (opt-in, air-gap capable)
 
@@ -205,6 +208,73 @@ worker/backend images unconditionally (present whether or not any org enables th
 transformer setting, since the deps must be importable for the opt-in to work at all).
 The `BAKE_SENTIMENT_MODEL=true` pre-bake additionally adds ~450–500 MB of model
 weights **only** when explicitly requested.
+
+## Local embedding model (opt-in, air-gap capable)
+
+The AI Copilot's template matching normally embeds queries through whatever
+LLM/embedding provider you've configured — a cloud key, or a local Ollama /
+OpenAI-compatible endpoint and its `nomic-embed-text`-style model (see
+[Fully-local LLM, including the AI Copilot](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
+above). This section covers a further option: an embedding model
+([`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5), 384-dim, CPU)
+that runs **in-process inside the backend** — no separate Ollama/endpoint process
+required at all — available as a **per-organization opt-in** (Settings → AI, embedding
+provider `local`). Switching an org onto (or off) this provider re-embeds the built-in
+query templates automatically on next startup; as with any provider switch, vectors from
+different providers/models are never mixed (see the callout above).
+
+### Fastest path (online, no pre-bake)
+
+Just set the org's embedding provider to `local` in Settings → AI. The backend downloads
+the model weights and caches them into `HF_HOME=/app/models` the first time an embedding
+is requested with `local` selected — no rebuild needed. This requires one-time outbound
+network access from the container. The cache persists for the life of the container; if
+you recreate it (`docker compose up --force-recreate`, image upgrades, etc.) with no
+volume mounted at `/app/models`, it re-downloads on next use — mount a volume there if you
+want the cache to survive recreation (same idea as the sentiment model above).
+
+### Air-gapped path (pre-bake at build time)
+
+For hosts with no runtime network access at all, bake the weights into the image at build
+time instead — **backend only**; the worker has no embedding consumers:
+
+```bash
+BAKE_EMBEDDING_MODEL=true docker compose -f docker-compose.prod.yml build backend
+```
+
+This runs the same download during `docker build` (so it still needs network access **at
+build time only**) and stores the result in `HF_HOME` inside the image — the resulting
+backend container needs no runtime network access to embed. Belt-and-suspenders for a
+genuinely air-gapped box, also set these in your `.env` so the container never attempts an
+outbound call even if one becomes reachable later:
+
+```bash
+HF_HUB_OFFLINE=1
+TRANSFORMERS_OFFLINE=1
+```
+
+Default builds (`BAKE_EMBEDDING_MODEL` unset or `false`) make **no** network call to
+Hugging Face and bake **no** weights — nothing changes for operators who never touch this
+setting.
+
+### Image size / quality note
+
+Model weights are ≈130 MB (`bge-small`), baked **only** when `BAKE_EMBEDDING_MODEL=true`
+is explicitly requested. The `torch`/`transformers`-family package cost is already paid by
+the sentiment model above (or by the `sentence-transformers` dependency either way this
+provider is reached) — enabling `local` embeddings doesn't add a second copy of those
+packages.
+
+On a committed retrieval eval, candidate `bge-small` beats the `nomic-embed-text` baseline
+(the model the Ollama setup above pulls) by **+0.089 recall@1** (0.178 vs 0.089), with no
+false-match regression on held-out negatives. Read that honestly: **absolute recall@1 is
+still low** at the strict 0.85 match threshold Rereflect's Copilot uses — most held-out
+paraphrases don't clear it and fall through to the LLM path instead of a fast template
+match. That's the **safe** failure mode (a slower, still-correct LLM answer), not a broken
+one. MRR≈0.75 shows the right template usually ranks near the top even on the paraphrases
+that don't clear the threshold. Treat `local` as a measured improvement over the
+`nomic-embed-text` default, not a solved-accuracy claim — the accuracy card at
+**Settings → AI → Accuracy** shows the same numbers for your own reference.
 
 ## Per-Org Corrections Classifier (M5.2, self-improving)
 
