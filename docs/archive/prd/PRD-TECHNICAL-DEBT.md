@@ -454,6 +454,6 @@ The following were considered but excluded from this PRD:
 
 ## 9. Related Documents
 
-- [DEV-TRACKING.md](DEV-TRACKING.md) - Development roadmap
-- [SALES-TRACKING.md](SALES-TRACKING.md) - Sales strategy
-- [CLAUDE.md](CLAUDE.md) - Technical documentation
+- [DEV-TRACKING.md](../../../DEV-TRACKING.md) - Development roadmap
+- [SALES-TRACKING.md](../../../SALES-TRACKING.md) - Sales strategy
+- [CLAUDE.md](../../../CLAUDE.md) - Technical documentation

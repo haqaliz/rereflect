@@ -18,7 +18,7 @@
 
 ## ⚠️ Open-Source Self-Hosted Pivot (2026-06)
 
-Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MRR framing and plan-gating below are **stale** — every feature is unlocked. See `PRD-OSS-SELF-HOSTED-PIVOT.md`.
+Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MRR framing and plan-gating below are **stale** — every feature is unlocked. See [`docs/archive/prd/PRD-OSS-SELF-HOSTED-PIVOT.md`](docs/archive/prd/PRD-OSS-SELF-HOSTED-PIVOT.md).
 
 **Open-Source Feature Batch — shipped 2026-06-22** (`PRD-LOCAL-LLM-CUSTOM-AI-PUBLIC-API.md`):
 - ✅ **Local / Offline LLM** — Ollama / any OpenAI-compatible endpoint, keyless; VADER fallback with no model.
