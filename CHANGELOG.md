@@ -28,6 +28,45 @@ New endpoints (`/api/v1/settings/ai`): `GET /classifier/versions`, `POST /classi
 and `POST /classifier/rollback` now accepts an optional `to_version_id`. Completes the M4.2
 "model versioning / rollback if accuracy drops" item.
 
+### Added — Local embedding model
+
+A second in-process embedding option for the AI Copilot's template matching, alongside the
+existing cloud/Ollama providers: an opt-in, CPU-only `sentence-transformers` provider
+(`BAAI/bge-small-en-v1.5`, 384-dim) that runs directly inside the backend — no separate
+Ollama/endpoint process required. Set per organization (Settings → AI, embedding provider
+`local`).
+
+- **In-process CPU provider.** No GPU, no separate model server; the `sentence-transformers`
+  dependency already ships alongside the transformer sentiment model (M5.1), so this doesn't
+  add a second heavy package family.
+- **Air-gap pre-bake.** `BAKE_EMBEDDING_MODEL=true docker compose -f docker-compose.prod.yml
+  build backend` bakes the ≈130 MB of weights into the image at build time (backend only —
+  the worker has no embedding consumers); combined with `HF_HUB_OFFLINE=1` /
+  `TRANSFORMERS_OFFLINE=1` for a container with no runtime network access at all. Off by
+  default — a default build makes no network call and bakes no weights.
+- **Model-keyed template matching.** Switching an org's embedding model/provider re-embeds the
+  built-in query templates automatically; vectors from different providers/models are never
+  mixed, so a model switch can't silently corrupt matching.
+- **Committed, honest retrieval eval + accuracy card.** An offline harness scores candidate vs.
+  baseline on recall@1, MRR, and false-match rate on held-out negatives; the result is
+  committed and surfaced on the same **Settings → AI → Accuracy** tab as the sentiment/classifier
+  cards.
+
+#### Known limits, stated plainly
+
+- Candidate `bge-small` beats the `nomic-embed-text` baseline by **+0.089 recall@1** (0.178 vs
+  0.089) on the committed eval set (n=69: 45 held-out paraphrases / 24 negatives), with no
+  false-match regression — a real, measured improvement.
+- **Absolute recall@1 is still low** at the strict 0.85 match threshold the Copilot uses: most
+  held-out paraphrases don't clear it and fall through to the LLM path rather than a fast
+  template match. That's the safe failure mode (a slower, still-correct answer), not a broken
+  one. MRR≈0.75 shows the right template usually ranks near the top even when it doesn't clear
+  the threshold. This is not presented as a solved-accuracy claim.
+- The Ollama embedding-model recommendation is now eval-backed too: `nomic-embed-text` remains
+  the default (neither Ollama alternative clears the recall@1 bar), and `mxbai-embed-large` is
+  documented as an optional modest upgrade (better ranking, fewer false matches, higher
+  RAM/latency) — see [SELF_HOSTING.md](docs/SELF_HOSTING.md#embedding-model-choice-on-the-ollama-path-eval-backed).
+
 ### Added — Usage-decline churn-label suggestions
 
 A second, CRM-free source of churn-label *suggestions* for the review queue introduced by

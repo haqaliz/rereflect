@@ -1,0 +1,29 @@
+{
+  "generated_at": "2026-07-25T01:17:41.783498+00:00",
+  "threshold": 0.85,
+  "n": 69,
+  "n_positives": 45,
+  "n_negatives": 24,
+  "baseline": {
+    "provider": "ollama",
+    "model": "nomic-embed-text",
+    "n": 69,
+    "n_pos": 45,
+    "n_neg": 24,
+    "recall_at_1": 0.08888888888888889,
+    "mrr": 0.7483597883597883,
+    "false_match_rate": 0.125
+  },
+  "candidate": {
+    "provider": "local",
+    "model": "BAAI/bge-small-en-v1.5",
+    "n": 69,
+    "n_pos": 45,
+    "n_neg": 24,
+    "recall_at_1": 0.17777777777777778,
+    "mrr": 0.7468967452300785,
+    "false_match_rate": 0.125
+  },
+  "recall_at_1_delta": 0.08888888888888889,
+  "meets_target": true
+}

@@ -1,0 +1,6 @@
+{"query": "what's our total number of feedback entries?", "expected": "Count total feedbacks"}
+{"query": "pull up anything flagged as urgent right now", "expected": "List urgent feedbacks"}
+{"query": "which accounts are most likely to cancel soon", "expected": "Top churn risk customers"}
+{"query": "what came in most recently", "expected": "Recent feedbacks list"}
+{"query": "change my billing plan", "expected": null}
+{"query": "what counts as an at-risk customer versus one that's just declining", "expected": null}

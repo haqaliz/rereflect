@@ -70,3 +70,6 @@ vaderSentiment==3.3.2         # Default sentiment provider (was missing — sync
 # Transformer sentiment provider (opt-in; mandatory dep once any org enables it — M5.1)
 transformers==4.46.3
 torch==2.5.0
+
+# Local in-process CPU embedding provider (opt-in; mandatory dep once any org enables it — M5.4)
+sentence-transformers==3.2.0

@@ -426,7 +426,7 @@
 
 ---
 
-## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2 sentiment + category heads shipped 2026-07-11, urgency head shipped 2026-07-14; M5.3–M5.4 planned)
+## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2 sentiment + category heads shipped 2026-07-11, urgency head shipped 2026-07-14; M5.4 shipped 2026-07-25; M5.3 planned)
 
 > **Strategic framing.** For an OSS / self-hosted / BYOK product the moat is **not** a trained
 > foundation model, a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks
@@ -561,8 +561,20 @@
 > question immediately below — that gate remains under review regardless of how many sources
 > feed it.
 
-#### M5.4 — Local embedding quality (Track D) — parked / nice-to-have
-- [ ] Better local embedding model for copilot/template matching (incremental; fully offline).
+#### M5.4 — Local embedding quality (Track D) — COMPLETE (shipped 2026-07-25, as `local-embedding-quality`)
+- [x] In-process, CPU-only embedding provider (`BAAI/bge-small-en-v1.5`, 384-dim, `local`,
+      opt-in per org) for Copilot template matching — no separate Ollama/endpoint process
+      required; degrades cleanly if the `sentence-transformers` dep is missing. **Model-keyed
+      template matching**: switching the embedding model/provider re-embeds the built-in query
+      templates automatically, so vectors from different providers/models are never mixed.
+      Committed, honest retrieval eval + accuracy card (Settings → AI → Accuracy), n=69 (45
+      positives / 24 negatives): candidate `bge-small` beats the `nomic-embed-text` baseline by
+      **+0.089 recall@1** (0.178 vs 0.089),
+      no false-match regression — but absolute recall@1 is still low at the strict 0.85 match
+      threshold (most held-out paraphrases fall through to the LLM path safely; MRR≈0.75). Same
+      air-gap/pre-bake pattern as M5.1: **`BAKE_EMBEDDING_MODEL=true`** at `docker build`
+      (backend only) + `HF_HUB_OFFLINE` / `TRANSFORMERS_OFFLINE` for a fully offline container,
+      documented in `docs/SELF_HOSTING.md`.
 
 ---
 

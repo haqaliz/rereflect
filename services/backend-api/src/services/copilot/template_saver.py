@@ -409,14 +409,16 @@ class TemplateSaver:
             )
             is_new = True
 
-        # 3. Add new question mapping with provider/dim tagging
+        # 3. Add new question mapping with provider/dim/model tagging
         provider = embedder.provider if embedder is not None else None
+        model = embedder.model if embedder is not None else None
         self._create_mapping(
             template_id=template_id,
             question=question,
             embedding=embedding,
             db=db,
             provider=provider,
+            model=model,
         )
 
         db.commit()
@@ -482,14 +484,15 @@ class TemplateSaver:
             return
 
         active_provider = embedder.provider
+        active_model = embedder.model
 
         for template_def in SYSTEM_TEMPLATES:
-            # Check if already seeded for the active provider
+            # Check if already seeded for the active provider + model
             existing_with_provider = self._find_template_by_sql_with_mapping(
-                template_def["sql_query"], None, db, provider=active_provider
+                template_def["sql_query"], None, db, provider=active_provider, model=active_model
             )
             if existing_with_provider is not None:
-                # Template exists and has at least one mapping with the active provider
+                # Template exists and has at least one mapping with the active provider + model
                 continue
 
             # Need to (re-)embed.  Try first pattern to validate endpoint is reachable.
@@ -531,6 +534,7 @@ class TemplateSaver:
                     embedding=emb,
                     db=db,
                     provider=active_provider,
+                    model=active_model,
                 )
 
         db.commit()
@@ -571,23 +575,27 @@ class TemplateSaver:
         org_id: Optional[int],
         db,
         provider: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         """
         Find a template by SQL that also has at least one mapping matching
-        the given embedding provider.
+        the given embedding provider AND embedding model.
 
-        Used by seed_system_templates for provider-aware idempotency: if the
-        template is already seeded for the active provider, we skip re-embedding.
+        Used by seed_system_templates for provider+model-aware idempotency: if
+        the template is already seeded for the active (provider, model) pair,
+        we skip re-embedding.  A model change (even with the same provider)
+        must NOT match here — that's what triggers a re-embed.
 
         Args:
             sql_query: The SQL to look up.
             org_id:    Organization scope (None for system templates).
             db:        SQLAlchemy session.
             provider:  Active embedding provider name to check for.
+            model:     Active embedding model name to check for.
 
         Returns:
-            The template ORM object if found with a matching-provider mapping,
-            None otherwise.
+            The template ORM object if found with a matching-provider+model
+            mapping, None otherwise.
         """
         template = self._find_template_by_sql(sql_query, org_id, db)
         if template is None:
@@ -599,6 +607,7 @@ class TemplateSaver:
             mapping = db.query(QueryTemplateMapping).filter_by(
                 template_id=template.id,
                 embedding_provider=provider,
+                embedding_model=model,
             ).first()
             if mapping is not None:
                 return template
@@ -610,7 +619,10 @@ class TemplateSaver:
             mappings = getattr(template, 'mappings', None)
             if mappings:
                 for m in mappings:
-                    if getattr(m, 'embedding_provider', None) == provider:
+                    if (
+                        getattr(m, 'embedding_provider', None) == provider
+                        and getattr(m, 'embedding_model', None) == model
+                    ):
                         return template
         except Exception:
             pass
@@ -671,6 +683,7 @@ class TemplateSaver:
         embedding: list,
         db,
         provider: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> None:
         """
         Create a new QueryTemplateMapping record.
@@ -678,6 +691,9 @@ class TemplateSaver:
         Always persists embedding_provider and embedding_dimension derived from
         the actual vector length — never a pre-embed hint.  This ensures that
         the matcher's skip-filter has accurate metadata for every stored vector.
+        Also persists embedding_model (the effective model string from the
+        resolved embedder) so a model change can be detected the same way a
+        provider change is — NULL means stale/unknown, never a guessed default.
 
         Args:
             template_id: FK to query_templates.
@@ -686,6 +702,8 @@ class TemplateSaver:
             db:          SQLAlchemy session.
             provider:    The embedding provider name (e.g. 'openai', 'openai_compatible').
                          None for stale / unknown rows.
+            model:       The effective embedding model string (ResolvedEmbedder.model).
+                         None for stale / unknown rows — stored as-is, never defaulted.
         """
         dimension = len(embedding) if embedding else None
 
@@ -697,6 +715,7 @@ class TemplateSaver:
                 question_embedding=embedding,
                 embedding_provider=provider,
                 embedding_dimension=dimension,
+                embedding_model=model,
                 match_count=0,
             )
             db.add(mapping)
@@ -708,9 +727,9 @@ class TemplateSaver:
                 text(
                     "INSERT INTO query_template_mappings "
                     "(template_id, question_pattern, question_embedding, "
-                    " embedding_provider, embedding_dimension, match_count, created_at) "
+                    " embedding_provider, embedding_dimension, embedding_model, match_count, created_at) "
                     "VALUES (:template_id, :pattern, :embedding, "
-                    "        :provider, :dimension, 0, :now)"
+                    "        :provider, :dimension, :model, 0, :now)"
                 ),
                 {
                     "template_id": template_id,
@@ -718,6 +737,7 @@ class TemplateSaver:
                     "embedding": _json.dumps(embedding),
                     "provider": provider,
                     "dimension": dimension,
+                    "model": model,
                     "now": datetime.utcnow(),
                 }
             )

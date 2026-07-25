@@ -1,0 +1,69 @@
+{"query": "what's our total number of feedback entries?", "expected": "Count total feedbacks"}
+{"query": "how much feedback have we gathered altogether", "expected": "Count total feedbacks"}
+{"query": "give me the overall feedback tally", "expected": "Count total feedbacks"}
+{"query": "can you break down feedback by how customers feel about us", "expected": "Count feedbacks by sentiment"}
+{"query": "how does the mix of positive versus negative comments look", "expected": "Count feedbacks by sentiment"}
+{"query": "give me a split of feedback by sentiment category", "expected": "Count feedbacks by sentiment"}
+{"query": "pull up anything flagged as urgent right now", "expected": "List urgent feedbacks"}
+{"query": "which submissions do we need to jump on right away", "expected": "List urgent feedbacks"}
+{"query": "show me the feedback items marked as high priority", "expected": "List urgent feedbacks"}
+{"query": "which issues are customers complaining about most this month", "expected": "Top pain point categories this month"}
+{"query": "what are the leading frustration categories lately", "expected": "Top pain point categories this month"}
+{"query": "rank the biggest customer complaints for the current month", "expected": "Top pain point categories this month"}
+{"query": "which feature asks come up most often from customers", "expected": "Most requested feature categories"}
+{"query": "what functionality are users asking us to build", "expected": "Most requested feature categories"}
+{"query": "rank the feature suggestions by how often they're requested", "expected": "Most requested feature categories"}
+{"query": "give me a snapshot of how healthy our customer base is", "expected": "Customer health score summary"}
+{"query": "what's the general state of customer health across the board", "expected": "Customer health score summary"}
+{"query": "summarize customer wellbeing scores for me", "expected": "Customer health score summary"}
+{"query": "which accounts are most likely to cancel soon", "expected": "Top churn risk customers"}
+{"query": "who are our shakiest customers right now", "expected": "Top churn risk customers"}
+{"query": "show me the accounts in the worst shape churn-wise", "expected": "Top churn risk customers"}
+{"query": "who are our most satisfied and stable accounts", "expected": "Healthiest customers"}
+{"query": "which customers are thriving the most", "expected": "Healthiest customers"}
+{"query": "which clients have the strongest engagement", "expected": "Healthiest customers"}
+{"query": "how has feedback looked over the past seven days", "expected": "Feedbacks this week"}
+{"query": "give me a rundown of what came in this week", "expected": "Feedbacks this week"}
+{"query": "what's the tally of feedback since Monday", "expected": "Feedbacks this week"}
+{"query": "walk me through everything in the order it came in, newest first", "expected": "Recent feedbacks list"}
+{"query": "pull up the newest submissions", "expected": "Recent feedbacks list"}
+{"query": "show me what customers just sent us", "expected": "Recent feedbacks list"}
+{"query": "how is feedback distributed across our different channels", "expected": "Feedback count by source"}
+{"query": "which platform brings in the most submissions", "expected": "Feedback count by source"}
+{"query": "break down where all this feedback is coming from", "expected": "Feedback count by source"}
+{"query": "which accounts have been sliding downward lately", "expected": "Customers with declining health"}
+{"query": "who is trending in the wrong direction health-wise", "expected": "Customers with declining health"}
+{"query": "show me customers whose scores keep dropping", "expected": "Customers with declining health"}
+{"query": "how serious are the issues customers are reporting", "expected": "Pain points by severity"}
+{"query": "rank complaints by how bad they are", "expected": "Pain points by severity"}
+{"query": "which problems are hurting customers the most", "expected": "Pain points by severity"}
+{"query": "how much feedback came in between these two dates", "expected": "Feedback count in date range"}
+{"query": "give me totals for a specific custom time window", "expected": "Feedback count in date range"}
+{"query": "count feedback for the period I specify", "expected": "Feedback count in date range"}
+{"query": "what kinds of urgent problems are showing up", "expected": "Urgent feedback categories"}
+{"query": "break urgent issues down by category", "expected": "Urgent feedback categories"}
+{"query": "what buckets do our high-priority complaints fall into", "expected": "Urgent feedback categories"}
+{"query": "export all feedback to CSV", "expected": null}
+{"query": "who is assigned to ticket 42", "expected": null}
+{"query": "change my billing plan", "expected": null}
+{"query": "what integrations are available", "expected": null}
+{"query": "reset my password", "expected": null}
+{"query": "how do I invite a new team member", "expected": null}
+{"query": "how do I connect our Zendesk account", "expected": null}
+{"query": "what's the pricing for the business plan", "expected": null}
+{"query": "can I add a custom dashboard widget", "expected": null}
+{"query": "how do I export this chart as an image", "expected": null}
+{"query": "who has admin access on our team", "expected": null}
+{"query": "can you draft a reply to this customer", "expected": null}
+{"query": "how do I turn on Slack notifications", "expected": null}
+{"query": "how many seats are on our plan", "expected": null}
+{"query": "how do I delete an integration", "expected": null}
+{"query": "when was our last data export", "expected": null}
+{"query": "what counts as an at-risk customer versus one that's just declining", "expected": null}
+{"query": "how do you decide whether a customer's health is getting worse or is just churn risk", "expected": null}
+{"query": "what's the difference between a pain point category and its severity level", "expected": null}
+{"query": "how do you determine how severe a complaint category is", "expected": null}
+{"query": "what makes a piece of feedback urgent versus just needing categorization", "expected": null}
+{"query": "how do urgent feedback categories get defined in the first place", "expected": null}
+{"query": "what's our sentiment breakdown looking like these days", "expected": null}
+{"query": "what's the process for tagging feedback as positive, neutral, or negative", "expected": null}

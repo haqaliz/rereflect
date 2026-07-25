@@ -12,6 +12,7 @@ TDD: RED first, then production code.
 """
 
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -222,6 +223,88 @@ class TestUpdateAISettingsLocalProviders:
         response = client.get("/api/v1/settings/ai", headers=admin_headers_local)
         assert response.status_code == 200
         assert response.json()["base_url"] == url
+
+
+class TestLocalEmbeddingProviderWiring:
+    """Aspect 2 / Task 2 (local-embedding-quality, M5.4): 'local' provider
+    wired through VALID_PROVIDERS + the deps guard in the PATCH endpoint.
+
+    'local' must NOT require a base_url (it is deliberately excluded from
+    LOCAL_PROVIDERS, which drives that requirement) — it is rejected instead
+    when sentence-transformers/torch are not importable.
+    """
+
+    def test_patch_local_provider_succeeds_when_deps_available(
+        self, client: TestClient, admin_headers_local: dict
+    ):
+        with patch(
+            "src.api.routes.ai_settings._embedding_local_deps_available",
+            return_value=True,
+        ):
+            response = client.patch(
+                "/api/v1/settings/ai",
+                headers=admin_headers_local,
+                json={"default_provider": "local"},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["default_provider"] == "local"
+
+    def test_patch_local_provider_rejected_when_deps_unavailable(
+        self, client: TestClient, admin_headers_local: dict
+    ):
+        with patch(
+            "src.api.routes.ai_settings._embedding_local_deps_available",
+            return_value=False,
+        ):
+            response = client.patch(
+                "/api/v1/settings/ai",
+                headers=admin_headers_local,
+                json={"default_provider": "local"},
+            )
+        assert response.status_code == 422, response.text
+        assert "local" in response.text
+        assert "base_url" not in response.json()["detail"]
+
+    def test_patch_local_provider_does_not_require_base_url(
+        self, client: TestClient, admin_headers_local: dict
+    ):
+        """local is not in LOCAL_PROVIDERS — no base_url 422 should occur even
+        when the deps guard is True and no base_url is supplied."""
+        with patch(
+            "src.api.routes.ai_settings._embedding_local_deps_available",
+            return_value=True,
+        ):
+            response = client.patch(
+                "/api/v1/settings/ai",
+                headers=admin_headers_local,
+                json={"default_provider": "local"},
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["base_url"] is None
+
+    def test_invalid_provider_error_lists_local(
+        self, client: TestClient, admin_headers_local: dict
+    ):
+        """Provider-list error strings must include 'local' among valid providers."""
+        response = client.patch(
+            "/api/v1/settings/ai",
+            headers=admin_headers_local,
+            json={"default_provider": "totally_unknown_provider"},
+        )
+        assert response.status_code == 422, response.text
+        assert "local" in response.json()["detail"]
+
+    def test_default_embedding_model_agrees_with_defaults_module(self):
+        """Both effective-model helpers must return the exact same value for
+        'local', sourced from LocalEmbeddingProvider.DEFAULT_MODEL (no
+        duplicated literal string)."""
+        from src.api.routes.ai_settings import _default_embedding_model
+        from src.services.embeddings.defaults import default_model_for_provider
+        from src.services.embeddings.providers.local import LocalEmbeddingProvider
+
+        assert _default_embedding_model("local") == LocalEmbeddingProvider.DEFAULT_MODEL
+        assert default_model_for_provider("local") == LocalEmbeddingProvider.DEFAULT_MODEL
+        assert _default_embedding_model("local") == default_model_for_provider("local")
 
 
 class TestOrgAIConfigModelEmbeddings:

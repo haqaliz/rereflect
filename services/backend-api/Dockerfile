@@ -14,6 +14,11 @@ ENV HF_HOME=/app/models
 # installs that need the weights baked into the image (see the RUN step below).
 ARG BAKE_SENTIMENT_MODEL=false
 
+# Off by default: the in-process local embedding provider (M5.4) pull-and-caches on
+# first use. Set to "true" at build time for air-gapped installs that need the weights
+# baked into the image (see the RUN step below).
+ARG BAKE_EMBEDDING_MODEL=false
+
 # Install system dependencies
 #  - libpq-dev, gcc: existing (psycopg2 + C ext builds)
 #  - libxml2/libxmlsec1 (+ -dev, -openssl), pkg-config, build-essential: native deps for python3-saml's
@@ -52,6 +57,16 @@ RUN if [ "$BAKE_SENTIMENT_MODEL" = "true" ]; then \
 MODEL_ID='cardiffnlp/twitter-roberta-base-sentiment-latest'; REVISION='main'; \
 AutoModelForSequenceClassification.from_pretrained(MODEL_ID, revision=REVISION); \
 AutoTokenizer.from_pretrained(MODEL_ID, revision=REVISION)" ; \
+    fi
+
+# Optional build-time pre-bake of the local embedding model for air-gapped installs.
+# Off by default (BAKE_EMBEDDING_MODEL=false) to keep the base image lean; the local
+# embedding provider is opt-in per-org and, when enabled without a pre-baked cache,
+# downloads + caches the model into HF_HOME on first use instead (needs runtime network once).
+# TODO(offline-packaging): pin a revision SHA (mirror LocalEmbeddingProvider.DEFAULT_MODEL).
+RUN if [ "$BAKE_EMBEDDING_MODEL" = "true" ]; then \
+        python -c "from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('BAAI/bge-small-en-v1.5')" ; \
     fi
 
 # Copy application code

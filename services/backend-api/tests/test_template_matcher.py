@@ -35,9 +35,10 @@ def matcher():
 
 @pytest.fixture
 def mock_resolved_openai():
-    """Mock ResolvedEmbedder for OpenAI (1536-dim)."""
+    """Mock ResolvedEmbedder for OpenAI (1536-dim), with a concrete effective model."""
     resolved = MagicMock()
     resolved.provider = "openai"
+    resolved.model = "text-embedding-3-small"
     resolved.embedder = MagicMock()
     resolved.embedder.embed.return_value = [0.1] * 1536
     resolved.embedder.dimension = 1536
@@ -46,9 +47,14 @@ def mock_resolved_openai():
 
 @pytest.fixture
 def mock_resolved_local():
-    """Mock ResolvedEmbedder for a local 768-dim provider."""
+    """
+    Mock ResolvedEmbedder for a local 768-dim provider (openai_compatible with no
+    configured model override — model is None, as ResolvedEmbedder.model can be
+    for this provider).
+    """
     resolved = MagicMock()
     resolved.provider = "openai_compatible"
+    resolved.model = None
     resolved.embedder = MagicMock()
     resolved.embedder.embed.return_value = [0.1] * 768
     resolved.embedder.dimension = 768
@@ -70,37 +76,40 @@ def sample_template():
 
 @pytest.fixture
 def sample_mapping_openai():
-    """A sample mapping tagged with openai / 1536-dim."""
+    """A sample mapping tagged with openai / 1536-dim / text-embedding-3-small."""
     mapping = MagicMock()
     mapping.template_id = "tpl_001"
     mapping.question_pattern = "how many negative feedbacks"
     mapping.question_embedding = [0.1] * 1536
     mapping.embedding_provider = "openai"
     mapping.embedding_dimension = 1536
+    mapping.embedding_model = "text-embedding-3-small"
     return mapping
 
 
 @pytest.fixture
 def sample_mapping_local():
-    """A sample mapping tagged with openai_compatible / 768-dim."""
+    """A sample mapping tagged with openai_compatible / 768-dim / no model (None)."""
     mapping = MagicMock()
     mapping.template_id = "tpl_002"
     mapping.question_pattern = "how many negative feedbacks"
     mapping.question_embedding = [0.1] * 768
     mapping.embedding_provider = "openai_compatible"
     mapping.embedding_dimension = 768
+    mapping.embedding_model = None
     return mapping
 
 
 @pytest.fixture
 def sample_mapping_stale():
-    """A stale mapping with no provider/dim (pre-migration row)."""
+    """A stale mapping with no provider/dim/model (pre-migration row)."""
     mapping = MagicMock()
     mapping.template_id = "tpl_003"
     mapping.question_pattern = "some old pattern"
     mapping.question_embedding = [0.1] * 1536
     mapping.embedding_provider = None
     mapping.embedding_dimension = None
+    mapping.embedding_model = None
     return mapping
 
 
@@ -322,12 +331,14 @@ class TestTemplateMatching:
         mapping1.question_embedding = [1.0, 0.0] + [0.0] * 1534
         mapping1.embedding_provider = "openai"
         mapping1.embedding_dimension = 1536
+        mapping1.embedding_model = "text-embedding-3-small"
 
         mapping2 = MagicMock()
         mapping2.template_id = "tpl_002"
         mapping2.question_embedding = [0.99, 0.01] + [0.0] * 1534
         mapping2.embedding_provider = "openai"
         mapping2.embedding_dimension = 1536
+        mapping2.embedding_model = "text-embedding-3-small"
 
         template2 = MagicMock()
         template2.id = "tpl_002"
@@ -367,7 +378,7 @@ class TestTemplateMatching:
 # ── PROVIDER / DIMENSION SKIP FILTER ─────────────────────────────────────────
 
 class TestProviderDimSkipFilter:
-    """Verify that the matcher excludes rows with mismatched provider/dim."""
+    """Verify that the matcher excludes rows with mismatched provider/dim/model."""
 
     def test_openai_1536_rows_skipped_when_active_is_768_local(
         self, matcher, mock_db, mock_resolved_local, sample_template
@@ -378,6 +389,7 @@ class TestProviderDimSkipFilter:
         openai_mapping.question_embedding = [0.1] * 1536  # close match IF dim matched
         openai_mapping.embedding_provider = "openai"
         openai_mapping.embedding_dimension = 1536
+        openai_mapping.embedding_model = "text-embedding-3-small"
 
         mock_db.execute.return_value.fetchall.return_value = [openai_mapping]
         mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
@@ -405,6 +417,7 @@ class TestProviderDimSkipFilter:
         local_mapping.question_embedding = [0.1] * 768
         local_mapping.embedding_provider = "openai_compatible"
         local_mapping.embedding_dimension = 768
+        local_mapping.embedding_model = None
 
         mock_db.execute.return_value.fetchall.return_value = [local_mapping]
         mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
@@ -422,12 +435,13 @@ class TestProviderDimSkipFilter:
         assert result is None
 
     def test_stale_rows_skipped(self, matcher, mock_db, mock_resolved_openai, sample_template):
-        """Rows with NULL provider/dim (stale pre-migration rows) are skipped."""
+        """Rows with NULL provider/dim/model (stale pre-migration rows) are skipped."""
         stale_mapping = MagicMock()
         stale_mapping.template_id = "tpl_001"
         stale_mapping.question_embedding = [0.1] * 1536  # identical to query
         stale_mapping.embedding_provider = None
         stale_mapping.embedding_dimension = None
+        stale_mapping.embedding_model = None
 
         mock_db.execute.return_value.fetchall.return_value = [stale_mapping]
         mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
@@ -445,15 +459,20 @@ class TestProviderDimSkipFilter:
         # Stale row → skipped → no match
         assert result is None
 
-    def test_matching_provider_and_dim_returns_match(
+    def test_matching_provider_dim_and_model_returns_match(
         self, matcher, mock_db, mock_resolved_openai, sample_template
     ):
-        """A row with matching provider/dim returns the template (regression guard)."""
+        """
+        Characterization/regression guard: a row with matching provider + dim + model
+        (the no-opt-in steady state, unchanged since before this task) still returns
+        the same best match as before the embedding_model skip-filter was added.
+        """
         correct_mapping = MagicMock()
         correct_mapping.template_id = "tpl_001"
         correct_mapping.question_embedding = [0.1] * 1536
         correct_mapping.embedding_provider = "openai"
         correct_mapping.embedding_dimension = 1536
+        correct_mapping.embedding_model = "text-embedding-3-small"
 
         mock_db.execute.return_value.fetchall.return_value = [correct_mapping]
         mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
@@ -480,12 +499,14 @@ class TestProviderDimSkipFilter:
         openai_mapping.question_embedding = [0.1] * 1536  # high similarity
         openai_mapping.embedding_provider = "openai"
         openai_mapping.embedding_dimension = 1536
+        openai_mapping.embedding_model = "text-embedding-3-small"
 
         local_mapping = MagicMock()
         local_mapping.template_id = "tpl_002"
         local_mapping.question_embedding = [0.1] * 768  # also high similarity IF dim matched
         local_mapping.embedding_provider = "openai_compatible"
         local_mapping.embedding_dimension = 768
+        local_mapping.embedding_model = None
 
         mock_db.execute.return_value.fetchall.return_value = [openai_mapping, local_mapping]
         mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
@@ -503,3 +524,154 @@ class TestProviderDimSkipFilter:
         # Only openai/1536 considered, and it matches
         assert result is not None
         assert result["template_id"] == "tpl_001"
+
+
+# ── EMBEDDING MODEL SKIP FILTER ───────────────────────────────────────────────
+
+class TestEmbeddingModelSkipFilter:
+    """
+    Verify that the matcher also excludes rows produced by a DIFFERENT embedding
+    model, even when provider and dimension coincide (e.g. two OpenAI models that
+    happen to share a dimension, or a local model swap that doesn't change dim).
+
+    Skip rule: `stored_model != active_model` — plain equality, no None special-
+    casing. Because `None == None` is True, a row with NULL embedding_model is
+    NOT skipped when the active embedder also resolves to model=None (this is
+    the openai_compatible-with-no-configured-model case, and it exactly
+    preserves pre-Task-4 behaviour for such installs). Conversely, any NULL-vs-
+    concrete or concrete-vs-different-concrete pairing is skipped.
+    """
+
+    def test_only_matching_embedding_model_row_is_considered(
+        self, matcher, mock_db, mock_resolved_openai, sample_template
+    ):
+        """
+        Two rows share (provider, dim) but differ in embedding_model. The row
+        with a DIFFERENT model has a near-perfect vector match; the row with the
+        SAME model as active has a near-orthogonal (low-similarity) vector. If
+        the model were not part of the skip-filter, the wrong-model row's high
+        similarity would win and produce a silent wrong-space match. Asserting
+        `result is None` here proves the wrong-model row was excluded rather
+        than just "not selected as best".
+        """
+        # Active embedder resolves to text-embedding-3-small, query vector [0.1]*1536.
+        mock_resolved_openai.embedder.embed.return_value = [0.1] * 1536
+
+        same_model_low_similarity = MagicMock()
+        same_model_low_similarity.template_id = "tpl_same_model"
+        same_model_low_similarity.question_embedding = [1.0, 0.0] + [0.0] * 1534
+        same_model_low_similarity.embedding_provider = "openai"
+        same_model_low_similarity.embedding_dimension = 1536
+        same_model_low_similarity.embedding_model = "text-embedding-3-small"  # matches active
+
+        different_model_high_similarity = MagicMock()
+        different_model_high_similarity.template_id = "tpl_diff_model"
+        different_model_high_similarity.question_embedding = [0.1] * 1536  # identical to query
+        different_model_high_similarity.embedding_provider = "openai"
+        different_model_high_similarity.embedding_dimension = 1536
+        different_model_high_similarity.embedding_model = "text-embedding-3-large"  # differs
+
+        mock_db.execute.return_value.fetchall.return_value = [
+            same_model_low_similarity,
+            different_model_high_similarity,
+        ]
+        mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
+
+        result = matcher.find_match(
+            question="how many feedbacks",
+            org_id=1,
+            db=mock_db,
+            embedder=mock_resolved_openai,
+            threshold=0.85
+        )
+
+        # The high-similarity row must be excluded for having the wrong model,
+        # leaving only the low-similarity same-model row — below threshold.
+        assert result is None
+
+    def test_null_model_row_skipped_when_active_model_is_concrete(
+        self, matcher, mock_db, mock_resolved_openai, sample_template
+    ):
+        """A stored row with embedding_model=NULL is skipped when active_model is a concrete string."""
+        null_model_mapping = MagicMock()
+        null_model_mapping.template_id = "tpl_001"
+        null_model_mapping.question_embedding = [0.1] * 1536  # identical to query
+        null_model_mapping.embedding_provider = "openai"
+        null_model_mapping.embedding_dimension = 1536
+        null_model_mapping.embedding_model = None
+
+        mock_db.execute.return_value.fetchall.return_value = [null_model_mapping]
+        mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
+
+        mock_resolved_openai.embedder.embed.return_value = [0.1] * 1536
+
+        result = matcher.find_match(
+            question="how many feedbacks",
+            org_id=1,
+            db=mock_db,
+            embedder=mock_resolved_openai,  # model = "text-embedding-3-small"
+            threshold=0.85
+        )
+
+        assert result is None
+
+    def test_none_active_model_with_null_stored_model_is_eligible(
+        self, matcher, mock_db, mock_resolved_local, sample_template
+    ):
+        """
+        active_model is None (e.g. openai_compatible with no configured model) and the
+        stored row also has embedding_model=NULL → None == None → NOT skipped, still
+        eligible to match on provider+dim. This preserves today's behaviour for such
+        installs.
+        """
+        null_model_mapping = MagicMock()
+        null_model_mapping.template_id = "tpl_001"
+        null_model_mapping.question_embedding = [0.1] * 768  # identical to query
+        null_model_mapping.embedding_provider = "openai_compatible"
+        null_model_mapping.embedding_dimension = 768
+        null_model_mapping.embedding_model = None
+
+        mock_db.execute.return_value.fetchall.return_value = [null_model_mapping]
+        mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
+
+        mock_resolved_local.embedder.embed.return_value = [0.1] * 768
+
+        result = matcher.find_match(
+            question="how many feedbacks",
+            org_id=1,
+            db=mock_db,
+            embedder=mock_resolved_local,  # model = None
+            threshold=0.85
+        )
+
+        assert result is not None
+        assert result["template_id"] == "tpl_001"
+
+    def test_none_active_model_with_concrete_stored_model_is_skipped(
+        self, matcher, mock_db, mock_resolved_local, sample_template
+    ):
+        """
+        active_model is None but the stored row has a concrete embedding_model →
+        None != "some-model" → skipped, even though provider+dim match.
+        """
+        concrete_model_mapping = MagicMock()
+        concrete_model_mapping.template_id = "tpl_001"
+        concrete_model_mapping.question_embedding = [0.1] * 768  # identical to query
+        concrete_model_mapping.embedding_provider = "openai_compatible"
+        concrete_model_mapping.embedding_dimension = 768
+        concrete_model_mapping.embedding_model = "nomic-embed-text"
+
+        mock_db.execute.return_value.fetchall.return_value = [concrete_model_mapping]
+        mock_db.query.return_value.filter_by.return_value.first.return_value = sample_template
+
+        mock_resolved_local.embedder.embed.return_value = [0.1] * 768
+
+        result = matcher.find_match(
+            question="how many feedbacks",
+            org_id=1,
+            db=mock_db,
+            embedder=mock_resolved_local,  # model = None
+            threshold=0.85
+        )
+
+        assert result is None

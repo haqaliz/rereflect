@@ -1,80 +1,53 @@
-# Card — Per-org classifier model versioning + rollback
+# Card — local-embedding-quality (freeform)
 
-**Type:** feat (freeform; no GitHub issue — selected via `rereflect-next`)
-**Slug (branch):** `feat/classifier-model-versioning-rollback`
-**Source:** `rereflect-next` recommendation handoff (this session).
+**Type:** feat · **Slug:** `local-embedding-quality` · **Branch:** `feat/local-embedding-quality`
+**Source:** freeform task from `rereflect-next` handoff on 2026-07-24. No GitHub issue.
+**Roadmap:** `AI-TRACKING.md` — **M5.4 "Local embedding quality"** (`[ ]` "parked / nice-to-have", no blocker stated)
 
 ---
 
-## Brief (from `rereflect-next`)
+## Brief (from rereflect-next handoff)
 
-Build **per-org classifier model versioning + rollback**, the two unchecked M4.2
-items at `AI-TRACKING.md:384-385`:
+Ship **M5.4**: a better **local** embedding model as an opt-in default for the offline AI
+Copilot's retrieval + template-matching, plugged into the existing embedding-provider layer
+(`services/backend-api/src/services/embeddings/`, per-org `model_embeddings` in `org_ai_config`).
 
-- `[ ]` **A/B comparison:** show fine-tuned vs default model accuracy side-by-side.
-- `[ ]` **Model versioning:** track model performance over time, rollback if
-  accuracy drops.
+Constraints / gates:
+- Keep the current default **byte-stable** for installs that don't opt in.
+- Keep it **CPU-only / air-gappable** (document a pre-baked model-cache path like M5.1 did).
+- The gate is an **honest offline eval**: build a small labeled retrieval/template-match set and
+  show the new model **measurably beats** the current local default before promoting it — no
+  absolute-accuracy marketing claims (matches the honest OSS brand).
+- Avoid the `status-sync-realtime-mapping` and `feat/classifier-model-versioning-rollback`
+  areas — both are in flight.
 
-This deepens the M5.2 flagship self-improving-classifier moat
-(`AI-TRACKING.md:37` — "corrections flywheel… Track A — flagship moat"). M5.2
-auto-promotes a challenger when it beats the incumbent on held-out corrections,
-but promotion is **one-directional** — there is no safety net when a promoted
-model later degrades on live data, and no operator-facing version history.
+## Why this was picked (moat rationale)
 
-## Why this is unblocked (data already exists)
+- The one **unblocked** item left in the Local Model Layer. M5.0/M5.1/M5.2 are `COMPLETE`;
+  M5.3 (per-org churn ML) is **data-gated** (~500 labels, gate under review); M5.4 has no blocker.
+- Deepens the **fully-offline AI Copilot** moat and gets better as base models improve.
+- The embedding-provider abstraction already ships (`local-embeddings-offline-copilot` merged),
+  so this is a **depth-first follow-on**, not net-new plumbing.
 
-- `services/backend-api/src/models/org_classifier.py`
-  - `OrgClassifierModel` — "versioned per-org corrections classifier artifact".
-    Stores every trained version with `macro_f1` / `precision` / `recall` /
-    `accuracy` / `label_count` / `fit_at` / `is_active`. Partial-unique index
-    `uq_org_classifier_one_active` = at most one active model per
-    `(organization_id, classifier_type)`.
-  - `OrgClassifierEvalRun` — "shadow-mode A/B eval history — incumbent vs
-    challenger, one row per run". Stores `incumbent_macro_f1`,
-    `challenger_macro_f1`, `macro_f1_delta`, `decision`
-    (`promoted | retained | skipped`), `n`, `created_at`.
+## Known caveat (carried into the dig)
 
-## Current state / caveats to resolve in the dig
+The hard part is **honest proof, not the swap.** Embedding/retrieval quality is harder to
+benchmark than sentiment macro-F1 — needs a small labeled retrieval/template-match eval set to
+show a measurable offline improvement, or it's just a model change dressed as a win. Must stay
+CPU-friendly/air-gappable (a bigger model raises worker image size + inference latency) and keep
+the current default byte-stable.
 
-1. **A/B comparison is LARGELY ALREADY SHIPPED.**
-   `services/backend-api/src/api/routes/classifier_accuracy.py`
-   (`GET /classifier/accuracy`) already returns the active model's metrics **and**
-   the eval-run history (`incumbent_macro_f1` vs `challenger_macro_f1` vs
-   `macro_f1_delta`), and `ClassifierAccuracyCard.tsx` renders it. So the core of
-   this feature is **version-list + rollback**, extending that card — NOT
-   rebuilding comparison. Read `classifier_accuracy.py` +
-   `ClassifierAccuracyCard.tsx` first.
-   - The accuracy route only fetches the **active** model (`_get_active_model`,
-     `is_active=True`) — it never lists the version history of
-     `OrgClassifierModel` rows. That version-history surface is the gap.
+## Grounding pointers (from rereflect-next dig, pre-worktree — verify in Phase 2)
 
-2. **No rollback endpoint exists anywhere** (`grep` finds only `db.rollback()`
-   transaction calls). M4.2's "rollback if accuracy drops" is fully unbuilt.
+- Embedding layer: `services/backend-api/src/services/embeddings/{base.py,factory.py}`,
+  `providers/` (e.g. `google.py`), `__init__.py`.
+- Per-org override: `org_ai_config.model_embeddings` (`services/backend-api/src/models/org_ai_config.py`).
+- Default resolution: `_default_embedding_model(provider)` in
+  `services/backend-api/src/api/routes/ai_settings.py` (+ `EmbeddingStatusResponse`).
+- Copilot consumers: `services/backend-api/src/api/routes/copilot_ws.py`,
+  `services/backend-api/src/models/query_template_mapping.py`.
+- Prior-art pattern to mirror: M5.1 sentiment-provider layer
+  (`services/analysis-engine/src/analyzer/sentiment_providers/`) + its offline pre-bake path.
 
-3. **Rollback vs. auto-promotion interaction (the one real design question).**
-   The worker's scheduled fit (`services/worker-service/src/tasks/classifier_training.py`)
-   auto-promotes a winning challenger, so a manual rollback could be re-overwritten
-   by the next scheduled fit. Decide in the PRD/dig: a "pin / hold auto-promotion"
-   flag vs. at-minimum honest UI copy stating the next scheduled fit may re-promote.
-
-4. **Rollback write safety.** Reactivating a prior version must be atomic against
-   `uq_org_classifier_one_active` (deactivate current + activate target in one
-   transaction) and strictly **org-scoped** (never activate another org's model).
-
-## Suggested first slice (from handoff)
-
-1. `GET /classifier/versions?type=` — list all `OrgClassifierModel` rows per
-   `classifier_type` (version, `fit_at`, metrics, `is_active`). RED→GREEN.
-2. Frontend version-history table + "Roll back to this version" action, extending
-   the existing `ClassifierAccuracyCard`.
-3. `POST /classifier/versions/{id}/activate` (rollback) — atomic `is_active` flip
-   honoring the one-active constraint, org-scoped, with a timeline/audit event.
-
-## Fit / brand
-
-OSS / self-host / BYOK; honesty brand (renders persisted macro-F1s, no fabricated
-numbers). "Your model, your data, your version history — revert if it slips."
-
-**NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE
-(pre-OSS-pivot). All features are unlocked (MIT, self-hosted, BYOK). Do **not**
-gate this feature behind a plan tier.
+**NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE (pre-OSS-pivot).
+All features are unlocked (MIT, self-hosted, BYOK). Do not gate this feature behind a plan tier.

@@ -557,6 +557,9 @@ async def _handle_query(
             template_match = None
             try:
                 matcher = TemplateMatcher()
+                # Off-loop by design: find_match() calls embedder.embed(), and the
+                # local provider's CPU-bound sentence-transformers encode() must
+                # never block the event loop, so this stays dispatched via to_thread.
                 template_match = await asyncio.to_thread(
                     matcher.find_match, content, org.id, db, resolved_embedder
                 )

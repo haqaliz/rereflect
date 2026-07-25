@@ -36,6 +36,7 @@ from src.api.routes import ai_readiness as ai_readiness_router  # noqa: E402 —
 from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 Churn Playbooks
 from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402 — product-usage ingest receiver
 from src.api.routes import sentiment_accuracy as sentiment_accuracy_router  # noqa: E402 — eval-harness-and-card (M5.1 disclosure)
+from src.api.routes import embedding_accuracy as embedding_accuracy_router  # noqa: E402 — retrieval-eval-card (M5.4 disclosure)
 from src.api.routes import classifier_accuracy as classifier_accuracy_router  # noqa: E402 — M5.2 settings-api-and-accuracy-card
 from src.api.routes import oidc_config as oidc_config_router  # noqa: E402 — oidc-sso: oidc-config aspect (M2/M3/M12)
 from src.api.routes import saml_config as saml_config_router  # noqa: E402 — saml-sso: config-model-and-crud aspect (M1/M6)
@@ -112,6 +113,21 @@ def seed_copilot_system_templates(db) -> None:
             "seed_copilot_system_templates: seeding complete "
             "(provider=%s)", resolved.provider if resolved else "none"
         )
+
+        # Pre-warm the local embedding model so the first real Copilot query
+        # doesn't pay the multi-second model-load cost. Best-effort: on a
+        # fresh provider change, seeding above already warmed it; this just
+        # guarantees warmth on same-provider reboots too. Never fails boot.
+        if resolved is not None and resolved.provider == "local":
+            try:
+                resolved.embedder.embed("warmup")  # force one-time model load + cache
+                logger.info(
+                    "seed_copilot_system_templates: local embedding model pre-warmed"
+                )
+            except Exception as e:
+                logger.warning(
+                    "local embedding pre-warm failed, boot continues: %s", e
+                )
     except Exception as e:
         logger.warning(
             "seed_copilot_system_templates: failed, boot continues: %s", e
@@ -293,6 +309,8 @@ app.include_router(churn_accuracy_router.system_router)
 app.include_router(ai_readiness_router.router)
 # Sentiment eval accuracy card (M5.1 disclosure — transformer vs VADER, not a merge gate)
 app.include_router(sentiment_accuracy_router.router)
+# Embedding retrieval eval accuracy card (M5.4 disclosure — local vs baseline provider)
+app.include_router(embedding_accuracy_router.router)
 # Per-org corrections classifier accuracy card (M5.2 settings-api-and-accuracy-card)
 app.include_router(classifier_accuracy_router.router)
 app.include_router(customers.router)
