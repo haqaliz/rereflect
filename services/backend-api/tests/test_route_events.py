@@ -154,10 +154,17 @@ class TestFeedbackEventEmissions:
         test_feedback: FeedbackItem,
         db: Session,
     ):
-        """DELETE /feedback/:id → emit_event called with 'feedback:deleted'."""
+        """DELETE /feedback/:id → emit_event called with 'feedback:deleted'.
+
+        The delete path now runs through feedback_service.delete_feedback_item,
+        which imports emit_event locally (feedback_service.py:58) — so the patch
+        must target the source module, not the route module.
+        """
         feedback_id = test_feedback.id
 
-        with patch("src.api.routes.feedback.emit_event", new_callable=AsyncMock) as mock_emit:
+        with patch(
+            "src.services.event_emitter.emit_event", new_callable=AsyncMock
+        ) as mock_emit:
             response = client.delete(
                 f"/api/v1/feedback/{feedback_id}",
                 headers=auth_headers,

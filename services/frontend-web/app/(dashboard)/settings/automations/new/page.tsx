@@ -554,7 +554,7 @@ export default function NewAutomationPage() {
           <CardContent className="space-y-3">
             {actions.length === 0 ? (
               <p className="text-sm text-muted-foreground italic">
-                No actions added yet. Click "Add Action" to add one.
+                No actions added yet. Click &ldquo;Add Action&rdquo; to add one.
               </p>
             ) : (
               actions.map((action, i) => (
@@ -579,7 +579,7 @@ export default function NewAutomationPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">Don't re-trigger within</span>
+              <span className="text-sm text-muted-foreground">Don&rsquo;t re-trigger within</span>
               <Input
                 data-testid="cooldown-hours-input"
                 type="number"

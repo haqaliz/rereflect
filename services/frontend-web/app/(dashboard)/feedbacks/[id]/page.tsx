@@ -438,7 +438,7 @@ function FeedbackDetailContent() {
           <Card className="p-8 text-center">
             <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-destructive opacity-50" />
             <h2 className="text-xl font-semibold mb-2">{error || 'Feedback not found'}</h2>
-            <p className="text-muted-foreground mb-6">The feedback you're looking for doesn't exist or has been deleted.</p>
+            <p className="text-muted-foreground mb-6">The feedback you&rsquo;re looking for doesn&rsquo;t exist or has been deleted.</p>
             <Button onClick={() => router.push('/feedbacks')} variant="outline">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Feedbacks

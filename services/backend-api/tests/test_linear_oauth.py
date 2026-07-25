@@ -418,8 +418,10 @@ class TestLinearStatus:
         assert response.status_code == 200
         data = response.json()
         assert data["connected"] is True
-        assert data["linear_org_name"] == "Acme Linear"
-        assert data["linear_org_id"] == "linear-org-abc"
+        # The response model strips the `linear_` prefix the DB columns carry:
+        # LinearStatusResponse exposes org_name / org_id.
+        assert data["org_name"] == "Acme Linear"
+        assert data["org_id"] == "linear-org-abc"
 
     def test_status_returns_not_connected_when_no_integration(
         self,
@@ -435,14 +437,19 @@ class TestLinearStatus:
         data = response.json()
         assert data["connected"] is False
 
-    def test_status_returns_not_connected_when_inactive(
+    def test_status_reports_inactive_integration_as_connected_but_not_active(
         self,
         client: TestClient,
         auth_headers: dict,
         db: Session,
         test_organization: Organization,
     ):
-        """Should return connected=False when integration is_active=False."""
+        """An inactive integration is still `connected` — `is_active` is the live flag.
+
+        /status deliberately reports any existing integration record so the UI can
+        show connection history; the settings page gates on `connected && is_active`
+        (settings/integrations/linear/page.tsx:149).
+        """
         from src.models.linear_integration import LinearIntegration
         integration = LinearIntegration(
             organization_id=test_organization.id,
@@ -461,7 +468,8 @@ class TestLinearStatus:
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["connected"] is False
+        assert data["connected"] is True
+        assert data["is_active"] is False
 
     def test_status_requires_auth(self, client: TestClient):
         """Should reject unauthenticated requests."""

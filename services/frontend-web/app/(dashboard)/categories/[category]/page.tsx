@@ -111,7 +111,7 @@ export default function CategoryPage() {
                 {categoryStyles.displayName}
               </h1>
               <p className="text-muted-foreground text-lg">
-                All feedback tagged with "{categoryStyles.displayName}"
+                All feedback tagged with &ldquo;{categoryStyles.displayName}&rdquo;
               </p>
             </div>
           </div>

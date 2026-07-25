@@ -374,7 +374,9 @@ class TestDeleteFolder:
             json={"title": "Work Chat", "folder_id": folder_id},
             headers=pro_auth_headers,
         )
-        conv_id = conv_resp.json()["id"]
+        # /conversations/{id} addresses conversations by their opaque public_id,
+        # not the numeric primary key (conversations.py:156).
+        conv_public_id = conv_resp.json()["public_id"]
 
         # Delete folder
         client.delete(
@@ -383,7 +385,9 @@ class TestDeleteFolder:
         )
 
         # Conversation should still exist but with folder_id=null
-        conv = client.get(f"/api/v1/conversations/{conv_id}", headers=pro_auth_headers)
+        conv = client.get(
+            f"/api/v1/conversations/{conv_public_id}", headers=pro_auth_headers
+        )
         assert conv.status_code == 200
         assert conv.json()["folder_id"] is None
 

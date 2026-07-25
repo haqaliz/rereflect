@@ -125,7 +125,7 @@ export default function NewWebhookPage() {
         <Card>
           <CardHeader>
             <CardTitle>Webhook Created</CardTitle>
-            <CardDescription>Save the signing secret below — it won't be shown again.</CardDescription>
+            <CardDescription>Save the signing secret below — it won&rsquo;t be shown again.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="p-4 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
