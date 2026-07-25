@@ -3,10 +3,30 @@
 All notable changes to Rereflect (the open-source, self-hosted edition) are documented here.
 Every feature is unlocked; the app runs on your own infrastructure with your own (or a local) LLM key.
 
-This is the first tagged release. Prior work lives in the git history and the tracking files
-(`AI-TRACKING.md`, `DEV-TRACKING.md`).
+Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `DEV-TRACKING.md`).
 
-## Unreleased
+## v1.0.0 — 2026-07-26
+
+**The 1.0 release.** Feature work for this milestone was already complete — every PRD in the
+roadmap shipped. What 1.0 adds is the engineering foundation a project should have before it asks
+anyone to depend on it:
+
+- **Continuous integration.** The repo had no workflows at all. CI now runs the backend suite
+  (against a real Postgres, migrated from scratch, with a single-Alembic-head assertion), the
+  worker suite, and the frontend's lint + tests — on every pull request.
+- **A green test suite.** 41 tests across the three suites had rotted against the code they
+  cover, and `test_report_ws.py` was excluded wholesale. All of it is fixed or explicitly and
+  visibly skipped with the reason recorded. Two real bugs surfaced and were fixed along the way:
+  deleting a Copilot folder deleted it as a conversation, and the automation trigger editor called
+  a hook conditionally.
+- **The last of the SaaS scaffolding removed.** "Promo Codes" still appeared in the admin sidebar
+  and rendered a page whose backend route was never mounted — a guaranteed-broken screen. That
+  surface, the Stripe service stub behind it, and the dead `promo_code_used` column are gone.
+- **Honest docs and versions.** Every service now reports 1.0.0, shipped PRDs moved out of the
+  repo root into `docs/archive/prd/`, and the stale Stripe/plan-gating/npm references left over
+  from the hosted era are corrected.
+
+### Added — Durable classifier rollback + version history
 
 ### Added — Durable classifier rollback + version history
 

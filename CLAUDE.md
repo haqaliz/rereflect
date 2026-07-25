@@ -59,9 +59,9 @@ AI-powered customer feedback analysis platform for SaaS businesses.
 ## Development Setup
 
 ### Prerequisites
-- Python 3.9+
-- Node.js 18+
-- PostgreSQL
+- Python 3.12+ (3.9 will not work — Authlib and others require 3.12)
+- Node.js 22+ and pnpm 10 (`corepack enable`)
+- PostgreSQL 14+
 - Redis
 
 ### Quick Start
@@ -80,8 +80,8 @@ cd services/worker-service && ./start.sh
 # Terminal 3: Backend API
 cd services/backend-api && ./start.sh
 
-# Terminal 4: Frontend
-cd services/frontend-web && npm run dev
+# Terminal 4: Frontend (pnpm workspace — `pnpm install` from the repo root first)
+cd services/frontend-web && pnpm dev
 ```
 
 ### Service Ports
@@ -189,6 +189,16 @@ Authorization: Bearer <token>
 ### Multi-tenancy
 All data is scoped by `organization_id` extracted from JWT.
 
+### Pagination
+```
+GET /api/v1/feedback?page=1&page_size=20&sort_by=created_at&sort_order=desc
+```
+
+### Filtering
+```
+GET /api/v1/feedback?sentiment=negative&is_urgent=true&search=payment
+```
+
 ## Role-Based Access Control (RBAC)
 
 ### Role Hierarchy
@@ -245,74 +255,42 @@ Usage in routes:
 - `components/SettingsTabs.tsx` - Tab visibility by role
 - `contexts/AuthContext.tsx` - User role from JWT
 
-## Billing & Subscription Tiers
+## Plans & Feature Gating (all unlocked)
 
-Rereflect uses Stripe for billing with 4 subscription tiers:
+Rereflect is free, open-source and self-hosted. **There is no billing.** Stripe was
+removed in the OSS pivot and the last of its scaffolding (the promo-code admin
+surface, the `stripe_service` stub) was deleted for 1.0.0.
 
-| Tier | Price | Feedback/mo | Seats | Key Features |
-|------|-------|-------------|-------|--------------|
-| **Free** | $0 | 250 | 2 | Dashboard, CSV Import, Sentiment Analysis, Email Support |
-| **Pro** | $29/mo | 2,500 | 10 | + Slack Integration, Webhooks, Data Export, Trends Analytics |
-| **Business** | $99/mo | 25,000 | 25 | + API Access, Advanced Analytics, Custom Categories, Dedicated Support |
-| **Enterprise** | Contact Sales | Unlimited | Unlimited | + SSO/SAML, Custom Integrations, SLA, Dedicated CSM, Audit Logs |
+The plan/feature machinery still exists in `src/config/plans.py`, but `SELF_HOSTED`
+defaults to `true`, and in that mode:
 
-### Feature Gating
+- `has_feature(plan, anything)` returns `True`
+- every limit getter (`get_feedback_limit`, `get_seat_limit`, `get_webhook_limit`, …)
+  returns `None`, meaning unlimited
+- `/auth/me` reports `plan="enterprise"` regardless of the stored plan
 
-Features are gated by plan level using the `require_feature` dependency:
+So `require_feature("...")` dependencies and `PLAN_*` limit maps are inert. They are
+kept because they are harmless, well-tested, and the only thing standing between this
+codebase and a tiered hosted mode should anyone want to run one (`SELF_HOSTED=false`).
 
-```python
-@router.post("/slack/webhook", dependencies=[Depends(require_feature("slack_integration"))])
-```
+**When adding a feature, do not add a plan gate.** If you see documentation, UI copy,
+or a test asserting that something is restricted to Pro/Business/Enterprise, it is
+stale — that is exactly the class of drift that broke ~40 tests before 1.0.0.
 
-Feature IDs by tier:
-- **Free**: `basic_dashboard`, `csv_import`, `sentiment_analysis`, `email_support`
-- **Pro**: + `slack_integration`, `webhooks`, `data_export`, `trends_analytics`, `priority_support`, `enhanced_churn_prediction`, `customer_health_scores`, `churn_llm_insights`
-- **Business**: + `api_access`, `advanced_analytics`, `custom_categories`, `dedicated_support`, `advanced_churn_prediction`, `churn_cohorts`, `churn_playbooks` (limit 20), `churn_accuracy_card`, `churn_event_csv_import`
-- **Enterprise**: + `sso_saml`, `custom_integrations`, `sla`, `dedicated_csm`, `audit_logs`, `custom_retention`, `custom_probability_bands`, `churn_playbooks` (unlimited)
+### Usage counters
 
-### Plan Gating Matrix
+`GET /api/v1/billing/usage` still exists and is Stripe-free: it reports feedback and
+seat counts for the current calendar month so a self-hoster can see their own volume.
+`GET /api/v1/billing/plans` returns plan metadata for the same historical reason.
 
-| Feature | Free | Pro | Business | Enterprise |
-|---------|------|-----|----------|------------|
-| Dashboard + CSV import | ✓ | ✓ | ✓ | ✓ |
-| Sentiment analysis (VADER) | ✓ | ✓ | ✓ | ✓ |
-| Enhanced churn prediction (9-factor, factor breakdown) | – | ✓ | ✓ | ✓ |
-| Customer health scores + alerts | – | ✓ | ✓ | ✓ |
-| Advanced churn prediction (probability %, CI, timeline bucket) | – | – | ✓ | ✓ |
-| Churn cohort analytics (source, month, volume) | – | – | ✓ | ✓ |
-| Churn playbooks (templates, execution) | – | – | ✓ (20 limit) | ✓ (unlimited) |
-| Churn accuracy dashboard + metrics | – | – | ✓ | ✓ |
-| Custom probability bands | – | – | – | ✓ |
-
-### Billing Enforcement
-
-- **Feedback limits**: Checked in `POST /api/v1/feedback` via `check_feedback_limit` dependency
-- **Feature access**: Checked via `require_feature(feature_id)` dependency
-- **Overage tracking**: Pro/Business allow overage at $0.02/$0.01 per feedback
-- **Enterprise**: Pay-as-you-go metered billing via Stripe Usage Records
-
-### Key Billing Files
-- `src/config/plans.py` - Plan definitions and feature mappings
-- `src/api/routes/billing.py` - Billing API endpoints
-- `src/api/dependencies.py` - Feature gating dependencies
-- `src/services/stripe_service.py` - Stripe integration
-- `src/models/subscription.py` - Subscription model
-- `src/models/usage.py` - Usage tracking model
-- `lib/api/billing.ts` - Frontend billing API
-
-### Pagination
-```
-GET /api/v1/feedback?page=1&page_size=20&sort_by=created_at&sort_order=desc
-```
-
-### Filtering
-```
-GET /api/v1/feedback?sentiment=negative&is_urgent=true&search=payment
-```
 
 ## Email Templates (Resend)
 
-Rereflect uses [Resend](https://resend.com) for transactional emails with template-based rendering.
+Transactional email is **optional and BYO-key**: set `RESEND_API_KEY` plus the
+`RESEND_TEMPLATE_*` ids and Rereflect will send invites, digests and alerts through
+[Resend](https://resend.com). With no key configured, those sends are skipped — the
+app runs fine without email, it just cannot notify anyone off-platform. Nothing here
+phones home to a Rereflect-operated service; the account and templates are yours.
 
 ### Template Management Script
 
@@ -401,25 +379,35 @@ Use triple curly braces for variables in HTML templates:
 ## Common Commands
 
 ```bash
-# Frontend
+# Frontend — this is a pnpm workspace; install once from the REPO ROOT.
+pnpm install             # from the repo root, not services/frontend-web
 cd services/frontend-web
-npm run dev              # Start dev server
-npm run build            # Production build
-npm run lint             # Run ESLint
+pnpm dev                 # Start dev server
+pnpm build               # Production build
+pnpm lint                # Run ESLint
+pnpm test                # Run vitest
 
 # Backend
 cd services/backend-api
 ./start.sh               # Start with auto-reload
 pytest tests/ -v         # Run tests
 
+# Worker
+cd services/worker-service
+pytest tests/ -v         # Run tests
+
 # Database
 alembic upgrade head     # Apply migrations
 alembic revision -m "description"  # Create migration
+alembic heads            # Must print exactly one head — CI asserts this
 
 # All services
 ./start-all.sh           # Start all in tmux
 ./stop-all.sh            # Stop all services
 ```
+
+CI (`.github/workflows/ci.yml`) runs the backend suite (against a clean, migrated
+PostgreSQL), the worker suite, and the frontend's lint + tests on every pull request.
 
 ## Development Guidelines
 

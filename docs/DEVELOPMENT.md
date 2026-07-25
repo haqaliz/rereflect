@@ -14,7 +14,7 @@ deployment instead, see [SELF_HOSTING.md](SELF_HOSTING.md).
 ## Prerequisites
 
 - Python 3.12+
-- Node.js 18+ and **pnpm** 10+ (`corepack enable` to get the pinned version)
+- Node.js 22+ and **pnpm** 10+ (`corepack enable` to get the pinned version)
 - PostgreSQL 14+
 - Redis
 
@@ -151,6 +151,25 @@ pnpm test           # Vitest
 
 - **Backend / worker / analysis** — `pytest tests/ -v` inside each service.
 - **Frontend** — `pnpm test` (Vitest) and `pnpm lint` inside `services/frontend-web`.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `master`:
+
+| Job | What it does |
+|---|---|
+| `backend` | Spins up PostgreSQL 16 + Redis 7, runs `alembic upgrade head` against an empty database, asserts there is exactly **one** Alembic head, then runs the backend suite |
+| `worker` | Spins up Redis 7 and runs the worker suite |
+| `frontend` | `pnpm install --frozen-lockfile` from the repo root, then ESLint and Vitest |
+
+The Python jobs install requirements **without** `torch`, `transformers` and
+`sentence-transformers`. Those are opt-in local-model extras (~2 GB) whose call sites
+are covered by stubs, so pulling them into CI would cost minutes per run for no extra
+coverage. If you add a test that genuinely needs one of them, mark it (see
+`needs_real_sentence_transformers` in `services/backend-api/pytest.ini`) so it skips
+rather than fails when the package is absent.
+
+A branch should be green before you ask for review.
 
 ## Troubleshooting
 

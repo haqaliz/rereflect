@@ -1,18 +1,24 @@
 # Development Tracking
 
-**Vision**: AI-powered feedback analysis SaaS
-**Target**: $50K MRR in 12 months
-**Last Updated**: 2026-05-21
+**Vision**: Open-source, self-hosted AI feedback analysis you run on your own infrastructure
+**Last Updated**: 2026-07-26 (v1.0.0)
 
 ---
 
 ## Current Status
 
-| Milestone | Status | MRR Target |
-|-----------|--------|------------|
-| Phase 1: MVP SaaS | 100% Complete | $500 |
-| Phase 2: Growth | Next | $5,000 |
-| Phase 3: Enterprise | Planned | $50,000 |
+Shipped as **v1.0.0** (2026-07-26) — free, open-source, self-hosted, MIT, BYOK.
+
+| Milestone | Status |
+|-----------|--------|
+| Phase 1: MVP | Complete |
+| Phase 2: Growth features | Complete |
+| Phase 3: Enterprise features | Complete except the items listed as deferred below |
+
+> The MRR targets that used to sit in this table were from the hosted-SaaS era and
+> are no longer meaningful — there is nothing to sell. They have been removed rather
+> than updated. Individual sections below still carry SaaS-era framing; see the
+> pivot note that follows.
 
 ---
 
