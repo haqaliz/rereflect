@@ -196,7 +196,6 @@ export default function AdminOrganizationsPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Plan</TableHead>
                     <TableHead>Users</TableHead>
-                    <TableHead>Promo</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -215,15 +214,6 @@ export default function AdminOrganizationsPage() {
                           <Users className="w-3.5 h-3.5 text-muted-foreground" />
                           {org.user_count}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        {org.promo_code_used ? (
-                          <Badge variant="outline" className="font-mono text-xs">
-                            {org.promo_code_used}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-sm">
                         {formatDate(org.created_at)}
@@ -356,12 +346,6 @@ export default function AdminOrganizationsPage() {
                   <span className="text-muted-foreground">Created</span>
                   <p>{formatDate(detailOrg.created_at)}</p>
                 </div>
-                {detailOrg.promo_code_used && (
-                  <div>
-                    <span className="text-muted-foreground">Promo Code</span>
-                    <p className="font-mono">{detailOrg.promo_code_used}</p>
-                  </div>
-                )}
                 {detailOrg.stripe_customer_id && (
                   <div>
                     <span className="text-muted-foreground">Stripe Customer</span>

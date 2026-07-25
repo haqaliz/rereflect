@@ -52,7 +52,6 @@ class AdminOrgResponse(BaseModel):
     name: str
     plan: str
     user_count: int
-    promo_code_used: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -117,7 +116,6 @@ def list_organizations(
                 name=org.name,
                 plan=org.plan,
                 user_count=user_count,
-                promo_code_used=org.promo_code_used,
                 created_at=org.created_at,
             )
             for org, user_count in results
@@ -142,7 +140,6 @@ def get_organization(org_id: int, db: Session = Depends(get_db)):
         name=org.name,
         plan=org.plan,
         user_count=len(users),
-        promo_code_used=org.promo_code_used,
         created_at=org.created_at,
         seat_count=org.seat_count,
         ai_analysis_enabled=org.ai_analysis_enabled,

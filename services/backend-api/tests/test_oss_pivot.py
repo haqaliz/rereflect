@@ -13,6 +13,7 @@ TDD Red → Green for every new behavior:
       notifications /retention no longer calls stripe.
 """
 
+import inspect
 import importlib
 import os
 import sys
@@ -435,31 +436,25 @@ class TestStripeRoutesRemoved:
         )
 
 
-class TestStripeServiceImportGuard:
-    """B3: App must boot even if 'stripe' package is uninstalled."""
+class TestStripeServiceRemoved:
+    """B3: the stripe_service stub is gone entirely (stronger than the old import guard)."""
 
-    def test_stripe_service_does_not_crash_without_stripe_package(self):
+    def test_stripe_service_module_does_not_exist(self):
         """
-        Importing stripe_service with stripe mocked away must not raise.
-        This verifies the import guard.
+        src.services.stripe_service was a no-op stub kept alive only so that
+        admin_promo / billing could still import it. Both of those importers are
+        gone as of 1.0.0, so the module must be too — the app can never reach
+        Stripe because there is no Stripe code left to reach.
         """
-        # Save original
-        original = sys.modules.get("stripe")
-        sys.modules["stripe"] = None  # type: ignore[assignment]
-        try:
-            import src.services.stripe_service as ss_mod
-            importlib.reload(ss_mod)
-            # Must not raise; get_stripe_service() may raise but import must succeed
-        except ImportError:
-            pytest.fail("stripe_service module raised ImportError without stripe package")
-        finally:
-            if original is None:
-                sys.modules.pop("stripe", None)
-            else:
-                sys.modules["stripe"] = original
-            # Reload with real stripe back
-            import src.services.stripe_service as ss_mod2
-            importlib.reload(ss_mod2)
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("src.services.stripe_service")
+
+    def test_services_package_does_not_export_stripe_service(self):
+        """`from src.services import StripeService` must fail."""
+        import src.services as services_pkg
+
+        assert not hasattr(services_pkg, "StripeService")
+        assert "StripeService" not in getattr(services_pkg, "__all__", [])
 
 
 class TestAdminPromoRouteRemoved:
@@ -474,24 +469,48 @@ class TestAdminPromoRouteRemoved:
 
 
 class TestRetentionNoStripeCall:
-    """B3: PUT /notifications/retention must NOT call stripe_service."""
+    """B3: PUT /notifications/retention must NOT reach any billing surface."""
 
-    def test_retention_update_does_not_call_stripe(
+    def test_retention_update_does_not_import_stripe(
         self, client: TestClient, auth_headers: dict
     ):
-        """Stripe manage_retention_addon must never be invoked from retention endpoint."""
-        with patch(
-            "src.services.stripe_service.StripeService.manage_retention_addon"
-        ) as mock_stripe:
-            response = client.put(
-                "/api/v1/notifications/retention",
-                headers=auth_headers,
-                json={"retentions": [{"alert_type": "anomaly", "days": 60}]},
+        """
+        This used to patch `stripe_service.StripeService.manage_retention_addon` and
+        assert it was never called. The stripe_service module is gone as of 1.0.0, so
+        the assertion is now made directly: hitting the endpoint must not pull `stripe`
+        into sys.modules, and the retention route source must not mention it.
+        """
+        stripe_was_loaded = "stripe" in sys.modules
+
+        client.put(
+            "/api/v1/notifications/retention",
+            headers=auth_headers,
+            json={"retentions": [{"alert_type": "anomaly", "days": 60}]},
+        )
+
+        if not stripe_was_loaded:
+            assert "stripe" not in sys.modules, (
+                "hitting /notifications/retention imported the stripe package"
             )
-            # Response may vary, but stripe must not be called
-            assert not mock_stripe.called, (
-                "stripe_service.manage_retention_addon was called from retention endpoint"
-            )
+
+        # The route module must not carry a stripe import of any form. (Its
+        # docstring still *mentions* Stripe to explain what was removed, so scan
+        # the AST rather than the raw text.)
+        import ast
+
+        import src.api.routes.notifications as notifications_mod
+
+        tree = ast.parse(inspect.getsource(notifications_mod))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+
+        assert not [m for m in imported if "stripe" in m.lower()], (
+            f"notifications route still imports stripe: {sorted(imported)}"
+        )
 
 
 # ─── No system key leakage (regression guard) ────────────────────────────────
