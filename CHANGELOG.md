@@ -42,6 +42,10 @@ Ollama/endpoint process required. Set per organization (Settings → AI, embeddi
   template match. That's the safe failure mode (a slower, still-correct answer), not a broken
   one. MRR≈0.75 shows the right template usually ranks near the top even when it doesn't clear
   the threshold. This is not presented as a solved-accuracy claim.
+- The Ollama embedding-model recommendation is now eval-backed too: `nomic-embed-text` remains
+  the default (neither Ollama alternative clears the recall@1 bar), and `mxbai-embed-large` is
+  documented as an optional modest upgrade (better ranking, fewer false matches, higher
+  RAM/latency) — see [SELF_HOSTING.md](docs/SELF_HOSTING.md#embedding-model-choice-on-the-ollama-path-eval-backed).
 
 ### Added — Usage-decline churn-label suggestions
 

@@ -10,6 +10,7 @@ default) treats every instance as fully featured.
 - [Required environment variables](#required-environment-variables)
 - [Running with no API key ($0, fully local)](#running-with-no-api-key-0-fully-local)
 - [Fully-local LLM, including the AI Copilot (Ollama / OpenAI-compatible)](#fully-local-llm-including-the-ai-copilot-ollama--openai-compatible)
+- [Embedding model choice on the Ollama path (eval-backed)](#embedding-model-choice-on-the-ollama-path-eval-backed)
 - [Local transformer sentiment model (opt-in, air-gap capable)](#local-transformer-sentiment-model-opt-in-air-gap-capable)
 - [Local embedding model (opt-in, air-gap capable)](#local-embedding-model-opt-in-air-gap-capable)
 - [Adding your own LLM key (BYOK)](#adding-your-own-llm-key-byok)
@@ -144,6 +145,48 @@ a wrong-but-confident answer.
 > providers are never mixed. Rereflect also ships an **in-process** embedding option that
 > needs no separate Ollama/endpoint at all — see
 > [Local embedding model](#local-embedding-model-opt-in-air-gap-capable) below.
+
+## Embedding model choice on the Ollama path (eval-backed)
+
+The default `nomic-embed-text` above is a reasonable choice, but it isn't the only Ollama
+embedding model that works with the Copilot's template matching. On the same 69-row
+held-out retrieval eval used elsewhere in this doc (0.85 match threshold), two alternative
+Ollama models were measured against the `nomic-embed-text` baseline (recall@1 **0.089**, MRR
+**0.748**, false-match **0.125**):
+
+| Model | recall@1 | MRR | false-match | vs. `nomic-embed-text` |
+|---|---|---|---|---|
+| `nomic-embed-text` (default) | 0.089 | 0.748 | 0.125 | — |
+| `mxbai-embed-large` (1024-dim) | 0.111 | 0.807 | 0.042 | recall +0.022, MRR +0.06, false-match cut ~66% |
+| `bge-m3` (heavier) | 0.067 | 0.827 | 0.042 | recall −0.022 (worse), MRR +0.08, false-match cut ~66% |
+
+Read this honestly: **neither Ollama candidate clears a meaningful recall@1 margin** over
+`nomic-embed-text` (the bar used elsewhere in this doc is +0.05; `mxbai-embed-large`'s +0.022
+falls short, and `bge-m3` is actually slightly worse on recall@1). So on the strict
+threshold-match metric there's no strong reason to switch the Ollama default, and
+**`nomic-embed-text` remains a fine default** for self-hosters on this path.
+
+That said, both candidates genuinely **rank the right template higher** (MRR) and **more
+than halve the false-match rate** on held-out negatives (0.042 vs 0.125) — real quality
+gains that just don't clear the 0.85 recall bar. If you want better ranking and fewer false
+matches on the Ollama path and can accept the cost, `mxbai-embed-large` is the better of the
+two (small recall bump, best-balanced result):
+
+```bash
+ollama pull mxbai-embed-large
+```
+
+Then select it as the embedding model in **Settings → AI**. Caveat: it's a 1024-dim model,
+so expect higher RAM usage and slower embedding calls than `nomic-embed-text`. `bge-m3` is
+heavier still and slightly worse on recall@1 — not recommended for this use. As with any
+embedding switch, this is safe to change at any time: Rereflect re-embeds the built-in query
+templates automatically on the next startup, and vectors from different providers/models are
+never mixed (see the callout above).
+
+If you'd rather avoid running a separate Ollama embedding model at all, the in-process
+`local`/`bge-small` provider is the **primary recommended offline upgrade** — it's the only
+candidate measured so far that clears the +0.05 recall@1 bar (+0.089 over `nomic-embed-text`).
+See [Local embedding model](#local-embedding-model-opt-in-air-gap-capable) below.
 
 ## Local transformer sentiment model (opt-in, air-gap capable)
 
