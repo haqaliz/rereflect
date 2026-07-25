@@ -2,10 +2,10 @@
 GET /api/v1/settings/ai/embeddings/accuracy (retrieval-eval-card aspect,
 M5.4 disclosure layer).
 
-Reads the committed eval_retrieval.py results artifact
+Reads the committed eval_embeddings.py results artifact
 (services/backend-api/eval_results/retrieval_accuracy.json) and serves it as
 a typed, never-raising response. Never runs the model synchronously in the
-request — recomputation is `python scripts/eval_retrieval.py` + commit
+request — recomputation is `python scripts/eval_embeddings.py` + commit
 (mirrors sentiment_accuracy.py's M5.1 scope decision).
 
 No require_feature gate: this is a disclosure/self-hosting-transparency
@@ -25,7 +25,7 @@ from src.schemas.embedding_accuracy import RetrievalAccuracyResponse
 
 router = APIRouter(prefix="/api/v1/settings/ai", tags=["embedding-accuracy"])
 
-# Path to the artifact produced by `python scripts/eval_retrieval.py` (matches
+# Path to the artifact produced by `python scripts/eval_embeddings.py` (matches
 # that script's default --output). Relative to this file so it resolves the
 # same way regardless of the process's current working directory.
 _ARTIFACT_PATH = os.path.abspath(

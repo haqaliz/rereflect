@@ -2,7 +2,7 @@
 Pydantic schemas for GET /api/v1/settings/ai/embeddings/accuracy
 (retrieval-eval-card aspect, M5.4 disclosure layer).
 
-Mirrors the eval_retrieval.py script's committed JSON artifact
+Mirrors the eval_embeddings.py script's committed JSON artifact
 (services/backend-api/eval_results/retrieval_accuracy.json) 1:1 so the
 route's parse-or-degrade handler is a thin pass-through.
 """
