@@ -112,6 +112,21 @@ def seed_copilot_system_templates(db) -> None:
             "seed_copilot_system_templates: seeding complete "
             "(provider=%s)", resolved.provider if resolved else "none"
         )
+
+        # Pre-warm the local embedding model so the first real Copilot query
+        # doesn't pay the multi-second model-load cost. Best-effort: on a
+        # fresh provider change, seeding above already warmed it; this just
+        # guarantees warmth on same-provider reboots too. Never fails boot.
+        if resolved is not None and resolved.provider == "local":
+            try:
+                resolved.embedder.embed("warmup")  # force one-time model load + cache
+                logger.info(
+                    "seed_copilot_system_templates: local embedding model pre-warmed"
+                )
+            except Exception as e:
+                logger.warning(
+                    "local embedding pre-warm failed, boot continues: %s", e
+                )
     except Exception as e:
         logger.warning(
             "seed_copilot_system_templates: failed, boot continues: %s", e
