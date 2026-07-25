@@ -151,6 +151,9 @@ class TestWeeklyDigestWithInsights:
             organization_id=org.id,
             role="owner",
             weekly_digest_enabled=True,
+            # Must match the current UTC run window — see conftest.test_user.
+            weekly_digest_day=datetime.utcnow().weekday(),
+            weekly_digest_hour=datetime.utcnow().hour,
         )
         db.add(user)
         db.commit()
@@ -206,6 +209,9 @@ class TestWeeklyDigestWithInsights:
             organization_id=org.id,
             role="owner",
             weekly_digest_enabled=True,
+            # Must match the current UTC run window — see conftest.test_user.
+            weekly_digest_day=datetime.utcnow().weekday(),
+            weekly_digest_hour=datetime.utcnow().hour,
         )
         db.add(user)
         db.commit()

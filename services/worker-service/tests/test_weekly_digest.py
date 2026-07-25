@@ -76,7 +76,9 @@ class TestSendWeeklyDigests:
 
             result = send_weekly_digests()
 
-            assert result["status"] == "no_organizations"
+            # The task filters on users (matching day/hour), not organizations, so
+            # the "nothing to do" status is no_matching_users (alerts.py:509).
+            assert result["status"] == "no_matching_users"
             assert result["sent"] == 0
             mock_send_email.assert_not_called()
 
@@ -122,6 +124,9 @@ class TestSendWeeklyDigests:
             organization_id=test_org.id,
             role="member",
             weekly_digest_enabled=True,
+            # Must match the current UTC run window — see conftest.test_user.
+            weekly_digest_day=datetime.utcnow().weekday(),
+            weekly_digest_hour=datetime.utcnow().hour,
         )
         db.add(user2)
         db.commit()
