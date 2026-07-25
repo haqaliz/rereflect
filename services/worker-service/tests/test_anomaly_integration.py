@@ -119,9 +119,30 @@ class TestCheckOrgForAnomalyIntegration:
         from src.tasks.anomaly import _check_org_for_anomaly
 
         now = datetime.utcnow()
-        # Add 10 recent items with 90% negative (vs ~10% baseline)
+
+        # The 30-day baseline query has no upper bound (anomaly.py:92), so the
+        # spike day is folded into its own baseline. With only 10 baseline days a
+        # single 90%-negative outlier drags the mean and std_dev up far enough
+        # that the deviation lands at ~3.0σ — right on the critical boundary.
+        # Extend the baseline so the outlier is properly diluted and the spike is
+        # unambiguously >3σ.
+        for day_offset in range(12, 30):
+            day = now - timedelta(days=day_offset)
+            for i in range(10):
+                sentiment = "negative" if i == 0 else "positive"
+                db.add(FeedbackItem(
+                    organization_id=org_with_baseline.id,
+                    text=f"Extended baseline {day_offset}-{i}",
+                    source="manual",
+                    sentiment_label=sentiment,
+                    sentiment_score=-0.8 if sentiment == "negative" else 0.5,
+                    created_at=day,
+                ))
+        db.commit()
+
+        # Add 10 recent items, all negative (vs ~10% baseline)
         for i in range(10):
-            sentiment = "negative" if i < 9 else "positive"
+            sentiment = "negative"
             db.add(FeedbackItem(
                 organization_id=org_with_baseline.id,
                 text=f"Recent extreme {i}",
@@ -137,9 +158,11 @@ class TestCheckOrgForAnomalyIntegration:
         assert result is True
         db.flush()
 
+        # Order explicitly — an unordered .first() can return an anomaly left by an
+        # earlier test in this class rather than the one this test just triggered.
         anomaly = db.query(SentimentAnomaly).filter(
             SentimentAnomaly.organization_id == org_with_baseline.id,
-        ).first()
+        ).order_by(SentimentAnomaly.id.desc()).first()
         assert anomaly is not None
         assert anomaly.severity == "critical"
 
@@ -295,132 +318,71 @@ class TestCheckOrgForAnomalyIntegration:
 
 
 class TestDispatchAnomalyAlerts:
-    """Tests for _dispatch_anomaly_alerts routing."""
+    """_dispatch_anomaly_alerts delegates routing to the notification dispatcher.
 
-    def test_sends_email_when_user_has_email_enabled(self, db, org_with_user):
-        """Should send email when user has email alert channel enabled."""
-        from src.tasks.anomaly import _dispatch_anomaly_alerts
+    This class used to assert per-user channel fan-out (email on/off, Slack on/off,
+    org defaults vs user overrides) by patching _send_anomaly_email /
+    _send_anomaly_slack. That routing moved into notification_dispatch.dispatch_alert,
+    which resolves each user's preferences and — for email — queues a daily digest
+    rather than sending immediately. _dispatch_anomaly_alerts no longer calls those
+    helpers at all, so the old assertions could never pass. Channel routing is
+    covered where it now lives; what remains this function's job is building a
+    correct alert payload and handing it over.
+    """
 
-        org, user = org_with_user
-        anomaly = MagicMock(
-            severity="warning",
+    def _anomaly(self, severity="warning"):
+        return MagicMock(
+            id=123,
+            severity=severity,
             current_negative_pct=40.0,
             baseline_negative_pct=10.0,
             deviation_pct=30.0,
             feedback_count=10,
         )
 
-        with patch("src.tasks.anomaly._send_anomaly_email") as mock_email:
-            _dispatch_anomaly_alerts(db, org, anomaly)
-            mock_email.assert_called_once_with(user.email, org.name, anomaly)
-
-    def test_skips_email_when_user_has_email_disabled(self, db):
-        """Should not send email when user has email channel disabled."""
+    def test_delegates_to_dispatch_alert_with_org_and_alert_type(self, db, org_with_user):
         from src.tasks.anomaly import _dispatch_anomaly_alerts
 
-        org = Organization(
-            name="No Email Corp", plan="pro",
-            default_alert_channels={"dashboard": True, "email": False, "slack": False},
-        )
-        db.add(org)
-        db.commit()
-        db.refresh(org)
+        org, _user = org_with_user
 
-        user = User(
-            email="noemail@test.com",
-            organization_id=org.id,
-            role="owner",
-            alert_channels={"dashboard": True, "email": False, "slack": False},
-        )
-        db.add(user)
-        db.commit()
+        with patch("src.notification_dispatch.dispatch_alert") as mock_dispatch:
+            _dispatch_anomaly_alerts(db, org, self._anomaly())
 
-        anomaly = MagicMock()
+        mock_dispatch.assert_called_once()
+        kwargs = mock_dispatch.call_args.kwargs
+        assert kwargs["org_id"] == org.id
+        assert kwargs["alert_type"] == "sentiment_spike"
+        assert kwargs["link"] == "/dashboard"
 
-        with patch("src.tasks.anomaly._send_anomaly_email") as mock_email:
-            _dispatch_anomaly_alerts(db, org, anomaly)
-            mock_email.assert_not_called()
-
-    def test_uses_org_defaults_when_user_has_no_override(self, db):
-        """Should use org default_alert_channels when user.alert_channels is None."""
+    def test_title_and_message_carry_the_anomaly_numbers(self, db, org_with_user):
         from src.tasks.anomaly import _dispatch_anomaly_alerts
 
-        org = Organization(
-            name="Default Alert Corp", plan="pro",
-            default_alert_channels={"dashboard": True, "email": True, "slack": False},
-        )
-        db.add(org)
-        db.commit()
-        db.refresh(org)
+        org, _user = org_with_user
 
-        user = User(
-            email="default@test.com",
-            organization_id=org.id,
-            role="owner",
-            alert_channels=None,  # No user override
-        )
-        db.add(user)
-        db.commit()
+        with patch("src.notification_dispatch.dispatch_alert") as mock_dispatch:
+            _dispatch_anomaly_alerts(db, org, self._anomaly(severity="critical"))
 
-        anomaly = MagicMock(
-            severity="warning",
-            current_negative_pct=40.0,
-            baseline_negative_pct=10.0,
-            deviation_pct=30.0,
-            feedback_count=10,
-        )
+        kwargs = mock_dispatch.call_args.kwargs
+        assert "CRITICAL" in kwargs["title"]
+        assert "40% negative" in kwargs["title"]
+        assert "baseline: 10%" in kwargs["message"]
+        assert "+30pp" in kwargs["message"]
+        assert "10 feedback items" in kwargs["message"]
 
-        with patch("src.tasks.anomaly._send_anomaly_email") as mock_email:
-            _dispatch_anomaly_alerts(db, org, anomaly)
-            # Should send because org default has email=True
-            mock_email.assert_called_once()
-
-    def test_sends_slack_when_org_has_slack_enabled(self, db):
-        """Should send Slack alert when org default has slack enabled."""
+    def test_metadata_carries_severity_and_percentages(self, db, org_with_user):
         from src.tasks.anomaly import _dispatch_anomaly_alerts
 
-        org = Organization(
-            name="Slack Corp", plan="pro",
-            default_alert_channels={"dashboard": True, "email": False, "slack": True},
-        )
-        db.add(org)
-        db.commit()
-        db.refresh(org)
+        org, _user = org_with_user
 
-        anomaly = MagicMock()
+        with patch("src.notification_dispatch.dispatch_alert") as mock_dispatch:
+            _dispatch_anomaly_alerts(db, org, self._anomaly())
 
-        with patch("src.tasks.anomaly._send_anomaly_slack") as mock_slack:
-            _dispatch_anomaly_alerts(db, org, anomaly)
-            mock_slack.assert_called_once_with(db, org, anomaly)
+        metadata = mock_dispatch.call_args.kwargs["metadata"]
+        assert metadata["anomaly_id"] == 123
+        assert metadata["severity"] == "warning"
+        assert metadata["current_negative_pct"] == 40.0
+        assert metadata["baseline_negative_pct"] == 10.0
 
-    def test_skips_slack_when_org_has_slack_disabled(self, db):
-        """Should not send Slack when org default has slack disabled."""
-        from src.tasks.anomaly import _dispatch_anomaly_alerts
-
-        org = Organization(
-            name="No Slack Corp", plan="pro",
-            default_alert_channels={"dashboard": True, "email": False, "slack": False},
-        )
-        db.add(org)
-        db.commit()
-        db.refresh(org)
-
-        anomaly = MagicMock()
-
-        with patch("src.tasks.anomaly._send_anomaly_slack") as mock_slack:
-            _dispatch_anomaly_alerts(db, org, anomaly)
-            mock_slack.assert_not_called()
-
-    def test_handles_email_failure_gracefully(self, db, org_with_user):
-        """Should log error but not crash when email sending fails."""
-        from src.tasks.anomaly import _dispatch_anomaly_alerts
-
-        org, user = org_with_user
-        anomaly = MagicMock(severity="critical")
-
-        with patch("src.tasks.anomaly._send_anomaly_email", side_effect=Exception("SMTP error")):
-            # Should not raise
-            _dispatch_anomaly_alerts(db, org, anomaly)
 
 
 class TestDetectSentimentAnomaliesTask:

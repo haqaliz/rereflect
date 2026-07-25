@@ -374,7 +374,7 @@ export default function WorkflowPage() {
             {/* Rules Table */}
             {rules.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                No assignment rules configured. Click "Add Rule" to create one.
+                No assignment rules configured. Click &ldquo;Add Rule&rdquo; to create one.
               </div>
             ) : (
               <div className="overflow-x-auto">

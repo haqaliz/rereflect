@@ -556,6 +556,6 @@ If the feedback has `customer_email`, show a small health score badge in the hea
 
 ## 9. Related Documents
 
-- [DEV-TRACKING.md](DEV-TRACKING.md) - Development roadmap
+- [DEV-TRACKING.md](../../../DEV-TRACKING.md) - Development roadmap
 - [PRD-TECHNICAL-DEBT.md](PRD-TECHNICAL-DEBT.md) - Technical debt resolution (completed)
-- [CLAUDE.md](CLAUDE.md) - Technical documentation
+- [CLAUDE.md](../../../CLAUDE.md) - Technical documentation

@@ -71,6 +71,23 @@ vi.mock('@/lib/api/zendesk', () => ({
   },
 }));
 
+// Asana was added to the integrations page after this test was written; leaving it
+// unmocked let the real module issue a fetch, which threw and blanked the page.
+vi.mock('@/lib/api/asana', () => ({
+  asanaAPI: {
+    getStatus: vi.fn(),
+    disconnect: vi.fn(),
+    testConnection: vi.fn(),
+  },
+}));
+
+// The page tree consumes RealtimeContext; without this the provider-less render
+// throws "useRealtime must be used within a RealtimeProvider".
+vi.mock('@/contexts/RealtimeContext', () => ({
+  RealtimeProvider: ({ children }: { children: React.ReactNode }) => children,
+  useRealtime: () => ({ connected: false, reconnecting: false, subscribe: vi.fn() }),
+}));
+
 import { useAuth } from '@/contexts/AuthContext';
 import { integrationsAPI } from '@/lib/api/integrations';
 import { linearAPI } from '@/lib/api/linear';
@@ -78,6 +95,7 @@ import { hubspotAPI } from '@/lib/api/hubspot';
 import { salesforceAPI } from '@/lib/api/salesforce';
 import { jiraAPI } from '@/lib/api/jira';
 import { zendeskAPI } from '@/lib/api/zendesk';
+import { asanaAPI } from '@/lib/api/asana';
 import IntegrationsPage from '../page';
 
 function makeAuthContext(role: string) {
@@ -98,6 +116,7 @@ describe('IntegrationsPage — Salesforce tile', () => {
     (linearAPI.getStatus as any).mockResolvedValue({ connected: false });
     (jiraAPI.getStatus as any).mockResolvedValue({ connected: false });
     (zendeskAPI.getStatus as any).mockResolvedValue({ connected: false });
+    (asanaAPI.getStatus as any).mockResolvedValue({ connected: false });
   });
 
   it('shows an Available Salesforce tile linking to the detail page when disconnected', async () => {

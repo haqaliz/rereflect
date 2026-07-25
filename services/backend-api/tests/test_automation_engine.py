@@ -376,6 +376,11 @@ def test_assign_action_executes(db: Session, test_organization: Organization):
     config = {"assign_to": f"user:{user.id}"}
     result = engine._execute_assign(config, fb)
 
+    # The _execute_* helpers stage their changes on the session; execute_rule()
+    # is what commits (automation_engine.py:197). Calling a helper directly means
+    # the test owns the commit — without it, refresh() re-reads the row from the
+    # DB and discards the pending write.
+    db.commit()
     db.refresh(fb)
     assert fb.assigned_to == user.id
     assert result["type"] == "auto_assign"
@@ -396,6 +401,7 @@ def test_change_status_action_executes(db: Session, test_organization: Organizat
     config = {"status": "in_review"}
     result = engine._execute_change_status(config, fb)
 
+    db.commit()
     db.refresh(fb)
     assert fb.workflow_status == "in_review"
     assert result["type"] == "change_status"
@@ -434,6 +440,7 @@ def test_notify_action_executes(db: Session, test_organization: Organization):
     engine = AutomationEngine(db)
     config = {"recipients": "admins", "channels": ["dashboard"]}
     result = engine._execute_notify(config, fb, rule)
+    db.commit()
 
     assert result["type"] == "send_notification"
     assert result["error"] is None
@@ -466,6 +473,7 @@ def test_multiple_actions_execute_sequentially(db: Session, test_organization: O
 
     engine = AutomationEngine(db)
     action_results = engine._execute_actions(rule, fb, context)
+    db.commit()
 
     assert len(action_results) == 2
     assert all(r["error"] is None for r in action_results)

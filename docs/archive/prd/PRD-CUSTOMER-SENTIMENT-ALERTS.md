@@ -474,6 +474,6 @@ The alert type row in preferences UI is hidden for Free plan users (same as the 
 
 ## Related
 
-- [AI-TRACKING.md](AI-TRACKING.md) — M1.3 milestone
+- [AI-TRACKING.md](../../../AI-TRACKING.md) — M1.3 milestone
 - [PRD-CUSTOMER-360.md](PRD-CUSTOMER-360.md) — Customer 360 page (dependency, completed)
 - [PRD-PREDICTIVE-ANALYTICS.md](PRD-PREDICTIVE-ANALYTICS.md) — Health score model origin

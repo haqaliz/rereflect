@@ -271,8 +271,6 @@ describe('FeedbackDetailPage – action bar', () => {
 
     it('clicking Delete calls feedbackAPI.delete after confirmation', async () => {
       const user = userEvent.setup();
-      // Mock window.confirm to return true
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
       await renderAndWait();
 
       const actionsBtn = screen.getByRole('button', { name: /actions/i });
@@ -280,6 +278,9 @@ describe('FeedbackDetailPage – action bar', () => {
 
       await waitFor(() => screen.getByRole('menuitem', { name: /delete/i }));
       await user.click(screen.getByRole('menuitem', { name: /delete/i }));
+
+      // Confirmation moved from window.confirm to a shadcn Dialog (page.tsx:1077).
+      await user.click(await screen.findByRole('button', { name: /^confirm$/i }));
 
       await waitFor(() => expect(mockFeedbackDelete).toHaveBeenCalledWith(42));
     });

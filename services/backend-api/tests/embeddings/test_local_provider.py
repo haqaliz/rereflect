@@ -21,6 +21,52 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def stub_sentence_transformers(request):
+    """Make `sentence_transformers` patchable without installing it.
+
+    Every test below patches `sentence_transformers.SentenceTransformer` with a
+    MagicMock — none of them exercise the real library, they exercise this
+    repo's provider logic (lazy load, caching, offline env, 2-D coercion).
+    But `mock.patch` has to import the target module to patch it, so without
+    the package installed all seven fail with ModuleNotFoundError.
+
+    `sentence-transformers` pulls in torch (~2 GB), which we do not want in the
+    unit-test CI job. So when the real package is absent we register a minimal
+    stub module for the duration of the test. When it IS installed (the
+    real-model smoke test below needs it) this fixture does nothing.
+    """
+    import sys
+
+    # The real-model smoke test genuinely needs the real library — it must keep
+    # skipping (not silently pass against a MagicMock) when it is absent.
+    if request.node.get_closest_marker("needs_real_sentence_transformers"):
+        yield
+        return
+
+    if "sentence_transformers" in sys.modules:
+        yield
+        return
+
+    try:
+        import sentence_transformers  # noqa: F401
+    except ModuleNotFoundError:
+        pass
+    else:
+        yield
+        return
+
+    import types as _types
+
+    stub = _types.ModuleType("sentence_transformers")
+    stub.SentenceTransformer = MagicMock(name="SentenceTransformer")
+    sys.modules["sentence_transformers"] = stub
+    try:
+        yield
+    finally:
+        sys.modules.pop("sentence_transformers", None)
+
+
 def _reload_local_provider_module():
     """Reload the module under test so its module-level loader cache
     (_loaded_models) starts empty for each test — the cache is process-global
@@ -160,6 +206,7 @@ class TestLocalEmbeddingProviderRealModelSmoke:
     """AC6: one real-model smoke test — SKIP (not FAIL) when unavailable
     (no network / no cached weights), so no-network CI stays green."""
 
+    @pytest.mark.needs_real_sentence_transformers
     def test_real_model_loads_and_embeds(self):
         pytest.importorskip("sentence_transformers")
 

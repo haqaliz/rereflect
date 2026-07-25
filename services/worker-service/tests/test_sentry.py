@@ -15,7 +15,8 @@ Tests verify:
 
 import importlib
 import os
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,6 +27,18 @@ def _reimport_celery_app_with_env(env: dict, clear: bool = False):
     patched, and return (module, mock_init). This executes celery_app.py's real
     module-level Sentry block.
     """
+    # test_webhook_delivery.py installs MagicMocks for sentry_sdk and its
+    # integrations into sys.modules at import time and never removes them. Once
+    # that has happened, reloading celery_app here picks up a mocked
+    # CeleryIntegration and the integration assertion fails — but only when the
+    # whole suite runs, not for this file alone. Evict the stubs and re-import the
+    # real package so this test is independent of collection order.
+    for name in ("sentry_sdk.integrations.celery", "sentry_sdk.integrations", "sentry_sdk"):
+        mod = sys.modules.get(name)
+        if isinstance(mod, MagicMock):
+            del sys.modules[name]
+    importlib.import_module("sentry_sdk.integrations.celery")
+
     with patch.dict(os.environ, env, clear=clear):
         with patch("sentry_sdk.init") as mock_init:
             import src.celery_app as celery_module

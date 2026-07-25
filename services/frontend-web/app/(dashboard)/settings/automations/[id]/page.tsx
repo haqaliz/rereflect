@@ -78,6 +78,84 @@ interface TriggerConfigProps {
   disabled?: boolean;
 }
 
+/**
+ * The category-match branch owns a text input, so it needs local state. It used
+ * to call useState() inline inside TriggerConfigFields' if-chain, which changed
+ * the hook order whenever the user switched trigger types — a
+ * react-hooks/rules-of-hooks violation that React only tolerates by accident.
+ * Extracting it into its own component makes the hook unconditional.
+ */
+function CategoryMatchTriggerFields({
+  config,
+  onChange,
+  disabled,
+}: {
+  config: Record<string, any>;
+  onChange: (config: Record<string, any>) => void;
+  disabled?: boolean;
+}) {
+  const tags: string[] = config.tags ?? [];
+  const [tagInput, setTagInput] = useState('');
+
+  const addTag = () => {
+    const tag = tagInput.trim().toLowerCase();
+    if (tag && !tags.includes(tag)) {
+      onChange({ ...config, tags: [...tags, tag] });
+      setTagInput('');
+    }
+  };
+
+  const removeTag = (tag: string) => {
+    onChange({ ...config, tags: tags.filter(t => t !== tag) });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">Category tags</label>
+        <div className="flex gap-2">
+          <Input
+            value={tagInput}
+            onChange={e => setTagInput(e.target.value)}
+            placeholder="e.g. billing, authentication"
+            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
+            disabled={disabled}
+            className="flex-1"
+          />
+          <Button variant="outline" size="sm" type="button" onClick={addTag} disabled={disabled}>
+            Add
+          </Button>
+        </div>
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1">
+            {tags.map(tag => (
+              <Badge
+                key={tag}
+                variant="secondary"
+                className={disabled ? '' : 'cursor-pointer'}
+                onClick={() => !disabled && removeTag(tag)}
+              >
+                {tag} {!disabled && <>×</>}
+              </Badge>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="trigger-urgent"
+          checked={config.urgent ?? false}
+          onCheckedChange={checked => !disabled && onChange({ ...config, urgent: !!checked })}
+          disabled={disabled}
+        />
+        <label htmlFor="trigger-urgent" className="text-sm cursor-pointer">
+          Only when feedback is urgent
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function TriggerConfigFields({ triggerType, config, onChange, disabled }: TriggerConfigProps) {
   if (triggerType === 'health_score_threshold') {
     return (
@@ -150,65 +228,12 @@ function TriggerConfigFields({ triggerType, config, onChange, disabled }: Trigge
   }
 
   if (triggerType === 'feedback_category_match') {
-    const tags: string[] = config.tags ?? [];
-    const [tagInput, setTagInput] = useState('');
-
-    const addTag = () => {
-      const tag = tagInput.trim().toLowerCase();
-      if (tag && !tags.includes(tag)) {
-        onChange({ ...config, tags: [...tags, tag] });
-        setTagInput('');
-      }
-    };
-
-    const removeTag = (tag: string) => {
-      onChange({ ...config, tags: tags.filter(t => t !== tag) });
-    };
-
     return (
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Category tags</label>
-          <div className="flex gap-2">
-            <Input
-              value={tagInput}
-              onChange={e => setTagInput(e.target.value)}
-              placeholder="e.g. billing, authentication"
-              onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())}
-              disabled={disabled}
-              className="flex-1"
-            />
-            <Button variant="outline" size="sm" type="button" onClick={addTag} disabled={disabled}>
-              Add
-            </Button>
-          </div>
-          {tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-1">
-              {tags.map(tag => (
-                <Badge
-                  key={tag}
-                  variant="secondary"
-                  className={disabled ? '' : 'cursor-pointer'}
-                  onClick={() => !disabled && removeTag(tag)}
-                >
-                  {tag} {!disabled && <>×</>}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="trigger-urgent"
-            checked={config.urgent ?? false}
-            onCheckedChange={checked => !disabled && onChange({ ...config, urgent: !!checked })}
-            disabled={disabled}
-          />
-          <label htmlFor="trigger-urgent" className="text-sm cursor-pointer">
-            Only when feedback is urgent
-          </label>
-        </div>
-      </div>
+      <CategoryMatchTriggerFields
+        config={config}
+        onChange={onChange}
+        disabled={disabled}
+      />
     );
   }
 
@@ -738,7 +763,7 @@ export default function AutomationDetailPage() {
               </CardHeader>
               <CardContent className="pt-5">
                 <div className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground">Don't re-trigger within</span>
+                  <span className="text-sm text-muted-foreground">Don&rsquo;t re-trigger within</span>
                   <Input
                     data-testid="cooldown-hours-input"
                     type="number"
@@ -777,7 +802,7 @@ export default function AutomationDetailPage() {
               <CardContent className="pt-4">
                 {executions.length === 0 ? (
                   <p className="text-center py-8 text-muted-foreground text-sm">
-                    No executions yet. This rule hasn't fired.
+                    No executions yet. This rule hasn&rsquo;t fired.
                   </p>
                 ) : (
                   <div className="overflow-x-auto">

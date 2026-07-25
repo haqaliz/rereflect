@@ -188,15 +188,12 @@ describe('AutomationForm - submit creates rule', () => {
     const nameInput = screen.getByTestId('rule-name-input');
     fireEvent.change(nameInput, { target: { value: 'New Rule' } });
 
-    // Select a trigger type
-    const triggerSelect = screen.getByTestId('trigger-type-select');
-    fireEvent.click(triggerSelect);
-
-    await waitFor(() => {
-      expect(screen.getByText('Health Score Threshold')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText('Health Score Threshold'));
+    // Trigger type is a Radix <Select>; fireEvent.click on the trigger does not
+    // open the listbox in jsdom, so the selection silently never happened and the
+    // submitted payload came through without a trigger_type.
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('trigger-type-select'));
+    await user.click(await screen.findByText('Health Score Threshold'));
 
     await waitFor(() => {
       expect(screen.getByTestId('trigger-config-threshold')).toBeInTheDocument();
@@ -207,10 +204,12 @@ describe('AutomationForm - submit creates rule', () => {
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
+      // The create payload nests the trigger as { type, config }; it used to be a
+      // flat trigger_type field.
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           name: 'New Rule',
-          trigger_type: 'health_score_threshold',
+          trigger: expect.objectContaining({ type: 'health_score_threshold' }),
         })
       );
     });

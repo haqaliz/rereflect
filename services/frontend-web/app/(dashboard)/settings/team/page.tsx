@@ -716,7 +716,7 @@ export default function TeamSettingsPage() {
                     <li>Give the new owner full control of the organization</li>
                     <li>Remove your access to billing and subscription settings</li>
                     <li>Change your role from Owner to Admin</li>
-                    <li>Cannot be reversed without the new owner's consent</li>
+                    <li>Cannot be reversed without the new owner&rsquo;s consent</li>
                   </ul>
                 </AlertDescription>
               </Alert>

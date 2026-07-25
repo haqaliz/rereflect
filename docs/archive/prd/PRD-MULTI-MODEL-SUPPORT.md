@@ -821,7 +821,7 @@ cryptography>=43.0.0
 
 ## Related
 
-- [AI-TRACKING.md](AI-TRACKING.md) — AI roadmap (M2.1 section)
+- [AI-TRACKING.md](../../../AI-TRACKING.md) — AI roadmap (M2.1 section)
 - [PRD-CHURN-PREDICTION-ACCURACY.md](PRD-CHURN-PREDICTION-ACCURACY.md) — M1.4 (predecessor)
 - `worker-service/src/openai_client.py` — Current LLM code (to be replaced)
 - `services/backend-api/src/api/routes/ai_settings.py` — Current AI settings API

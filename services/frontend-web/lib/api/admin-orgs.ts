@@ -6,7 +6,6 @@ export interface AdminOrg {
   plan: string;
   user_count: number;
   stripe_customer_id: string | null;
-  promo_code_used: string | null;
   created_at: string;
 }
 

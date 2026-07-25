@@ -16,8 +16,8 @@ Kept (Stripe-free, useful for self-hosted):
   - GET  /usage   — feedback and seat usage counters (calendar-month window,
                     no Stripe billing period, no Stripe-era counters)
 
-The `stripe_service` import is retained so the module compiles whether or not
-the `stripe` package is installed (stripe_service itself is now import-guarded).
+The `stripe_service` module itself was deleted for 1.0.0 — nothing imported it
+any more once the Stripe-only routes and the admin promo-code surface were removed.
 """
 from typing import Optional
 from datetime import datetime
@@ -32,7 +32,6 @@ from src.models.usage import UsageRecord
 from src.models.user import User
 from src.api.dependencies import get_current_org
 from src.config.plans import PLANS, get_plan, get_feedback_limit, get_seat_limit
-from src.services.stripe_service import get_stripe_service  # import-guarded stub
 
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])

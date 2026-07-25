@@ -290,9 +290,6 @@ describe('ResponseTemplates - custom templates CRUD', () => {
   });
 
   it('calls deleteTemplate API when delete button is clicked and confirmed', async () => {
-    // Confirm dialog mock
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
     render(<ResponseTemplatesPage />);
     await waitFor(() => {
       expect(screen.getByText('Enterprise Welcome')).toBeInTheDocument();
@@ -300,6 +297,11 @@ describe('ResponseTemplates - custom templates CRUD', () => {
 
     const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
     fireEvent.click(deleteButtons[0]);
+
+    // The page confirms through a shadcn Dialog, not window.confirm — the row
+    // button only opens it.
+    const confirmButton = await screen.findByRole('button', { name: /^confirm$/i });
+    fireEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(mockDeleteTemplate).toHaveBeenCalledWith(10);

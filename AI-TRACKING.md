@@ -660,4 +660,5 @@ CustomerProfile
 ## Related
 
 - [DEV-TRACKING.md](DEV-TRACKING.md) - Overall development tracking
-- [PRD-PREDICTIVE-ANALYTICS.md](PRD-PREDICTIVE-ANALYTICS.md) - Predictive analytics PRD (completed)
+- [PRD-PREDICTIVE-ANALYTICS.md](docs/archive/prd/PRD-PREDICTIVE-ANALYTICS.md) - Predictive analytics PRD (completed)
+- [docs/archive/prd/](docs/archive/prd/) - All shipped PRDs, archived (unmaintained; their `Status:` headers are pre-implementation)

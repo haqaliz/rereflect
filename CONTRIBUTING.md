@@ -13,7 +13,7 @@ and help make this a welcoming project for everyone.
 ### Prerequisites
 
 - Python 3.12+
-- Node.js 18+
+- Node.js 22+ and pnpm 10 (`corepack enable`)
 - PostgreSQL 14+
 - Redis
 
@@ -36,7 +36,9 @@ cd services/backend-api && ./start.sh
 cd services/worker-service && ./start.sh
 
 # Frontend (http://localhost:3000)
-cd services/frontend-web && npm run dev
+# This is a pnpm workspace — install once from the repo root, then run the app.
+pnpm install
+cd services/frontend-web && pnpm dev
 ```
 
 ### Environment
@@ -84,12 +86,22 @@ alembic revision -m "describe your change"
 # Backend (pytest)
 cd services/backend-api && pytest tests/ -v
 
+# Worker (pytest)
+cd services/worker-service && pytest tests/ -v
+
+# Frontend tests (vitest)
+cd services/frontend-web && pnpm test
+
 # Frontend lint
-cd services/frontend-web && npm run lint
+cd services/frontend-web && pnpm lint
 
 # Frontend build (type-check + production build)
-cd services/frontend-web && npm run build
+cd services/frontend-web && pnpm build
 ```
+
+CI (`.github/workflows/ci.yml`) runs all of these on every pull request, plus
+`alembic upgrade head` against a clean PostgreSQL and a single-Alembic-head
+check. A pull request should be green before review.
 
 Please add or update tests for any behavior you change. Backend route changes
 should include endpoint tests; verify migrations against a real PostgreSQL
@@ -114,7 +126,7 @@ database, not just SQLite.
 - Use CSS variables for theming — never hardcode colors. Prefer
   `color-mix(in oklch, ...)` for variations.
 - Use Skeleton components for loading states.
-- Keep components small and focused. Run `npm run lint` before committing.
+- Keep components small and focused. Run `pnpm lint` before committing.
 
 ### Backend (FastAPI + SQLAlchemy)
 

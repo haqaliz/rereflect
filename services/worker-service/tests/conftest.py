@@ -132,11 +132,17 @@ def unanalyzed_feedback(db, ai_enabled_org):
 @pytest.fixture
 def test_user(db, test_org):
     """Create a test user with digest enabled."""
+    # send_weekly_digests only picks up users whose weekly_digest_day/hour match
+    # the current UTC run time (alerts.py:502). The model defaults (Mon 09:00)
+    # would make these tests pass for one hour a week, so pin the fixture to now.
+    _now = datetime.utcnow()
     user = User(
         email="user@test.com",
         organization_id=test_org.id,
         role="owner",
         weekly_digest_enabled=True,
+        weekly_digest_day=_now.weekday(),
+        weekly_digest_hour=_now.hour,
     )
     db.add(user)
     db.commit()
@@ -147,11 +153,14 @@ def test_user(db, test_org):
 @pytest.fixture
 def opted_out_user(db, test_org):
     """Create a user who opted out of weekly digest."""
+    _now = datetime.utcnow()
     user = User(
         email="optout@test.com",
         organization_id=test_org.id,
         role="member",
         weekly_digest_enabled=False,
+        weekly_digest_day=_now.weekday(),
+        weekly_digest_hour=_now.hour,
     )
     db.add(user)
     db.commit()

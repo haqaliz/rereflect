@@ -645,7 +645,7 @@ Done.
 
 ## Related
 
-- [AI-TRACKING.md](AI-TRACKING.md) — M1.4 milestone
+- [AI-TRACKING.md](../../../AI-TRACKING.md) — M1.4 milestone
 - [PRD-PREDICTIVE-ANALYTICS.md](PRD-PREDICTIVE-ANALYTICS.md) — Original churn scoring implementation
 - [PRD-CUSTOMER-360.md](PRD-CUSTOMER-360.md) — Customer 360 page (dependency, completed)
 - [PRD-CUSTOMER-SENTIMENT-ALERTS.md](PRD-CUSTOMER-SENTIMENT-ALERTS.md) — M1.3 (dependency, completed)

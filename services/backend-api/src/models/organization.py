@@ -25,7 +25,6 @@ class Organization(Base):
     auto_assignment_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
 
     # Promo tracking
-    promo_code_used = Column(String(50), nullable=True)
 
     # Response Settings (M2.3 AI Response Suggestions)
     brand_voice = Column(Text, nullable=True)                    # max 500 chars; prepended to LLM system prompt
