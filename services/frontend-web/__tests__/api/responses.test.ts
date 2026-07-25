@@ -86,7 +86,10 @@ describe('responsesAPI.listTemplates', () => {
   });
 
   it('returns array of templates', async () => {
-    mockGet.mockResolvedValue({ data: [mockTemplate, mockCustomTemplate] });
+    // listTemplates unwraps response.data.templates (responses.ts:83)
+    mockGet.mockResolvedValue({
+      data: { templates: [mockTemplate, mockCustomTemplate] },
+    });
     const result = await responsesAPI.listTemplates();
     expect(result).toHaveLength(2);
     expect(result[0].name).toBe('Bug Report Acknowledgment');

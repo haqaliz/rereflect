@@ -47,7 +47,7 @@ export function ConversationList({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<number>>(new Set());
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'conversation' | 'folder'; id: string } | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const newFolderInputRef = useRef<HTMLInputElement>(null);
 
@@ -119,7 +119,7 @@ export function ConversationList({
 
   const handleDeleteConversation = async (publicId: string) => {
     setContextMenu(null);
-    setConfirmDeleteId(null);
+    setConfirmDelete(null);
     await conversationsAPI.deleteConversation(publicId);
     setConversations((prev) => prev.filter((c) => c.public_id !== publicId));
     onDeleteConversation?.(publicId);
@@ -127,6 +127,7 @@ export function ConversationList({
 
   const handleDeleteFolder = async (folderId: number) => {
     setContextMenu(null);
+    setConfirmDelete(null);
     await conversationsAPI.deleteFolder(folderId);
     setFolders((prev) => prev.filter((f) => f.id !== folderId));
     // Move conversations to unfiled
@@ -268,7 +269,7 @@ export function ConversationList({
                       onRenameChange={setRenameValue}
                       onRenameCommit={() => commitRename(conv.public_id)}
                       onRenameCancel={() => setRenamingId(null)}
-                      onRequestDelete={() => setConfirmDeleteId(conv.public_id)}
+                      onRequestDelete={() => setConfirmDelete({ type: 'conversation', id: conv.public_id })}
                     />
                   ))}
                 </div>
@@ -292,7 +293,7 @@ export function ConversationList({
                   onRenameChange={setRenameValue}
                   onRenameCommit={() => commitRename(conv.public_id)}
                   onRenameCancel={() => setRenamingId(null)}
-                  onRequestDelete={() => setConfirmDeleteId(conv.public_id)}
+                  onRequestDelete={() => setConfirmDelete({ type: 'conversation', id: conv.public_id })}
                 />
               ))}
           </>
@@ -321,7 +322,7 @@ export function ConversationList({
               </button>
               <button
                 className="w-full text-left px-3 py-1.5 hover:bg-muted text-destructive transition-colors"
-                onClick={() => { setConfirmDeleteId(contextMenu.id); setContextMenu(null); }}
+                onClick={() => { setConfirmDelete({ type: 'conversation', id: contextMenu.id }); setContextMenu(null); }}
               >
                 Delete
               </button>
@@ -331,7 +332,7 @@ export function ConversationList({
               <button
                 data-testid={`folder-delete-${contextMenu.id}`}
                 className="w-full text-left px-3 py-1.5 hover:bg-muted text-destructive transition-colors"
-                onClick={() => { setConfirmDeleteId(contextMenu.id); setContextMenu(null); }}
+                onClick={() => { setConfirmDelete({ type: 'folder', id: contextMenu.id }); setContextMenu(null); }}
               >
                 Delete
               </button>
@@ -341,23 +342,34 @@ export function ConversationList({
       )}
 
       {/* Delete confirmation dialog */}
-      <Dialog open={confirmDeleteId !== null} onOpenChange={(open) => { if (!open) setConfirmDeleteId(null); }}>
+      <Dialog open={confirmDelete !== null} onOpenChange={(open) => { if (!open) setConfirmDelete(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete conversation?</DialogTitle>
+            <DialogTitle>
+              {confirmDelete?.type === 'folder' ? 'Delete folder?' : 'Delete conversation?'}
+            </DialogTitle>
             <DialogDescription>
-              This will permanently delete this conversation and all its messages. This action cannot be undone.
+              {confirmDelete?.type === 'folder'
+                ? 'This will delete the folder. Conversations inside it are kept and moved to Unfiled.'
+                : 'This will permanently delete this conversation and all its messages. This action cannot be undone.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setConfirmDeleteId(null)}>
+            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(null)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
               size="sm"
               data-testid="confirm-delete-btn"
-              onClick={() => { if (confirmDeleteId) handleDeleteConversation(confirmDeleteId); }}
+              onClick={() => {
+                if (!confirmDelete) return;
+                if (confirmDelete.type === 'folder') {
+                  handleDeleteFolder(Number(confirmDelete.id));
+                } else {
+                  handleDeleteConversation(confirmDelete.id);
+                }
+              }}
             >
               Delete
             </Button>

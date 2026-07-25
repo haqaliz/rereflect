@@ -101,12 +101,19 @@ describe('MessageBubble — Rating buttons (Track B)', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows placeholder text "What was wrong?" in feedback input', () => {
+  it('prompts for what went wrong, with an example-led placeholder', () => {
     render(<MessageBubble message={aiMessage} />);
     fireEvent.click(screen.getByTestId(`thumbs-down-btn-${aiMessage.id}`));
 
+    // The bare "What was wrong?" placeholder was replaced by a dialog title plus
+    // an examples hint in the textarea (MessageActions.tsx:128,135).
+    expect(screen.getByText('What went wrong?')).toBeInTheDocument();
+
     const input = screen.getByTestId(`correction-feedback-input-${aiMessage.id}`);
-    expect(input).toHaveAttribute('placeholder', 'What was wrong?');
+    expect(input).toHaveAttribute(
+      'placeholder',
+      'e.g., The data was inaccurate, the tone was off, it missed the point...'
+    );
   });
 
   it('submits correction with feedback text when send button clicked', async () => {

@@ -188,8 +188,6 @@ describe('LinearSettings', () => {
       vi.mocked(linearAPI.disconnect).mockResolvedValue(undefined);
       vi.mocked(linearAPI.getTeamMappings).mockResolvedValue([]);
       vi.mocked(linearAPI.getStatusMappings).mockResolvedValue([]);
-      // Mock window.confirm to return true
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
       render(<LinearSettings />);
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /disconnect/i })).toBeInTheDocument();
@@ -197,6 +195,8 @@ describe('LinearSettings', () => {
       // After clicking disconnect, status re-fetches to disconnected
       vi.mocked(linearAPI.getStatus).mockResolvedValue(disconnectedStatus);
       fireEvent.click(screen.getByRole('button', { name: /disconnect/i }));
+      // Confirmation moved from window.confirm to a shadcn Dialog.
+      fireEvent.click(await screen.findByRole('button', { name: /^confirm$/i }));
       await waitFor(() => {
         expect(linearAPI.disconnect).toHaveBeenCalled();
       });

@@ -222,11 +222,19 @@ describe('CommandBar', () => {
     expect(screen.getByTestId('template-chip-0')).not.toHaveAttribute('data-highlighted', 'true');
   });
 
+  // Arrow-key navigation wraps over ALL chips — static templates plus the report
+  // templates (and any dynamic suggestions) — so derive the count from the DOM
+  // rather than hardcoding it. It was 8 before REPORT_TEMPLATES was added.
+  const chipCount = () =>
+    document.querySelectorAll('[data-testid^="template-chip-"]').length;
+
   it('wraps around to the first chip after passing the last chip', () => {
     renderCommandBar();
     const input = screen.getByPlaceholderText(/ask anything about your feedback/i);
-    // 8 templates → pressing down 9 times wraps back to index 0
-    for (let i = 0; i < 9; i++) {
+    const total = chipCount();
+    expect(total).toBeGreaterThan(0);
+    // Stepping down total + 1 times wraps back to index 0.
+    for (let i = 0; i < total + 1; i++) {
       fireEvent.keyDown(input, { key: 'ArrowDown' });
     }
     expect(screen.getByTestId('template-chip-0')).toHaveAttribute('data-highlighted', 'true');
@@ -235,8 +243,12 @@ describe('CommandBar', () => {
   it('highlights the last chip on ArrowUp from no selection', () => {
     renderCommandBar();
     const input = screen.getByPlaceholderText(/ask anything about your feedback/i);
+    const lastIndex = chipCount() - 1;
     fireEvent.keyDown(input, { key: 'ArrowUp' });
-    expect(screen.getByTestId('template-chip-7')).toHaveAttribute('data-highlighted', 'true');
+    expect(screen.getByTestId(`template-chip-${lastIndex}`)).toHaveAttribute(
+      'data-highlighted',
+      'true'
+    );
   });
 
   it('submits the highlighted template text on Enter', () => {

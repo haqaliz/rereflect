@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -152,8 +153,9 @@ describe('WebhookDetail - delivery log tab', () => {
       expect(screen.getByRole('tab', { name: /delivery log/i })).toBeInTheDocument();
     });
 
-    // Switch to Delivery Log tab
-    fireEvent.click(screen.getByRole('tab', { name: /delivery log/i }));
+    // Radix TabsTrigger activates on pointer events, which fireEvent.click does
+    // not synthesize in jsdom — the tab silently stayed on Configuration.
+    await userEvent.click(screen.getByRole('tab', { name: /delivery log/i }));
 
     await waitFor(() => {
       // Delivery events shown
@@ -192,6 +194,9 @@ describe('WebhookDetail - rotate secret', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /rotate secret/i }));
+
+    // Rotation is behind a shadcn confirm Dialog (page.tsx:207).
+    fireEvent.click(await screen.findByRole('button', { name: /^confirm$/i }));
 
     await waitFor(() => {
       expect(mockRotateSecret).toHaveBeenCalledWith(1);

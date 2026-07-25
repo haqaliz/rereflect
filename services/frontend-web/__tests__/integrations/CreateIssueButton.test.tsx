@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
+import userEvent from '@testing-library/user-event';
 
 // ── Next.js navigation ───────────────────────────────────────────────────────
 const mockPush = vi.fn();
@@ -67,6 +68,13 @@ vi.mock('@/hooks/useRealtimeEvents', () => ({
   useRealtimeEvents: vi.fn(),
 }));
 
+// The page tree consumes RealtimeContext; without this the provider-less render
+// throws "useRealtime must be used within a RealtimeProvider".
+vi.mock('@/contexts/RealtimeContext', () => ({
+  RealtimeProvider: ({ children }: { children: React.ReactNode }) => children,
+  useRealtime: () => ({ connected: false, reconnecting: false, subscribe: vi.fn() }),
+}));
+
 import { feedbackAPI } from '@/lib/api/feedback';
 import { linearAPI } from '@/lib/api/linear';
 
@@ -117,15 +125,25 @@ describe('Feedback Detail Page - Create Issue button', () => {
     vi.mocked(linearAPI.getLabels).mockResolvedValue([]);
   });
 
-  it('shows "Create Issue" button for Pro user with connected integration', async () => {
+  // "Create Issue" is no longer a top-level button — it is an item inside the
+  // Actions dropdown (feedbacks/[id]/page.tsx:490).
+  async function openActionsMenu() {
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /actions/i }));
+    return user;
+  }
+
+  it('offers "Create Issue" for a Pro user with a connected integration', async () => {
     mockUseAuth.mockReturnValue({ user: proUser });
     vi.mocked(linearAPI.getStatus).mockResolvedValue(connectedStatus);
 
     const FeedbackDetailPage = (await import('@/app/(dashboard)/feedbacks/[id]/page')).default;
     render(<FeedbackDetailPage />);
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /create issue/i })).toBeInTheDocument();
-    });
+    await openActionsMenu();
+
+    expect(
+      await screen.findByRole('menuitem', { name: /create issue/i })
+    ).toBeInTheDocument();
   });
 
   it('hides "Create Issue" button when no integration is connected', async () => {
@@ -141,16 +159,19 @@ describe('Feedback Detail Page - Create Issue button', () => {
     expect(screen.queryByRole('button', { name: /create issue/i })).not.toBeInTheDocument();
   });
 
-  it('shows disabled "Create Issue" button for Free plan user', async () => {
+  it('offers "Create Issue" to a Free-plan user too — plan gating was removed', async () => {
+    // The open-source self-hosted edition unlocks every feature; "Create Issue"
+    // used to be disabled below Pro, and that gate no longer exists.
     mockUseAuth.mockReturnValue({ user: freeUser });
     vi.mocked(linearAPI.getStatus).mockResolvedValue(connectedStatus);
 
     const FeedbackDetailPage = (await import('@/app/(dashboard)/feedbacks/[id]/page')).default;
     render(<FeedbackDetailPage />);
-    await waitFor(() => {
-      const btn = screen.getByRole('button', { name: /create issue/i });
-      expect(btn).toBeDisabled();
-    });
+    await openActionsMenu();
+
+    const item = await screen.findByRole('menuitem', { name: /create issue/i });
+    expect(item).toBeInTheDocument();
+    expect(item).not.toHaveAttribute('data-disabled');
   });
 });
 

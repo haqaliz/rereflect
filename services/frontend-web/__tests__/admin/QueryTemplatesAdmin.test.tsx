@@ -4,9 +4,14 @@ import userEvent from '@testing-library/user-event';
 import React from 'react';
 
 // Mock next/navigation
+// The router object must be a STABLE reference: the page's load effect depends on
+// [user, isAdminOrOwner, router] (page.tsx:139). Returning a fresh object literal
+// per call re-runs the effect on every render, which re-fetches the template list
+// and silently reverts local state changes such as a delete.
 const mockPush = vi.fn();
+const mockRouter = { push: mockPush };
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => mockRouter,
 }));
 
 // Mock AuthContext
@@ -104,6 +109,13 @@ const mockedUpdate = adminQueryTemplatesAPI.update as ReturnType<typeof vi.fn>;
 const mockedDelete = adminQueryTemplatesAPI.delete as ReturnType<typeof vi.fn>;
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
+
+// The filters are Radix <Select>s, not native <select> elements — fireEvent.change
+// on the trigger is a no-op. Open the listbox and click the option instead.
+async function chooseOption(triggerTestId: string, optionLabel: RegExp) {
+  await userEvent.click(screen.getByTestId(triggerTestId));
+  await userEvent.click(await screen.findByRole('option', { name: optionLabel }));
+}
 
 describe('QueryTemplatesAdminPage', () => {
   beforeEach(() => {
@@ -248,8 +260,7 @@ describe('QueryTemplatesAdminPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('filter-created-by')).toBeInTheDocument();
       });
-      // Click "system" filter option
-      fireEvent.change(screen.getByTestId('filter-created-by'), { target: { value: 'system' } });
+      await chooseOption('filter-created-by', /^system$/i);
       await waitFor(() => {
         expect(screen.getByText('Count feedbacks by sentiment')).toBeInTheDocument();
         expect(screen.queryByText('Get urgent feedbacks')).not.toBeInTheDocument();
@@ -261,7 +272,7 @@ describe('QueryTemplatesAdminPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('filter-status')).toBeInTheDocument();
       });
-      fireEvent.change(screen.getByTestId('filter-status'), { target: { value: 'disabled' } });
+      await chooseOption('filter-status', /^disabled$/i);
       await waitFor(() => {
         expect(screen.getByText('Disabled template')).toBeInTheDocument();
         expect(screen.queryByText('Count feedbacks by sentiment')).not.toBeInTheDocument();
@@ -354,13 +365,12 @@ describe('QueryTemplatesAdminPage', () => {
     });
 
     it('removes deleted template from table', async () => {
-      const user = userEvent.setup();
       render(<QueryTemplatesAdminPage />);
       await waitFor(() => {
         expect(screen.getByText('Count feedbacks by sentiment')).toBeInTheDocument();
       });
-      await user.click(screen.getByTestId('delete-btn-1'));
-      await user.click(screen.getByTestId('delete-confirm-yes'));
+      fireEvent.click(screen.getByTestId('delete-btn-1'));
+      fireEvent.click(screen.getByTestId('delete-confirm-yes'));
       await waitFor(() => {
         expect(screen.queryByText('Count feedbacks by sentiment')).not.toBeInTheDocument();
       });

@@ -55,6 +55,13 @@ vi.mock('@/components/workflow/FeedbackTimeline', () => ({
   FeedbackTimeline: () => <div data-testid="feedback-timeline" />,
 }));
 
+// The page tree consumes RealtimeContext; without this the provider-less render
+// throws "useRealtime must be used within a RealtimeProvider".
+vi.mock('@/contexts/RealtimeContext', () => ({
+  RealtimeProvider: ({ children }: { children: React.ReactNode }) => children,
+  useRealtime: () => ({ connected: false, reconnecting: false, subscribe: vi.fn() }),
+}));
+
 import { feedbackAPI } from '@/lib/api/feedback';
 import { customerHealthAPI } from '@/lib/api/customer-health';
 import FeedbackDetailPage from '../../app/(dashboard)/feedbacks/[id]/page';

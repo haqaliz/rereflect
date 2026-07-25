@@ -44,7 +44,7 @@ vi.mock('@/lib/api/webhooks', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { webhooksAPI } from '@/lib/api/webhooks';
+import { webhooksAPI, PLAN_WEBHOOK_LIMITS } from '@/lib/api/webhooks';
 import WebhooksPage from '@/app/(dashboard)/settings/webhooks/page';
 
 const mockList = webhooksAPI.list as ReturnType<typeof vi.fn>;
@@ -91,13 +91,21 @@ const mockWebhooks = [
   },
 ];
 
+// webhooksAPI.list() resolves { webhooks, count, limit } — not a bare array.
+// The page reads data.webhooks, so a bare array makes it throw on render.
+const listResponse = (webhooks: typeof mockWebhooks | []) => ({
+  webhooks,
+  count: webhooks.length,
+  limit: PLAN_WEBHOOK_LIMITS.pro,
+});
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('WebhooksSettings - empty state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: adminUser });
-    mockList.mockResolvedValue([]);
+    mockList.mockResolvedValue(listResponse([]));
   });
 
   it('test_renders_empty_state_when_no_webhooks', async () => {
@@ -114,7 +122,7 @@ describe('WebhooksSettings - list rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: adminUser });
-    mockList.mockResolvedValue(mockWebhooks);
+    mockList.mockResolvedValue(listResponse(mockWebhooks));
   });
 
   it('test_renders_webhook_list', async () => {
@@ -159,7 +167,7 @@ describe('WebhooksSettings - add button at plan limit', () => {
       name: `Webhook ${i + 1}`,
     }));
     mockUseAuth.mockReturnValue({ user: adminUser }); // pro plan
-    mockList.mockResolvedValue(fiveWebhooks);
+    mockList.mockResolvedValue(listResponse(fiveWebhooks));
   });
 
   it('test_add_button_disabled_at_plan_limit', async () => {
@@ -176,7 +184,7 @@ describe('WebhooksSettings - delete webhook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: adminUser });
-    mockList.mockResolvedValue(mockWebhooks);
+    mockList.mockResolvedValue(listResponse(mockWebhooks));
     mockDelete.mockResolvedValue(undefined);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
@@ -191,6 +199,10 @@ describe('WebhooksSettings - delete webhook', () => {
     const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
     fireEvent.click(deleteButtons[0]);
 
+    // Delete is behind a confirm dialog — the row button only opens it.
+    const confirmButton = await screen.findByRole('button', { name: /^confirm$/i });
+    fireEvent.click(confirmButton);
+
     await waitFor(() => {
       expect(mockDelete).toHaveBeenCalledWith(1);
     });
@@ -201,7 +213,7 @@ describe('WebhooksSettings - test button', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ user: adminUser });
-    mockList.mockResolvedValue(mockWebhooks);
+    mockList.mockResolvedValue(listResponse(mockWebhooks));
     mockTest.mockResolvedValue({
       success: true,
       response_code: 200,

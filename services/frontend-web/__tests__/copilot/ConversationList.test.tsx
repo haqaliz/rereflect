@@ -232,6 +232,8 @@ describe('ConversationList', () => {
     });
     fireEvent.contextMenu(screen.getByTestId('conversation-item-test-uuid-42'));
     fireEvent.click(screen.getByText('Delete'));
+    // Deletion is behind a confirm dialog.
+    fireEvent.click(await screen.findByTestId('confirm-delete-btn'));
     await waitFor(() => {
       expect(mockedDeleteConversation).toHaveBeenCalledWith('test-uuid-42');
     });
@@ -313,6 +315,7 @@ describe('ConversationList', () => {
     const folder = screen.getByTestId('folder-item-1');
     fireEvent.contextMenu(folder);
     fireEvent.click(screen.getByTestId('folder-delete-1'));
+    fireEvent.click(await screen.findByTestId('confirm-delete-btn'));
     await waitFor(() => {
       expect(mockedDeleteFolder).toHaveBeenCalledWith(1);
     });
