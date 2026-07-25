@@ -281,7 +281,7 @@ function ModelSelector({
           <p className="font-medium text-foreground">Test result:</p>
           <pre className="text-muted-foreground whitespace-pre-wrap">{JSON.stringify(testResult.result, null, 2)}</pre>
           <p className="text-muted-foreground">
-            {testResult.tokens} tokens &middot; {testResult.cost_cents.toFixed(4)}¢ &middot; {testResult.latency_ms}ms
+            {testResult.tokens} tokens &middot; {(testResult.cost_cents ?? 0).toFixed(4)}¢ &middot; {testResult.latency_ms}ms
           </p>
         </div>
       )}

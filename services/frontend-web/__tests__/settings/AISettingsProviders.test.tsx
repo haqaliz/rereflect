@@ -312,7 +312,9 @@ describe('AISettingsProviders', () => {
         model: 'gpt-4o-mini',
         result: 'Analysis successful',
         tokens: 150,
-        cost: 0.01,
+        // The API field is cost_cents (ai-settings.ts:85); `cost` was stale and
+        // left the component reading undefined.toFixed(), which crashed the render.
+        cost_cents: 0.01,
         latency_ms: 500,
       });
       render(<AISettingsProviders settings={mockSettings} onUpdate={vi.fn()} />);
