@@ -30,6 +30,7 @@ import { AISettingsUsage } from '@/components/settings/AISettingsUsage';
 import { HealthWeightsEditor } from '@/components/settings/HealthWeightsEditor';
 import { AIReadinessCard } from '@/components/settings/AIReadinessCard';
 import { SentimentAccuracyCard } from '@/components/settings/SentimentAccuracyCard';
+import { RetrievalAccuracyCard } from '@/components/settings/RetrievalAccuracyCard';
 import { ClassifierAccuracyCard } from '@/components/settings/ClassifierAccuracyCard';
 
 type CategoryType = 'pain_point' | 'feature_request' | 'urgency' | 'general';
@@ -481,6 +482,9 @@ function AISettingsContent() {
 
             <div className="mt-6">
               <SentimentAccuracyCard />
+            </div>
+            <div className="mt-6">
+              <RetrievalAccuracyCard />
             </div>
             <div className="mt-6">
               <ClassifierAccuracyCard classifierType="sentiment" isAdminOrOwner={isAdminOrOwner} />
