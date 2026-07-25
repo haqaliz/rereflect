@@ -25,9 +25,15 @@ def org_with_baseline(db):
     db.refresh(org)
 
     now = datetime.utcnow()
-    # Create 10 days of historical data, ~10% negative per day
+    # Create 10 days of historical data, ~10% negative per day.
+    # Anchor each day to midnight: the detector groups by func.date(created_at),
+    # so `day + i hours` off a wall-clock `now` silently splits one logical day
+    # across two date buckets whenever now's hour + 9 crosses midnight. That made
+    # the whole class pass or fail depending on the time of day it ran.
     for day_offset in range(2, 12):  # days 2-11 ago (avoid last 24h)
-        day = now - timedelta(days=day_offset)
+        day = (now - timedelta(days=day_offset)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         for i in range(10):
             sentiment = "negative" if i == 0 else "positive"
             db.add(FeedbackItem(
@@ -127,7 +133,9 @@ class TestCheckOrgForAnomalyIntegration:
         # Extend the baseline so the outlier is properly diluted and the spike is
         # unambiguously >3σ.
         for day_offset in range(12, 30):
-            day = now - timedelta(days=day_offset)
+            day = (now - timedelta(days=day_offset)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
             for i in range(10):
                 sentiment = "negative" if i == 0 else "positive"
                 db.add(FeedbackItem(
