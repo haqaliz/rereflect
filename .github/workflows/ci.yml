@@ -55,6 +55,14 @@ jobs:
           cache: pip
           cache-dependency-path: services/backend-api/requirements.txt
 
+      # python3-saml pulls in lxml and xmlsec, which build from source and need
+      # libxml2/libxslt/xmlsec headers. The ubuntu-latest image does not ship them.
+      - name: Install system build dependencies (lxml / xmlsec for SAML SSO)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxml2-dev libxslt1-dev libxmlsec1-dev libxmlsec1-openssl pkg-config
+
       # torch / transformers / sentence-transformers are opt-in ML extras (~2 GB)
       # that only load when an org enables a local model. The suite covers their
       # call sites with stubs, so installing them here would cost minutes per run
