@@ -42,4 +42,8 @@ def default_model_for_provider(provider: str) -> Optional[str]:
         return GoogleEmbeddingProvider.DEFAULT_MODEL
     if provider == "ollama":
         return "nomic-embed-text"
+    if provider == "local":
+        from src.services.embeddings.providers.local import LocalEmbeddingProvider
+
+        return LocalEmbeddingProvider.DEFAULT_MODEL
     return None

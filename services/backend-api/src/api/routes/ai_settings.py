@@ -32,9 +32,13 @@ from src.services.sentiment_resolver import VALID_SENTIMENT_PROVIDERS
 
 router = APIRouter(prefix="/api/v1/settings/ai", tags=["ai-settings"])
 
-VALID_PROVIDERS = {"openai", "anthropic", "google", "ollama", "openai_compatible"}
+VALID_PROVIDERS = {"openai", "anthropic", "google", "ollama", "openai_compatible", "local"}
 
-# Local/offline providers: keyless, require a base_url instead of an API key
+# Local/offline providers: keyless, require a base_url instead of an API key.
+# "local" (in-process sentence-transformers embeddings, Aspect 2 / Task 2 of
+# local-embedding-quality) is deliberately NOT included here — it is keyless
+# but needs no base_url at all; it is gated instead by
+# _embedding_local_deps_available() below.
 LOCAL_PROVIDERS = {"ollama", "openai_compatible"}
 
 # Per-org corrections classifier mode (M5.2). Defined locally — the resolver
@@ -406,7 +410,23 @@ def _default_embedding_model(provider: str) -> Optional[str]:
         return GoogleEmbeddingProvider.DEFAULT_MODEL
     if provider == "ollama":
         return "nomic-embed-text"
+    if provider == "local":
+        from src.services.embeddings.providers.local import LocalEmbeddingProvider
+        return LocalEmbeddingProvider.DEFAULT_MODEL
     return None
+
+
+def _embedding_local_deps_available() -> bool:
+    """Cheap, safe check: are sentence-transformers/torch importable, without
+    importing them (find_spec has no import side effects). Mirrors
+    _sentiment_transformer_deps_available() below. Does NOT verify the model
+    actually loads — that's deliberately out of scope here.
+    """
+    import importlib.util
+    return (
+        importlib.util.find_spec("sentence_transformers") is not None
+        and importlib.util.find_spec("torch") is not None
+    )
 
 
 def _sentiment_transformer_deps_available() -> bool:
@@ -508,6 +528,18 @@ def update_ai_settings(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="base_url must be a valid http or https URL.",
             )
+
+    # ── 'local' embedding provider deps validation ────────────────────────────
+    # 'local' is keyless and needs no base_url (excluded from LOCAL_PROVIDERS
+    # above), but it does need sentence-transformers + torch importable.
+    if effective_provider == "local" and not _embedding_local_deps_available():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Embedding provider 'local' requires sentence-transformers and torch "
+                "to be installed. See docs/SELF_HOSTING.md for the local model setup."
+            ),
+        )
 
     # Persist base_url if explicitly included in the request (even as null).
     if "base_url" in data.model_fields_set and hasattr(config, "base_url"):

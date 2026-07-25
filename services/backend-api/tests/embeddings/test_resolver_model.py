@@ -73,6 +73,14 @@ class TestDefaultModelForProvider:
     def test_unknown_provider_has_no_default(self):
         assert default_model_for_provider("some_future_provider") is None
 
+    def test_local_default(self):
+        """Aspect 2 / Task 2: local's default must come from
+        LocalEmbeddingProvider.DEFAULT_MODEL (lazy import, no duplicated literal)."""
+        from src.services.embeddings.providers.local import LocalEmbeddingProvider
+
+        assert default_model_for_provider("local") == LocalEmbeddingProvider.DEFAULT_MODEL
+        assert default_model_for_provider("local") == "BAAI/bge-small-en-v1.5"
+
 
 class TestResolvedEmbedderModelField:
     """resolve_embedding_provider must thread the effective model through."""
@@ -124,6 +132,25 @@ class TestResolvedEmbedderModelField:
 
         assert result is not None
         assert result.model == "nomic-embed-text"
+
+    def test_local_provider_resolves_keyless_with_no_base_url(self):
+        """Aspect 2 / Task 2 AC3: default_provider='local' with NO base_url and
+        NO BYOK key must resolve via the keyless path — resolve_org_byok_key
+        must NOT be called for local."""
+        config = _make_config(
+            default_provider="local",
+            base_url=None,
+            model_embeddings=None,
+        )
+        db = _make_db_with_config(config)
+
+        with patch("src.services.embeddings.resolver.resolve_org_byok_key") as mock_byok:
+            result = resolve_embedding_provider(org_id=1, db=db)
+            mock_byok.assert_not_called()
+
+        assert result is not None
+        assert result.provider == "local"
+        assert result.model == "BAAI/bge-small-en-v1.5"
 
     def test_missing_model_embeddings_column_falls_back_to_default(self):
         """Pre-migration schema (no model_embeddings column at all) must still

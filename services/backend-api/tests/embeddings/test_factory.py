@@ -5,9 +5,14 @@ Phase 4 RED: Tests for EmbeddingProviderFactory.
 - create("openai_compatible", base_url=..., model="nomic-embed-text") → OpenAICompatibleEmbeddingProvider
 - create("ollama", ...) → OpenAICompatibleEmbeddingProvider with default base_url localhost:11434/v1
 - create("google", ...) → GoogleEmbeddingProvider
+- create("local", ...) → LocalEmbeddingProvider (Aspect 2 / Task 2, local-embedding-quality)
 - create("anthropic", ...) raises ValueError("no first-party embeddings API")
 - create("", ...) raises ValueError
 - create("unknown_xyz", ...) raises ValueError
+
+LocalEmbeddingProvider construction is safe to call directly (no mocking
+needed): __init__ never loads the model (see providers/local.py), so these
+tests stay offline/fast without patching sentence_transformers.
 """
 
 import pytest
@@ -18,6 +23,7 @@ from src.services.embeddings.providers.openai_compatible import (
     OpenAICompatibleEmbeddingProvider,
 )
 from src.services.embeddings.providers.google import GoogleEmbeddingProvider
+from src.services.embeddings.providers.local import LocalEmbeddingProvider
 
 
 class TestEmbeddingProviderFactory:
@@ -100,6 +106,29 @@ class TestEmbeddingProviderFactory:
         )
         assert provider._model == "models/text-multilingual-embedding-002"
 
+    def test_create_local_returns_local_provider(self):
+        """create('local') → LocalEmbeddingProvider (Aspect 2 / Task 2)."""
+        provider = EmbeddingProviderFactory.create("local")
+        assert isinstance(provider, LocalEmbeddingProvider)
+
+    def test_create_local_default_model_is_bge_small(self):
+        """Without model, local provider must default to LocalEmbeddingProvider.DEFAULT_MODEL."""
+        provider = EmbeddingProviderFactory.create("local")
+        assert provider._model == LocalEmbeddingProvider.DEFAULT_MODEL
+        assert provider._model == "BAAI/bge-small-en-v1.5"
+
+    def test_create_local_with_custom_model(self):
+        """create('local', model='x') must respect the override."""
+        provider = EmbeddingProviderFactory.create("local", model="x")
+        assert provider._model == "x"
+
+    def test_create_local_ignores_api_key_and_base_url(self):
+        """local is keyless — api_key/base_url must be accepted but ignored."""
+        provider = EmbeddingProviderFactory.create(
+            "local", api_key="unused-key", base_url="http://unused/v1"
+        )
+        assert isinstance(provider, LocalEmbeddingProvider)
+
     def test_create_anthropic_raises_value_error(self):
         """Anthropic has no embeddings API; factory must raise clear ValueError."""
         with pytest.raises(ValueError) as exc_info:
@@ -110,6 +139,12 @@ class TestEmbeddingProviderFactory:
         """Unknown provider name must raise ValueError."""
         with pytest.raises(ValueError):
             EmbeddingProviderFactory.create("cohere", api_key="key")
+
+    def test_unknown_provider_error_lists_local_as_supported(self):
+        """The 'Supported: ...' error message must list 'local' (Task 2 wiring)."""
+        with pytest.raises(ValueError) as exc_info:
+            EmbeddingProviderFactory.create("cohere", api_key="key")
+        assert "local" in str(exc_info.value)
 
     def test_create_empty_provider_raises_value_error(self):
         """Empty provider string must raise ValueError."""

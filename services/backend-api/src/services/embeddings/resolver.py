@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 # Providers that are keyless and require a base_url instead of a BYOK key.
 # Mirrors the worker-service _LOCAL_PROVIDERS constant (no cross-import).
-_LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", "openai_compatible"})
+# "local" (in-process sentence-transformers, Aspect 2 / Task 2) is keyless
+# too, but needs neither a base_url nor a BYOK key — it only hits the
+# `provider == "openai_compatible" and not base_url` guard below, which it
+# skips entirely since it isn't "openai_compatible".
+_LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", "openai_compatible", "local"})
 
 
 @dataclass

@@ -10,6 +10,7 @@ Supported providers:
   "openai_compatible" — Any OpenAI-API-compatible local/remote server (keyless)
   "ollama"            — Alias for openai_compatible with localhost:11434/v1 default
   "google"            — Google Generative AI Embeddings (BYOK key required)
+  "local"             — In-process sentence-transformers model (keyless, no base_url)
 
 Explicitly unsupported:
   "anthropic"         — Anthropic has no first-party embeddings API; raises ValueError.
@@ -45,7 +46,7 @@ class EmbeddingProviderFactory:
         the other providers (mirrors the worker factory pattern).
 
         Args:
-            provider:  One of "openai", "openai_compatible", "ollama", "google".
+            provider:  One of "openai", "openai_compatible", "ollama", "google", "local".
                        "anthropic" raises a clear error (no embeddings API).
                        Empty or unknown strings raise ValueError.
             api_key:   API key for cloud providers (openai, google).
@@ -67,7 +68,7 @@ class EmbeddingProviderFactory:
         if not provider:
             raise ValueError(
                 f"Unknown embedding provider: {provider!r}. "
-                f"Supported: openai, openai_compatible, ollama, google."
+                f"Supported: openai, openai_compatible, ollama, google, local."
             )
 
         if provider == "openai":
@@ -105,14 +106,18 @@ class EmbeddingProviderFactory:
                 model=model or GoogleEmbeddingProvider.DEFAULT_MODEL,
             )
 
+        elif provider == "local":
+            from src.services.embeddings.providers.local import LocalEmbeddingProvider
+            return LocalEmbeddingProvider(model=model or LocalEmbeddingProvider.DEFAULT_MODEL)
+
         elif provider == "anthropic":
             raise ValueError(
                 "Anthropic has no first-party embeddings API. "
-                "Use 'openai', 'openai_compatible', 'ollama', or 'google' instead."
+                "Use 'openai', 'openai_compatible', 'ollama', 'google', or 'local' instead."
             )
 
         else:
             raise ValueError(
                 f"Unknown embedding provider: {provider!r}. "
-                f"Supported: openai, openai_compatible, ollama, google."
+                f"Supported: openai, openai_compatible, ollama, google, local."
             )
