@@ -215,7 +215,7 @@ async def lifespan(app: FastAPI):
 root_path = os.getenv("ROOT_PATH", "")
 
 app = FastAPI(
-    title="Customer Feedback Analyzer API",
+    title="Rereflect API",
     version="1.0.0",
     description="Multi-tenant SaaS API for customer feedback analysis",
     lifespan=lifespan,

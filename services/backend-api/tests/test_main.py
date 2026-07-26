@@ -18,7 +18,7 @@ class TestRootEndpoint:
         assert "message" in data
         assert "version" in data
         assert "status" in data
-        assert data["message"] == "Customer Feedback Analyzer API"
+        assert data["message"] == "Rereflect API"
         assert data["version"] == "1.0.0"
         assert data["status"] == "running"
 
