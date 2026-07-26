@@ -41,7 +41,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://rereflect:rereflect@localhost:5432/rereflect_test
       REDIS_URL: redis://localhost:6379/0
-      SELF_HOSTED: 'true'
+      # Deliberately NOT setting SELF_HOSTED here. tests/conftest.py does
+      # `os.environ.setdefault("SELF_HOSTED", "false")` so the suite exercises the
+      # plan-gating paths normally, flipping to true per-test via patch.dict.
+      # Setting it in the job env makes that setdefault a no-op, unlocks every
+      # feature, and turns ~57 gating assertions (expect 403, get 200) red.
       # Deterministic dummy secrets — the suite never talks to a real provider.
       JWT_SECRET: ci-jwt-secret-not-used-outside-ci
       LLM_ENCRYPTION_KEY: 8ZBhLB0mS7lnKZKGSjZ0nGRxKCXQOxJvYcvHkKZ3fLY=
@@ -110,7 +114,6 @@ jobs:
 
     env:
       REDIS_URL: redis://localhost:6379/0
-      SELF_HOSTED: 'true'
 
     steps:
       - uses: actions/checkout@v4
