@@ -12,6 +12,23 @@ from src.models import (
     Organization, User, FeedbackItem, SentimentAnomaly, Integration,
 )
 
+def recent_ts(now, i):
+    """A timestamp inside the last 24h that is guaranteed to share `now`'s date.
+
+    The detector mixes two notions of time: a rolling 24-hour window for the
+    "current" numbers, and calendar-date buckets (func.date) for the baseline.
+    Placing recent items at `now - 1h - i minutes` straddles midnight whenever
+    `now` is just past 01:00, which splits them across two date buckets, inflates
+    the baseline's standard deviation, and drops the deviation under the 2σ
+    detection floor — so these tests failed only when CI happened to run in that
+    window. Clamping to today keeps the recent items in one bucket at any hour.
+    """
+    base = now.replace(second=0, microsecond=0) - timedelta(minutes=30)
+    if base.date() != now.date():
+        base = now.replace(hour=0, minute=1, second=0, microsecond=0)
+    return base + timedelta(seconds=i)
+
+
 
 @pytest.fixture
 def org_with_baseline(db):
@@ -80,7 +97,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label=sentiment,
                 sentiment_score=-0.5 if sentiment == "negative" else 0.5,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
@@ -101,7 +118,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label=sentiment,
                 sentiment_score=-0.5 if sentiment == "negative" else 0.5,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
@@ -157,7 +174,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label=sentiment,
                 sentiment_score=-0.8 if sentiment == "negative" else 0.5,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
@@ -203,7 +220,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label=sentiment,
                 sentiment_score=-0.5 if sentiment == "negative" else 0.5,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
@@ -240,7 +257,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label=sentiment,
                 sentiment_score=-0.5 if sentiment == "negative" else 0.5,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
@@ -288,7 +305,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label="negative",
                 sentiment_score=-0.8,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
@@ -309,7 +326,7 @@ class TestCheckOrgForAnomalyIntegration:
                 source="manual",
                 sentiment_label=sentiment,
                 sentiment_score=-0.5 if sentiment == "negative" else 0.5,
-                created_at=now - timedelta(hours=1, minutes=i),
+                created_at=recent_ts(now, i),
             ))
         db.commit()
 
