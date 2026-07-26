@@ -1,0 +1,76 @@
+# Root build context ignore.
+#
+# The frontend image builds from the REPO ROOT, not from services/frontend-web:
+# its Dockerfile copies pnpm-workspace.yaml, pnpm-lock.yaml and packages/ui,
+# because frontend-web is a member of the pnpm workspace and cannot be built in
+# isolation. Docker only honours the .dockerignore next to the build context, so
+# services/frontend-web/.dockerignore does not apply to that build — this file
+# does. Without it the daemon would be sent the whole working tree (~18 GB here,
+# mostly Python virtualenvs).
+
+# Version control
+.git/
+.gitignore
+
+# Python virtualenvs (several GB each)
+venv/
+venv.*/
+.venv/
+env/
+ENV/
+**/venv/
+**/venv.*/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# Node
+node_modules/
+**/node_modules/
+.pnpm-store/
+
+# Build output
+.next/
+**/.next/
+out/
+**/out/
+build/
+dist/
+
+# Test / coverage artifacts
+coverage/
+**/coverage/
+.nyc_output/
+lighthouse-report.json
+
+# Local tooling and scratch
+graphify-out/
+.claude/
+.claire/
+.cache/
+
+# Environment files — never bake secrets into an image
+.env
+.env.*
+!.env.example
+!.env.prod.example
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docs that do not affect the build
+docs/
+*.md
+!README.md

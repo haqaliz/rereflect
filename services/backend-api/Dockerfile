@@ -2,7 +2,14 @@
 # Build context must be ./services (parent directory) -- see docker-compose.yml /
 # docker-compose.prod.yml. Needed so this image can COPY the sibling analysis-engine
 # package (see below); a Docker build context cannot COPY anything outside itself.
-FROM python:3.12-slim
+# Pinned to bookworm deliberately, not floating on python:3.12-slim.
+# The SAML stack builds xmlsec from source against the system libxmlsec1, and the
+# pin in requirements.txt (xmlsec<=1.3.13 on linux) is chosen for bookworm's
+# libxmlsec1 1.2.37. When Debian promoted trixie, the unpinned tag moved with it and
+# the build broke two ways: trixie's gcc 14 turns -Wincompatible-pointer-types into
+# an error, and xmlsec 1.3.13's enc.c does not compile against the lxml 6 headers
+# pip pulls into its isolated build env. Re-pin only together with requirements.txt.
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
@@ -33,6 +40,8 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libxml2 \
     libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
     libxmlsec1 \
     libxmlsec1-dev \
     libxmlsec1-openssl \

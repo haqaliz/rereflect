@@ -1,6 +1,7 @@
 # Celery Worker Dockerfile
 # Build context should be ./services (parent directory)
-FROM python:3.12-slim
+# Pinned to bookworm to match the backend image; see services/backend-api/Dockerfile.
+FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 

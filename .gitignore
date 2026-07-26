@@ -302,7 +302,9 @@ temp/
 # ============================================
 
 # Docker
-.dockerignore
+# NOTE: .dockerignore is deliberately NOT ignored — it is a build input. Ignoring
+# it meant no .dockerignore had ever been committed, so every clone built its
+# images with no exclusions at all.
 docker-compose.override.yml
 *.log
 

@@ -149,8 +149,11 @@ services:
   # ===========================================
   frontend:
     build:
-      context: ./services/frontend-web
-      dockerfile: Dockerfile
+    # Built from the repo root, NOT from services/frontend-web: frontend-web is a
+    # pnpm workspace member, so its Dockerfile needs pnpm-workspace.yaml,
+    # pnpm-lock.yaml and packages/ui. See the root .dockerignore.
+      context: .
+      dockerfile: services/frontend-web/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
         # OPTIONAL browser-side error tracking. Empty (default) -> Sentry is never
