@@ -14,7 +14,12 @@ jobs:
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # ~4500 tests. Locally this is ~23 min; a GitHub runner has taken up to ~45,
+    # and the first attempt was killed at exactly the old 45-minute ceiling.
+    # Follow-up worth doing: pytest-xdist to cut this materially — most of the
+    # suite is SQLite-in-memory and parallelises cleanly, but a few tests share
+    # the Postgres service, so it needs verifying rather than switching on blind.
+    timeout-minutes: 75
 
     services:
       postgres:
