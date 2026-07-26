@@ -14,11 +14,13 @@ anyone to depend on it:
 - **Continuous integration.** The repo had no workflows at all. CI now runs the backend suite
   (against a real Postgres, migrated from scratch, with a single-Alembic-head assertion), the
   worker suite, and the frontend's lint + tests — on every pull request.
-- **A green test suite.** 41 tests across the three suites had rotted against the code they
-  cover, and `test_report_ws.py` was excluded wholesale. All of it is fixed or explicitly and
-  visibly skipped with the reason recorded. Two real bugs surfaced and were fixed along the way:
-  deleting a Copilot folder deleted it as a conversation, and the automation trigger editor called
-  a hook conditionally.
+- **A green test suite**, verified in CI: **backend 4501, worker 1345, frontend 1496**. Around
+  sixty tests across the three suites had rotted against the code they cover, and
+  `test_report_ws.py` was excluded wholesale. All of it is fixed, or explicitly and visibly
+  skipped with the reason recorded. Several of the failures were hiding real bugs: deleting a
+  Copilot folder deleted it as a conversation, the automation trigger editor called a hook
+  conditionally, the AI provider card crashed its own render on a missing field, and the
+  sentiment-anomaly suite only passed at certain times of day.
 - **The last of the SaaS scaffolding removed.** "Promo Codes" still appeared in the admin sidebar
   and rendered a page whose backend route was never mounted — a guaranteed-broken screen. That
   surface, the Stripe service stub behind it, and the dead `promo_code_used` column are gone.
