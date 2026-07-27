@@ -1156,7 +1156,8 @@ class HubSpotIntegration(Base):
     backfill_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False,
+                        onupdate=datetime.utcnow)  # mirrors backend HubSpotIntegration
 
     __table_args__ = (
         UniqueConstraint("organization_id",

@@ -15,6 +15,16 @@ from typing import Optional
 from src.models.customer_health import CustomerHealth
 
 
+def _float_or_none(val) -> Optional[float]:
+    """Coerce Decimal / Numeric column values to float safely.
+
+    Module-level so both serialize_customer_profile and the module-level
+    _read_crm_fields can use it; _read_crm_fields cannot close over a nested
+    definition, which is why a second identical helper (_f) existed here.
+    """
+    return float(val) if val is not None else None
+
+
 def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
     """Build a Customer 360 profile dict from a ``CustomerHealth`` ORM row.
 
@@ -52,10 +62,6 @@ def serialize_customer_profile(record: CustomerHealth, db=None) -> dict:
     llm_risk_drivers = analysis_data.get("risk_drivers")
     llm_urgency: Optional[str] = analysis_data.get("estimated_urgency")
     llm_analysis_type: Optional[str] = analysis_data.get("analysis_type")
-
-    def _float_or_none(val) -> Optional[float]:
-        """Coerce Decimal / Numeric column values to float safely."""
-        return float(val) if val is not None else None
 
     return {
         # ── Core ──────────────────────────────────────────────────────────────
@@ -123,17 +129,14 @@ def _read_crm_fields(record: CustomerHealth, db) -> dict:
                 pass
             crm = None
 
-    def _f(val):
-        return float(val) if val is not None else None
-
     return {
         "crm_company_name":    crm.company_name    if crm else None,
         "crm_lifecycle_stage": crm.lifecycle_stage if crm else None,
-        "crm_arr":             _f(crm.arr)          if crm else None,
+        "crm_arr":             _float_or_none(crm.arr)          if crm else None,
         "crm_renewal_date":    crm.renewal_date    if crm else None,
         "crm_deal_name":       crm.deal_name       if crm else None,
         "crm_deal_stage":      crm.deal_stage      if crm else None,
-        "crm_deal_amount":     _f(crm.deal_amount)  if crm else None,
+        "crm_deal_amount":     _float_or_none(crm.deal_amount)  if crm else None,
         "crm_provider":        crm.provider        if crm else None,
     }
 

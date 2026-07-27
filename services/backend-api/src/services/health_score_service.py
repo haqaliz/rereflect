@@ -156,8 +156,16 @@ def _compute_crm_component(
         sp.commit()
         if row is not None and row[0] is not None:
             renewal_date = row[0]
-            # Normalize to datetime. SQLAlchemy+SQLite returns datetime objects
-            # (via native_datetime mode) or ISO8601 strings. Handle both.
+            # Normalize to datetime.
+            #
+            # Which branch is live: crm_enrichment.renewal_date is a DateTime
+            # column, so on PostgreSQL — the only supported production database —
+            # psycopg2 already hands back a datetime and the isinstance checks
+            # below are all skipped. The string and bare-date branches exist for
+            # SQLite, which the entire backend test suite runs on and which
+            # returns ISO8601 strings for this raw-SQL SELECT. They are therefore
+            # dead in production but load-bearing in tests: do not remove them
+            # without first moving the suite onto PostgreSQL.
             if isinstance(renewal_date, str):
                 # Python 3.9's date.fromisoformat() only accepts "YYYY-MM-DD";
                 # datetime.fromisoformat() accepts full datetime strings.

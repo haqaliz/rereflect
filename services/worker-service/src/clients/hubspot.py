@@ -176,12 +176,20 @@ class HubSpotClient:
 
         data = resp.json()
         props = data.get("properties", {})
-        return {
+        arr_value = props.get(self._arr_property)
+        # "annualrevenue" is the stable contract key: consumers (hubspot_sync)
+        # read it literally regardless of the org's configured
+        # arr_property_name. Built explicitly rather than as two dict-literal
+        # entries, which silently collapsed to one whenever the configured name
+        # was the default and read as an accidental double-write.
+        company = {
             "name": props.get("name"),
-            self._arr_property: props.get(self._arr_property),
-            # convenience alias so callers can use "annualrevenue" regardless
-            "annualrevenue": props.get(self._arr_property),
+            "annualrevenue": arr_value,
         }
+        if self._arr_property != "annualrevenue":
+            # Also expose the raw property name for callers that introspect it.
+            company[self._arr_property] = arr_value
+        return company
 
     # ------------------------------------------------------------------
     # Deals

@@ -292,24 +292,10 @@ class TestConnectEndpoint:
                 headers=owner_headers,
             )
         assert resp.status_code == 422
+        # Names the missing env var so the operator knows what to set. This
+        # absorbed test_connect_missing_encryption_key_message_is_actionable,
+        # which exercised an identical path and asserted the same thing.
         assert "LLM_ENCRYPTION_KEY" in resp.json()["detail"]
-
-    def test_connect_missing_encryption_key_message_is_actionable(self, client, owner_headers):
-        with (
-            patch("src.api.routes.hubspot_integration.httpx.Client",
-                  return_value=hubspot_ping_ok()),
-            patch(
-                "src.api.routes.hubspot_integration.encrypt_api_key",
-                side_effect=ValueError("LLM_ENCRYPTION_KEY environment variable is not set"),
-            ),
-        ):
-            resp = client.post(
-                "/api/v1/integrations/hubspot/connect",
-                json={"access_token": VALID_TOKEN},
-                headers=owner_headers,
-            )
-        detail = resp.json()["detail"]
-        assert "LLM_ENCRYPTION_KEY" in detail
 
     def test_connect_second_connect_upserts(
         self, client, db, test_organization, owner_headers

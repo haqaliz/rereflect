@@ -390,8 +390,18 @@ class TestScoreMovesWhenCrmWeightRaised:
         ):
             result = compute_health_score(test_organization.id, self.EMAIL, db)
 
-        assert 0 <= result["health_score"] <= 100
-        assert result["health_score"] != 47
+        # Pinned rather than asserting "!= 47": a bare inequality passes for any
+        # wrong-but-different number, so it cannot catch a mis-weighted sum.
+        #   churn      55 * 0.35 = 19.25
+        #   sentiment  56 * 0.20 = 11.20
+        #   resolution 50 * 0.20 = 10.00
+        #   frequency  10 * 0.15 =  1.50
+        #   usage      50 * 0.00 =  0.00   (weight zeroed by this config)
+        #   crm        15 * 0.10 =  1.50   (mocked component)
+        #                          -----
+        #                          43.45  -> int() -> 43
+        assert result["health_score"] == 43
+        assert result["health_score"] != 47  # and still differs from the weight-0 baseline
 
     def test_weight_zero_still_returns_baseline_even_with_config(
         self, db, test_organization

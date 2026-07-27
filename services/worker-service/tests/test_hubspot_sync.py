@@ -8,6 +8,8 @@ Mirror test_usage_metrics.py structure exactly.
 from __future__ import annotations
 
 import importlib
+import os
+import pathlib
 import sys
 from contextlib import contextmanager
 from datetime import datetime
@@ -124,6 +126,63 @@ def _run_sync_org(org_id: int, db: Session, mock_client, health_mock=None):
 
 
 # ---------------------------------------------------------------------------
+# Mirror-parity helper
+# ---------------------------------------------------------------------------
+
+
+def backend_model_columns(module_filename: str, class_name: str) -> set:
+    """Return the DB column names declared by a backend-api model class.
+
+    Reads the backend source with `ast` instead of importing it. The previous
+    approach deleted every `src.*` entry from sys.modules, prepended
+    services/backend-api to sys.path, imported the backend model, then tried to
+    restore all of it. That mutated global interpreter state mid-suite, so it
+    was order-dependent and a standing CI-flake risk (review finding A2a).
+
+    Parsing side-steps all of that: no imports, no sys.path or sys.modules
+    mutation, and it cannot be perturbed by whatever ran before it.
+
+    A column's DB name is the first positional string argument to Column() when
+    present (``Column("db_name", ...)``), otherwise the attribute name.
+    """
+    import ast
+
+    repo_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    path = os.path.join(
+        repo_root, "services", "backend-api", "src", "models", module_filename
+    )
+    tree = ast.parse(pathlib.Path(path).read_text(), filename=path)
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            cols = set()
+            for stmt in node.body:
+                targets = (
+                    stmt.targets if isinstance(stmt, ast.Assign)
+                    else [stmt.target] if isinstance(stmt, ast.AnnAssign) else []
+                )
+                value = getattr(stmt, "value", None)
+                if not (
+                    isinstance(value, ast.Call)
+                    and getattr(value.func, "id", getattr(value.func, "attr", None)) == "Column"
+                ):
+                    continue
+                explicit = (
+                    value.args
+                    and isinstance(value.args[0], ast.Constant)
+                    and isinstance(value.args[0].value, str)
+                )
+                for t in targets:
+                    if isinstance(t, ast.Name):
+                        cols.add(value.args[0].value if explicit else t.id)
+            return cols
+
+    raise AssertionError(f"{class_name} not found in {path}")
+
+
+# ---------------------------------------------------------------------------
 # Phase 1: TestModelsAndMigration
 # ---------------------------------------------------------------------------
 
@@ -140,36 +199,11 @@ class TestModelsAndMigration:
         The backend model is imported by temporarily swapping sys.path and
         sys.modules so the worker's 'src' package is not shadowed.
         """
-        import os
-
-        # Worker mirror (available in current sys.path)
         from src.models import CrmEnrichment as WorkerModel
         worker_cols = {c.name for c in WorkerModel.__table__.columns}
-
-        # Temporarily save worker's src-related modules and path
-        worktree = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        backend_cols = backend_model_columns(
+            "crm_enrichment.py", "CrmEnrichment"
         )
-        backend_src = os.path.join(worktree, "services", "backend-api")
-
-        # Save & clear conflicting modules
-        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
-        for k in saved_mods:
-            del sys.modules[k]
-
-        # Prepend backend-api to path so its 'src' is found first
-        sys.path.insert(0, backend_src)
-        try:
-            from src.models.crm_enrichment import CrmEnrichment as BackendModel
-            backend_cols = {c.name for c in BackendModel.__table__.columns}
-        finally:
-            # Restore worker's src modules
-            sys.path.remove(backend_src)
-            # Remove any backend-api src modules we imported
-            for k in list(sys.modules.keys()):
-                if k == "src" or k.startswith("src."):
-                    del sys.modules[k]
-            sys.modules.update(saved_mods)
 
         assert worker_cols == backend_cols, (
             f"Column mismatch!\n"
@@ -185,31 +219,11 @@ class TestModelsAndMigration:
         Same sys.path/sys.modules swap technique as the crm_enrichment parity
         test above.
         """
-        import os
-
-        # Worker mirror (available in current sys.path)
         from src.models import HubSpotIntegration as WorkerModel
         worker_cols = {c.name for c in WorkerModel.__table__.columns}
-
-        worktree = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        backend_cols = backend_model_columns(
+            "hubspot_integration.py", "HubSpotIntegration"
         )
-        backend_src = os.path.join(worktree, "services", "backend-api")
-
-        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
-        for k in saved_mods:
-            del sys.modules[k]
-
-        sys.path.insert(0, backend_src)
-        try:
-            from src.models.hubspot_integration import HubSpotIntegration as BackendModel
-            backend_cols = {c.name for c in BackendModel.__table__.columns}
-        finally:
-            sys.path.remove(backend_src)
-            for k in list(sys.modules.keys()):
-                if k == "src" or k.startswith("src."):
-                    del sys.modules[k]
-            sys.modules.update(saved_mods)
 
         assert worker_cols == backend_cols, (
             f"Column mismatch!\n"
@@ -229,31 +243,11 @@ class TestModelsAndMigration:
         Same sys.path/sys.modules swap technique as the crm_enrichment parity
         test above.
         """
-        import os
-
-        # Worker mirror (available in current sys.path)
         from src.models import ChurnLabelSuggestion as WorkerModel
         worker_cols = {c.name for c in WorkerModel.__table__.columns}
-
-        worktree = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        backend_cols = backend_model_columns(
+            "churn_label_suggestion.py", "ChurnLabelSuggestion"
         )
-        backend_src = os.path.join(worktree, "services", "backend-api")
-
-        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
-        for k in saved_mods:
-            del sys.modules[k]
-
-        sys.path.insert(0, backend_src)
-        try:
-            from src.models.churn_label_suggestion import ChurnLabelSuggestion as BackendModel
-            backend_cols = {c.name for c in BackendModel.__table__.columns}
-        finally:
-            sys.path.remove(backend_src)
-            for k in list(sys.modules.keys()):
-                if k == "src" or k.startswith("src."):
-                    del sys.modules[k]
-            sys.modules.update(saved_mods)
 
         assert worker_cols == backend_cols, (
             f"Column mismatch!\n"
@@ -278,31 +272,11 @@ class TestModelsAndMigration:
         Same sys.path/sys.modules swap technique as the crm_enrichment parity
         test above.
         """
-        import os
-
-        # Worker mirror (available in current sys.path)
         from src.models import SalesforceIntegration as WorkerModel
         worker_cols = {c.name for c in WorkerModel.__table__.columns}
-
-        worktree = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        backend_cols = backend_model_columns(
+            "salesforce_integration.py", "SalesforceIntegration"
         )
-        backend_src = os.path.join(worktree, "services", "backend-api")
-
-        saved_mods = {k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")}
-        for k in saved_mods:
-            del sys.modules[k]
-
-        sys.path.insert(0, backend_src)
-        try:
-            from src.models.salesforce_integration import SalesforceIntegration as BackendModel
-            backend_cols = {c.name for c in BackendModel.__table__.columns}
-        finally:
-            sys.path.remove(backend_src)
-            for k in list(sys.modules.keys()):
-                if k == "src" or k.startswith("src."):
-                    del sys.modules[k]
-            sys.modules.update(saved_mods)
 
         assert worker_cols == backend_cols, (
             f"Column mismatch!\n"

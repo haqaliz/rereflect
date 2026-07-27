@@ -338,7 +338,11 @@ def hubspot_connect(
 
     hint = get_key_hint(payload.access_token)  # "...last4"
     hub_id = str(portal_meta.get("portalId", ""))
-    portal_name = portal_meta.get("companyName") or portal_meta.get("timeZone")
+    # Fall back to the hub id, not timeZone: a portal with no companyName set
+    # would otherwise be labelled with something like "US/Eastern" in the UI,
+    # which reads as a name but is not one. "Portal 12345678" is at least true
+    # and matches what the operator sees in HubSpot.
+    portal_name = portal_meta.get("companyName") or (f"Portal {hub_id}" if hub_id else None)
 
     # Step 3: Upsert — query by org (not requiring is_active so we can reactivate)
     existing = (
