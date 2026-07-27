@@ -463,10 +463,11 @@ def _analyze_feedback_item(feedback, db=None) -> None:
     # Update customer health score after analysis
     if feedback.customer_email and db is not None:
         try:
-            from src.services.health_score_service import update_customer_health
-            update_customer_health(feedback.organization_id, feedback.customer_email, db)
-        except ImportError:
-            pass
+            # Routed through the shared seam: the recompute is unavailable in the
+            # worker image today (GitHub #3), which this reports once per process
+            # instead of swallowing silently as `except ImportError: pass` did.
+            from src.services.health_recompute import request_health_recompute
+            request_health_recompute(feedback.organization_id, feedback.customer_email, db)
         except Exception as e:
             logger.warning(f"Failed to update customer health for {feedback.customer_email}: {e}")
 

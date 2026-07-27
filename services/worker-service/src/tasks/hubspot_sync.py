@@ -140,20 +140,14 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
     """
     Trigger a health-score recompute for the customer.
 
-    ImportError is silently tolerated: during a partial-deploy the
-    health_score_service module may not yet be present in the worker image.
-    All other errors propagate so the Celery task can decide on retry.
-
-    Verbatim copy from usage_metrics.py:135-153.
+    Delegates to the shared seam (see usage_metrics._call_update_health, which
+    does the same). The recompute is currently unavailable in the worker image,
+    which is why an enrichment upsert does not refresh crm_component —
+    GitHub #3. Errors raised by the recompute itself still propagate.
     """
-    try:
-        from src.services.health_score_service import update_customer_health
-        update_customer_health(org_id, customer_email, db)
-    except ImportError:
-        logger.warning(
-            "health_score_service not available; skipping health recompute "
-            "for org=%s email=%s", org_id, customer_email,
-        )
+    from src.services.health_recompute import request_health_recompute
+
+    request_health_recompute(org_id, customer_email, db)
 
 
 def _maybe_harvest(

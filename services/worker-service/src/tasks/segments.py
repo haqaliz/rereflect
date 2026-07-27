@@ -100,12 +100,25 @@ def recompute_segments() -> Dict[str, int]:
                     else None
                 )
 
-                # Lazy cross-service import: this module lives only in
-                # backend-api, but resolves at task runtime the same way
-                # usage_metrics.py imports update_customer_health.
-                from src.services.health_score_service import compute_sentiment_trend
-
-                sentiment = compute_sentiment_trend(row.organization_id, row.customer_email, db)
+                # health_score_service lives only in backend-api and is not in
+                # the worker image (GitHub #3), so this import always fails here.
+                # It used to raise into the per-row `except Exception` below,
+                # which meant the daily segment recompute skipped *every* row and
+                # segments were never refreshed at all.
+                #
+                # classify_segment already treats a missing sentiment trend as an
+                # optional signal (`direction=None` is a supported input), so
+                # degrade to that rather than losing the whole recompute. When the
+                # service becomes importable this transparently starts using the
+                # real trend again.
+                try:
+                    from src.services.health_score_service import compute_sentiment_trend
+                except ImportError:
+                    sentiment = None
+                else:
+                    sentiment = compute_sentiment_trend(
+                        row.organization_id, row.customer_email, db
+                    )
                 direction = sentiment.get("direction") if sentiment else None
 
                 new_segment = classify_segment(
