@@ -1,0 +1,66 @@
+# Build context ignore for the backend and worker images.
+#
+# Both build with `context: ./services` (dockerfile: <service>/Dockerfile), and
+# Docker only reads the .dockerignore sitting at the root of the build context —
+# so this file is the one that governs those builds. A per-service file such as
+# services/backend-api/.dockerignore is NOT consulted for a ./services context,
+# which is why one existed for a long time while having no effect at all.
+#
+# Without this, every backend or worker build in a working tree uploads each
+# service's virtualenv and node_modules to the daemon (~10 GB here).
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+venv.*/
+**/venv/
+**/venv.*/
+.venv/
+**/.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+**/node_modules/
+.pnpm-store/
+.next/
+**/.next/
+out/
+**/out/
+dist/
+build/
+
+# Tests and coverage
+coverage/
+**/coverage/
+.coverage
+htmlcov/
+**/.nyc_output/
+
+# Local state that must never enter an image
+.env
+.env.*
+!.env.example
+*.log
+celerybeat-schedule*
+*.sqlite3
+*.db
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
