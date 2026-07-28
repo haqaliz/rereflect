@@ -43,7 +43,12 @@ internal guess. `rereflect-next` should pick from here before the older roadmap 
 Two of the four comments needed no build work and are recorded under *No build required*
 so nobody re-litigates them.
 
-### P0 — `automation-worker-triggers-dead` (bug, NOT STARTED) — **worst of the batch**
+### P0 — `automation-worker-triggers-dead` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
+> Shipped: worker-side mirror `automation_feedback_trigger.py` (two triggers, four actions,
+> cooldown parity with the backend), module-level import in `analysis.py` so a broken import
+> fails loudly at startup, and migration `12a1003fbfe0` moving pre-existing rules on the two
+> repaired triggers to `mode='shadow'`. Worker suite 1372 passed; backend automation suites
+> 138 passed.
 > Found 2026-07-29 while digging the P1 Slack-channel bug. **Verified, not inferred.**
 
 - [ ] `services/worker-service/src/tasks/analysis.py:175` does
@@ -100,7 +105,10 @@ so nobody re-litigates them.
 > `health_score_service` inside a try with a comment documenting deliberate degradation —
 > not a bug, but it does mean the segment sentiment-trend signal is permanently absent.
 
-### P1 — `automation-slack-channel` (bug, IN FLIGHT `bug/automation-slack-channel`)
+### P1 — `automation-slack-channel` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
+> Shipped: `slack` branch in `_execute_notify` posting org-wide once per rule firing to every
+> active Slack integration, a real `error` on the action result so a dropped channel becomes
+> `partial_failure` instead of a false `success`, and a warning for any unknown channel.
 - [ ] `AutomationEngine._execute_notify` (`automation_engine.py:485-571`) implements only
       the `dashboard` and `email` channels, but the **Critical Bug Escalation** template
       (`src/config/automation_templates.py:72`) declares
