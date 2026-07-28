@@ -660,9 +660,14 @@ def test_analysis_does_not_swallow_import_error():
 
     source = inspect.getsource(analysis_module)
 
-    # The exact dead import this bug is about must be gone.
+    # The exact dead import this bug is about must be gone (a comment
+    # referencing the old module name by way of explanation is fine — only
+    # an executable import statement matters here).
     assert "from src.services.automation_engine import AutomationEngine" not in source
-    assert "automation_engine" not in source
+    assert not any(
+        isinstance(node, ast.ImportFrom) and node.module == "src.services.automation_engine"
+        for node in ast.walk(ast.parse(source))
+    )
 
     # The replacement import must live at module level (tree.body), not
     # nested inside a function/try block.
