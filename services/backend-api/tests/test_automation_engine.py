@@ -569,3 +569,82 @@ def test_failed_action_logs_error(db: Session, test_organization: Organization):
     errors = [a.get("error") for a in actions_executed if a.get("error")]
     assert len(errors) >= 1
     assert "assign boom" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (slack-channel-and-loudness) — characterization tests.
+#
+# These lock in today's dashboard/email behaviour so that adding the slack
+# channel + loudness in later phases cannot silently change it. Both must
+# pass immediately, with zero production changes.
+# ---------------------------------------------------------------------------
+
+def test_notify_dashboard_only_unchanged(db: Session, test_organization: Organization):
+    """channels:["dashboard"] creates one Notification per admin; error is None."""
+    from src.services.automation_engine import AutomationEngine
+    from src.models.notification import Notification
+
+    admin1 = User(
+        email="admin1@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    admin2 = User(
+        email="admin2@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    db.add_all([admin1, admin2])
+    db.commit()
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Notify Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["dashboard"]}
+    result = engine._execute_notify(config, fb, rule)
+    db.commit()
+
+    assert result["error"] is None
+
+    notifications = db.query(Notification).filter(
+        Notification.organization_id == test_organization.id,
+    ).all()
+    assert len(notifications) == 2
+    assert {n.user_id for n in notifications} == {admin1.id, admin2.id}
+
+
+def test_notify_email_channel_unchanged(db: Session, test_organization: Organization):
+    """channels:["email"] calls send_alert_email for each recipient; error is None."""
+    from src.services.automation_engine import AutomationEngine
+
+    admin = User(
+        email="admin@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    db.add(admin)
+    db.commit()
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Notify Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["email"]}
+
+    with patch("src.services.email_service.send_alert_email") as mock_send:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_send.assert_called_once()
+    assert mock_send.call_args.kwargs["to_email"] == admin.email
+    assert result["error"] is None
