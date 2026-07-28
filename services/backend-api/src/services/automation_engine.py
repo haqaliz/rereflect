@@ -24,9 +24,15 @@ from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
 from src.models.customer_health import CustomerHealth
 from src.models.feedback import FeedbackItem
+from src.models.integration import Integration
 from src.services.usage_trend_severity import is_worsening_transition
 
 logger = logging.getLogger(__name__)
+
+# Channels _execute_notify knows how to deliver. Any other string in a
+# rule's `channels` config is recorded as a loud error instead of being
+# silently dropped — see _execute_notify.
+KNOWN_NOTIFY_CHANNELS = {"dashboard", "email", "slack"}
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +242,23 @@ class AutomationEngine:
             return False
         # PRD only defines direction=below; treat absence the same way
         return int(health_score) < int(threshold)
+
+    # ------------------------------------------------------------------
+    # MIRRORED IN THE WORKER — change both or they silently diverge.
+    #
+    # `_trigger_sentiment_pattern` and `_trigger_feedback_category` below are
+    # ported verbatim into
+    # `services/worker-service/src/services/automation_feedback_trigger.py`.
+    # The worker cannot import this module (its image copies only
+    # worker-service/src + analysis-engine/src/analyzer), and these two
+    # triggers are dispatched ONLY from the worker's analysis task — so the
+    # worker mirror, not this class, is what actually evaluates them in
+    # production. This code path runs for backend-dispatched triggers only.
+    #
+    # The cooldown key scheme is deliberately identical in both
+    # (`automation_cooldown:{rule_id}:{customer_email}`, Redis DB 1) so a
+    # cooldown set by either process is honoured by the other.
+    # ------------------------------------------------------------------
 
     def _trigger_sentiment_pattern(self, cfg: dict, context: dict) -> bool:
         """Fire when customer has >= count negative feedbacks in last *days* days."""
@@ -489,10 +512,24 @@ class AutomationEngine:
         rule: AutomationRule,
     ) -> Dict:
         """
-        Create in-app (and optionally email) notifications for the configured recipients.
+        Create in-app / email / Slack notifications for the configured recipients.
 
         recipients: "assignee" | "admins" | "owner" | "user:{id}"
-        channels:   ["dashboard"] | ["email"] | ["dashboard", "email"]
+        channels:   any non-empty subset of KNOWN_NOTIFY_CHANNELS =
+                    {"dashboard", "email", "slack"}.
+
+        "dashboard" and "email" are per-recipient (one Notification / email
+        per resolved user id). "slack" is org-wide: it posts once per rule
+        firing to every active `Integration` row with type="slack" for the
+        org, regardless of how many recipients were resolved — Slack has no
+        per-user identity here.
+
+        Any channel string outside KNOWN_NOTIFY_CHANNELS is logged as a
+        warning and recorded as a channel error rather than silently
+        dropped. The returned "error" is `None` only when every requested
+        channel was delivered; otherwise it is a "; "-joined summary of
+        every channel failure, so `_evaluate_rule` computes
+        "partial_failure" (or "failed") instead of a false "success".
         """
         from src.models.notification import Notification
         from src.models.user import User
@@ -504,6 +541,8 @@ class AutomationEngine:
             "message_template",
             f"Automation '{rule.name}' triggered for feedback #{feedback.id if feedback else '?'}",
         )
+
+        channel_errors: List[str] = []
 
         # Resolve recipient user IDs
         target_user_ids: List[int] = []
@@ -564,10 +603,81 @@ class AutomationEngine:
                 except Exception as exc:
                     logger.warning("AutomationEngine: email notify failed for user %s: %s", uid, exc)
 
+        # Slack is org-wide and fires once per rule firing, not once per
+        # recipient — posting inside the loop above would duplicate the
+        # message N times for N resolved users.
+        slack_sent = 0
+        if "slack" in channels:
+            integrations = (
+                self.db.query(Integration)
+                .filter(
+                    Integration.organization_id == org_id,
+                    Integration.type == "slack",
+                    Integration.is_active.is_(True),
+                )
+                .all()
+            )
+            if not integrations:
+                channel_errors.append("slack: no active Slack integration configured")
+
+            title = f"Automation: {rule.name}"
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*{title}*\n{message_template}"},
+                }
+            ]
+            if feedback is not None:
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [
+                            {"type": "mrkdwn", "text": f"Feedback #{feedback.id}"}
+                        ],
+                    }
+                )
+
+            for integration in integrations:
+                try:
+                    webhook_url = (integration.config or {}).get("webhook_url")
+                    if not webhook_url:
+                        channel_errors.append(
+                            f"slack: integration {integration.id} has no webhook_url"
+                        )
+                        continue
+
+                    from src.api.routes.integrations import send_slack_message
+
+                    res = send_slack_message(
+                        webhook_url=webhook_url, blocks=blocks, text=title
+                    )
+                    if res.get("success"):
+                        slack_sent += 1
+                    else:
+                        channel_errors.append(
+                            f"slack: integration {integration.id}: {res.get('error')}"
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "AutomationEngine: slack notify failed for integration %s: %s",
+                        integration.id, exc,
+                    )
+                    channel_errors.append(f"slack: integration {integration.id}: {exc}")
+
+        # Loudness: any channel string outside the known set is a silent
+        # drop unless we log and record it here.
+        for ch in channels:
+            if ch not in KNOWN_NOTIFY_CHANNELS:
+                logger.warning(
+                    "AutomationEngine: unknown notification channel %r on rule %s",
+                    ch, rule.id,
+                )
+                channel_errors.append(f"unknown channel: {ch}")
+
         return {
             "type": "send_notification",
-            "result": {"notifications_created": created_count},
-            "error": None,
+            "result": {"notifications_created": created_count, "slack_sent": slack_sent},
+            "error": "; ".join(channel_errors) if channel_errors else None,
         }
 
     def _execute_draft_response(

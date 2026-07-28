@@ -33,6 +33,148 @@ Rereflect pivoted to **free, open-source, self-hosted (MIT, BYOK)**. The SaaS/MR
 
 ---
 
+## Post-1.0.0 User Feedback Backlog (opened 2026-07-29)
+
+Sourced from real user comments on the v1.0.0 release, triaged against the shipped code
+on 2026-07-29. **This is the highest-priority queue** — it is the first external feedback
+the project has had, and every item below traces to a named user ask rather than to an
+internal guess. `rereflect-next` should pick from here before the older roadmap sections.
+
+Two of the four comments needed no build work and are recorded under *No build required*
+so nobody re-litigates them.
+
+### P0 — `automation-worker-triggers-dead` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
+> Shipped: worker-side mirror `automation_feedback_trigger.py` (two triggers, four actions,
+> cooldown parity with the backend), module-level import in `analysis.py` so a broken import
+> fails loudly at startup, and migration `12a1003fbfe0` moving pre-existing rules on the two
+> repaired triggers to `mode='shadow'`. Worker suite 1372 passed; backend automation suites
+> 138 passed.
+> Found 2026-07-29 while digging the P1 Slack-channel bug. **Verified, not inferred.**
+
+- [ ] `services/worker-service/src/tasks/analysis.py:175` does
+      `from src.services.automation_engine import AutomationEngine` inside a
+      `try/except Exception` that only logs a warning. **That module does not exist in
+      worker-service** (`services/worker-service/src/services/` contains only
+      `automation_churn_trigger.py` and `automation_usage_trend_trigger.py`), and the
+      worker image never gets backend-api's package — `services/worker-service/Dockerfile`
+      copies only `worker-service/src` and `analysis-engine/src/analyzer` under
+      `PYTHONPATH=/app`.
+- [ ] **Consequence:** the `feedback_category_match` and `sentiment_pattern` triggers
+      **never fire in any deployment.** They are dispatched from nowhere else. That means
+      **four of the six** shipped automation templates — **Critical Bug Escalation**,
+      **Feature Request Triage**, **Negative Sentiment Alert** and **Positive Feedback
+      Follow-up** — do nothing at all, while the UI happily shows them as enabled. Only
+      Churn Prevention (backend `health_score_threshold` path) and Usage Decline Outreach
+      (worker `usage_trend` mirror, ships in shadow) actually work.
+- [ ] Already known internally and deliberately left alone: the docstring of
+      `worker-service/src/services/automation_churn_trigger.py` calls it "a pre-existing
+      dead import … that has silently never fired," out of scope for that task. It is in
+      scope now.
+- [ ] **Fix with care.** Repairing the import will *activate* rules that users created
+      months ago and that have never once run. That is a real behaviour change on a
+      notification path — it needs a shadow-mode/backfill-suppression story, not just an
+      import fix.
+- **Why P0 over the Slack bug:** the Slack bug drops one channel of a firing rule. This
+  one means the rule never fires. It also invalidates the natural answer to the P1 feature
+  request below — pointing a user at the "Negative Sentiment Alert" template today points
+  them at something inert.
+
+### P0b — `worker-resolution-time-scoring-dead` (bug, NOT STARTED) — same class, one-line fix
+> Found 2026-07-29 by sweeping worker-service for imports that resolve to nothing.
+> **Verified empirically**, not inferred.
+
+- [ ] `services/worker-service/src/tasks/analysis.py:821` does
+      `from src.models.feedback_workflow_event import FeedbackWorkflowEvent`. That
+      submodule does not exist in worker-service — the class lives at `src.models`
+      (`src/models/__init__.py:551`). Proof:
+      `ModuleNotFoundError: No module named 'src.models.feedback_workflow_event'`, while
+      `from src.models import FeedbackWorkflowEvent` succeeds.
+- [ ] The `except Exception: pass` at line ~864 swallows it, so the **"Resolution time
+      (0-10 pts)" component of the churn-risk score is always 0** for every customer.
+      Churn scores have been silently missing up to 10 points of their range.
+- [ ] Fix is one line: `from src.models import FeedbackWorkflowEvent`. The value is in the
+      test that proves the component now contributes, plus narrowing that bare `except`.
+- **Why tracked separately:** the same file is being edited by the automations fix; landing
+  both at once risks a collision. Trivial to do immediately after.
+
+> **Sweep result (for whoever picks these up).** Three worker imports resolve to nothing:
+> `src.services.automation_engine` (P0, in flight), `src.models.feedback_workflow_event`
+> (this item), and `src.services.health_score_service` — the third is **already handled**
+> by `src/services/health_recompute.py`, which makes its absence loud (shipped as #3,
+> commit `f5d43234`). A fourth site, `src/tasks/segments.py:115`, imports
+> `health_score_service` inside a try with a comment documenting deliberate degradation —
+> not a bug, but it does mean the segment sentiment-trend signal is permanently absent.
+
+### P1 — `automation-slack-channel` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
+> Shipped: `slack` branch in `_execute_notify` posting org-wide once per rule firing to every
+> active Slack integration, a real `error` on the action result so a dropped channel becomes
+> `partial_failure` instead of a false `success`, and a warning for any unknown channel.
+- [ ] `AutomationEngine._execute_notify` (`automation_engine.py:485-571`) implements only
+      the `dashboard` and `email` channels, but the **Critical Bug Escalation** template
+      (`src/config/automation_templates.py:72`) declares
+      `channels: ["dashboard", "email", "slack"]`. The `slack` string matches no branch, so
+      it is **silently dropped** — no Slack post, no log line, no execution-log entry.
+      A user enabling that template believes they are covered for critical bugs and
+      security breaches, and is not.
+- [ ] `_execute_notify` returns `{"error": None}` unconditionally, so a rule whose only
+      channel is unimplemented still logs `status="success"` with
+      `notifications_created: 0`. The execution log actively reports a lie.
+- [ ] Route `slack` through the existing Slack integration (`Integration` rows with
+      `type="slack"`; `send_slack_message()` in `src/api/routes/integrations.py`) and make
+      an unknown/unroutable channel **loud** instead of silent.
+- **Why it still matters below P0:** same silent-failure class, but narrower — it drops one
+  channel of a rule that fires. Note the two bugs **compound**: Critical Bug Escalation is
+  hit by both.
+- *Note:* Slack alerting itself is **not** broken — the customer-health path
+  (`worker-service/src/notification_dispatch.py::_dispatch_slack_health_alert`) does post
+  to Slack. Only the automations engine drops it.
+
+### P1 — Batch-level sentiment threshold trigger (feat, unblocked)
+> "it would be great if you could plug in a Slack or Discord webhook to get pinged whenever
+> a **batch** of new feedback crosses a certain sentiment threshold."
+
+- [ ] Today's `sentiment_pattern` trigger fires on *N negative feedbacks from **one
+      customer** within D days* (`automation_engine.py::_trigger_sentiment_pattern`). The
+      user is asking for a threshold across an **incoming batch** — a different axis
+      entirely (import/window scoped, not customer scoped).
+- [ ] Needs a new trigger type. Open design question to settle with the requester before
+      building: is the threshold a **percentage negative**, an **absolute count**, and is
+      the window **per import** or **per rolling hour**?
+- **Why P1:** direct user ask, lands on the existing automations trigger/action spine, and
+  P0 makes its Slack delivery path actually work. Do P0 first or this ships broken.
+
+### P2 — Native Discord webhook support (feat, unblocked)
+- [ ] Discord is not supported. Its webhook API requires a `{content}` or `{embeds}` body;
+      the custom-webhook dispatcher posts Rereflect's own JSON envelope, so aiming an
+      endpoint at a Discord URL returns **400**. The URL validator accepts it
+      (`https://` passes), so the failure surfaces only in the delivery log.
+- [ ] Needs a Discord **formatter** on the outbound path, mirroring how Slack Block Kit is
+      built — not a new transport.
+- **Why P2:** same user, same sentence as P1, but strictly smaller and independent.
+
+### P3 — Discoverability: Analytics trends already exist (docs/marketing, no backend work)
+> "one thing i'd love to see is a built in trend view over time … watch how sentiment and
+> recurring pain points shift week to week rather than just looking at a snapshot"
+
+- [ ] **This shipped in 1.0.0 and the user did not find it.** `/analytics` already provides
+      7d/30d/90d ranges, daily/weekly buckets, average sentiment + volume + urgent + pain
+      point + feature request series over time, and top pain points/feature requests each
+      carrying an `up`/`down`/`stable` trend arrow (`TopItem.trend`), plus source breakdown,
+      CSV export, saved views and read-only share links.
+- [ ] Treat as a **discoverability defect**, not a feature gap: surface the trends view on
+      the landing page and in `README.md` / onboarding.
+- [ ] Genuine limits worth stating honestly rather than hiding: the window caps at **90
+      days**, and it is bucketed counts — **not** statistical change detection. Longer
+      retention and anomaly flagging are the real follow-ups if asked again.
+
+### No build required (recorded so they are not re-opened)
+- Two comments were **pure positive signal** on the no-telemetry / self-hosted / BYOK
+  positioning and on local-pipeline-without-an-API-key working out of the box. No ask
+  attached. Worth noting that **both** independently named privacy/BYOK as the hook — that
+  is the messaging that is landing, and it should stay first on the landing page.
+
+---
+
 ## Phase 1: MVP SaaS (Months 1-3)
 
 ### Authentication & Multi-tenancy - COMPLETE

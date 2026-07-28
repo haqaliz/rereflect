@@ -20,6 +20,7 @@ from src.models.automation_execution import AutomationExecution
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
 from src.models.user import User
+from src.models.integration import Integration
 
 
 # ---------------------------------------------------------------------------
@@ -569,3 +570,325 @@ def test_failed_action_logs_error(db: Session, test_organization: Organization):
     errors = [a.get("error") for a in actions_executed if a.get("error")]
     assert len(errors) >= 1
     assert "assign boom" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 (slack-channel-and-loudness) — characterization tests.
+#
+# These lock in today's dashboard/email behaviour so that adding the slack
+# channel + loudness in later phases cannot silently change it. Both must
+# pass immediately, with zero production changes.
+# ---------------------------------------------------------------------------
+
+def test_notify_dashboard_only_unchanged(db: Session, test_organization: Organization):
+    """channels:["dashboard"] creates one Notification per admin; error is None."""
+    from src.services.automation_engine import AutomationEngine
+    from src.models.notification import Notification
+
+    admin1 = User(
+        email="admin1@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    admin2 = User(
+        email="admin2@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    db.add_all([admin1, admin2])
+    db.commit()
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Notify Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["dashboard"]}
+    result = engine._execute_notify(config, fb, rule)
+    db.commit()
+
+    assert result["error"] is None
+
+    notifications = db.query(Notification).filter(
+        Notification.organization_id == test_organization.id,
+    ).all()
+    assert len(notifications) == 2
+    assert {n.user_id for n in notifications} == {admin1.id, admin2.id}
+
+
+def test_notify_email_channel_unchanged(db: Session, test_organization: Organization):
+    """channels:["email"] calls send_alert_email for each recipient; error is None."""
+    from src.services.automation_engine import AutomationEngine
+
+    admin = User(
+        email="admin@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    db.add(admin)
+    db.commit()
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Notify Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["email"]}
+
+    with patch("src.services.email_service.send_alert_email") as mock_send:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_send.assert_called_once()
+    assert mock_send.call_args.kwargs["to_email"] == admin.email
+    assert result["error"] is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 (slack-channel-and-loudness) — failing tests for slack channel
+# delivery + loud failure reporting. These encode spec ACs 1-7 and must FAIL
+# until _execute_notify grows a slack branch (Phase 3).
+# ---------------------------------------------------------------------------
+
+def _make_slack_integration(
+    db: Session,
+    org_id: int,
+    *,
+    is_active: bool = True,
+    webhook_url: str = "https://hooks.slack.com/services/T/B/x",
+) -> Integration:
+    integration = Integration(
+        organization_id=org_id,
+        type="slack",
+        is_active=is_active,
+        config={"webhook_url": webhook_url},
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+
+def test_notify_slack_posts_once_per_rule(db: Session, test_organization: Organization):
+    """One active Slack integration → send_slack_message called exactly once; error is None."""
+    from src.services.automation_engine import AutomationEngine
+
+    _make_slack_integration(db, test_organization.id)
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Slack Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["slack"]}
+
+    with patch(
+        "src.api.routes.integrations.send_slack_message",
+        return_value={"success": True},
+    ) as mock_slack:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_slack.assert_called_once()
+    assert result["error"] is None
+
+
+def test_notify_slack_posts_to_all_integrations(db: Session, test_organization: Organization):
+    """Two active Slack integrations → send_slack_message called twice."""
+    from src.services.automation_engine import AutomationEngine
+
+    _make_slack_integration(db, test_organization.id, webhook_url="https://hooks.slack.com/services/T/B/1")
+    _make_slack_integration(db, test_organization.id, webhook_url="https://hooks.slack.com/services/T/B/2")
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Slack Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["slack"]}
+
+    with patch(
+        "src.api.routes.integrations.send_slack_message",
+        return_value={"success": True},
+    ) as mock_slack:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    assert mock_slack.call_count == 2
+    assert result["error"] is None
+
+
+def test_notify_slack_no_integration_sets_error(db: Session, test_organization: Organization):
+    """No active Slack integration configured → result["error"] is non-null."""
+    from src.services.automation_engine import AutomationEngine
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Slack Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["slack"]}
+
+    with patch(
+        "src.api.routes.integrations.send_slack_message",
+        return_value={"success": True},
+    ) as mock_slack:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_slack.assert_not_called()
+    assert result["error"] is not None
+
+
+def test_notify_slack_failure_preserves_dashboard(db: Session, test_organization: Organization):
+    """Slack send failure must not prevent the dashboard Notification from being created."""
+    from src.services.automation_engine import AutomationEngine
+    from src.models.notification import Notification
+
+    admin = User(
+        email="admin@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    db.add(admin)
+    db.commit()
+
+    _make_slack_integration(db, test_organization.id)
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Slack Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["dashboard", "slack"]}
+
+    with patch(
+        "src.api.routes.integrations.send_slack_message",
+        return_value={"success": False, "error": "webhook rejected"},
+    ):
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    notifications = db.query(Notification).filter(
+        Notification.user_id == admin.id,
+    ).all()
+    assert len(notifications) >= 1
+    assert result["error"] is not None
+
+
+def test_notify_unknown_channel_warns_and_errors(db: Session, test_organization: Organization, caplog):
+    """An unrecognised channel string logs a warning and sets a non-null error."""
+    from src.services.automation_engine import AutomationEngine
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Unknown Channel Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["carrier_pigeon"]}
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="src.services.automation_engine"):
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    assert any("carrier_pigeon" in record.message for record in caplog.records)
+    assert result["error"] is not None
+
+
+def test_notify_slack_not_multiplied_by_recipients(db: Session, test_organization: Organization):
+    """Slack is org-wide — 3 admin recipients must still post exactly once."""
+    from src.services.automation_engine import AutomationEngine
+
+    for i in range(3):
+        admin = User(
+            email=f"admin{i}@test.com", password_hash="hashed",
+            organization_id=test_organization.id, role="admin",
+        )
+        db.add(admin)
+    db.commit()
+
+    _make_slack_integration(db, test_organization.id)
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Slack Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["slack"]}
+
+    with patch(
+        "src.api.routes.integrations.send_slack_message",
+        return_value={"success": True},
+    ) as mock_slack:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_slack.assert_called_once()
+    assert result["error"] is None
+
+
+def test_execution_status_partial_failure_on_channel_error(db: Session, test_organization: Organization):
+    """A rule with an undeliverable slack channel alongside a succeeding action logs partial_failure."""
+    from src.services.automation_engine import AutomationEngine
+
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 50, "direction": "below"},
+        actions=[
+            {"type": "change_status", "config": {"status": "in_review"}},
+            {"type": "send_notification", "config": {"recipients": "admins", "channels": ["slack"]}},
+        ],
+    )
+
+    fb = _make_feedback(db, test_organization.id)
+    context = {
+        "health_score": 10,
+        "customer_email": fb.customer_email,
+        "feedback_id": fb.id,
+    }
+
+    engine = AutomationEngine(db)
+    # No Slack integration configured for the org — the slack channel is undeliverable.
+    with patch.object(engine, "_check_cooldown", return_value=False):
+        with patch.object(engine, "_set_cooldown"):
+            engine.evaluate(test_organization.id, "health_score_threshold", context)
+
+    execution = db.query(AutomationExecution).filter(
+        AutomationExecution.rule_id == rule.id
+    ).first()
+    assert execution is not None
+    assert execution.status == "partial_failure"

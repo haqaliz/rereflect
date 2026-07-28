@@ -14,6 +14,14 @@ from celery import shared_task
 from src.database import get_db_session
 from src.config import settings, get_redis_url
 from src.llm_client import categorize_feedback
+# Module-level import: feedback_category_match / sentiment_pattern automation
+# triggers. This used to be `from src.services.automation_engine import
+# AutomationEngine` (a module that only exists in backend-api) hidden inside
+# a per-item `try/except Exception` — the resulting ImportError fired on
+# every analysis and was silently swallowed, so these triggers never ran in
+# any deployment. Importing at module level instead means a broken import
+# fails loudly at worker startup, not silently per feedback item.
+from src.services.automation_feedback_trigger import evaluate_feedback_triggers
 
 # Redis client for distributed task locking
 _redis_client = None
@@ -170,19 +178,19 @@ def analyze_single_feedback(self, feedback_id: int) -> dict:
                     feedback_id, exc,
                 )
 
-            # Automation rules — feedback_category_match and sentiment_pattern triggers
+            # Automation rules — feedback_category_match and sentiment_pattern
+            # triggers. Only the evaluation call itself is guarded: an import
+            # failure here would already have surfaced at worker startup via
+            # the module-level import above.
+            context = {
+                "customer_email": feedback.customer_email or "",
+                "feedback_id": feedback.id,
+            }
             try:
-                from src.services.automation_engine import AutomationEngine
-                engine = AutomationEngine(db)
-                context = {
-                    "customer_email": feedback.customer_email or "",
-                    "feedback_id": feedback.id,
-                }
-                engine.evaluate(feedback.organization_id, "feedback_category_match", context)
-                engine.evaluate(feedback.organization_id, "sentiment_pattern", context)
+                evaluate_feedback_triggers(db, feedback.organization_id, context)
             except Exception as exc:
                 logger.warning(
-                    "Automation engine dispatch failed after analysis for feedback %s: %s",
+                    "Automation feedback trigger evaluation failed for feedback %s: %s",
                     feedback_id, exc,
                 )
 

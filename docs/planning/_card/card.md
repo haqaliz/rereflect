@@ -1,53 +1,85 @@
-# Card — local-embedding-quality (freeform)
+# Card — automation Slack channel silently dropped
 
-**Type:** feat · **Slug:** `local-embedding-quality` · **Branch:** `feat/local-embedding-quality`
-**Source:** freeform task from `rereflect-next` handoff on 2026-07-24. No GitHub issue.
-**Roadmap:** `AI-TRACKING.md` — **M5.4 "Local embedding quality"** (`[ ]` "parked / nice-to-have", no blocker stated)
+**Type:** bug · **Slug:** `automation-slack-channel` · **Branch:** `bug/automation-slack-channel`
+**Source:** freeform — post-1.0.0 user feedback triage on 2026-07-29. No GitHub issue.
+
+> Replaces the prior `local-embedding-quality` card on this branch only; that card
+> remains in `master` history. `_card/card.md` is per-worktree by design.
 
 ---
 
-## Brief (from rereflect-next handoff)
+## Brief (as given)
 
-Ship **M5.4**: a better **local** embedding model as an opt-in default for the offline AI
-Copilot's retrieval + template-matching, plugged into the existing embedding-provider layer
-(`services/backend-api/src/services/embeddings/`, per-org `model_embeddings` in `org_ai_config`).
+Fix the silently-dropped `"slack"` notification channel in the automations engine.
 
-Constraints / gates:
-- Keep the current default **byte-stable** for installs that don't opt in.
-- Keep it **CPU-only / air-gappable** (document a pre-baked model-cache path like M5.1 did).
-- The gate is an **honest offline eval**: build a small labeled retrieval/template-match set and
-  show the new model **measurably beats** the current local default before promoting it — no
-  absolute-accuracy marketing claims (matches the honest OSS brand).
-- Avoid the `status-sync-realtime-mapping` and `feat/classifier-model-versioning-rollback`
-  areas — both are in flight.
+`AutomationEngine._send_notification` (`services/backend-api/src/services/automation_engine.py`,
+~L502–560) only implements the `"dashboard"` and `"email"` channels. But
+`services/backend-api/src/config/automation_templates.py:72` (the **Critical Bug
+Escalation** template) declares:
 
-## Why this was picked (moat rationale)
+```python
+"channels": ["dashboard", "email", "slack"],
+```
 
-- The one **unblocked** item left in the Local Model Layer. M5.0/M5.1/M5.2 are `COMPLETE`;
-  M5.3 (per-org churn ML) is **data-gated** (~500 labels, gate under review); M5.4 has no blocker.
-- Deepens the **fully-offline AI Copilot** moat and gets better as base models improve.
-- The embedding-provider abstraction already ships (`local-embeddings-offline-copilot` merged),
-  so this is a **depth-first follow-on**, not net-new plumbing.
+So a user who enables that template expects a Slack ping on every critical bug /
+security breach and silently gets nothing. No log line, no execution-log entry, no
+error — the channel string is simply never matched by an `if`.
 
-## Known caveat (carried into the dig)
+Requested outcome:
 
-The hard part is **honest proof, not the swap.** Embedding/retrieval quality is harder to
-benchmark than sentiment macro-F1 — needs a small labeled retrieval/template-match eval set to
-show a measurable offline improvement, or it's just a model change dressed as a win. Must stay
-CPU-friendly/air-gappable (a bigger model raises worker image size + inference latency) and keep
-the current default byte-stable.
+1. Wire the `slack` channel through the existing Slack integration
+   (`Integration` rows with `type="slack"`; `send_slack_message()` in
+   `services/backend-api/src/api/routes/integrations.py`).
+2. Make an unknown or unroutable channel **loud** rather than silent.
 
-## Grounding pointers (from rereflect-next dig, pre-worktree — verify in Phase 2)
+## Origin — post-1.0.0 user feedback
 
-- Embedding layer: `services/backend-api/src/services/embeddings/{base.py,factory.py}`,
-  `providers/` (e.g. `google.py`), `__init__.py`.
-- Per-org override: `org_ai_config.model_embeddings` (`services/backend-api/src/models/org_ai_config.py`).
-- Default resolution: `_default_embedding_model(provider)` in
-  `services/backend-api/src/api/routes/ai_settings.py` (+ `EmbeddingStatusResponse`).
-- Copilot consumers: `services/backend-api/src/api/routes/copilot_ws.py`,
-  `services/backend-api/src/models/query_template_mapping.py`.
-- Prior-art pattern to mirror: M5.1 sentiment-provider layer
-  (`services/analysis-engine/src/analyzer/sentiment_providers/`) + its offline pre-bake path.
+Surfaced while drafting replies to four pieces of 1.0.0 feedback. The relevant one:
 
-**NOTE:** `CLAUDE.md`'s billing / plan-gating / Stripe / Resend sections are STALE (pre-OSS-pivot).
-All features are unlocked (MIT, self-hosted, BYOK). Do not gate this feature behind a plan tier.
+> "Honestly the bring your own key setup is really nice, but it would be great if
+> you could plug in a Slack or Discord webhook to get pinged whenever a batch of new
+> feedback crosses a certain sentiment threshold. Would make triaging way faster for
+> our team."
+
+Investigating that request is what exposed the dropped channel. The user's ask is
+**broader** than this bug — see *Explicitly out of scope*.
+
+## Verified facts (checked against the `v1.0.0` tree)
+
+- `automation_engine.py` `_send_notification`: `if "dashboard" in channels` (~L536)
+  and `if "email" in channels` (~L550). No `slack` branch, no `else`, no warning.
+- Its own docstring under-declares the contract:
+  `channels: ["dashboard"] | ["email"] | ["dashboard", "email"]` — so the code and
+  the template disagree about what a valid channel even is.
+- `automation_templates.py:72`: Critical Bug Escalation declares `slack` in channels.
+- Slack **is** otherwise supported: `POST /api/v1/integrations/slack/webhook` accepts an
+  incoming-webhook URL (validated to start with `https://hooks.slack.com/`), plus a
+  Slack OAuth flow and a `/slack/test` endpoint.
+- Slack alerts **do** fire today, but from a different path:
+  `services/worker-service/src/notification_dispatch.py::_dispatch_slack_health_alert`
+  (customer-health / churn alerts) — not from the automations engine.
+- `require_feature("slack_integration")` gates the Slack routes, but is inert under
+  `SELF_HOSTED=true` (returns `True`), so this is **not** a plan-gating issue and no
+  plan gate may be added.
+
+## Explicitly out of scope (track separately in AI-TRACKING/DEV-TRACKING)
+
+These came from the same feedback but are **not** this bug:
+
+- **Batch-level sentiment trigger.** Today's `sentiment_pattern` trigger fires on
+  *N negative feedbacks from one customer within D days*. The user asked for a
+  threshold across an incoming **batch**. That's a new trigger type.
+- **Discord support.** Not supported. Discord's webhook API requires `{content}` or
+  `{embeds}`; the custom-webhook dispatcher posts Rereflect's own JSON envelope, so
+  pointing it at a Discord URL returns 400. Needs a native formatter.
+
+## Open questions for the dig
+
+- Which Slack integration does an automation use when an org has more than one?
+- Should the org-wide Slack post happen once per rule firing, or once per recipient
+  user (recipients resolve to user ids; Slack channels are org-wide)?
+- "Loud" for an unroutable channel — log warning only, or also record it on the
+  `AutomationExecution` row so it surfaces in the execution-log UI?
+- Does the frontend automations editor let a user select `slack` today?
+- Is `send_slack_message` safely importable from the service layer, or does importing
+  a route module from a service create a circular import?
