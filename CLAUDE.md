@@ -162,6 +162,36 @@ rereflect/
 - `services/frontend-web/app/(dashboard)/settings/playbooks/page.tsx` - Playbook editor + templates
 - `services/frontend-web/components/customers/` - ChurnProbabilityBadge, MarkAsChurnedDialog, RunPlaybookDropdown
 
+### Automations engine (two copies — change both)
+
+The automations engine exists **twice**, on purpose, and the two must stay in agreement:
+
+- `services/backend-api/src/services/automation_engine.py` — the full engine. Evaluates
+  `health_score_threshold` and `churn_risk_level_change`, dispatched from
+  `health_score_service`.
+- `services/worker-service/src/services/automation_feedback_trigger.py` — mirrors
+  `feedback_category_match` and `sentiment_pattern` (two triggers, four actions). These are
+  dispatched **only** from the worker's analysis task, so in production this mirror — not
+  the backend engine — is what evaluates them.
+
+Plus two narrower mirrors that handle one trigger and `run_playbook` only:
+`automation_churn_trigger.py` (`churn_probability_threshold`) and
+`automation_usage_trend_trigger.py` (`usage_trend`).
+
+**Why the duplication:** worker-service cannot import backend-api. The worker image copies
+only `worker-service/src` and `analysis-engine/src/analyzer` under `PYTHONPATH=/app`. There
+is no shared Python package (`shared/` is the pnpm `@rereflect/ui` workspace).
+
+**The trap this caused:** `analysis.py` previously imported the backend engine inside a bare
+`try/except Exception`. The `ImportError` fired on every analysis and was swallowed, so those
+two triggers never ran in any deployment and four of six built-in templates were inert while
+the UI showed them enabled. **A bare `except` around an import in worker-service should be
+treated as a defect on sight** — see `docs/planning/automations-delivery-integrity/`.
+
+Cooldowns are shared across processes: Redis DB 1, key
+`automation_cooldown:{rule_id}:{customer_email}`, TTL `cooldown_hours * 3600`. A cooldown set
+by either process is honoured by the other, so that key scheme must not drift.
+
 ## Theme System
 
 The app uses a custom "Sunset Horizon" theme with CSS variables:
