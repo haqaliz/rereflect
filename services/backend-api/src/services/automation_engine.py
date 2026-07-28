@@ -243,6 +243,23 @@ class AutomationEngine:
         # PRD only defines direction=below; treat absence the same way
         return int(health_score) < int(threshold)
 
+    # ------------------------------------------------------------------
+    # MIRRORED IN THE WORKER — change both or they silently diverge.
+    #
+    # `_trigger_sentiment_pattern` and `_trigger_feedback_category` below are
+    # ported verbatim into
+    # `services/worker-service/src/services/automation_feedback_trigger.py`.
+    # The worker cannot import this module (its image copies only
+    # worker-service/src + analysis-engine/src/analyzer), and these two
+    # triggers are dispatched ONLY from the worker's analysis task — so the
+    # worker mirror, not this class, is what actually evaluates them in
+    # production. This code path runs for backend-dispatched triggers only.
+    #
+    # The cooldown key scheme is deliberately identical in both
+    # (`automation_cooldown:{rule_id}:{customer_email}`, Redis DB 1) so a
+    # cooldown set by either process is honoured by the other.
+    # ------------------------------------------------------------------
+
     def _trigger_sentiment_pattern(self, cfg: dict, context: dict) -> bool:
         """Fire when customer has >= count negative feedbacks in last *days* days."""
         required_count: int = cfg.get("count", 3)

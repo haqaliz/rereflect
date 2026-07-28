@@ -74,6 +74,32 @@ so nobody re-litigates them.
   request below — pointing a user at the "Negative Sentiment Alert" template today points
   them at something inert.
 
+### P0b — `worker-resolution-time-scoring-dead` (bug, NOT STARTED) — same class, one-line fix
+> Found 2026-07-29 by sweeping worker-service for imports that resolve to nothing.
+> **Verified empirically**, not inferred.
+
+- [ ] `services/worker-service/src/tasks/analysis.py:821` does
+      `from src.models.feedback_workflow_event import FeedbackWorkflowEvent`. That
+      submodule does not exist in worker-service — the class lives at `src.models`
+      (`src/models/__init__.py:551`). Proof:
+      `ModuleNotFoundError: No module named 'src.models.feedback_workflow_event'`, while
+      `from src.models import FeedbackWorkflowEvent` succeeds.
+- [ ] The `except Exception: pass` at line ~864 swallows it, so the **"Resolution time
+      (0-10 pts)" component of the churn-risk score is always 0** for every customer.
+      Churn scores have been silently missing up to 10 points of their range.
+- [ ] Fix is one line: `from src.models import FeedbackWorkflowEvent`. The value is in the
+      test that proves the component now contributes, plus narrowing that bare `except`.
+- **Why tracked separately:** the same file is being edited by the automations fix; landing
+  both at once risks a collision. Trivial to do immediately after.
+
+> **Sweep result (for whoever picks these up).** Three worker imports resolve to nothing:
+> `src.services.automation_engine` (P0, in flight), `src.models.feedback_workflow_event`
+> (this item), and `src.services.health_score_service` — the third is **already handled**
+> by `src/services/health_recompute.py`, which makes its absence loud (shipped as #3,
+> commit `f5d43234`). A fourth site, `src/tasks/segments.py:115`, imports
+> `health_score_service` inside a try with a comment documenting deliberate degradation —
+> not a bug, but it does mean the segment sentiment-trend signal is permanently absent.
+
 ### P1 — `automation-slack-channel` (bug, IN FLIGHT `bug/automation-slack-channel`)
 - [ ] `AutomationEngine._execute_notify` (`automation_engine.py:485-571`) implements only
       the `dashboard` and `email` channels, but the **Critical Bug Escalation** template
