@@ -108,10 +108,11 @@ def _make_rule(
     trigger_config=None,
     actions=None,
     cooldown_hours=24,
+    name="Test rule",
 ) -> AutomationRule:
     rule = AutomationRule(
         organization_id=org_id,
-        name="Test rule",
+        name=name,
         trigger_type=trigger_type,
         trigger_config=trigger_config or {"categories": ["billing"]},
         actions=actions if actions is not None else [],
@@ -557,7 +558,7 @@ def test_send_notification_slack_send_failure_raises_are_caught(
     evaluate_feedback_triggers(db, 1, context)
 
     log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
-    assert log.status == "partial_failure"
+    assert log.status == "failed"
     send_notification_result = next(
         a for a in log.actions_executed if a["type"] == "send_notification"
     )
@@ -577,7 +578,7 @@ def test_send_notification_unknown_channel_records_error(mock_redis, db):
     evaluate_feedback_triggers(db, 1, context)
 
     log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
-    assert log.status == "partial_failure"
+    assert log.status == "failed"
     send_notification_result = next(
         a for a in log.actions_executed if a["type"] == "send_notification"
     )
@@ -597,7 +598,7 @@ def test_send_notification_slack_no_active_integration_records_error(mock_redis,
     evaluate_feedback_triggers(db, 1, context)
 
     log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
-    assert log.status == "partial_failure"
+    assert log.status == "failed"
     send_notification_result = next(
         a for a in log.actions_executed if a["type"] == "send_notification"
     )
