@@ -7,6 +7,27 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Discord alerts
+
+Rereflect can now post alerts to Discord. Settings → Integrations → Discord, paste a
+webhook URL from your server, done — no OAuth app to create.
+
+Urgent feedback, sentiment spikes, churn risk, volume spikes, and customer health
+drop/recovery alerts all reach Discord.
+
+This closes the last piece of a 1.0.0 user request for "Slack **or Discord**" pings.
+Pointing the existing custom-webhook feature at a Discord URL never worked: it saves,
+because the validator accepts any `https://` URL, but Discord requires a body with
+`content` or `embeds` and we posted our own envelope, so Discord returned 400 and only the
+delivery log showed it.
+
+**Known limitation:** Discord has no channel preference of its own yet, so it rides on the
+existing **Slack** toggle in Settings → Notifications. If you enable Discord but switch that
+toggle off, you get nothing; if you have both integrations, both receive every alert. Also
+not covered: automation-rule notifications, custom message templates (they're authored in
+Slack `mrkdwn`, which renders as literal asterisks on Discord), the per-integration alert
+log, and `429` retry. See `docs/SELF_HOSTING.md`.
+
 ### Added — Batch sentiment threshold automation trigger
 
 A new automation trigger, `batch_sentiment_threshold`, fires when the share (or absolute
