@@ -114,63 +114,77 @@ def _find_matching_sources(
         FeedbackSource.is_active == True,
     )
 
-    # For Slack events, match by team_id via the integration
+    # For Slack events, match by team_id via the integration. A missing or
+    # empty team_id must never fall through to `return query.all()` below --
+    # that would fan every org's active slack FeedbackSource back to the
+    # caller, a cross-tenant leak.
     if source_type == "slack":
         team_id = provider_context.get("team_id")
-        if team_id:
-            # Find integrations with this team_id
-            integrations = db.query(Integration).filter(
-                Integration.type == "slack",
-                Integration.is_active == True,
-            ).all()
+        if not team_id:
+            return []
 
-            # Filter to those with matching team_id in config
-            matching_integration_ids = []
-            for integration in integrations:
-                config = integration.config or {}
-                if config.get("team_id") == team_id:
-                    matching_integration_ids.append(integration.id)
+        # Find integrations with this team_id
+        integrations = db.query(Integration).filter(
+            Integration.type == "slack",
+            Integration.is_active == True,
+        ).all()
 
-            if matching_integration_ids:
-                query = query.filter(
-                    FeedbackSource.integration_id.in_(matching_integration_ids)
-                )
-            else:
-                return []
+        # Filter to those with matching team_id in config
+        matching_integration_ids = []
+        for integration in integrations:
+            config = integration.config or {}
+            if config.get("team_id") == team_id:
+                matching_integration_ids.append(integration.id)
 
-    # For Intercom events, match by workspace_id via the integration
+        if matching_integration_ids:
+            query = query.filter(
+                FeedbackSource.integration_id.in_(matching_integration_ids)
+            )
+        else:
+            return []
+
+    # For Intercom events, match by workspace_id via the integration. Same
+    # cross-tenant reasoning as slack above -- and workspace_id can be `""`
+    # (the Intercom OAuth callback stores it with a "" default), so `not x`
+    # is required, not `is None`.
     elif source_type == "intercom":
         workspace_id = provider_context.get("workspace_id")
-        if workspace_id:
-            integrations = db.query(Integration).filter(
-                Integration.type == "intercom",
-                Integration.is_active == True,
-            ).all()
+        if not workspace_id:
+            return []
 
-            matching_integration_ids = []
-            for integration in integrations:
-                config = integration.config or {}
-                if config.get("workspace_id") == workspace_id:
-                    matching_integration_ids.append(integration.id)
+        integrations = db.query(Integration).filter(
+            Integration.type == "intercom",
+            Integration.is_active == True,
+        ).all()
 
-            if matching_integration_ids:
-                query = query.filter(
-                    FeedbackSource.integration_id.in_(matching_integration_ids)
-                )
-            else:
-                return []
+        matching_integration_ids = []
+        for integration in integrations:
+            config = integration.config or {}
+            if config.get("workspace_id") == workspace_id:
+                matching_integration_ids.append(integration.id)
 
-    # For email events, match by source_id directly (webhook handler already resolved)
+        if matching_integration_ids:
+            query = query.filter(
+                FeedbackSource.integration_id.in_(matching_integration_ids)
+            )
+        else:
+            return []
+
+    # For email events, match by source_id directly (webhook handler already
+    # resolved). Same cross-tenant reasoning as slack/intercom above.
     elif source_type == "email":
         source_id = provider_context.get("source_id")
-        if source_id:
-            query = query.filter(FeedbackSource.id == source_id)
+        if not source_id:
+            return []
+        query = query.filter(FeedbackSource.id == source_id)
 
-    # For webhook events, match by source_id directly
+    # For webhook events, match by source_id directly. Same cross-tenant
+    # reasoning as slack/intercom above.
     elif source_type == "webhook":
         source_id = provider_context.get("source_id")
-        if source_id:
-            query = query.filter(FeedbackSource.id == source_id)
+        if not source_id:
+            return []
+        query = query.filter(FeedbackSource.id == source_id)
 
     # For Zendesk events, match by subdomain via the dedicated ZendeskIntegration
     # table (one row per org, BYOK-style — not a row in the generic `integrations`
