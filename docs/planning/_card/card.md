@@ -281,6 +281,25 @@ documenting `INTERCOM_CLIENT_SECRET` — not just a flipped boolean.
    notification envelope carries `app_id` at the top level for all topics, including the three
    handled ones. Returning `[]` on a missing `app_id` **would not drop real traffic.**
 
+**DECIDED by the user, 2026-07-29:**
+
+6. **Scope = Intercom + Slack.** Both carry the same two defects; fixing only one knowingly
+   leaves an identical hole. **But the two are not treated identically on the fail-closed flip:**
+   - **Intercom** → fail closed immediately. Ingestion has never worked (envelope-shape bug), so
+     there is no live traffic to break. Zero migration risk.
+   - **Slack** → **shadow first.** Slack ingestion demonstrably *does* work today, so a hard flip
+     stops real traffic for any install running without `SLACK_SIGNING_SECRET`. Log loudly on
+     every unsigned/unverifiable request for one release, then reject in the next.
+   - The **tenancy guard** (`else: return []`) applies to **both immediately** — it is not
+     shadowed. A missing `team_id`/`app_id` is never legitimate.
+
+5. **RBAC scope = `integrations.py` only.** It has no member-facing consumer (the settings page
+   redirects non-admins before fetching), so the full house-convention gate is safe with no
+   caveat. **`linear_integration.py` is filed separately** as its own item: it is a product
+   decision about whether members may view/create tracker issues from feedback, and it requires
+   frontend work (hiding `LinkedIssuesCard` / `CreateIssueDialog` for members) that does not
+   belong in a security branch.
+
 **Still open — need a decision:**
 
 1. Fail closed **unconditionally**, or allow an explicit opt-out escape hatch for an operator
