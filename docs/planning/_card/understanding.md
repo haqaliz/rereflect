@@ -1,185 +1,247 @@
-# Understanding — usage-decline-churn-labels (Phase 2 dig)
+# Phase 2 — Understanding: `feat/intercom-selfhost-ingestion`
 
-**Date:** 2026-07-23
-**Branch:** `feat/usage-decline-churn-labels`
-**Method:** 2 read-only agents (suggestion-queue pipeline; usage-history/trend stack) + direct reads of
-`docs/planning/crm-churn-labels/prd.md` and a live environment check.
-**Environment verified:** venv rebuilt on **Python 3.12** (system `python3` is 3.9.6 and cannot install
-`Authlib==1.7.2`); `alembic heads` run **live** → **single head `a1c2d3e4f5a6`**; baseline
-`pytest` over the 6 affected suites → **95 passed**.
+**Dug:** 2026-07-30, against the worktree at `feat/intercom-selfhost-ingestion`
+(base `dc596f96`). Every claim below is a direct code read with a `file:line`.
+Live-verified: single alembic head `12a1003fbfe0`; backend + worker venvs on
+Python 3.12.13.
 
----
-
-## What this feature really is
-
-Not a new idea — the **unblocking of a written-down deferral**. `crm-churn-labels`' own
-Out of Scope section says:
-
-> **Usage/Segment-derived churn labels.** Blocked: `customer_usage` keeps only current 7d/30d
-> counters with no history (`customer-360-unified-timeline` R1, "we will not fabricate a drop
-> event").
-
-M3.2b (`usage-trend-churn-signal`, 2026-07-22) added the durable `customer_usage_history` snapshot.
-`AI-TRACKING.md:480-485` records the blocker as resolved and the work as "feasible but **unplanned**
-… it would need a confirm-in-review step like `crm-churn-labels`, not auto-labelling."
-
-**Why it matters:** the shipped CRM label source produces **nothing** for a self-hoster with no
-HubSpot/Salesforce — the default OSS deployment. This is the only label supply that works CRM-free.
+> **Process note.** This dig was run in the main thread. Four parallel dig agents
+> were dispatched first (backend / worker / frontend / tests-docs) but all four
+> went idle without delivering reports, and nothing was retrievable from them, so
+> the mapping was redone directly rather than burning further budget on retries.
 
 ---
 
-## Finding 1 — The backend genuinely needs no migration and no route changes
+## What the issue is really asking
 
-- `models/churn_label_suggestion.py:47` — `provider` is `String(50)`, **no CHECK, no enum, no DB
-  whitelist**. Enum values are Python-list-validated by house convention, and `provider` isn't even
-  in such a list.
-- `routes/churn_suggestions.py` — `provider` appears in exactly 3 places, all opaque string
-  handling: list filter (`:262-263`), bulk cohort filter (`:219-220`), response passthrough. Only
-  `status` is validated (`:251-255`). **Zero changes needed.**
-- The natural key `UniqueConstraint(organization_id, provider, external_opportunity_id)` (`:84-101`)
-  gives idempotent re-detection for free — a new provider just needs a **stable synthesized id**.
+A user asked for Intercom/Zendesk feedback to "flow in automatically instead of
+pasting tickets manually". Zendesk delivers this today. Intercom is registered,
+marketed, documented, and **structurally incapable of it** — for three
+independent reasons that have to be fixed together or not at all.
 
-## Finding 2 — Confirm is provider-blind, so labels are trainable on identical footing
-
-`_confirm_one` (`routes/churn_suggestions.py:70-127`) always writes
-`CustomerChurnEvent(source="manual", marked_by_user_id=<confirming user>)` — **`provider` is never
-propagated into the churn event**. Since `ai_readiness.py:91-99` excludes only
-`source == "auto_suggested"` from `trainable`, a confirmed usage-decline label counts exactly like a
-confirmed CRM one. And `_pending_suggestion_count` (`:160-178`) has **no provider filter**, so
-`pending_suggestions` picks up the new provider automatically while staying out of
-`churn_labels_ready` (`:244`). The readiness-honesty requirement is satisfied by construction.
-
-## Finding 3 — The opt-in home is the one real collision with "no migration"
-
-Default-deny today lives on the CRM integration rows themselves:
-`HubSpotIntegration.churn_labels_enabled` + `churn_label_config` (`models/hubspot_integration.py:47-48`)
-and the Salesforce twin (`:49-50`), mirrored in `worker-service/src/models/__init__.py:1133-1134,1187-1188`.
-
-**There is no non-CRM row to hang a flag off.** The nearest org-level home is `OrgAIConfig`
-(`models/org_ai_config.py`), which already carries `health_weight_usage` and the classifier-mode
-columns — but adding a column there is a migration. This is a genuine fork, not a detail:
-**default-deny is non-negotiable (it is the house pattern and the safety property), so if honoring it
-costs a migration, the migration wins over the "no migration" aspiration.**
-
-## Finding 4 — `crm_churn_label_options.py` is a fence, not a tool
-
-`CHURN_LABEL_CONFIG_KEYS` (`:43-46`) is hardwired to exactly hubspot/salesforce;
-`_validate_churn_label_config:244` would `KeyError` on a third key, and `fetch_renewal_options:64-65`
-returns `("options_fetch_failed")` for anything else. **Never route this provider through
-`/integrations/{provider}/churn-labels`.** Write it into the PRD as an explicit out-of-scope fence.
-
-## Finding 5 — Correction: where the trend logic actually lives
-
-The card/handoff said "reusing `usage_trend_severity.py`". **Imprecise.** That module
-(`services/backend-api/src/services/usage_trend_severity.py`, byte-identical worker duplicate) is
-*only* `TREND_SEVERITY = {stable:0, declining:1, sharp_decline:2}` + `is_worsening_transition` —
-`insufficient_history` is deliberately absent so every transition touching it returns `False`.
-
-The **classification** lives in `usage_score_service.py:203-366` (byte-identical worker duplicate):
-- `select_nearest_in_band_snapshot` (`:245-285`) — baseline from history rows aged
-  `[12, 16]` days, nearest to 14, ties → older. Never widens the band.
-- `classify_usage_trend` (`:288-331`) — `pct <= -60` → `sharp_decline`; `pct <= -30` → `declining`;
-  else `stable`. Returns `("insufficient_history", None)` when there's no in-band baseline, or when
-  **`baseline_active_days_14d < 5`** (the floor).
-- `apply_trend_penalty` (`:334-366`) — `-8` / `-15` on the **health usage component only**.
-
-## Finding 6 — Edge-triggered vs. sustained: the central design fork
-
-The post-commit drain seam M3.2c added (`worker-service/src/tasks/usage_metrics.py:659-681`) is
-**edge-triggered**: `pending_trend_transitions` is appended to **only on a genuine state change**
-(`:635-638`). It is exception-isolated per transition and fires strictly after `db.commit()` — an
-excellent seam, and the closest precedent is
-`worker-service/src/services/automation_usage_trend_trigger.py` (332 lines, `TRIGGERED_BY =
-"auto_usage_trend"`).
-
-**But "sustained decline" is a level-based concept, and the seam cannot express it.** A customer who
-enters `sharp_decline` and stays there produces exactly **one** transition, on day one — which is the
-*least* evidence-backed moment. A detector wanting "declining held for N consecutive days" must read
-`usage_trend_state` per scanned row each day, independent of the transitions list. This is the single
-biggest open design question and it is **not** resolvable from the files.
-
-## Finding 7 — Hard scope fence (executable, not just convention)
-
-`tests/test_usage_trend_churn_boundary.py` (216 lines) asserts a `stable → sharp_decline` transition
-with zero new feedback leaves `churn_risk_component`, `churn_probability`,
-`churn_probability_low/high`, `calibration_model_id`, `time_to_churn_bucket` **byte-for-byte
-unchanged**, while proving non-vacuity (the usage component *does* drop by exactly 15). M3.2b and
-M3.2c both kept it green and unmodified. **This branch must too.**
-Confirmed by grep: `usage_score_service.py` has **zero** matches for
-`churn_probability|churn_risk_component|isotonic|calibrat`.
-
-## Finding 8 — Plan gating is inert, correctly
-
-`routes/churn_suggestions.py:51-58` carries a router-level
-`require_feature("advanced_churn_prediction")`. This is **not** a live plan gate:
-`plans.py:329-330` — `has_feature` returns `True` unconditionally in self-hosted mode. Inheriting it
-is consistent with the OSS pivot. Do not add a new gate; do not remove this one.
-
-## Finding 9 — Frontend is cosmetic-only, plus one contained type edit
-
-- **Needs editing:** `lib/api/churn-suggestions.ts:8` —
-  `ChurnSuggestionProvider = 'hubspot' | 'salesforce'`. TS-only, not runtime-validated, so a new
-  provider *renders* fine; but filtering by it type-safely requires widening the union.
-- **Renders fine, reads wrong (cosmetic):** page header "CRM churn suggestions" + subtitle
-  (`customers/churn-suggestions/page.tsx:127-132`); the `provider` badge is plain text (`:198-207`,
-  no provider-keyed icon/link, so no break); `EvidenceCell` (`:27-47`) reads CRM-shaped keys
-  (`deal_name`/`amount`/`stage`) and falls back to *"No CRM detail captured"*; the
-  `ConfirmSuggestionDialog.tsx:88` field is hardcoded-labeled **"CRM close date"**.
-- The `/customers` pending-count StatCard (`customers/page.tsx:219-220`) is provider-agnostic and
-  picks the new provider up for free.
-
-## Finding 10 — Reusable pure core, with a caveat
-
-`worker-service/src/services/churn_harvest_core.py:decide_suggestion` (`:24-52`) is generic by
-signature (`is_closed, is_won, discriminator, renewal_set, customer_email, known_emails`) and
-deny-ordered. `_process_raw_record` (`churn_suggestion_harvester.py:82-161`) takes `adapt` as an
-**injected callable**, so a new adapter slots in **without editing shared code**; only
-`_fetch_raw_candidates` (`:39-45`) and the `_ADAPTERS` dict (`:33-36`) are hardwired, and a
-usage-decline path simply wouldn't call them. Dedup + `begin_nested()`/`IntegrityError` race backstop
-(`:142-161`) are reusable verbatim.
-
-**Caveat:** `test_churn_harvest_core.py` has a `TestPurityGuard` asserting no
-Celery/SQLAlchemy/FastAPI/httpx/CRM imports. Any reuse must preserve that. And bending
-`is_closed=True, is_won=False, discriminator=<trend state>` onto a usage signal may be forcing a
-CRM-shaped abstraction onto a non-CRM one — worth deciding deliberately rather than by default.
+The honest one-line framing: **Intercom is a source that looks connected and
+produces nothing.**
 
 ---
 
-## Contradictions / corrections to the brief
+## F1 — The envelope defect: the route is wrong, the adapter is right
 
-1. **`usage_trend_severity.py` is not the classifier** (Finding 5). The brief named the wrong module.
-2. **"No migration" may be unattainable** without abandoning default-deny (Finding 3). The brief
-   framed no-migration as the target; the dig says default-deny is worth more.
-3. **The M3.2c seam does not give "sustained"** (Finding 6). The brief assumed the trend stack would
-   supply the signal directly; it supplies *edges*, and sustained-ness must be built.
+- `services/backend-api/src/api/routes/source_webhooks.py:333` passes
+  `event_data=payload.get("data", {})` — the unwrapped `data` object.
+- `services/worker-service/src/adapters/intercom.py:88-89` reads
+  `event_data.get("topic", "")` and `event_data.get("data", {}).get("item", {})`.
+  Same full-envelope assumption at `intercom.py:73` (`_get_body_text`, keyword
+  triggers), `intercom.py:148` (`get_external_ids`, the dedup key) and
+  `intercom.py:171` (`fetch_context` enrichment) — **four sites, not one.**
+- So `topic` is `""` and `item` is `{}` on every delivery: no text, no dedup key,
+  no feedback item, ever.
 
-## Open questions for the interview
+**Which side is the bug is not a judgement call — the tests settle it:**
 
-1. **Detection rule** — edge on entering `sharp_decline`, or level-based "held N consecutive days"?
-   (Finding 6. Materially changes where the detector hangs and what it reads.)
-2. **Opt-in home** — new `OrgAIConfig` column (migration, honors default-deny) vs. always-on?
-   (Finding 3.)
-3. **`suggested_churned_at` semantics** — decline start, last active day, or detection date? The CRM
-   source uses the *close date* explicitly because stability makes re-harvest idempotent; the
-   usage analogue needs the same stability property.
-4. **Synthetic `external_opportunity_id`** — determines whether a customer who declines, is
-   rejected, recovers, and declines again months later can ever produce a second suggestion.
-5. **`evidence` payload** — what does a reviewer need to adjudicate honestly (usage series? pct?
-   baseline? last active day? recent feedback)? Note the frontend renders CRM keys or falls back.
-6. **Reuse `decide_suggestion` or write a parallel core?** (Finding 10 caveat.)
-7. **Distinguishable provenance for M5.3 backtests** — should confirmed usage-sourced labels be
-   separable from CRM-sourced ones later? (`churn_event_id` back-link exists; `source` is `manual`
-   for both.)
+- `services/worker-service/tests/test_intercom_adapter.py:18,26,34,91-92,109-110`
+  feeds the adapter the **full envelope** (`{"topic": ..., "data": {"item": ...}}`)
+  and passes. The adapter's contract is the envelope.
+- `services/backend-api/tests/test_intercom.py:438` asserts
+  `event_data=payload["data"]` — it **pins the defect as correct**.
 
-## Honest limits to carry into the PRD (unchanged by the dig, now precisely located)
+So the production fix is in the route (pass the whole `payload`), and the RED
+step is inverting that one assertion. Note the route already reads the envelope
+correctly two lines earlier to derive `conversation_id`
+(`source_webhooks.py:319`) — this is a pure handoff slip, not a misunderstanding
+of Intercom's shape.
 
-- **A usage decline is not churn.** The review queue is the entire safety mechanism.
-- **≥5 active-day baseline floor** (`usage_score_service.py:288-331`) permanently excludes
-  light-usage customers — arguably the likeliest churners. Structural, inherited, must be stated.
-- **~12-16 day warm-up** minimum before any decline can be classified (band is `[12,16]` days).
-- **180-day retention** (`usage_metrics.py:46`, weekly `purge_old_usage_history`) — ample vs. the
-  16-day lookback, but caps longer-window analysis.
-- **Unvalidated upstream dependency**: requires the operator to have instrumented usage events.
-- **No claim about churn-prediction quality.** This changes label *supply* only.
-- **The 500-label gate is under review** (`AI-TRACKING.md:467-478`); do not restate it as settled and
-  do not justify this feature by "it gets you to 500".
+**The generalizable finding:** both sides were tested, both green, in mutual
+disagreement, because **nothing tested the seam**. `DEV-TRACKING.md:441-446`
+already generalized this exact family ("green tests over code that never
+executes in production… a 'is this reachable from an entrypoint?' sweep would
+have caught all three"). This is the fourth instance. The missing artifact is a
+**contract test on the queue→adapter seam**, and it should be written so that it
+fails if either side drifts again — not a test of the route and a test of the
+adapter, which is what already exists and what already failed to catch this.
+
+## F2 — The tenancy discriminator silently blocks any token-paste connect
+
+`services/worker-service/src/tasks/source_events.py:150-171` — the Intercom
+branch of `_find_matching_sources` requires a non-empty
+`provider_context["workspace_id"]` and matches it against
+`Integration.config["workspace_id"]`, returning `[]` otherwise (correctly — this
+is the P0 tenancy fix).
+
+**Only the OAuth callback populates that config key.** A token-paste connect that
+wrote to a different row or a dedicated table would match nothing, and ingestion
+would silently produce zero items — the same failure mode as F1, arrived at from
+the other direction. Any token-paste design must therefore *also* land a
+matching branch here, and that must be a named, tested requirement rather than
+an implementation detail.
+
+Zendesk solved the identical problem differently and better
+(`source_events.py:193-207`): a dedicated `ZendeskIntegration` table matched by
+`subdomain → organization_id`, with the comment explaining exactly why it does
+not use `Integration.config`.
+
+**Feasibility, and it is good news:** the existing OAuth callback already calls
+`https://api.intercom.io/me` (`integrations.py:1066`) to obtain workspace
+identity from a bearer token. That endpoint needs only an access token, so a
+token-paste connect can validate the token *and* derive the workspace id in the
+same call — exactly the shape of `ZendeskClient.validate()`
+(`zendesk_integration.py:397-400`). Token-paste is genuinely reachable.
+
+## F3 — The webhook signature question, and why it may force pull-only
+
+- `verify_intercom_signature` uses the single global `INTERCOM_CLIENT_SECRET` and
+  now **fails closed** (`source_webhooks.py:303-304`).
+- `tests/test_webhook_verifiers_fail_closed.py:47-50` — `SHADOW_ALLOWLIST` holds
+  only `verify_slack_signature` and `email_webhooks._verify_webhook_signature`.
+  Intercom is **not** allowlisted, so any new verifier must fail closed to keep
+  that test green. Good: the guard rail is already in place.
+- Consequence: an install with no `INTERCOM_CLIENT_SECRET` rejects every Intercom
+  delivery. A token-paste org has no client secret.
+
+**Unlike Zendesk, a per-org webhook secret may not be available at all.** Zendesk
+webhooks are configured *in Zendesk* by the operator, who pastes a secret
+Rereflect generated (`zendesk_integration.py:441-453`, display-once). Intercom
+signs webhooks with **its app's own client secret**, which Rereflect does not
+choose. So the Zendesk pattern likely does not transfer.
+
+> ⚠️ **Marked unverified — the PRD must confirm against current Intercom docs.**
+> I have not verified against Intercom's live documentation whether (a) an access
+> token can be obtained without a Developer Hub app, and (b) whether an operator
+> who *does* create an app to get a token therefore also has a client secret that
+> could be stored per-org. Both bear directly on scope. **Do not let this be
+> settled by assumption.** The low-risk reading, and my recommendation: the
+> token-paste path is **pull-only**, and the webhook path stays app/OAuth-only.
+> That resolves the card's open question in favour of option (b), for a stated
+> technical reason rather than convenience — and it is also what the user asked
+> for, since "flows in automatically" is the pull path.
+
+## F4 — ⚠️ The tracking doc's proposed fix would build on dead scaffolding
+
+`DEV-TRACKING.md:293-297` proposes "implement `IntercomConnector.fetch_new_items`
+against the Conversations API". **That is the wrong seam, and following it would
+produce a third dead-code instance.** Evidence:
+
+- `ZendeskConnector.fetch_new_items` (`worker-service/src/tasks/integrations.py:180-190`)
+  is **also** a `"not implemented"` stub returning `[]`.
+- Zendesk's real, shipped incremental pull is a **separate module**,
+  `worker-service/src/tasks/zendesk_sync.py`, which does not touch
+  `BaseConnector` at all.
+- `sync_all_integrations` (`tasks/integrations.py:17`) is nonetheless registered
+  on the beat schedule (`celery_app.py:121`) and selects
+  `type.in_(["intercom", "zendesk"])` (`tasks/integrations.py:30`) — so a
+  scheduled job runs and calls two stubs. The whole `BaseConnector` layer is dead
+  scaffolding from "Month 2".
+
+**Recommendation:** build `intercom_sync.py` mirroring `zendesk_sync.py`, and
+delete (or explicitly neutralize) the dead `BaseConnector` layer rather than
+extending it. Deleting it is in scope precisely because leaving it invites the
+next person to make this same mistake.
+
+`zendesk_sync.py:1-57` is an unusually complete template and its documented
+decisions should be inherited deliberately:
+- cursor = `last_synced_at` falling back to `connected_at`, **never epoch/None**,
+  so a missing cursor can never trigger a historical backfill (D1);
+- route every fetched item through the **shared** core
+  (`_find_matching_sources` + `_process_event_for_source`) rather than creating
+  `FeedbackItem`s ad hoc — this is what makes pull and webhook share one dedup
+  path (D2, and the card's explicit guardrail);
+- synthesize a uniform `*.created` event and let `FeedbackSourceEvent` dedup
+  enforce "one item per conversation, ever", instead of guessing new-vs-updated (D3);
+- a static auth failure is operator-recoverable: record `last_sync_status` /
+  `last_error` **without** flipping `is_active` (D7).
+
+A new `worker-service/src/clients/intercom.py` is needed — `src/clients/` holds
+`zendesk/jira/asana/hubspot/salesforce` and no Intercom client.
+
+## F5 — Intercom feedback does not reach Customer 360 (scope question)
+
+`docs/SELF_HOSTING.md:1589-1592`: Intercom items **do not populate
+`customer_email`** — it appears only in `source_metadata`, and only when field
+mapping enables enrichment. Zendesk populates it by side-loading `users` and
+merging a flat `requester_email` client-side before the item reaches the shared
+core (`zendesk_sync.py:22-34`).
+
+So Intercom feedback today cannot feed health scores, churn, or Customer 360.
+Ingesting items that are invisible to the product's main value loop is a thin
+win; the pull path should side-load contacts the same way Zendesk does. **This
+is a scope decision for the PRD, not a given.**
+
+## F6 — RBAC: the precedent is clear, the gap is elsewhere
+
+`zendesk_integration.py:367,509,529` all carry
+`dependencies=[Depends(require_admin_or_owner)]`. Any new Intercom token-paste
+route must too. `DEV-TRACKING.md:422`'s claim is about the OAuth module
+(`integrations.py`) specifically, and fixing that module wholesale is a
+**separate card** — but a new route here must not inherit its omission.
+
+## F7 — Frontend: two competing patterns, pick the shipped one
+
+- Intercom connect lives in a **shared wizard**,
+  `frontend-web/app/(dashboard)/settings/integrations/new/page.tsx` — a
+  `slack | intercom | discord` type union (`:37`) with a `connectionMethod`
+  concept already present (`:263` sets `'oauth'`), calling
+  `integrationsAPI.getIntercomOAuthUrl` (`:116`) and surfacing
+  `"Failed to start Intercom OAuth"` (`:119`) on the 403.
+- The token-paste providers instead have **dedicated pages** with their own test
+  files: `settings/integrations/zendesk/page.tsx` (+ `__tests__/ZendeskPage.test.tsx`),
+  and the same for `jira/` and `asana/`.
+
+**Recommendation:** a dedicated `settings/integrations/intercom/page.tsx`
+following the Zendesk page, because that is the pattern with a shipped testing
+precedent. Leave the OAuth wizard entry intact for operators who use it.
+
+## F8 — Docs and copy are currently honest; keep them that way
+
+- `SELF_HOSTING.md:1581-1596` states plainly: webhook-only, no periodic pull,
+  daily sync is a no-op, no write-back, no token-paste path.
+  `SELF_HOSTING.md:1674` carries the "does not currently produce feedback items"
+  warning. `CHANGELOG.md:53-60` says the same. `INTERCOM_CLIENT_ID` is documented
+  in `.env.example:22`, `.env.prod.example:115`, `SELF_HOSTING.md:1614`.
+- **Every one of those statements becomes false when this lands** and must be
+  updated in the same branch — that list is the docs checklist.
+
+## F9 — Verified: the write-back module is still orphaned
+
+`grep` across `services/backend-api/src` + `services/worker-service/src` for
+`intercom_service` / `add_note_to_conversation` / `close_conversation` returns
+**only the definitions** in
+`services/backend-api/src/services/intercom_service.py:27,67`. Zero production
+callers, confirming `DEV-TRACKING.md:433-446`. Out of scope here (it is
+outbound, this card is inbound) — but it is the fourth "registered code that
+never runs" instance and the P2 call stands: wire it or delete it.
+
+---
+
+## Ambiguities and open questions for the interview
+
+1. **Webhook under token-paste** (F3) — pull-only, or a per-org secret? Needs an
+   Intercom-docs check, not an assumption. My recommendation: pull-only.
+2. **Customer email side-loading** (F5) — in scope, or a follow-up? Excluding it
+   ships ingestion that cannot reach Customer 360.
+3. **Delete the dead `BaseConnector` layer** (F4) — in this branch, or a separate
+   cleanup? It currently runs on a schedule and does nothing for two providers.
+4. **Backfill on connect.** Zendesk deliberately never backfills (cursor from
+   `connected_at`). Same for Intercom, or an opt-in bounded backfill? Precedent
+   says no backfill by default.
+5. **One Intercom connection per org?** Zendesk enforces one row per org; the CRM
+   integrations enforce one CRM per org. Presumably the same, worth stating.
+6. **Does the OAuth path stay?** Both paths coexisting means two credential
+   sources and two tenancy discriminators. Cheaper to support one — but removing
+   OAuth is a breaking change for anyone using it.
+
+## Contradictions found (code vs docs)
+
+| Claim | Where | Reality |
+|---|---|---|
+| "implement `IntercomConnector.fetch_new_items`" is the fix | `DEV-TRACKING.md:293` | That abstraction is dead for **both** providers; Zendesk's real pull is `zendesk_sync.py` (F4) |
+| Intercom polling is wired | `tasks/integrations.py:30` + `celery_app.py:121` | Beat runs daily and calls two stubs returning `[]` |
+| `intercom_service.py` might now be wired | — | Still zero production callers (F9) |
+| "2,500 feedback/mo · Slack & Intercom · Priority Support" | `frontend-web/app/signup/page.tsx:341` | Pre-pivot plan-tier copy; everything is unlocked (`CLAUDE.md` § Plans). Stale drift, **out of scope**, flagged |
+
+## Affected surface (for decomposition)
+
+| Service | Files |
+|---|---|
+| backend-api | `routes/source_webhooks.py` (envelope fix), a new `routes/intercom_integration.py` (token-paste connect/status/disconnect, modelled on `zendesk_integration.py`), a new `models/` row + migration, `tests/test_intercom.py` |
+| worker-service | new `tasks/intercom_sync.py`, new `clients/intercom.py`, `tasks/source_events.py` (match branch), `adapters/intercom.py` (unchanged if the route is fixed), `tasks/integrations.py` (delete dead layer), `celery_app.py` (beat), `tests/test_intercom_adapter.py` + a new seam test |
+| frontend-web | new `settings/integrations/intercom/page.tsx` + `__tests__`, the integrations API client, the tile registry |
+| docs | `SELF_HOSTING.md` (§ Connecting Intercom, the known-limitation block at :1674, the env table at :1614), `CHANGELOG.md:53-60`, `README.md`, `AI-TRACKING.md` (new/updated Intercom row), `DEV-TRACKING.md:252,378,293` |
