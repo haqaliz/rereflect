@@ -12,7 +12,7 @@ describe('FAQ', () => {
     expect(screen.getByRole('heading', { name: /Frequently Asked Questions/i })).toBeInTheDocument();
   });
 
-  it('renders all 10 FAQ questions as visible text', () => {
+  it('renders all 12 FAQ questions as visible text', () => {
     render(<FAQ />);
     expect(screen.getByText('Is it really free?')).toBeInTheDocument();
     expect(screen.getByText('How do I self-host it?')).toBeInTheDocument();
@@ -20,9 +20,11 @@ describe('FAQ', () => {
     expect(screen.getByText('Can I use it without sending any data to an external LLM?')).toBeInTheDocument();
     expect(screen.getByText('What is the license?')).toBeInTheDocument();
     expect(screen.getByText('What integrations are included?')).toBeInTheDocument();
+    expect(screen.getByText('Does it support single sign-on (SSO)?')).toBeInTheDocument();
     expect(screen.getByText('Who owns my data?')).toBeInTheDocument();
     expect(screen.getByText('Can I contribute or request features?')).toBeInTheDocument();
     expect(screen.getByText('How does churn prediction work without sending data to a hosted service?')).toBeInTheDocument();
+    expect(screen.getByText('Can Rereflect pull churn labels from my CRM?')).toBeInTheDocument();
     expect(screen.getByText('Can I automate actions based on feedback events?')).toBeInTheDocument();
   });
 
@@ -107,7 +109,7 @@ describe('FAQ', () => {
     render(<FAQ />);
     const question = screen.getByText('Who owns my data?').closest('button')!;
     await user.click(question);
-    expect(screen.getByTestId('faq-answer-6')).toHaveTextContent('your infrastructure');
+    expect(screen.getByTestId('faq-answer-7')).toHaveTextContent('your infrastructure');
   });
 
   it('question "What is the license?" has answer mentioning "MIT"', async () => {
@@ -116,6 +118,17 @@ describe('FAQ', () => {
     const question = screen.getByText('What is the license?').closest('button')!;
     await user.click(question);
     expect(screen.getByTestId('faq-answer-4')).toHaveTextContent('MIT');
+  });
+
+  it('question "What integrations are included?" lists Zendesk as shipped, not planned', async () => {
+    const user = userEvent.setup();
+    render(<FAQ />);
+    const question = screen.getByText('What integrations are included?').closest('button')!;
+    await user.click(question);
+    const answer = screen.getByTestId('faq-answer-5');
+    expect(answer).toHaveTextContent('Zendesk');
+    expect(answer).toHaveTextContent('HubSpot');
+    expect(answer).not.toHaveTextContent(/planned/i);
   });
 
   // Accessibility
