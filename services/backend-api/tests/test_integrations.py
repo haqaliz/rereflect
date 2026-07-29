@@ -263,3 +263,151 @@ class TestDeleteIntegration:
             headers=auth_headers
         )
         assert response.status_code == 404
+
+
+class TestDiscordWebhookIntegration:
+    """Discord as an outbound alert destination.
+
+    Discord's webhook API requires a body containing `content` or `embeds`;
+    posting Rereflect's own envelope (what the generic webhook feature does)
+    returns 400. These tests pin the provider registration and the payload
+    shape that fix that.
+    """
+
+    def test_create_discord_webhook_success(
+        self, client: TestClient, auth_headers: dict, db: Session
+    ):
+        """A discord.com webhook URL creates a type='discord' integration."""
+        response = client.post(
+            "/api/v1/integrations/discord/webhook",
+            headers=auth_headers,
+            json={
+                "name": "Eng Alerts",
+                "webhook_url": "https://discord.com/api/webhooks/123/abcXYZ",
+                "triggers": ["urgent"],
+                "included_fields": ["text", "sentiment"],
+                "digest_time": "09:00",
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "Eng Alerts"
+        assert data["type"] == "discord"
+        assert data["is_active"] is True
+
+    def test_create_discord_webhook_accepts_legacy_discordapp_host(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """discordapp.com is the legacy host and is still issued by old servers."""
+        response = client.post(
+            "/api/v1/integrations/discord/webhook",
+            headers=auth_headers,
+            json={
+                "name": "Legacy Host",
+                "webhook_url": "https://discordapp.com/api/webhooks/123/abcXYZ",
+                "triggers": ["urgent"],
+            },
+        )
+
+        assert response.status_code == 201
+
+    def test_create_discord_webhook_rejects_slack_url(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """A Slack URL pasted into the Discord form must fail at save time."""
+        response = client.post(
+            "/api/v1/integrations/discord/webhook",
+            headers=auth_headers,
+            json={
+                "name": "Wrong Provider",
+                "webhook_url": "https://hooks.slack.com/services/T1/B2/xyz",
+                "triggers": ["urgent"],
+            },
+        )
+
+        assert response.status_code == 422
+
+    def test_create_discord_webhook_rejects_arbitrary_host(
+        self, client: TestClient, auth_headers: dict
+    ):
+        """Any non-Discord host is rejected, mirroring the Slack validator."""
+        response = client.post(
+            "/api/v1/integrations/discord/webhook",
+            headers=auth_headers,
+            json={
+                "name": "Not Discord",
+                "webhook_url": "https://example.com/api/webhooks/123/abc",
+                "triggers": ["urgent"],
+            },
+        )
+
+        assert response.status_code == 422
+
+    def test_discord_test_route_posts_embeds(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization
+    ):
+        """The Test button must post a body containing `embeds`.
+
+        A Discord payload with neither `content` nor `embeds` is the 400 this
+        whole feature exists to fix, so the shape is asserted, not just the
+        status code.
+        """
+        from unittest.mock import patch
+
+        integration = Integration(
+            organization_id=test_organization.id,
+            type="discord",
+            name="Discord Test Target",
+            config={
+                "webhook_url": "https://discord.com/api/webhooks/123/abcXYZ",
+                "integration_type": "webhook",
+            },
+            triggers=["urgent"],
+            included_fields=["text"],
+            is_active=True,
+        )
+        db.add(integration)
+        db.commit()
+        db.refresh(integration)
+
+        # Patched at the DEFINITION site: the route imports it from this module.
+        with patch(
+            "src.api.routes.integrations.send_discord_message"
+        ) as mock_send:
+            mock_send.return_value = {"success": True, "response": "ok"}
+            response = client.post(
+                "/api/v1/integrations/discord/test",
+                headers=auth_headers,
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 200
+        assert mock_send.called
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs.get("embeds"), "Discord payload must carry embeds"
+
+    def test_send_discord_message_returns_dict_and_never_raises(self):
+        """Backend contract: returns {'success': bool}, never raises.
+
+        The worker's send_discord_message_webhook deliberately does the
+        opposite. Mixing the two inverts failure semantics silently.
+        """
+        from unittest.mock import patch
+        import httpx
+
+        from src.api.routes.integrations import send_discord_message
+
+        with patch("httpx.Client") as mock_client:
+            mock_client.return_value.__enter__.return_value.post.side_effect = (
+                httpx.HTTPError("boom")
+            )
+            result = send_discord_message(
+                webhook_url="https://discord.com/api/webhooks/1/x",
+                embeds=[{"title": "t"}],
+                content="fallback",
+            )
+
+        assert result["success"] is False
+        assert "boom" in result["error"]
