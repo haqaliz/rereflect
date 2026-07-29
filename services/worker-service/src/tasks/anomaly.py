@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from celery import shared_task
 
 from src.database import get_db_session
+from src.tasks.alerts import send_discord_message_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -279,3 +280,56 @@ def _send_anomaly_slack(db, org, anomaly):
                 )
         except Exception as e:
             logger.error(f"Failed to send anomaly Slack message for integration {integration.id}: {e}")
+
+
+def _send_anomaly_discord(db, org, anomaly):
+    """Send anomaly alert via Discord integration.
+
+    Mirrors _send_anomaly_slack above (including its lack of last_used_at
+    bookkeeping — this alert path was never wired into notification_dispatch.py
+    to begin with, per TestDispatchAnomalyAlerts). A raising send is caught
+    per-integration so one bad webhook doesn't abort the rest.
+    """
+    from src.models import Integration
+
+    integrations = db.query(Integration).filter(
+        Integration.organization_id == org.id,
+        Integration.type == "discord",
+        Integration.is_active == True,
+    ).all()
+
+    if not integrations:
+        return
+
+    severity_emoji = "🔴" if anomaly.severity == "critical" else "🟡"
+    severity_label = anomaly.severity.upper()
+
+    content = f"Rereflect: Sentiment Anomaly ({severity_label})"
+    description = (
+        f"Negative sentiment spiked to **{anomaly.current_negative_pct:.0f}%** "
+        f"(baseline: {anomaly.baseline_negative_pct:.0f}%)\n"
+        f"Deviation: +{anomaly.deviation_pct:.0f}pp | "
+        f"Based on {anomaly.feedback_count} feedback items in the last 24h"
+    )
+    embeds = [
+        {
+            "title": f"{severity_emoji} Sentiment Anomaly - {severity_label}",
+            "description": description[:4096],  # THE CONTRACT: description <= 4096 chars
+            "color": 15548997 if anomaly.severity == "critical" else 16776960,  # red / yellow, decimal
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+    ]
+
+    for integration in integrations:
+        try:
+            config = integration.config or {}
+            webhook_url = config.get("webhook_url")
+
+            if webhook_url:
+                send_discord_message_webhook(
+                    webhook_url=webhook_url,
+                    embeds=embeds,
+                    content=content,
+                )
+        except Exception as e:
+            logger.error(f"Failed to send anomaly Discord message for integration {integration.id}: {e}")
