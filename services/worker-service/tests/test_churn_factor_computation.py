@@ -629,3 +629,98 @@ class TestCustomerLevelFactorsWithDB:
         from src.tasks import analysis
 
         assert analysis.FeedbackWorkflowEvent is FeedbackWorkflowEvent
+
+
+class _RaisingQuery:
+    """Wraps a real SQLAlchemy Query so `.filter(...)` raises once the criteria
+    mention `trigger_substring` — used to simulate exactly one customer-level
+    churn factor's query failing, without touching the other four.
+    """
+
+    def __init__(self, real_query, trigger_substring):
+        self._real_query = real_query
+        self._trigger = trigger_substring
+
+    def filter(self, *criteria):
+        for c in criteria:
+            if self._trigger in str(c):
+                raise RuntimeError("simulated factor query failure")
+        return _RaisingQuery(self._real_query.filter(*criteria), self._trigger)
+
+    def __getattr__(self, name):
+        return getattr(self._real_query, name)
+
+
+class TestFactorFailureIsolation:
+    """Spec S3 / plan Phase 4: a single factor's exception must be logged (not
+    swallowed) and must not void the other eight factors' scores.
+    """
+
+    def test_factor_failure_logs_and_leaves_others_intact(self, db, test_org, caplog):
+        """Simulate the pain_severity query raising. Assert: a warning naming
+        the factor is logged, pain_severity falls back to its 0 default despite
+        conditions that would otherwise score it 10, and the other 8 factors
+        (including the other customer-level ones) still compute normally.
+        """
+        now = datetime.utcnow()
+        email = "factor-failure@example.com"
+
+        # Same setup as test_pain_severity_scores_10_for_three_critical_points —
+        # would score pain_severity=10 if the query didn't fail.
+        fb1 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Data loss on export",
+            customer_email=email,
+            pain_point_severity="critical",
+            created_at=now - timedelta(days=10),
+        )
+        fb2 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Login broken",
+            customer_email=email,
+            pain_point_severity="major",
+            created_at=now - timedelta(days=5),
+        )
+        trigger = FeedbackItem(
+            organization_id=test_org.id,
+            text="I want to cancel, this is terrible",
+            customer_email=email,
+            sentiment_score=-0.8,
+            is_urgent=True,
+            pain_point_severity="critical",
+            created_at=now,
+        )
+        db.add_all([fb1, fb2, trigger])
+        db.commit()
+        db.refresh(trigger)
+
+        real_query = db.query
+
+        def wrapped_query(*args, **kwargs):
+            return _RaisingQuery(real_query(*args, **kwargs), "pain_point_severity")
+
+        db.query = wrapped_query
+
+        with caplog.at_level("WARNING", logger="src.tasks.analysis"):
+            _, factors = _compute_heuristic_churn_risk(trigger, db=db)
+
+        # The failing factor falls back to its default — the failure did not
+        # propagate and did not silently score as if nothing happened.
+        assert factors["pain_severity"]["score"] == 0
+        assert factors["pain_severity"]["label"] == "No critical pain points"
+
+        # The failure was logged, naming the factor, instead of being swallowed.
+        assert any(
+            "pain_severity" in record.message.lower()
+            for record in caplog.records
+        ), f"Expected a warning naming 'pain_severity', got: {[r.message for r in caplog.records]}"
+
+        # The other feedback-level factors still computed correctly...
+        assert factors["sentiment"]["score"] == 15
+        assert factors["urgency"]["score"] == 10
+        assert factors["churn_keywords"]["score"] >= 5
+
+        # ...and the other customer-level factors, sharing the same db session,
+        # were not knocked out by pain_severity's isolated failure.
+        assert factors["resolution_time"]["label"] == "No resolved issues in 60 days"
+        assert factors["feature_density"]["score"] == 0

@@ -806,8 +806,8 @@ def _compute_heuristic_churn_risk(feedback, db=None):
                     sentiment_trend_label = "Stable sentiment trend"
             else:
                 sentiment_trend_label = "Insufficient data for trend"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("churn factor %s failed to compute: %s", "sentiment_trend", exc)
 
         # Feedback frequency (0-10 pts) — more complaints recently
         try:
@@ -832,8 +832,8 @@ def _compute_heuristic_churn_risk(feedback, db=None):
                 frequency_label = f"Complaint frequency increasing ({last_7d} this week vs {avg_weekly:.1f} avg)"
             else:
                 frequency_label = "Normal frequency"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("churn factor %s failed to compute: %s", "feedback_frequency", exc)
 
         # Resolution time (0-10 pts) — slow resolution
         try:
@@ -879,8 +879,8 @@ def _compute_heuristic_churn_risk(feedback, db=None):
                         resolution_label = f"Resolved within {avg_days:.1f} days avg"
             else:
                 resolution_label = "No resolved issues in 60 days"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("churn factor %s failed to compute: %s", "resolution_time", exc)
 
         # Pain point severity (0-10 pts)
         try:
@@ -898,8 +898,8 @@ def _compute_heuristic_churn_risk(feedback, db=None):
                 pain_label = f"{critical_count} critical pain point{'s' if critical_count != 1 else ''} in 30 days"
             else:
                 pain_label = "No critical pain points"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("churn factor %s failed to compute: %s", "pain_severity", exc)
 
         # Feature request density (0-5 pts)
         try:
@@ -922,8 +922,8 @@ def _compute_heuristic_churn_risk(feedback, db=None):
                 feature_density_label = f"High feature request ratio ({pct}%)"
             else:
                 feature_density_label = "Low feature request ratio"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("churn factor %s failed to compute: %s", "feature_density", exc)
 
     # Build factors dict
     factors = {
