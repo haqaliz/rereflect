@@ -30,6 +30,11 @@ SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
 SLACK_REDIRECT_URI = os.environ.get("SLACK_REDIRECT_URI", "http://localhost:8000/api/v1/integrations/slack/oauth/callback")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
+# Verifies inbound Slack Events API requests (source_webhooks.py), not the
+# OAuth client secret above. Read here too so list_integrations can report
+# whether it is configured.
+SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
+
 # Intercom OAuth Configuration
 INTERCOM_CLIENT_ID = os.environ.get("INTERCOM_CLIENT_ID", "")
 INTERCOM_CLIENT_SECRET = os.environ.get("INTERCOM_CLIENT_SECRET", "")
@@ -120,6 +125,7 @@ class IntegrationResponse(BaseModel):
     error_count: int
     last_error: Optional[str]
     created_at: datetime
+    signature_verification_configured: bool = True
 
     class Config:
         from_attributes = True
@@ -252,6 +258,21 @@ TEMPLATE_VARIABLES = [
 # Helper Functions
 # ============================================================================
 
+def _signature_verification_configured(integration_type: str) -> bool:
+    """Whether inbound webhooks for this integration type are signature-verified.
+
+    Only slack and intercom integrations receive inbound, signed webhooks
+    (source_webhooks.py) — everything else (e.g. discord, which carries its
+    credential in the webhook URL itself) has no signature to configure, so
+    it reports True rather than raising a warning that doesn't apply.
+    """
+    if integration_type == "slack":
+        return bool(SLACK_SIGNING_SECRET)
+    if integration_type == "intercom":
+        return bool(INTERCOM_CLIENT_SECRET)
+    return True
+
+
 def integration_to_response(integration: Integration) -> IntegrationResponse:
     """Convert Integration model to response schema."""
     config = integration.config or {}
@@ -271,6 +292,7 @@ def integration_to_response(integration: Integration) -> IntegrationResponse:
         error_count=integration.error_count or 0,
         last_error=integration.last_error,
         created_at=integration.created_at,
+        signature_verification_configured=_signature_verification_configured(integration.type),
     )
 
 

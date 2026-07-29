@@ -237,6 +237,32 @@ def _make_intercom_signature(body: bytes, secret: str) -> str:
     return f"sha1={digest}"
 
 
+# ============================================================================
+# verify_intercom_signature -- pure-function fail-closed tests
+# ============================================================================
+
+class TestVerifyIntercomSignatureFailsClosed:
+    """Mirrors test_zendesk_webhook.py's TestVerifyZendeskSignature fail-closed
+    coverage (_verify_zendesk_signature is the correct reference: an
+    empty/None secret must return False, not skip verification)."""
+
+    def test_empty_secret_returns_false_fail_closed(self):
+        from src.api.routes.source_webhooks import verify_intercom_signature
+
+        body = b'{"topic": "conversation.user.created"}'
+        signature = _make_intercom_signature(body, "some-secret")
+
+        assert verify_intercom_signature(body, signature, "") is False
+
+    def test_none_secret_returns_false_fail_closed(self):
+        from src.api.routes.source_webhooks import verify_intercom_signature
+
+        body = b'{"topic": "conversation.user.created"}'
+        signature = "sha1=irrelevant"
+
+        assert verify_intercom_signature(body, signature, None) is False
+
+
 class TestIntercomWebhook:
     """Tests for POST /api/v1/webhooks/intercom/events"""
 
@@ -250,6 +276,7 @@ class TestIntercomWebhook:
         """Should accept valid HMAC-SHA1 signature."""
         payload = {
             "topic": "conversation.user.created",
+            "app_id": "abc123",
             "data": {
                 "item": {
                     "type": "conversation",
@@ -273,10 +300,89 @@ class TestIntercomWebhook:
         assert response.json()["status"] == "queued"
         mock_queue.assert_called_once()
 
+    @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "")
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_webhook_rejects_when_client_secret_not_set(
+        self, mock_queue: MagicMock, client: TestClient,
+    ):
+        """Fail closed: with INTERCOM_CLIENT_SECRET unset (the default,
+        undocumented-elsewhere state of every install), an unsigned payload
+        must be rejected, not silently accepted."""
+        payload = {
+            "topic": "conversation.user.created",
+            "app_id": "abc123",
+            "data": {"item": {"id": "conv_001"}},
+        }
+        body = json.dumps(payload).encode()
+
+        response = client.post(
+            "/api/v1/webhooks/intercom/events",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Hub-Signature": "sha1=whatever"},
+        )
+        assert response.status_code == 401
+        mock_queue.assert_not_called()
+
+    @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_webhook_rejects_tampered_body(self, mock_queue: MagicMock, client: TestClient):
+        """Signature computed over payload A must not validate payload B."""
+        payload_a = {
+            "topic": "conversation.user.created",
+            "app_id": "abc123",
+            "data": {"item": {"id": "conv_001"}},
+        }
+        payload_b = {
+            "topic": "conversation.user.created",
+            "app_id": "abc123",
+            "data": {"item": {"id": "conv_002"}},
+        }
+        body_a = json.dumps(payload_a).encode()
+        body_b = json.dumps(payload_b).encode()
+        sig_for_a = _make_intercom_signature(body_a, "webhook-secret")
+
+        response = client.post(
+            "/api/v1/webhooks/intercom/events",
+            content=body_b,
+            headers={"Content-Type": "application/json", "X-Hub-Signature": sig_for_a},
+        )
+        assert response.status_code == 401
+        mock_queue.assert_not_called()
+
+    @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
+    @patch("src.api.routes.source_webhooks.queue_source_event")
+    def test_non_ascii_signature_returns_401_not_500(self, mock_queue: MagicMock, client: TestClient):
+        """hmac.compare_digest raises TypeError on a non-ASCII str argument --
+        must surface as a 401, not an unhandled 500."""
+        payload = {
+            "topic": "conversation.user.created",
+            "app_id": "abc123",
+            "data": {"item": {"id": "conv_001"}},
+        }
+        body = json.dumps(payload).encode()
+
+        response = client.post(
+            "/api/v1/webhooks/intercom/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                # httpx encodes str header values as ASCII; send raw latin-1
+                # bytes (as a real client could) so the server actually
+                # receives a non-ASCII str after Starlette's header decode.
+                "X-Hub-Signature": "sha1=ééé".encode("latin-1"),
+            },
+        )
+        assert response.status_code == 401
+        mock_queue.assert_not_called()
+
     @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
     def test_webhook_rejects_invalid_signature(self, client: TestClient):
         """Should reject requests with invalid signature."""
-        payload = {"topic": "conversation.user.created", "data": {"item": {"id": "conv_001"}}}
+        payload = {
+            "topic": "conversation.user.created",
+            "app_id": "abc123",
+            "data": {"item": {"id": "conv_001"}},
+        }
         body = json.dumps(payload).encode()
 
         response = client.post(
@@ -296,9 +402,18 @@ class TestIntercomWebhook:
         mock_queue: MagicMock,
         client: TestClient,
     ):
-        """Should queue conversation.user.created events."""
+        """Should queue conversation.user.created events, with the payload's
+        app_id flowing through as provider_context.workspace_id.
+
+        This test previously asserted `workspace_id: None` against a payload
+        that deliberately omitted `app_id` -- pinning the cross-tenant
+        vulnerability (missing app_id -> None -> matches every org's source
+        in worker-service's _find_matching_sources) as the expected
+        contract. Rewritten, not extended: the payload now includes app_id
+        and the assertion follows it through."""
         payload = {
             "topic": "conversation.user.created",
+            "app_id": "abc123",
             "data": {
                 "item": {
                     "type": "conversation",
@@ -321,7 +436,7 @@ class TestIntercomWebhook:
             external_event_id="conv_100",
             event_type="conversation.user.created",
             event_data=payload["data"],
-            provider_context={"conversation_id": "conv_100", "workspace_id": None},
+            provider_context={"conversation_id": "conv_100", "workspace_id": "abc123"},
         )
 
     @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
@@ -334,6 +449,7 @@ class TestIntercomWebhook:
         """Should queue conversation.user.replied events."""
         payload = {
             "topic": "conversation.user.replied",
+            "app_id": "abc123",
             "data": {
                 "item": {
                     "type": "conversation",
@@ -365,6 +481,7 @@ class TestIntercomWebhook:
         """Should queue conversation.rating.added events."""
         payload = {
             "topic": "conversation.rating.added",
+            "app_id": "abc123",
             "data": {
                 "item": {
                     "type": "conversation",
@@ -389,6 +506,7 @@ class TestIntercomWebhook:
         """Should ignore topics we don't handle."""
         payload = {
             "topic": "user.unsubscribed",
+            "app_id": "abc123",
             "data": {"item": {"id": "user_999"}},
         }
         body = json.dumps(payload).encode()

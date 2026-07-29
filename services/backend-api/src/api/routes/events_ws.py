@@ -26,6 +26,7 @@ Internal HTTP endpoint for Celery workers:
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -49,7 +50,7 @@ router = APIRouter(tags=["events-ws"])
 HEARTBEAT_INTERVAL = 30   # seconds
 IDLE_TIMEOUT = 600         # 10 minutes (passive endpoint, longer than copilot)
 
-INTERNAL_SECRET = os.getenv("INTERNAL_EVENTS_SECRET", "dev-secret")
+INTERNAL_SECRET = os.getenv("INTERNAL_EVENTS_SECRET", "")
 
 
 # -- Authentication ------------------------------------------------------------
@@ -154,7 +155,17 @@ async def internal_emit(
     Internal endpoint for Celery workers to push events.
     Protected by INTERNAL_EVENTS_SECRET shared secret.
     """
-    if x_internal_secret != INTERNAL_SECRET:
+    if not INTERNAL_SECRET or not x_internal_secret:
+        raise HTTPException(status_code=403, detail="Invalid internal secret")
+
+    try:
+        secret_matches = hmac.compare_digest(x_internal_secret, INTERNAL_SECRET)
+    except TypeError:
+        # compare_digest rejects non-ASCII str input; treat it as a mismatch
+        # rather than letting it surface as a 500.
+        secret_matches = False
+
+    if not secret_matches:
         raise HTTPException(status_code=403, detail="Invalid internal secret")
 
     await emit_event(

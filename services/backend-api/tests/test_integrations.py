@@ -388,6 +388,113 @@ class TestDiscordWebhookIntegration:
         kwargs = mock_send.call_args.kwargs
         assert kwargs.get("embeds"), "Discord payload must carry embeds"
 
+
+class TestSignatureVerificationConfiguredField:
+    """GET /api/v1/integrations/ surfaces whether inbound webhook signatures
+    are verified for slack/intercom integrations, so a self-hoster can see
+    unsigned ingestion in the UI rather than needing to read logs.
+    """
+
+    def test_slack_integration_reports_configured_when_secret_set(
+        self, client: TestClient, auth_headers: dict,
+        test_integration: Integration, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr("src.api.routes.integrations.SLACK_SIGNING_SECRET", "shh")
+
+        response = client.get("/api/v1/integrations/", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()["integrations"][0]
+        assert data["type"] == "slack"
+        assert data["signature_verification_configured"] is True
+
+    def test_slack_integration_reports_unconfigured_when_secret_unset(
+        self, client: TestClient, auth_headers: dict,
+        test_integration: Integration, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr("src.api.routes.integrations.SLACK_SIGNING_SECRET", "")
+
+        response = client.get("/api/v1/integrations/", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()["integrations"][0]
+        assert data["signature_verification_configured"] is False
+
+    def test_intercom_integration_reports_configured_when_secret_set(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization, monkeypatch: pytest.MonkeyPatch
+    ):
+        integration = Integration(
+            organization_id=test_organization.id,
+            type="intercom",
+            name="Intercom Bridge",
+            config={"integration_type": "oauth", "workspace_id": "abc123"},
+            triggers=["urgent"],
+            is_active=True,
+        )
+        db.add(integration)
+        db.commit()
+        monkeypatch.setattr("src.api.routes.integrations.INTERCOM_CLIENT_SECRET", "shh")
+
+        response = client.get("/api/v1/integrations/", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()["integrations"][0]
+        assert data["type"] == "intercom"
+        assert data["signature_verification_configured"] is True
+
+    def test_intercom_integration_reports_unconfigured_when_secret_unset(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization, monkeypatch: pytest.MonkeyPatch
+    ):
+        integration = Integration(
+            organization_id=test_organization.id,
+            type="intercom",
+            name="Intercom Bridge",
+            config={"integration_type": "oauth", "workspace_id": "abc123"},
+            triggers=["urgent"],
+            is_active=True,
+        )
+        db.add(integration)
+        db.commit()
+        monkeypatch.setattr("src.api.routes.integrations.INTERCOM_CLIENT_SECRET", "")
+
+        response = client.get("/api/v1/integrations/", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()["integrations"][0]
+        assert data["signature_verification_configured"] is False
+
+    def test_discord_integration_always_reports_configured(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Discord carries its credential in the webhook URL — there is no
+        inbound signature to verify, so it must never show the warning."""
+        integration = Integration(
+            organization_id=test_organization.id,
+            type="discord",
+            name="Discord Alerts",
+            config={
+                "webhook_url": "https://discord.com/api/webhooks/123/abcXYZ",
+                "integration_type": "webhook",
+            },
+            triggers=["urgent"],
+            is_active=True,
+        )
+        db.add(integration)
+        db.commit()
+        monkeypatch.setattr("src.api.routes.integrations.SLACK_SIGNING_SECRET", "")
+        monkeypatch.setattr("src.api.routes.integrations.INTERCOM_CLIENT_SECRET", "")
+
+        response = client.get("/api/v1/integrations/", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()["integrations"][0]
+        assert data["type"] == "discord"
+        assert data["signature_verification_configured"] is True
+
+
     def test_send_discord_message_returns_dict_and_never_raises(self):
         """Backend contract: returns {'success': bool}, never raises.
 

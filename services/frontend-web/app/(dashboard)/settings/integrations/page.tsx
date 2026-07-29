@@ -26,6 +26,7 @@ import {
   Settings as SettingsIcon,
   Users,
   Activity,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   Dialog,
@@ -52,6 +53,17 @@ import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
 import { zendeskAPI, ZendeskConnectionStatus } from '@/lib/api/zendesk';
 import { asanaAPI, AsanaConnectionStatus } from '@/lib/api/asana';
 import { getOauthErrorMessage } from '@/lib/oauthErrors';
+
+// Docs entry point for the env vars that enable inbound webhook signature
+// verification (SLACK_SIGNING_SECRET, INTERCOM_CLIENT_SECRET).
+const SELF_HOSTING_DOCS_URL = 'https://github.com/haqaliz/rereflect/blob/master/docs/SELF_HOSTING.md';
+
+// The env var a self-hoster needs to set for each integration type that can
+// receive inbound signed webhooks. Only consulted when the backend reports
+// signature_verification_configured: false, so no other type needs an entry.
+function signingSecretEnvVar(integrationType: string): string {
+  return integrationType === 'intercom' ? 'INTERCOM_CLIENT_SECRET' : 'SLACK_SIGNING_SECRET';
+}
 
 function IntegrationsContent() {
   const router = useRouter();
@@ -379,6 +391,26 @@ function IntegrationsContent() {
                         </div>
                       )}
                     </div>
+
+                    {/* Unverified webhook signature — configuration gap, not a breach */}
+                    {!integration.signature_verification_configured && (
+                      <div className="mt-3 ml-11">
+                        <a
+                          href={SELF_HOSTING_DOCS_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block"
+                        >
+                          <Badge
+                            variant="warning"
+                            className="text-xs flex items-center gap-1 w-fit"
+                          >
+                            <ShieldAlert className="w-3 h-3 flex-shrink-0" />
+                            Signature not verified — set {signingSecretEnvVar(integration.type)} (see self-hosting docs)
+                          </Badge>
+                        </a>
+                      </div>
+                    )}
 
                     {/* Status info */}
                     <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground ml-11">

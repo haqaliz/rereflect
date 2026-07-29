@@ -31,12 +31,27 @@ router = APIRouter(prefix="/api/v1/webhooks/linear", tags=["linear-webhooks"])
 
 
 def _verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
-    """Verify Linear webhook HMAC-SHA256 signature."""
+    """Verify Linear webhook HMAC-SHA256 signature.
+
+    Fails closed on a missing secret, matching `_verify_jira_signature` — whose
+    module docstring already names the fail-open variant as an anti-pattern it
+    deliberately did not copy.
+
+    This is behaviour-neutral today: the sole caller (`_find_integration_by_secret`)
+    only invokes this when `integration.webhook_secret` is truthy, so the branch
+    was unreachable. It is fixed anyway because that guard is the only thing
+    standing between here and an unauthenticated write, and a second call site
+    would silently re-arm it.
+    """
     if not secret:
-        logger.warning("No webhook secret configured — skipping verification")
-        return True
+        logger.warning("Linear webhook secret not configured, rejecting (fails closed)")
+        return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    try:
+        return hmac.compare_digest(expected, signature)
+    except TypeError:
+        # compare_digest raises TypeError on non-ASCII str input.
+        return False
 
 
 def _find_integration_by_secret(signature: str, body: bytes, db: Session) -> Optional[LinearIntegration]:

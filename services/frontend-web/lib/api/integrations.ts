@@ -16,6 +16,7 @@ export interface Integration {
   error_count: number;
   last_error: string | null;
   created_at: string;
+  signature_verification_configured: boolean;
 }
 
 export interface OAuthConnectResponse {

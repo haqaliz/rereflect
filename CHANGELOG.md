@@ -7,6 +7,58 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Security — Inbound webhooks accepted unsigned requests, and could write to the wrong organization
+
+**If you run Rereflect with more than one organization on a single instance, upgrade.**
+Set `SLACK_SIGNING_SECRET` and `RESEND_INBOUND_WEBHOOK_SECRET` if you use the Slack or
+inbound-email sources; see *Inbound webhook signing secrets* in `docs/SELF_HOSTING.md`.
+
+Three problems, each of which was the shipped default rather than an edge case:
+
+- **Signature verification failed open.** The Intercom, Slack, inbound-email and Linear
+  verifiers each returned "valid" when their signing secret was unset — and none of those
+  secrets appeared in any `.env.example`, compose file or doc, so unset *was* the default
+  state of every install. Zendesk, Jira and Asana were already correct.
+- **A missing tenant discriminator matched every organization.** The worker's source-matching
+  query is not scoped by organization; each provider branch narrows it only when a
+  payload-supplied id is present. Four branches had no guard for the missing case and fell
+  through to "every active source on the instance." Only Zendesk was guarded — it had been
+  fixed once, in isolation, and the identical shape was left standing everywhere else.
+- **`/api/internal/events/emit` shipped with a public default secret.** It defaulted to the
+  literal `"dev-secret"` in an open-source repository, compared it non-constant-time, and
+  took the target `org_id` straight from the request body. This one required no integration
+  to be configured at all.
+
+**What this means in practice.** On a default install, an unauthenticated caller who knew a
+webhook URL could cause writes attributed to organizations they had no relationship with. We
+want to be precise rather than dramatic about what those writes were: a separate payload-shape
+bug meant Intercom deliveries never produced feedback items, so what actually landed was a
+source-event log row carrying attacker-supplied JSON under another organization's id. That bug
+was an accident, not a safeguard — it was the only thing standing between this and arbitrary
+feedback injection, which is why the tenancy fix landed first and why the shape fix is
+deliberately still pending.
+
+**Fixed:** Intercom and Linear now fail closed; the tenancy guard is applied to all four
+unguarded branches; `INTERNAL_EVENTS_SECRET` has no default and is compared in constant time.
+A new test enumerates every signature verifier in the codebase and asserts each fails closed,
+so this cannot be fixed one verifier at a time again.
+
+**Grace period for Slack and inbound email.** Both are in live use, so flipping them closed
+immediately would have silently stopped real feedback for anyone running without a secret.
+They still accept unsigned deliveries for now, but log a `SECURITY-SHADOW` warning on every
+request, warn at startup when an active integration has no secret, and are flagged in
+Settings → Integrations. A future release rejects them. The test allowlisting them fails the
+moment that happens, so the grace period cannot quietly become permanent.
+
+### Known limitation — Intercom ingestion does not produce feedback items
+
+This affects every release to date, not just this one. Intercom webhook deliveries are
+received and authenticated, but a payload-shape mismatch between the webhook route and the
+Intercom adapter empties the extracted text before a feedback item is created. If you have
+connected Intercom and seen events arrive with no feedback appearing, that is why, and it is
+not your configuration. Documented in `docs/SELF_HOSTING.md`; a fix is tracked separately.
+Zendesk is the closest fully-working inbound source today.
+
 ### Fixed — We were telling people shipped integrations didn't exist
 
 A 1.0.0 user asked us to build Intercom and Zendesk ingestion "so feedback flows in

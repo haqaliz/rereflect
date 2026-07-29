@@ -1618,9 +1618,11 @@ Set these in your backend `.env`:
 
 Restart the backend after setting these so the OAuth routes pick them up.
 
-> **INTERCOM_CLIENT_SECRET is required.** This variable must be set before the
-> webhook endpoint is exposed. It serves as the HMAC signing key for incoming
-> webhook deliveries.
+> **INTERCOM_CLIENT_SECRET is required.** It is the HMAC signing key for incoming
+> webhook deliveries. **If it is unset, every delivery to
+> `/api/v1/webhooks/intercom/events` is rejected with HTTP 401** — signature
+> verification fails closed, so an unconfigured install accepts nothing rather
+> than accepting everything. Set it before exposing the webhook endpoint.
 
 ### 3. Connect from the app
 
@@ -1669,8 +1671,21 @@ request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
 
 - **Settings → Integrations → Intercom** shows connection status and the
   workspace name once connected.
-- New Intercom conversations appear as feedback items, analyzed for sentiment,
-  within a minute or two — or in the pending-review queue if `auto_import` is off.
+> ### ⚠️ Known limitation — Intercom does not currently produce feedback items
+>
+> Deliveries are received, authenticated and recorded, but a payload-shape
+> mismatch between the webhook route and the Intercom adapter means the extracted
+> text is always empty, so the event is ignored before a feedback item is created.
+> **This affects every release to date, not just this one.**
+>
+> Nothing you can configure works around it — if you connect Intercom and see
+> events arriving but no feedback, this is why, and it is not your setup. A fix is
+> tracked separately. Zendesk is the closest fully-working inbound source if you
+> need one today.
+
+- Once the limitation above is resolved, new Intercom conversations will appear as
+  feedback items, analyzed for sentiment, within a minute or two — or in the
+  pending-review queue if `auto_import` is off.
 - If nothing arrives, the webhook is the first thing to check: the endpoint must be
   reachable from the public internet, and the subscription must cover the three
   topics in step 5. Intercom's own webhook delivery log is the fastest way to see
@@ -2157,6 +2172,42 @@ usage cap — it's available to every organization running the app.
   Traefik) in front for TLS.
 - **Backups.** Your data lives in the Postgres volume. Snapshot it (or run
   `pg_dump`) on a schedule before upgrades.
+
+### Inbound webhook signing secrets
+
+Every inbound webhook endpoint authenticates deliveries with an HMAC signature. The
+signature proves the request came from your provider; without it, an endpoint that is
+reachable from the internet will accept a request from anyone who knows the URL.
+
+Set the secret for each source you actually use:
+
+| Source | Variable | Where to get it | If unset |
+|---|---|---|---|
+| Intercom | `INTERCOM_CLIENT_SECRET` | Intercom app → Client Secret | **Rejected (401).** Fails closed. |
+| Slack | `SLACK_SIGNING_SECRET` | Slack app → Basic Information → Signing Secret | **Accepted unverified**, warning logged. A future release will reject. |
+| Inbound email | `RESEND_INBOUND_WEBHOOK_SECRET` | Resend → inbound webhook settings | **Accepted unverified**, warning logged. A future release will reject. |
+| Zendesk | *(per-integration, set in the app)* | Generated when you enable the Zendesk webhook | Rejected (401). Fails closed. |
+| Jira / Asana / Linear | *(per-integration, set in the app)* | Generated on connect | Rejected. Fails closed. |
+
+Slack and inbound email are in a **grace period**: they still accept unsigned
+deliveries so that existing installs keep ingesting, but every such request logs a
+`SECURITY-SHADOW` warning naming the missing variable, and the backend warns at
+startup if you have an active Slack integration with no signing secret. Settings →
+Integrations also flags the affected integration. Set the secret before the next
+release turns those warnings into rejections.
+
+Zendesk, Jira, Asana and Linear store their webhook secret **per integration** in the
+database rather than in an environment variable, so there is nothing to configure in
+`.env` for those — the secret is created when you connect.
+
+### The internal events endpoint
+
+`POST /api/internal/events/emit` pushes realtime events to connected dashboards and is
+guarded by `INTERNAL_EVENTS_SECRET`. **It has no default**: if the variable is unset,
+the endpoint rejects every request with `403`, which is the safe state. Nothing in
+Rereflect calls this endpoint today — it exists for external tooling that wants to push
+events into the dashboard. Generate a secret with `openssl rand -hex 32` if you use it,
+and keep the endpoint off the public internet either way.
 
 ### Redis is required for automation cooldowns
 
