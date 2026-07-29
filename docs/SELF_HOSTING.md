@@ -97,7 +97,7 @@ The only outbound calls a Rereflect instance ever makes are ones you configure y
 |---|---|
 | Your LLM provider (OpenAI / Anthropic / Google) | Only if you add a BYOK key **and** set `ai_analysis_enabled=true`. Omit the key and nothing is contacted. |
 | Your local model endpoint (Ollama, etc.) | Only if you point Settings → AI at one. Stays on your network. |
-| Integrations (Slack, Jira, Zendesk, Asana, Intercom, Linear, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
+| Integrations (Slack, Discord, Jira, Zendesk, Asana, Intercom, Linear, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
 | Your Sentry project | Only if you set `SENTRY_DSN` — see below. |
 
 ### Optional error tracking (Sentry), off by default
