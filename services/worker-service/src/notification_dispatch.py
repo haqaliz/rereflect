@@ -118,6 +118,38 @@ def _dispatch_slack_health_alert(
         db.commit()
 
 
+def _dispatch_discord_health_alert(
+    org_id: int,
+    embeds: List[Dict],
+    content: str,
+) -> None:
+    """Send Discord health alert using org's active Discord webhook integrations."""
+    from src.models import Integration
+
+    with get_db_session() as db:
+        integrations = db.query(Integration).filter(
+            Integration.organization_id == org_id,
+            Integration.type == "discord",
+            Integration.is_active == True,
+        ).all()
+
+        for integration in integrations:
+            try:
+                config = integration.config or {}
+                webhook_url = config.get("webhook_url")
+
+                if webhook_url:
+                    send_discord_message_webhook(
+                        webhook_url=webhook_url,
+                        embeds=embeds,
+                        content=content,
+                    )
+            except Exception as e:
+                logger.error(f"Failed to send Discord health alert for integration {integration.id}: {e}")
+
+        db.commit()
+
+
 def build_health_alert_blocks(
     customer_email: str,
     customer_name: Optional[str],
@@ -203,6 +235,72 @@ def build_health_alert_blocks(
     ]
 
     return blocks
+
+
+def build_discord_health_alert_embeds(
+    customer_email: str,
+    customer_name: Optional[str],
+    old_score: int,
+    new_score: int,
+    old_risk_level: str,
+    new_risk_level: str,
+    components: Dict[str, int],
+    is_recovery: bool = False,
+) -> List[Dict]:
+    """Build a Discord embed for a health drop or recovery alert.
+
+    Same argument list as build_health_alert_blocks() above so call sites only
+    branch on integration.type. Discord webhooks cannot render the Slack
+    version's actions/button block, so the customer URL goes in the embed's
+    "url" field instead (makes the embed title a clickable link).
+    """
+    app_url = os.getenv("APP_URL", "https://app.rereflect.com")
+    encoded_email = quote(customer_email, safe="")
+    customer_url = f"{app_url}/customers/{encoded_email}"
+
+    score_delta = new_score - old_score
+    delta_str = f"+{score_delta}" if score_delta >= 0 else str(score_delta)
+
+    if is_recovery:
+        title = "✅ Customer Health Improved"
+        color = 5763719  # green, decimal per THE CONTRACT
+        risk_emoji = "🟢"
+    else:
+        title = "⚠️ Customer Health Drop"
+        color = 15548997  # red
+        risk_emoji = "🔴" if new_risk_level in ("at_risk", "critical") else "🟡"
+
+    # Risk drivers = components with lowest scores (most problematic).
+    risk_drivers = sorted(components.items(), key=lambda x: x[1])
+    top_drivers = risk_drivers[:2]
+    drivers_text = ", ".join(
+        f"{k.replace('_', ' ').title()} ({v})" for k, v in top_drivers
+    )
+
+    display_name = customer_name or customer_email
+    description = _truncate_discord_text(
+        f"**Customer:** {display_name} ({customer_email})\n"
+        f"**Risk Level:** {risk_emoji} {new_risk_level}\n"
+        f"**Score Change:** {old_score} → {new_score} ({delta_str})"
+    )
+
+    fields = [
+        {"name": "Customer", "value": f"{display_name} ({customer_email})", "inline": False},
+        {"name": "Risk Level", "value": f"{risk_emoji} {new_risk_level}", "inline": True},
+        {"name": "Score Change", "value": f"{old_score} → {new_score} ({delta_str})", "inline": True},
+        {"name": "Top Risk Drivers", "value": drivers_text or "N/A", "inline": False},
+    ][:25]  # THE CONTRACT: max 25 fields per embed
+
+    embed = {
+        "title": title,
+        "description": description,
+        "url": customer_url,
+        "color": color,
+        "fields": fields,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+    }
+
+    return [embed]  # THE CONTRACT: max 10 embeds per message
 
 
 def dispatch_health_drop_alert(
@@ -356,6 +454,18 @@ def dispatch_health_drop_alert(
             )
             fallback_text = title
             _dispatch_slack_health_alert(org_id, blocks, fallback_text)
+
+            discord_embeds = build_discord_health_alert_embeds(
+                customer_email=customer_email,
+                customer_name=customer_name,
+                old_score=old_score,
+                new_score=new_score,
+                old_risk_level=old_risk_level,
+                new_risk_level=new_risk_level,
+                components=components,
+                is_recovery=is_recovery,
+            )
+            _dispatch_discord_health_alert(org_id, discord_embeds, fallback_text)
 
         # 5. Set Redis cooldown key
         if not is_recovery:
