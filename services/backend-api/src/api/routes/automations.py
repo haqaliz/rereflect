@@ -53,6 +53,7 @@ VALID_TRIGGER_TYPES = frozenset({
     "feedback_category_match",
     "churn_probability_threshold",
     "usage_trend",
+    "batch_sentiment_threshold",
 })
 
 VALID_ACTION_TYPES = frozenset({
@@ -149,6 +150,54 @@ class FeedbackCategoryConfig(BaseModel):
         return v
 
 
+VALID_BATCH_SENTIMENT_VALUES = frozenset({"negative", "neutral", "positive"})
+VALID_BATCH_SENTIMENT_MODES = frozenset({"percentage", "count"})
+
+
+class BatchSentimentConfig(BaseModel):
+    """batch_sentiment_threshold (batch-sentiment-trigger, Track A).
+
+    Org-wide aggregate trigger — see THE CONTRACT in
+    docs/planning/batch-sentiment-trigger/trigger-core/spec.md.
+    `extra: "forbid"` follows UsageTrendConfig: a silently-ignored typo'd
+    threshold is exactly the failure this must not have.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    sentiment: str = "negative"
+    window_hours: int = Field(default=24, ge=1, le=168)
+    mode: str = "percentage"
+    threshold: float = Field(default=0.5, gt=0)
+    min_total: int = Field(default=5, ge=1)
+
+    @field_validator("sentiment")
+    @classmethod
+    def validate_sentiment(cls, v: str) -> str:
+        if v not in VALID_BATCH_SENTIMENT_VALUES:
+            raise ValueError(
+                f"sentiment must be one of {sorted(VALID_BATCH_SENTIMENT_VALUES)}"
+            )
+        return v
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in VALID_BATCH_SENTIMENT_MODES:
+            raise ValueError(
+                f"mode must be one of {sorted(VALID_BATCH_SENTIMENT_MODES)}"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def validate_threshold_bounds(self) -> "BatchSentimentConfig":
+        if self.mode == "percentage" and self.threshold > 1:
+            raise ValueError(
+                "threshold must be <= 1 when mode is 'percentage' (it is a share, 0-1)"
+            )
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Pydantic — action config schemas
 # ---------------------------------------------------------------------------
@@ -222,6 +271,8 @@ class TriggerSchema(BaseModel):
             ChurnProbabilityConfig(**cfg)
         elif t == "usage_trend":
             UsageTrendConfig(**cfg)
+        elif t == "batch_sentiment_threshold":
+            BatchSentimentConfig(**cfg)
 
         return self
 

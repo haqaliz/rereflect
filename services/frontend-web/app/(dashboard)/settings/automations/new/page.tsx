@@ -132,6 +132,97 @@ function UsageTrendConfig({ config, onChange }: { config: Record<string, any>; o
   );
 }
 
+const BATCH_SENTIMENT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'negative', label: 'Negative' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'positive', label: 'Positive' },
+];
+
+function BatchSentimentThresholdConfig({ config, onChange }: { config: Record<string, any>; onChange: (c: Record<string, any>) => void }) {
+  const thresholdMode: 'percentage' | 'count' = config.mode ?? 'percentage';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Sentiment</label>
+          <Select
+            value={config.sentiment ?? 'negative'}
+            onValueChange={val => onChange({ ...config, sentiment: val })}
+          >
+            <SelectTrigger data-testid="trigger-config-sentiment" className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BATCH_SENTIMENT_OPTIONS.map(({ value, label }) => (
+                <SelectItem key={value} value={value}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Window (hours)</label>
+          <Input
+            data-testid="trigger-config-window-hours"
+            type="number"
+            min={1}
+            max={168}
+            value={config.window_hours ?? 24}
+            onChange={e => onChange({ ...config, window_hours: Number(e.target.value) })}
+            className="w-28"
+          />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-end gap-4">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">Threshold type</label>
+          <Select
+            value={thresholdMode}
+            onValueChange={val => onChange({ ...config, mode: val })}
+          >
+            <SelectTrigger data-testid="trigger-config-mode" className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="percentage">Percentage of feedback</SelectItem>
+              <SelectItem value="count">Absolute count</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium">
+            {thresholdMode === 'percentage' ? 'Threshold (share, 0–1)' : 'Threshold (count)'}
+          </label>
+          <Input
+            data-testid="trigger-config-batch-threshold"
+            type="number"
+            min={thresholdMode === 'percentage' ? 0.01 : 1}
+            max={thresholdMode === 'percentage' ? 1 : undefined}
+            step={thresholdMode === 'percentage' ? 0.05 : 1}
+            value={config.threshold ?? 0.5}
+            onChange={e => onChange({ ...config, threshold: Number(e.target.value) })}
+            className="w-28"
+          />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">Minimum feedback in window</label>
+        <Input
+          data-testid="trigger-config-min-total"
+          type="number"
+          min={1}
+          value={config.min_total ?? 5}
+          onChange={e => onChange({ ...config, min_total: Number(e.target.value) })}
+          className="w-28"
+        />
+        <p className="text-xs text-muted-foreground">
+          Sample floor — the rule won&rsquo;t fire until at least this many feedback items land in the window.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function TriggerConfigFields({ triggerType, config, onChange }: TriggerConfigProps) {
   if (triggerType === 'health_score_threshold') {
     return (
@@ -229,6 +320,10 @@ function TriggerConfigFields({ triggerType, config, onChange }: TriggerConfigPro
         />
       </div>
     );
+  }
+
+  if (triggerType === 'batch_sentiment_threshold') {
+    return <BatchSentimentThresholdConfig config={config} onChange={onChange} />;
   }
 
   return null;
@@ -350,6 +445,7 @@ const MODE_LABELS: Record<'off' | 'shadow' | 'active', string> = {
 // other trigger type keeps the global 'active' default.
 const TRIGGER_DEFAULT_MODE: Partial<Record<TriggerType, 'off' | 'shadow' | 'active'>> = {
   usage_trend: 'shadow',
+  batch_sentiment_threshold: 'shadow',
 };
 
 function defaultModeForTrigger(triggerType: string): 'off' | 'shadow' | 'active' {
@@ -399,6 +495,13 @@ export default function NewAutomationPage() {
       feedback_category_match: { categories: [], is_urgent: false },
       churn_probability_threshold: { threshold: 0.7, direction: 'above' },
       usage_trend: { states: ['declining', 'sharp_decline'] },
+      batch_sentiment_threshold: {
+        sentiment: 'negative',
+        window_hours: 24,
+        mode: 'percentage',
+        threshold: 0.5,
+        min_total: 5,
+      },
     };
     setTriggerConfig(triggerDefaults[val] || {});
     setMode(defaultModeForTrigger(val));

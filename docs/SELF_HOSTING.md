@@ -626,6 +626,52 @@ any churn-prediction accuracy metric — the trend signal never enters the churn
 design. It only changes what happens when an already-computed trend classification changes
 state.
 
+### Batch sentiment threshold trigger (`batch_sentiment_threshold`)
+
+Every other automation trigger asks a question about **one customer**. This one asks about
+**your incoming feedback as a whole**: it fires when the share (or count) of a given
+sentiment across a trailing window crosses a threshold you set.
+
+**Why it exists.** The older `sentiment_pattern` trigger fires when a *single customer* sends
+N negative feedbacks within D days — it answers "is this account souring?". It cannot detect
+30 angry feedbacks from 30 different customers, because no one customer reaches N. That
+aggregate spike is the case this trigger covers.
+
+**Configuration** (Settings → Automations):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `sentiment` | `negative` | Which sentiment to measure |
+| `window_hours` | `24` | Trailing window, 1–168 hours |
+| `mode` | `percentage` | `percentage` (share of total) or `count` (absolute) |
+| `threshold` | `0.5` | Share `0 < x ≤ 1` in percentage mode; an absolute count in count mode |
+| `min_total` | `5` | **Sample floor** — the rule never fires on fewer items than this |
+
+**`min_total` is not optional, and you should not set it to 1.** Two negative items out of
+three is 67% — a percentage threshold with no sample floor is a false-alarm generator on
+quiet days. The floor is what makes a percentage threshold mean anything.
+
+**These defaults are a starting point, not a calibration.** Nobody has measured how often
+`50% negative over 24h with a floor of 5` fires against a real feedback stream, because that
+depends entirely on your volume and your customers. Treat the first weeks as tuning, which
+is exactly why the shipped template starts in shadow mode.
+
+**The shipped template starts in `shadow`.** Like Usage Decline Outreach, the built-in
+"Batch Sentiment Alert" template is created in shadow mode: it evaluates and writes an
+execution-log entry showing what it *would* have done, without running actions. Review those
+entries, tune `threshold`/`window_hours`/`min_total` to your volume, then switch it to
+active deliberately.
+
+**It fires once per crossing, not once per feedback item.** The trigger is evaluated as each
+new feedback item is analysed, but the rule takes a single org-wide cooldown, so a sustained
+breach produces one alert per `cooldown_hours` rather than one per item. The alert links to
+whichever item happened to cross the threshold — that item is the pivot, not the subject.
+
+**There is no activation seeding.** If you switch a rule to active while your org is
+*already* over the threshold, it fires on the next analysed item. That is deliberate (the
+same choice made for `usage_trend`), and shadow mode is the intended way to find out whether
+you're already over the line before arming it.
+
 ### Usage-decline churn-label suggestions
 
 Building on the trend signal above, Rereflect can turn a **sustained** usage decline into a

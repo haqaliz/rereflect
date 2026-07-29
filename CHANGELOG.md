@@ -7,6 +7,30 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Batch sentiment threshold automation trigger
+
+A new automation trigger, `batch_sentiment_threshold`, fires when the share (or absolute
+count) of a given sentiment across your **whole** incoming feedback stream crosses a
+threshold over a trailing window.
+
+Every existing trigger asks about one customer. The closest one, `sentiment_pattern`, fires
+when a single customer sends N negative feedbacks within D days — so a spike of 30 angry
+feedbacks from 30 *different* customers triggered nothing at all. That aggregate case is
+what this covers, and it was a direct request from a 1.0.0 user who wanted to be pinged for
+triage.
+
+Configurable: `sentiment`, `window_hours` (1–168), `mode` (`percentage` or `count`),
+`threshold`, and `min_total` — a sample floor, because two negative items out of three is
+67% and a percentage threshold without a floor is a false-alarm generator.
+
+The shipped "Batch Sentiment Alert" template starts in **shadow mode**. The defaults
+(50% negative, 24h, floor of 5) are a reasoned starting point, **not a measured
+calibration** — how often they fire depends entirely on your volume. Review the shadow
+execution log, tune, then arm it. See `docs/SELF_HOSTING.md`.
+
+Delivery reuses the existing notification channels, including the Slack channel fixed
+earlier in this release.
+
 ### Fixed — Churn `resolution_time` factor was permanently dead
 
 The `resolution_time` churn factor (10 of the 100 points in every customer's churn score)

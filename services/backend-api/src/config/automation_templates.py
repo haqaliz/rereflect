@@ -1,16 +1,18 @@
 """
 Pre-built automation rule templates (M4.4 — Phase 1; template 6 added by
-usage-trend-automation-trigger's template-and-docs aspect, M10).
+usage-trend-automation-trigger's template-and-docs aspect, M10; template 7
+added by batch-sentiment-trigger, Track A).
 
-6 starter templates users can enable and customize from Settings > Automations.
+7 starter templates users can enable and customize from Settings > Automations.
 Each template is a dict that maps directly to the AutomationRule schema so it
 can be instantiated with a single call.
 
 Optional `mode` key (M10): honored by `enable_template`
 (`api/routes/automations.py`), defaults to "active" when absent so the
-original 5 templates are unaffected. Only template 6 sets it, to "shadow" —
-`usage_trend` rules default to shadow everywhere else in the product (M7)
-and a template that silently armed itself would be the one exception.
+original 5 templates are unaffected. Templates 6 and 7 set it, to "shadow" —
+`usage_trend` and `batch_sentiment_threshold` rules default to shadow
+everywhere else in the product (M7 / batch-sentiment-trigger) and a template
+that silently armed itself would be the one exception.
 """
 
 from typing import Any
@@ -162,6 +164,41 @@ AUTOMATION_TEMPLATES: list[dict[str, Any]] = [
         "trigger": {
             "type": "usage_trend",
             "config": {"states": ["declining", "sharp_decline"]},
+        },
+        "actions": [
+            {
+                "type": "send_notification",
+                "config": {"recipients": "admins", "channels": ["dashboard", "email"]},
+            },
+        ],
+        "cooldown_hours": 24,
+        "mode": "shadow",
+    },
+
+    # ------------------------------------------------------------------ #
+    # 7. Batch Sentiment Alert (batch-sentiment-trigger, Track A)
+    # ------------------------------------------------------------------ #
+    {
+        "id": "batch_sentiment_alert",
+        "name": "Batch Sentiment Alert",
+        "description": (
+            "Notify admins when incoming feedback as a whole crosses a "
+            "negative-sentiment threshold within a rolling window (the "
+            "batch_sentiment_threshold trigger) — distinct from "
+            "sentiment_pattern, which watches a single customer. Starts in "
+            "shadow mode: nobody knows this trigger's firing rate on real "
+            "data yet, so the execution log fills with would-have-fired "
+            "entries to review before you flip it to active."
+        ),
+        "trigger": {
+            "type": "batch_sentiment_threshold",
+            "config": {
+                "sentiment": "negative",
+                "window_hours": 24,
+                "mode": "percentage",
+                "threshold": 0.5,
+                "min_total": 5,
+            },
         },
         "actions": [
             {
