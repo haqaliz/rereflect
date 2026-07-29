@@ -221,7 +221,20 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
       built — not a new transport.
 - **Why P2:** same user, same sentence as P1, but strictly smaller and independent.
 
-### P3 — Discoverability: Analytics trends already exist (docs/marketing, no backend work)
+### P3 — Discoverability: Analytics trends — **SHIPPED** on `chore/trends-discoverability` (2026-07-29)
+> Docs only, no code. The README Highlights row said "Trends, distributions and top-insight
+> tables", which is true and tells a reader nothing — rewritten to name the 7/30/90-day
+> ranges, the five time series, and the ↑/↓/→ per-theme arrows. Added a
+> `docs/SELF_HOSTING.md` section that also states the two real limits (90-day cap; bucketed
+> counts, **not** statistical change detection) and points at
+> `batch_sentiment_threshold` for people who want an alert rather than a chart.
+>
+> **Deliberately did not touch** `README.md`'s "ingests customer feedback from CSV, email,
+> webhooks and Slack" line or the *Sources & integrations* row — those are the target of the
+> concurrent `chore/intercom-zendesk-docs` work, which is fixing the same class of
+> under-selling for the ingestion side.
+
+### ~~P3 (original entry)~~ — superseded, kept for the reasoning
 > "one thing i'd love to see is a built in trend view over time … watch how sentiment and
 > recurring pain points shift week to week rather than just looking at a snapshot"
 

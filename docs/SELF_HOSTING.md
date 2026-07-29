@@ -626,6 +626,33 @@ any churn-prediction accuracy metric — the trend signal never enters the churn
 design. It only changes what happens when an already-computed trend classification changes
 state.
 
+### Trends over time (`/analytics`) — and its honest limits
+
+If you want to watch sentiment and recurring pain points shift week to week rather than
+look at a snapshot, that is the **Analytics** page, not the dashboard. It is easy to miss,
+so: `/analytics` gives you
+
+- **7 / 30 / 90-day ranges**, bucketed daily or weekly;
+- time series for **average sentiment, feedback volume, urgent count, pain points and
+  feature requests**;
+- **top pain points and top feature requests each with an ↑ / ↓ / → trend arrow**, computed
+  by comparing the first half of the range against the second — so you can tell an
+  accelerating theme from a merely loud one;
+- sentiment and source distributions, saved views, CSV export, PDF export, and read-only
+  share links you can hand to someone without an account.
+
+**Two limits worth knowing before you rely on it:**
+
+- **90 days is the maximum window.** There is no all-time view. If you need longer history,
+  export to CSV.
+- **It is bucketed counts, not statistical change detection.** The trend arrow tells you a
+  pain point moved between the two halves of your range; it does **not** tell you the move
+  is statistically significant, and it does not correct for volume changes. Treat it as a
+  place to look, not a verdict.
+
+For alerting on an aggregate sentiment shift rather than eyeballing a chart, see the
+`batch_sentiment_threshold` automation trigger below.
+
 ### Discord alerts
 
 Rereflect can post alerts to a Discord channel. Settings → Integrations → Discord, then
