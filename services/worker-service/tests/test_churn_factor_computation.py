@@ -460,3 +460,172 @@ class TestCustomerLevelFactorsWithDB:
 
         assert factors["resolution_time"]["score"] == 0
         assert "Resolved within" in factors["resolution_time"]["label"]
+
+    def test_sentiment_trend_scores_15_for_sharp_decline(self, db, test_org):
+        """>=2 prior feedbacks with sentiment declining >0.5 should score
+        sentiment_trend=15 (spec S2). Expected to pass immediately — this factor
+        uses FeedbackItem only, which imports fine; the point is converting
+        "assumed working" into "proven working".
+        """
+        now = datetime.utcnow()
+        email = "declining-sentiment@example.com"
+
+        older = FeedbackItem(
+            organization_id=test_org.id,
+            text="Things are going great",
+            customer_email=email,
+            sentiment_score=0.6,
+            created_at=now - timedelta(days=10),
+        )
+        newer = FeedbackItem(
+            organization_id=test_org.id,
+            text="Getting worse",
+            customer_email=email,
+            sentiment_score=-0.1,
+            created_at=now - timedelta(days=5),
+        )
+        db.add_all([older, newer])
+        db.commit()
+
+        trigger = FeedbackItem(
+            organization_id=test_org.id,
+            text="This is the final straw",
+            customer_email=email,
+            sentiment_score=0.0,
+            created_at=now,
+        )
+        db.add(trigger)
+        db.commit()
+        db.refresh(trigger)
+
+        _, factors = _compute_heuristic_churn_risk(trigger, db=db)
+
+        assert factors["sentiment_trend"]["score"] == 15
+
+    def test_feedback_frequency_scores_10_for_spike(self, db, test_org):
+        """last-7d count > 2x the 30d weekly average should score
+        feedback_frequency=10 (spec S2).
+        """
+        now = datetime.utcnow()
+        email = "frequency-spike@example.com"
+
+        # 1 older feedback inside the 30d window but outside the 7d window,
+        # plus 3 feedbacks in the last 7 days: last_30d=4, last_7d=3,
+        # avg_weekly=1.0, 3 > 2*1.0.
+        older = FeedbackItem(
+            organization_id=test_org.id,
+            text="An earlier complaint",
+            customer_email=email,
+            created_at=now - timedelta(days=15),
+        )
+        recent_1 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Another problem",
+            customer_email=email,
+            created_at=now - timedelta(days=3),
+        )
+        recent_2 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Yet another problem",
+            customer_email=email,
+            created_at=now - timedelta(days=2),
+        )
+        trigger = FeedbackItem(
+            organization_id=test_org.id,
+            text="This keeps happening",
+            customer_email=email,
+            created_at=now - timedelta(days=1),
+        )
+        db.add_all([older, recent_1, recent_2, trigger])
+        db.commit()
+        db.refresh(trigger)
+
+        _, factors = _compute_heuristic_churn_risk(trigger, db=db)
+
+        assert factors["feedback_frequency"]["score"] == 10
+
+    def test_pain_severity_scores_10_for_three_critical_points(self, db, test_org):
+        """>=3 feedbacks with pain_point_severity in (critical, major) in the last
+        30 days should score pain_severity=10 (spec S2).
+        """
+        now = datetime.utcnow()
+        email = "critical-pain@example.com"
+
+        fb1 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Data loss on export",
+            customer_email=email,
+            pain_point_severity="critical",
+            created_at=now - timedelta(days=10),
+        )
+        fb2 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Login broken",
+            customer_email=email,
+            pain_point_severity="major",
+            created_at=now - timedelta(days=5),
+        )
+        trigger = FeedbackItem(
+            organization_id=test_org.id,
+            text="API returns 500s",
+            customer_email=email,
+            pain_point_severity="critical",
+            created_at=now,
+        )
+        db.add_all([fb1, fb2, trigger])
+        db.commit()
+        db.refresh(trigger)
+
+        _, factors = _compute_heuristic_churn_risk(trigger, db=db)
+
+        assert factors["pain_severity"]["score"] == 10
+
+    def test_feature_density_scores_5_for_majority_feature_requests(self, db, test_org):
+        """>50% of last-30d feedbacks being feature requests should score
+        feature_density=5 (spec S2).
+        """
+        now = datetime.utcnow()
+        email = "feature-heavy@example.com"
+
+        # 3 feedbacks in the 30d window, 2 of them feature requests: 2/3 > 50%.
+        non_feature = FeedbackItem(
+            organization_id=test_org.id,
+            text="Just a comment",
+            customer_email=email,
+            created_at=now - timedelta(days=10),
+        )
+        feature_1 = FeedbackItem(
+            organization_id=test_org.id,
+            text="Please add dark mode",
+            customer_email=email,
+            feature_request_category="ui",
+            created_at=now - timedelta(days=5),
+        )
+        trigger = FeedbackItem(
+            organization_id=test_org.id,
+            text="Please add SSO support",
+            customer_email=email,
+            feature_request_category="auth",
+            created_at=now,
+        )
+        db.add_all([non_feature, feature_1, trigger])
+        db.commit()
+        db.refresh(trigger)
+
+        _, factors = _compute_heuristic_churn_risk(trigger, db=db)
+
+        assert factors["feature_density"]["score"] == 5
+
+    def test_feedback_workflow_event_symbol_resolves(self):
+        """Regression guard (spec S4): the resolution_time factor's
+        FeedbackWorkflowEvent import must keep resolving at module level in
+        src.tasks.analysis. This is the same class of bug fixed for the
+        automations trigger — an import that cannot succeed should fail loudly
+        at worker startup, not silently per feedback item. If this ever
+        regresses to the dead `src.models.feedback_workflow_event` submodule
+        path, this test fails at collection/import time instead of the factor
+        quietly going back to 0.
+        """
+        from src.tasks import analysis
+
+        assert analysis.FeedbackWorkflowEvent is FeedbackWorkflowEvent
