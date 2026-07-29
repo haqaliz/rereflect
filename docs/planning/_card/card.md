@@ -1,60 +1,67 @@
-# Card — batch sentiment threshold trigger
+# Card — native Discord notification channel
 
-**Type:** feat · **Slug:** `batch-sentiment-trigger` · **Branch:** `feat/batch-sentiment-trigger`
-**Source:** direct v1.0.0 user request. No GitHub issue. **DEV-TRACKING P1.**
+**Type:** feat · **Slug:** `discord-notifications` · **Branch:** `feat/discord-notifications`
+**Source:** direct v1.0.0 user request. No GitHub issue. **DEV-TRACKING P2.**
 
 ---
 
 ## The user's words
 
-> "Honestly the bring your own key setup is really nice, but it would be great if you could
-> plug in a Slack or Discord webhook to get pinged whenever **a batch of new feedback crosses
-> a certain sentiment threshold**. Would make triaging way faster for our team."
+> "it would be great if you could plug in a **Slack or Discord** webhook to get pinged
+> whenever a batch of new feedback crosses a certain sentiment threshold."
 
-Two asks in one sentence. The delivery half (Slack) and the Discord half are handled
-separately (Slack shipped in `52c763dd`; Discord is DEV-TRACKING P2). **This card is the
-trigger half only.**
+Third and last piece of that one sentence. The other two shipped:
 
-## Why today's triggers don't cover it
+| Piece | Status |
+|---|---|
+| Slack delivery actually works | `52c763dd` — the `slack` channel was silently dropped and logged as success |
+| The batch sentiment trigger | `7bd735be` — `batch_sentiment_threshold`, first org-wide trigger |
+| **Discord delivery** | **this card** |
 
-`sentiment_pattern` fires when **one customer** sends ≥ `count` feedbacks of a given
-sentiment within `days`. It is a *per-customer* signal — "this account is souring".
+## Why Discord isn't just "another webhook URL"
 
-The user is asking about *aggregate* sentiment — "our incoming feedback as a whole just got
-worse". A spike of angry feedback from 30 different customers trips nothing today, because no
-single customer crosses the per-customer count. That is precisely the triage case they
-describe.
+Rereflect already has generic outbound webhooks (Settings → Webhooks) and the URL validator
+accepts any `https://` URL — so a Discord webhook URL *saves fine today*. It just doesn't
+work: the dispatcher posts Rereflect's own JSON envelope, and Discord's webhook API requires
+a body containing `content` or `embeds`. Discord replies **400**, and the failure only shows
+in the delivery log.
 
-## Decisions already made (do not re-litigate)
+So the gap is a **payload formatter**, not a transport. That is why this is a notification
+channel rather than a webhook tweak.
 
-- **Rolling time window, not per-import.** Evaluate the org's feedback over a configurable
-  trailing window. "A batch" is undefined for streaming sources — Zendesk, Intercom, email
-  forwarding, the public API all arrive continuously — so a per-import trigger would silently
-  never fire for most ingestion paths. That silent-never-fires failure mode is the exact class
-  of bug fixed twice already this session, and is not worth reintroducing deliberately.
-- **Threshold configurable on both axes** — negative *share* (percentage) and *absolute
-  count* — rather than picking one for the user. This was the open question in the reply
-  draft; making it configurable answers it by design.
-- Delivery reuses the existing notification channels. No new delivery code.
+## Decision already made
 
-## Prior art to follow
+**Ship it as a `discord` notification channel**, mirroring the `slack` channel — `Integration`
+rows with `type="discord"`, a `discord` member in `KNOWN_NOTIFY_CHANNELS`, and a Discord
+embed formatter. Rejected: sniffing the URL in the generic webhook path, which would make
+webhook behaviour depend on a hostname and still leave Discord unusable as an automation
+notification channel.
 
-- `sentiment_pattern` in `services/worker-service/src/services/automation_feedback_trigger.py`
-  (the worker mirror that actually evaluates feedback triggers in production).
-- The `usage_trend` trigger is the closest structural precedent for a *state* trigger with a
-  config object and a frontend checkbox group.
-- `usage_decline_outreach` template ships in `mode="shadow"` — good precedent for a new
-  trigger whose firing rate is unknown on real data.
+Encouraging sign: `Integration.type`'s inline comment already reads
+`# 'slack', 'discord', 'teams'` — the model anticipated this.
+
+## The trap to avoid (learned the hard way this session)
+
+The Slack senders have **two different error contracts**:
+
+| Sender | Process | On failure |
+|---|---|---|
+| `send_slack_message` (`backend-api/src/api/routes/integrations.py:216`) | backend | returns `{"success": False, ...}`, **never raises** |
+| `send_slack_message_webhook` (`worker-service/src/tasks/alerts.py:207`) | worker | **raises** |
+
+The Discord senders must match the contract of whichever process they live in, and the
+`_execute_notify` implementations differ accordingly. Mixing them up silently changes failure
+semantics — the exact class of bug this session has fixed three times.
 
 ## Open questions for the PRD
 
-- **Cooldown identity.** Every existing cooldown key is
-  `automation_cooldown:{rule_id}:{customer_email}`. A batch trigger is org-wide with no single
-  customer. What goes in that slot, and does an empty string collide with anything?
-- **Evaluation cadence.** Evaluate on every analysed feedback item (cheap per item, but the
-  window query runs constantly), or on a Celery beat schedule (fewer queries, coarser
-  latency)? Latency matters for a triage alert.
-- **Minimum sample size.** 2 negative out of 3 total is 67% and almost certainly noise. Does
-  the trigger need a floor before a percentage threshold is meaningful?
-- **What does `feedback_id` mean in the execution log** for a trigger that is about many items?
-- Should it ship in `shadow` by default, like `usage_decline_outreach`?
+- Which existing alert paths should also reach Discord? There are three separate Slack
+  dispatch sites (`_dispatch_slack_health_alert`, `_dispatch_slack_alert`,
+  `_send_legacy_slack_alerts`). Doing all of them is a much bigger job than the notify channel.
+- Discord webhook URL validation: `discord.com/api/webhooks/` — but also the legacy
+  `discordapp.com` host. Accept both? Reject non-Discord hosts like the Slack validator does?
+- Embed vs plain `content`? Embeds look better and support fields/colour; `content` is
+  simpler and never fails schema validation.
+- Rate limits: Discord webhooks are ~5 requests/2s per webhook and return 429 with
+  `retry_after`. Slack's sender ignores rate limiting entirely. Do we handle 429, or accept
+  the same limitation for consistency?
