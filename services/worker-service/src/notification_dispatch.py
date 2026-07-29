@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 
 from src.database import get_db_session
+from src.tasks.alerts import send_discord_message_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,26 @@ HEALTH_ALERT_COOLDOWN_TTL = 86400  # 24 hours
 
 # Risk level ordering: higher = worse
 RISK_LEVEL_ORDER = {"healthy": 0, "moderate": 1, "at_risk": 2, "critical": 3}
+
+# Discord embed colors (decimal, per THE CONTRACT — not "#hex") by alert_type.
+DISCORD_ALERT_COLORS = {
+    "urgent_feedback": 15548997,  # red
+    "sentiment_spike": 15105570,  # orange
+    "churn_risk": 15548997,       # red
+    "volume_spike": 3447003,      # blue
+}
+DISCORD_DEFAULT_COLOR = 5793266  # blurple
+
+DISCORD_DESCRIPTION_MAX = 4096
+
+
+def _truncate_discord_text(text: str, limit: int = DISCORD_DESCRIPTION_MAX) -> str:
+    """Truncate with an ellipsis rather than error, per THE CONTRACT."""
+    if text is None:
+        return text
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 1, 0)] + "…"
 
 
 def _get_redis_client():
@@ -494,6 +515,9 @@ def dispatch_alert(
         # Send Slack alert once per org if any user wants it
         if counts["slack"] > 0:
             _dispatch_slack_alert(org_id, alert_type, title, message, link)
+            # There is no separate channel_discord preference yet — Discord webhook
+            # integrations piggyback on the same "chat" toggle as Slack.
+            _dispatch_discord_alert(org_id, alert_type, title, message, link)
 
     return counts
 
@@ -569,6 +593,72 @@ def _dispatch_slack_alert(
 
             except Exception as e:
                 logger.error(f"Failed to send Slack alert for integration {integration.id}: {e}")
+                integration.error_count = (integration.error_count or 0) + 1
+                integration.last_error = str(e)
+
+        db.commit()
+
+
+def _dispatch_discord_alert(
+    org_id: int,
+    alert_type: str,
+    title: str,
+    message: str,
+    link: Optional[str] = None,
+) -> None:
+    """Send a Discord alert for the organization using active Discord webhook integrations.
+
+    Mirrors _dispatch_slack_alert above: writes back last_used_at / error_count /
+    last_error per integration exactly the same way, or the integration-health UI
+    silently goes stale. A raising send is caught per-integration so one bad webhook
+    doesn't abort the rest.
+    """
+    from src.models import Integration
+    import os
+
+    app_url = os.getenv("APP_URL", "http://localhost:3000")
+
+    with get_db_session() as db:
+        integrations = db.query(Integration).filter(
+            Integration.organization_id == org_id,
+            Integration.type == "discord",
+            Integration.is_active == True,
+        ).all()
+
+        if not integrations:
+            return
+
+        full_link = f"{app_url}{link}" if link else app_url
+
+        content = f"Rereflect: {title}"
+        embeds = [
+            {
+                "title": title,
+                "description": _truncate_discord_text(message),
+                "url": full_link,
+                "color": DISCORD_ALERT_COLORS.get(alert_type, DISCORD_DEFAULT_COLOR),
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+        ]
+
+        for integration in integrations:
+            try:
+                config = integration.config or {}
+                webhook_url = config.get("webhook_url")
+
+                if webhook_url:
+                    send_discord_message_webhook(
+                        webhook_url=webhook_url,
+                        embeds=embeds,
+                        content=content,
+                    )
+
+                integration.last_used_at = datetime.utcnow()
+                integration.error_count = 0
+                integration.last_error = None
+
+            except Exception as e:
+                logger.error(f"Failed to send Discord alert for integration {integration.id}: {e}")
                 integration.error_count = (integration.error_count or 0) + 1
                 integration.last_error = str(e)
 
