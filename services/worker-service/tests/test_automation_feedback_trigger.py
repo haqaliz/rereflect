@@ -682,3 +682,247 @@ def test_analysis_does_not_swallow_import_error():
         "evaluate_feedback_triggers must be imported at module level, not "
         "inside a try/except, so an ImportError surfaces at startup"
     )
+
+
+# ---------------------------------------------------------------------------
+# batch_sentiment_threshold — Track B (spec: docs/planning/batch-sentiment-
+# trigger/trigger-core/spec.md, "THE CONTRACT"). This is the first ORG-WIDE
+# trigger: it fires on the org's aggregate sentiment mix, not a single
+# customer, so the cooldown identity and AutomationExecution.customer_email
+# behave differently from every trigger above (see B3 tests below).
+# ---------------------------------------------------------------------------
+
+
+def _seed_feedback(db, org_id, sentiments, created_at=None):
+    """Create one FeedbackItem per entry in *sentiments*, all sharing
+    *created_at* (defaults to "now")."""
+    for s in sentiments:
+        _make_feedback(db, org_id=org_id, sentiment_label=s, created_at=created_at)
+
+
+def _batch_rule(db, org_id=1, rule_mode="active", cooldown_hours=24, **config_overrides) -> AutomationRule:
+    """rule_mode is AutomationRule.mode ('off'/'shadow'/'active'); the config's
+    own 'mode' key ('percentage'/'count') is a THE-CONTRACT field passed via
+    **config_overrides — deliberately named the same as the rule activation
+    mode field to match spec vocabulary, hence the disambiguated param name
+    here."""
+    config = {
+        "sentiment": "negative",
+        "window_hours": 24,
+        "mode": "percentage",
+        "threshold": 0.5,
+        "min_total": 5,
+    }
+    config.update(config_overrides)
+    return _make_rule(
+        db,
+        org_id=org_id,
+        mode=rule_mode,
+        trigger_type="batch_sentiment_threshold",
+        trigger_config=config,
+        actions=[],
+        cooldown_hours=cooldown_hours,
+        name="Batch sentiment rule",
+    )
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_fires_at_threshold(mock_redis, db):
+    """AC4: window with 6 of 10 negative, threshold 0.5, min_total 5 -> fires."""
+    _seed_feedback(db, 1, ["negative"] * 5 + ["positive"] * 4)
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="negative")
+
+    rule = _batch_rule(db, threshold=0.5, min_total=5)
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    results = evaluate_feedback_triggers(db, 1, context)
+
+    assert len(results) == 1
+    logs = db.query(AutomationExecution).all()
+    assert len(logs) == 1
+    assert logs[0].rule_id == rule.id
+    assert logs[0].status == "success"
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_does_not_fire_below_threshold(mock_redis, db):
+    """2 of 10 negative (20%), threshold 0.5 -> does not fire."""
+    _seed_feedback(db, 1, ["negative"] + ["positive"] * 8)
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="negative")
+
+    _batch_rule(db, threshold=0.5, min_total=5)
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    results = evaluate_feedback_triggers(db, 1, context)
+
+    assert results == []
+    assert db.query(AutomationExecution).count() == 0
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_does_not_fire_when_total_below_min_total(mock_redis, db):
+    """The false-alarm case from THE CONTRACT: 2 negative of 3 total is 67%,
+    comfortably above a 0.5 threshold, but under a min_total=5 floor -> must
+    NOT fire."""
+    _seed_feedback(db, 1, ["negative"])
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="negative")
+    # total so far = 2 (both negative). One more, non-matching, would still
+    # keep total at 3 for the count below — but the pivot item itself must
+    # match cfg["sentiment"] to reach the aggregate check at all, so seed a
+    # third feedback item directly.
+    _make_feedback(db, org_id=1, sentiment_label="positive")
+
+    _batch_rule(db, threshold=0.5, min_total=5)
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    results = evaluate_feedback_triggers(db, 1, context)
+
+    assert results == [], "2 of 3 (67%) must not fire below the min_total=5 sample floor"
+    assert db.query(AutomationExecution).count() == 0
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_count_mode_fires_on_absolute_count(mock_redis, db):
+    """count mode: threshold=3, 4 negative -> fires regardless of percentage."""
+    _seed_feedback(db, 1, ["negative"] * 3)
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="negative")
+
+    rule = _batch_rule(db, mode="count", threshold=3, min_total=3)
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    results = evaluate_feedback_triggers(db, 1, context)
+
+    assert len(results) == 1
+    assert db.query(AutomationExecution).filter_by(rule_id=rule.id).count() == 1
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_window_boundary_excludes_older_items(mock_redis, db):
+    """Items outside window_hours must not count toward total/matching. If
+    they wrongly did, this would fire; the assertion proves they don't."""
+    stale = datetime.utcnow() - timedelta(hours=25)
+    _seed_feedback(db, 1, ["negative"] * 5, created_at=stale)  # outside a 24h window
+    _seed_feedback(db, 1, ["negative"])  # inside window
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="negative")
+
+    _batch_rule(db, window_hours=24, threshold=0.5, min_total=5)
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    results = evaluate_feedback_triggers(db, 1, context)
+
+    # In-window total is only 2 (well below min_total=5) — the stale rows
+    # must not be counted, or this would incorrectly fire.
+    assert results == []
+    assert db.query(AutomationExecution).count() == 0
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_non_matching_item_never_fires(mock_redis, db):
+    """Per-item seam: even with the aggregate already past threshold, a
+    pivot item whose own sentiment doesn't match cfg["sentiment"] must skip
+    before ever running the aggregate COUNT (THE CONTRACT's short-circuit
+    order, step 2)."""
+    _seed_feedback(db, 1, ["negative"] * 8)
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="positive")
+
+    _batch_rule(db, threshold=0.5, min_total=5)
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    results = evaluate_feedback_triggers(db, 1, context)
+
+    assert results == []
+    assert db.query(AutomationExecution).count() == 0
+
+
+def test_batch_sentiment_cooldown_suppresses_second_fire(db):
+    fake_redis = MagicMock()
+    fake_redis.exists.return_value = False
+
+    with patch(
+        "src.services.automation_feedback_trigger._get_redis", return_value=fake_redis
+    ):
+        _seed_feedback(db, 1, ["negative"] * 5)
+        fb1 = _make_feedback(db, org_id=1, sentiment_label="negative")
+        _batch_rule(db, threshold=0.5, min_total=5)
+
+        context1 = {"customer_email": "", "feedback_id": fb1.id}
+        evaluate_feedback_triggers(db, 1, context1)
+        assert db.query(AutomationExecution).count() == 1
+
+        fake_redis.exists.return_value = True
+        fb2 = _make_feedback(db, org_id=1, sentiment_label="negative")
+        context2 = {"customer_email": "", "feedback_id": fb2.id}
+        evaluate_feedback_triggers(db, 1, context2)
+        assert db.query(AutomationExecution).count() == 1  # unchanged
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_shadow_mode_logs_no_actions(mock_redis, db):
+    _seed_feedback(db, 1, ["negative"] * 5)
+    trigger_fb = _make_feedback(db, org_id=1, sentiment_label="negative")
+
+    rule = _batch_rule(
+        db,
+        rule_mode="shadow",
+        threshold=0.5,
+        min_total=5,
+    )
+    # Even with actions configured, shadow must run none of them.
+    rule.actions = [{"type": "send_notification", "config": {"recipients": "admins"}}]
+    db.commit()
+
+    context = {"customer_email": "", "feedback_id": trigger_fb.id}
+    evaluate_feedback_triggers(db, 1, context)
+
+    logs = db.query(AutomationExecution).filter_by(rule_id=rule.id).all()
+    assert len(logs) == 1
+    assert logs[0].status == "shadow"
+    assert logs[0].actions_executed == []
+
+
+# ---------------------------------------------------------------------------
+# B3 — org-wide cooldown identity: "__org__" is the Redis key identity, but
+# AutomationExecution.customer_email must always be NULL for this trigger,
+# even when the triggering context happens to carry a real customer_email.
+# ---------------------------------------------------------------------------
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_batch_sentiment_execution_customer_email_is_null(mock_redis, db):
+    _seed_feedback(db, 1, ["negative"] * 5)
+    trigger_fb = _make_feedback(
+        db, org_id=1, sentiment_label="negative", customer_email="real-customer@example.com"
+    )
+
+    _batch_rule(db, threshold=0.5, min_total=5)
+
+    # A real customer_email in context must NOT leak into the execution row.
+    context = {"customer_email": "real-customer@example.com", "feedback_id": trigger_fb.id}
+    evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).first()
+    assert log is not None
+    assert log.customer_email is None
+
+
+def test_batch_sentiment_cooldown_key_uses_org_sentinel(db):
+    """The shared cooldown key must be automation_cooldown:{rule_id}:__org__
+    — ONE key per rule, not one per customer_email, even when context
+    carries a real customer_email."""
+    fake_redis = MagicMock()
+    fake_redis.exists.return_value = False
+
+    with patch(
+        "src.services.automation_feedback_trigger._get_redis", return_value=fake_redis
+    ):
+        _seed_feedback(db, 1, ["negative"] * 5)
+        trigger_fb = _make_feedback(
+            db, org_id=1, sentiment_label="negative", customer_email="someone@example.com"
+        )
+        rule = _batch_rule(db, threshold=0.5, min_total=5, cooldown_hours=6)
+
+        context = {"customer_email": "someone@example.com", "feedback_id": trigger_fb.id}
+        evaluate_feedback_triggers(db, 1, context)
+
+    expected_key = f"automation_cooldown:{rule.id}:__org__"
+    fake_redis.setex.assert_called_once_with(expected_key, 6 * 3600, "1")

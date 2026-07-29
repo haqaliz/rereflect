@@ -1,6 +1,7 @@
 """
-automation_feedback_trigger — worker-side mirror of the `feedback_category_match`
-and `sentiment_pattern` triggers (worker-trigger-mirror, aspect 2).
+automation_feedback_trigger — worker-side mirror of the `feedback_category_match`,
+`sentiment_pattern`, and (added for batch-sentiment-trigger, Track B)
+`batch_sentiment_threshold` triggers (worker-trigger-mirror, aspect 2).
 
 Why this exists (read before touching)
 ---------------------------------------
@@ -63,7 +64,18 @@ logger = logging.getLogger(__name__)
 # Trigger types this mirror is allowed to evaluate. Every other trigger_type
 # (health_score_threshold, churn_risk_level_change, churn_probability_threshold,
 # usage_trend) remains backend-only / out of scope for this seam.
-FEEDBACK_TRIGGER_TYPES = ("feedback_category_match", "sentiment_pattern")
+#
+# batch_sentiment_threshold is the odd one out: it is the first ORG-WIDE
+# trigger (see docs/planning/batch-sentiment-trigger/trigger-core/spec.md,
+# "THE CONTRACT") — every other entry here is evaluated per-customer. Its
+# cooldown identity is the sentinel "__org__", not a customer_email; see
+# `_evaluate_rule`'s `cooldown_identity` branch and `_trigger_batch_sentiment`
+# below.
+FEEDBACK_TRIGGER_TYPES = (
+    "feedback_category_match",
+    "sentiment_pattern",
+    "batch_sentiment_threshold",
+)
 
 # Channels _execute_notify knows how to deliver. Any other string in a
 # rule's `channels` config is recorded as a loud error instead of being
@@ -200,6 +212,19 @@ def evaluate_feedback_triggers(
 # ---------------------------------------------------------------------------
 
 
+# Sentinel cooldown identity for org-wide triggers (currently only
+# batch_sentiment_threshold — THE CONTRACT, B3). One rule => one shared
+# cooldown key, regardless of which customer's feedback happened to be the
+# pivot item. This value must NEVER be written to
+# AutomationExecution.customer_email — see `_evaluate_rule` below.
+ORG_WIDE_COOLDOWN_IDENTITY = "__org__"
+
+# Trigger types that are evaluated org-wide rather than per-customer. Kept
+# as its own set (rather than hardcoding the string inline) so a future
+# second org-wide trigger only has to be added here.
+ORG_WIDE_TRIGGER_TYPES = ("batch_sentiment_threshold",)
+
+
 def _evaluate_rule(
     rule: AutomationRule, context: Dict[str, Any], db: Session
 ) -> Optional[Dict]:
@@ -207,14 +232,21 @@ def _evaluate_rule(
     customer_email: str = context.get("customer_email", "")
     feedback_id: Optional[int] = context.get("feedback_id")
 
-    if not _check_trigger(rule, context, db):
+    is_org_wide = rule.trigger_type in ORG_WIDE_TRIGGER_TYPES
+    cooldown_identity = ORG_WIDE_COOLDOWN_IDENTITY if is_org_wide else customer_email
+
+    # Cooldown is checked BEFORE the (potentially expensive, aggregate-
+    # query-driven) trigger evaluation — THE CONTRACT's short-circuit order,
+    # step 1. This also fixes the org-wide identity: batch_sentiment_threshold
+    # must use ONE key per rule ("__org__"), not one per customer_email.
+    if _check_cooldown(rule.id, cooldown_identity):
+        logger.debug(
+            "automation_feedback_trigger: rule %s in cooldown for %s — skipping",
+            rule.id, cooldown_identity,
+        )
         return None
 
-    if _check_cooldown(rule.id, customer_email):
-        logger.debug(
-            "automation_feedback_trigger: rule %s in cooldown for customer %s — skipping",
-            rule.id, customer_email,
-        )
+    if not _check_trigger(rule, context, db):
         return None
 
     feedback: Optional[FeedbackItem] = None
@@ -234,11 +266,18 @@ def _evaluate_rule(
         else:
             status = "failed"
 
+    # Org-wide executions must log customer_email = NULL even though a real
+    # customer_email may be present in `context` (it belongs to whichever
+    # feedback item happened to be the pivot, not to "the org"). The
+    # ORG_WIDE_COOLDOWN_IDENTITY sentinel is kept strictly local to the
+    # cooldown key above and must never reach this column — THE CONTRACT, B3.
+    execution_customer_email = None if is_org_wide else (customer_email or None)
+
     execution = AutomationExecution(
         rule_id=rule.id,
         organization_id=rule.organization_id,
         feedback_id=feedback.id if feedback else None,
-        customer_email=customer_email or None,
+        customer_email=execution_customer_email,
         trigger_snapshot=context,
         actions_executed=action_results,
         status=status,
@@ -249,7 +288,7 @@ def _evaluate_rule(
     rule.execution_count = (rule.execution_count or 0) + 1
     rule.last_executed_at = datetime.utcnow()
 
-    _set_cooldown(rule.id, customer_email, rule.cooldown_hours)
+    _set_cooldown(rule.id, cooldown_identity, rule.cooldown_hours)
 
     db.commit()
 
@@ -277,6 +316,8 @@ def _check_trigger(rule: AutomationRule, context: Dict[str, Any], db: Session) -
         return _trigger_feedback_category(cfg, context, db)
     if t == "sentiment_pattern":
         return _trigger_sentiment_pattern(cfg, context, db)
+    if t == "batch_sentiment_threshold":
+        return _trigger_batch_sentiment(cfg, context, db)
 
     logger.warning("automation_feedback_trigger: unknown trigger type '%s'", t)
     return False
@@ -350,6 +391,79 @@ def _trigger_sentiment_pattern(cfg: dict, context: dict, db: Session) -> bool:
         or 0
     )
     return int(count) >= int(required_count)
+
+
+def _trigger_batch_sentiment(cfg: dict, context: dict, db: Session) -> bool:
+    """Fire when the org's feedback in a trailing window crosses a sentiment
+    threshold — THE CONTRACT (docs/planning/batch-sentiment-trigger/
+    trigger-core/spec.md). The FIRST org-wide trigger in this mirror: it
+    reasons about the org's aggregate mix, not a single customer's history.
+
+    Firing rule, evaluated over the org's FeedbackItem rows with
+    created_at >= now - window_hours:
+        total    = count(all feedback in window)
+        matching = count(feedback in window with sentiment_label == cfg["sentiment"])
+        if total < min_total:        -> DO NOT FIRE  (sample floor)
+        mode == "percentage"         -> fire when matching / total >= threshold
+        mode == "count"              -> fire when matching >= threshold
+
+    Short-circuit order (THE CONTRACT, performance/PRD R6). Step 1 (cooldown)
+    is checked by the caller, `_evaluate_rule`, strictly BEFORE this function
+    is ever invoked (it computes the org-wide "__org__" identity ahead of
+    `_check_trigger`). This function owns step 2: skip before running any
+    aggregate COUNT unless the pivot feedback item in hand matches
+    cfg["sentiment"] — only step 3, the COUNT queries, is expensive.
+    """
+    sentiment: str = cfg.get("sentiment", "negative")
+    feedback_id: Optional[int] = context.get("feedback_id")
+    if not feedback_id:
+        return False
+
+    feedback = db.query(FeedbackItem).filter(FeedbackItem.id == feedback_id).first()
+    if not feedback:
+        return False
+
+    # Step 2 — cheap single-row check before any aggregate query.
+    if feedback.sentiment_label != sentiment:
+        return False
+
+    window_hours: int = cfg.get("window_hours", 24)
+    mode: str = cfg.get("mode", "percentage")
+    threshold: float = cfg.get("threshold", 0.5)
+    min_total: int = cfg.get("min_total", 5)
+
+    cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+    org_id = feedback.organization_id
+
+    # Step 3 — the aggregate COUNT queries, only reached once steps 1 and 2
+    # have both passed.
+    total = (
+        db.query(func.count(FeedbackItem.id))
+        .filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.created_at >= cutoff,
+        )
+        .scalar()
+        or 0
+    )
+
+    if total < min_total:
+        return False
+
+    matching = (
+        db.query(func.count(FeedbackItem.id))
+        .filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.created_at >= cutoff,
+            FeedbackItem.sentiment_label == sentiment,
+        )
+        .scalar()
+        or 0
+    )
+
+    if mode == "count":
+        return int(matching) >= threshold
+    return (matching / total) >= threshold
 
 
 # ---------------------------------------------------------------------------
