@@ -330,6 +330,128 @@ framing rules in this project mean the advisory in G1 must not overstate it.
 
 ---
 
+---
+
+## ⚠️ ADDENDUM — full unauthenticated-surface sweep (arrived after drafting)
+
+The fourth dig agent reported after this PRD was written. **The surface is not clean, and the
+scope above is too narrow.** Every claim below was independently re-verified against the code
+before being recorded here.
+
+### A1 — `POST /api/internal/events/emit` is worse than the Intercom chain — [CRITICAL]
+
+`services/backend-api/src/api/routes/events_ws.py:52,157,160-165`
+
+```python
+INTERNAL_SECRET = os.getenv("INTERNAL_EVENTS_SECRET", "dev-secret")   # :52
+...
+if x_internal_secret != INTERNAL_SECRET:                              # :157  plain !=
+    raise HTTPException(status_code=403, ...)
+await emit_event(org_id=request.org_id, ...)                          # :160  org_id from BODY
+```
+
+Three compounding defects: a **hardcoded default secret that is public knowledge** (this is an
+open-source repo), a **non-constant-time comparison**, and **`org_id` taken verbatim from the
+request body**. Nothing enforces or logs the absence of `INTERNAL_EVENTS_SECRET`.
+
+**Why this outranks the Intercom chain:** it requires **no integration to be configured at all**.
+Intercom needs an org to have connected Intercom; this needs nothing. The effect is arbitrary
+attacker-controlled content pushed to every WebSocket client of any named org — forged
+notifications, and a stored-XSS delivery path wherever the frontend renders event `data`
+unescaped. Fix is a two-line change: no default (refuse to start or hard-fail when unset) plus
+`hmac.compare_digest`.
+
+### A2 — The Resend inbound-email webhook fails open *and* resolves org from the payload — [HIGH]
+
+`email_webhooks.py:45-47` (fail-open, verified) and `:175-190` (loads **every** `source_type ==
+"email"` row across all orgs — `is_active` not even in the SQL — then matches the attacker-supplied
+`to` address in Python). Knowing or guessing a tenant's inbound address is sufficient to inject
+feedback into it. Rate limiting at `:205` is keyed on the **resolved** org, so it throttles the
+victim, not the attacker.
+
+**Blocker:** `tests/test_email_webhooks.py:367-378` `test_missing_secret_skips_verification`
+**asserts the fail-open behaviour** — docstring *"Should skip verification and continue when
+webhook secret is not configured"*, `assert result is True`. Verified verbatim. This is the second
+test in the repo that pins a vulnerability as the expected contract (the first being M8). It must
+be **inverted**, not worked around.
+
+### A3 — The tenancy guard is needed on FOUR branches, not two
+
+| Branch | `source_events.py` | Guard? | Reachable today |
+|---|---|---|---|
+| slack | `:118-139` | **missing** | latent — handler pre-checks `team_id` at `source_webhooks.py:140-142` |
+| intercom | `:142-161` | **missing** | **YES** |
+| email | `:164-167` | **missing** | latent — handler always sets `source_id` |
+| webhook | `:170-173` | **missing** | latent — handler always sets `source_id` |
+| zendesk | `:179-193` | **present** | fixed |
+
+The two "latent" ones are latent only because their current caller pre-checks. Each is one new call
+site away from live. The Zendesk fix was applied as a **point fix, never swept** — the same drift
+pattern this branch exists to correct.
+
+### A4 — Other findings, ranked
+
+- **[MEDIUM] Linear stores `webhook_secret` in plaintext** (`linear_integration.py:389,418,430`) —
+  the only integration that doesn't encrypt it; Zendesk, Jira and Asana all round-trip through
+  `encrypt_api_key`. Any DB read yields a working forgery key. **Needs a migration.**
+- **[MEDIUM] Linear's verifier has the same fail-open branch** (`linear_webhook.py:35-37`), defused
+  only by the caller's `and` guard at `:53`. One new call site re-arms it. Note
+  `jira_webhook.py:8-10` calls this pattern out by name as an anti-pattern it deliberately did not
+  copy — so it was known.
+- **[MEDIUM] No replay window on Zendesk, Jira, Asana, Linear or Intercom.** Slack is the only one
+  with a real 300s window. Zendesk is one line away — it already *receives*
+  `X-Zendesk-Webhook-Signature-Timestamp` and feeds it into the HMAC but never checks freshness.
+  Content-dedup blocks duplicate *content* replay but **not** status-transition replay:
+  `_handle_zendesk_status_change`, `reconcile_issue` and `reconcile_task` all run before any dedup
+  check, so a captured "ticket closed" delivery can re-drive that transition indefinitely, undoing
+  manual triage.
+- **[MEDIUM] The generic webhook persists all request headers into the DB**
+  (`source_webhooks.py:229-233`, `dict(request.headers)`) — including its own `X-Webhook-Secret`,
+  plus any `Authorization`/`Cookie` a caller sends. Written to `FeedbackSourceEvent.event_data` in
+  cleartext. Anyone with read access to that table can forge the webhook.
+- **[LOW] `JWT_SECRET` defaults to `"dev-secret-key"`** (`src/api/auth.py:11`) — verified. Same
+  class as A1, far larger blast radius (forge any user's token). Presumably accepted for local dev,
+  but a self-hoster following the quickstart is never told it is unset.
+- **[LOW] In-memory OAuth state never expires and breaks under >1 uvicorn worker**
+  (`integrations.py:39,786-790`) — `created_at` is stored next to a comment saying it expires after
+  10 minutes; **nothing ever reads it**. Salesforce and OIDC already solved this with stateless
+  signed state + TTL; that pattern can be ported.
+
+### A5 — Confirmed correct, do not touch
+
+Zendesk (the reference implementation), `jira_webhook.py` in full, `asana_webhook.py` in full,
+`usage_webhooks.py` (the cleanest example in the repo — `org_id = auth.organization_id`, body
+explicitly not trusted), `public/auth.py`, `_oidc_state.py` + Salesforce state signing,
+`shared_links.py`, `invites.py`. All HMAC comparisons repo-wide use `compare_digest` **except**
+`events_ws.py:157`. Intercom's HMAC-SHA1 **is** correct per vendor spec and is unaffected by SHA-1
+collision attacks — **do not "fix" it.**
+
+Three things that turned out not to exist: no password-reset route (the
+`RESEND_TEMPLATE_PASSWORD_RESET` template in `CLAUDE.md` is unwired), no unsubscribe route, and
+`/health/detailed` is **not** unauthenticated (it carries `require_system_admin`).
+
+### A6 — Recommended scope revision
+
+The sweep's ordering, which I endorse:
+
+1. **`events_ws.py`** — kill the default + `compare_digest`. Smallest change, largest exposure.
+2. **Fail-open → `return False`** on Slack, Intercom **and email** (3 lines, 3 files), plus
+   inverting `test_email_webhooks.py:367-378`.
+3. **`source_events.py`** — `if not X: return []` on all four branches, with a
+   `test_missing_*_returns_empty_not_cross_tenant_fanout` twin for each.
+4. Linear fail-closed + encrypt `webhook_secret` (migration).
+5. Zendesk timestamp freshness (one line, reuses Slack's logic).
+6. Drop `dict(request.headers)` from the generic webhook's `event_data`.
+
+**Items 2 and 3 must ship together** — either alone leaves the Intercom chain exploitable from the
+other end.
+
+**This supersedes G3.** The multi-org-prevalence caveat still applies to the *cross-tenant* framing,
+but A1 does not depend on it: a single-org install with `INTERNAL_EVENTS_SECRET` unset is publicly
+writable by anyone who has read this repo.
+
+---
+
 ## Out of Scope
 
 - **Encrypting `oauth_access_token`/`oauth_refresh_token`.** Needs a backfill migration; own
