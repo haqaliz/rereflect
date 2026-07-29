@@ -627,6 +627,77 @@ any churn-prediction accuracy metric — the trend signal never enters the churn
 design. It only changes what happens when an already-computed trend classification changes
 state.
 
+### Trends over time (`/analytics`) — and its honest limits
+
+If you want to watch sentiment and recurring pain points shift week to week rather than
+look at a snapshot, that is the **Analytics** page, not the dashboard. It is easy to miss,
+so: `/analytics` gives you
+
+- **7 / 30 / 90-day ranges**, bucketed daily or weekly;
+- time series for **average sentiment, feedback volume, urgent count, pain points and
+  feature requests**;
+- **top pain points and top feature requests each with an ↑ / ↓ / → trend arrow**, computed
+  by comparing the first half of the range against the second — so you can tell an
+  accelerating theme from a merely loud one;
+- sentiment and source distributions, saved views, CSV export, PDF export, and read-only
+  share links you can hand to someone without an account.
+
+**Two limits worth knowing before you rely on it:**
+
+- **90 days is the maximum window.** There is no all-time view. If you need longer history,
+  export to CSV.
+- **It is bucketed counts, not statistical change detection.** The trend arrow tells you a
+  pain point moved between the two halves of your range; it does **not** tell you the move
+  is statistically significant, and it does not correct for volume changes. Treat it as a
+  place to look, not a verdict.
+
+For alerting on an aggregate sentiment shift rather than eyeballing a chart, see the
+`batch_sentiment_threshold` automation trigger below.
+
+### Discord alerts
+
+Rereflect can post alerts to a Discord channel. Settings → Integrations → Discord, then
+paste an incoming webhook URL from your server (**Server Settings → Integrations →
+Webhooks → New Webhook → Copy Webhook URL**). Both `https://discord.com/api/webhooks/…`
+and the legacy `https://discordapp.com/api/webhooks/…` are accepted; anything else is
+rejected when you save rather than failing silently on the first alert. There is no OAuth
+app to create — a Discord webhook carries its own credential in the URL.
+
+**Why you cannot just point a custom webhook at Discord.** The generic Settings → Webhooks
+feature accepts any `https://` URL, so a Discord URL *saves* there — it just never works.
+Discord's API requires a body containing `content` or `embeds`, and the generic dispatcher
+posts Rereflect's own JSON envelope, so Discord replies `400` and the failure only appears
+in the delivery log. Use a Discord *integration*, not a custom webhook.
+
+**What reaches Discord.** The four main alert types — urgent feedback, sentiment spike,
+churn risk, volume spike — plus customer health-drop and recovery alerts.
+
+**⚠️ Discord currently rides on the Slack toggle.** There is no separate "Discord" channel
+preference yet. In Settings → Notifications the per-alert channel switch is still labelled
+**Slack**, and Discord fires whenever that switch is on and your org has an active Discord
+integration. Two consequences worth knowing before you rely on it:
+
+- If you configure Discord and turn the Slack toggle **off**, you will receive **nothing**.
+- If you have both Slack and Discord integrations active, both receive every alert. There
+  is no way to route some alert types to one and some to the other.
+
+A dedicated `channel_discord` preference is a schema change and is not in this release.
+
+**Not covered by Discord in this release:**
+
+- **Automation-rule notifications.** An automation's `send_notification` action can target
+  `dashboard`, `email` and `slack`, but not `discord`. (In practice that channel list is not
+  editable from the automations UI at all today — it comes from the built-in templates.)
+- **Custom message templates.** The per-integration template feature is authored in Slack
+  `mrkdwn`; `*bold*` renders as literal asterisks on Discord. Discord alerts use built-in
+  formatting.
+- **The alert log.** Settings → Integrations → *(your Discord integration)* → logs will be
+  **empty**. Only the legacy custom-template path writes those rows, and it is Slack-only.
+  This is a pre-existing gap — the Slack health and dispatch paths do not log either.
+- **Rate limiting.** Discord throttles webhooks (roughly 5 requests per 2 seconds) and
+  replies `429`. Rereflect does not currently retry on `429`, exactly as it does not for
+  Slack. In a very high-volume org some alerts may be dropped.
+
 ### Batch sentiment threshold trigger (`batch_sentiment_threshold`)
 
 Every other automation trigger asks a question about **one customer**. This one asks about

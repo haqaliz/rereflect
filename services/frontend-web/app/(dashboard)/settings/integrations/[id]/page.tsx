@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import { DiscordIcon } from '@/components/icons/DiscordIcon';
 import {
   Dialog,
   DialogContent,
@@ -146,7 +147,9 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
     setTesting(true);
     setTestResult(null);
     try {
-      const result = await integrationsAPI.testSlack(parseInt(id));
+      const result = integration?.type === 'discord'
+        ? await integrationsAPI.testDiscord(parseInt(id))
+        : await integrationsAPI.testSlack(parseInt(id));
       setTestResult(result);
       // Refresh logs
       const newLogs = await integrationsAPI.getLogs(parseInt(id), 100);
@@ -252,9 +255,19 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
           </Link>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className={`p-3 rounded-xl ${integration.type === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
+              <div
+                className={`p-3 rounded-xl ${
+                  integration.type === 'intercom'
+                    ? 'bg-[#1F8DED]/10'
+                    : integration.type === 'discord'
+                    ? 'bg-[#5865F2]/10'
+                    : 'bg-secondary'
+                }`}
+              >
                 {integration.type === 'intercom' ? (
                   <IntercomIcon className="w-8 h-8" />
+                ) : integration.type === 'discord' ? (
+                  <DiscordIcon className="w-8 h-8" />
                 ) : (
                   <SlackIcon className="w-8 h-8" />
                 )}
@@ -273,7 +286,11 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                   )}
                 </div>
                 <p className="text-muted-foreground">
-                  {integration.type === 'intercom' ? 'Configure your Intercom integration' : 'Configure your Slack integration'}
+                  {integration.type === 'intercom'
+                    ? 'Configure your Intercom integration'
+                    : integration.type === 'discord'
+                    ? 'Configure your Discord integration'
+                    : 'Configure your Slack integration'}
                 </p>
               </div>
             </div>
@@ -326,7 +343,13 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                 <h3 className="font-semibold">Integration Status</h3>
                 <p className="text-sm text-muted-foreground">
                   {form.is_active
-                    ? `Integration is active${integration?.type === 'intercom' ? '' : ' and sending alerts to Slack'}`
+                    ? `Integration is active${
+                        integration?.type === 'intercom'
+                          ? ''
+                          : integration?.type === 'discord'
+                          ? ' and sending alerts to Discord'
+                          : ' and sending alerts to Slack'
+                      }`
                     : 'Integration is paused'}
                 </p>
               </div>
@@ -470,7 +493,9 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
               />
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
-                  Slack mrkdwn: *bold*, _italic_, `code`, &gt; quote
+                  {integration.type === 'discord'
+                    ? 'Discord markdown: **bold**, *italic*, `code`, > quote'
+                    : 'Slack mrkdwn: *bold*, _italic_, `code`, > quote'}
                 </p>
                 <Button
                   type="button"

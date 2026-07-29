@@ -60,7 +60,7 @@ multi-tenant dashboard you host yourself.
 | 🧑‍💼 **Customer 360 + timeline** | Per-customer health profile with a unified, paginated activity timeline (feedback, product usage, churn and health-score events); CRM enrichment (HubSpot, Salesforce) with optional health-score writeback to both HubSpot and Salesforce — also readable over the public API. |
 | 🗂️ **Team workflow** | Kanban board, statuses, auto-assignment rules and round-robin routing. |
 | 🔌 **Sources & integrations** | **Inbound:** CSV import, email, webhooks and Slack, plus support desks (Intercom, Zendesk). **Issue trackers:** Jira, Linear and Asana. **CRM:** HubSpot and Salesforce. **Outbound:** alerts and digests via Slack and Discord. |
-| 📊 **Analytics & sharing** | Trends, distributions and top-insight tables, exportable to PDF and shareable via signed links. |
+| 📊 **Trends over time & sharing** | Not just a snapshot: `/analytics` plots **average sentiment, volume, urgent count, pain points and feature requests over 7/30/90 days** (daily or weekly buckets), and each top pain point and feature request carries an ↑/↓/→ arrow so you can see which themes are actually **accelerating** rather than just loud. Plus source breakdown, saved views, CSV export, PDF export and read-only share links. |
 | 👥 **Multi-tenant + RBAC** | Organization isolation with Owner / Admin / Member roles. |
 
 ## 🚀 Quick Start

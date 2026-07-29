@@ -131,6 +131,67 @@ class IntegrationListResponse(BaseModel):
     total: int
 
 
+class DiscordWebhookCreateRequest(BaseModel):
+    """Request to create a Discord webhook integration.
+
+    Discord is webhook-only — there is no OAuth flow to configure, unlike Slack.
+    """
+    name: str
+    webhook_url: str
+    triggers: List[str] = ["urgent"]
+    included_fields: List[str] = ["text", "sentiment"]
+    digest_time: Optional[str] = "09:00"
+    message_template: Optional[str] = None
+
+    @field_validator('webhook_url')
+    @classmethod
+    def validate_webhook_url(cls, v):
+        # `discordapp.com` is the legacy host and is still handed out by older
+        # servers, so both are accepted. Anything else is rejected at save time
+        # rather than failing on the first alert — mirrors the Slack validator.
+        if not (
+            v.startswith('https://discord.com/api/webhooks/')
+            or v.startswith('https://discordapp.com/api/webhooks/')
+        ):
+            raise ValueError(
+                'Invalid Discord webhook URL. Must start with '
+                'https://discord.com/api/webhooks/ or '
+                'https://discordapp.com/api/webhooks/'
+            )
+        return v
+
+    # The trigger/field vocabularies below are provider-neutral and duplicated
+    # from SlackWebhookCreateRequest. Kept explicit rather than inherited: the
+    # two request models are independent API contracts, and a shared base would
+    # couple Discord's schema to Slack-specific fields if either grows.
+    @field_validator('triggers')
+    @classmethod
+    def validate_triggers(cls, v):
+        valid_triggers = {'urgent', 'negative', 'all', 'daily_digest', 'weekly_digest'}
+        for trigger in v:
+            if trigger not in valid_triggers:
+                raise ValueError(f'Invalid trigger: {trigger}. Valid options: {valid_triggers}')
+        return v
+
+    @field_validator('included_fields')
+    @classmethod
+    def validate_fields(cls, v):
+        valid_fields = {
+            'text', 'sentiment', 'sentiment_score', 'pain_point_category',
+            'pain_point_severity', 'feature_request_category', 'feature_request_priority',
+            'urgent_category', 'urgent_response_time', 'source', 'link'
+        }
+        for field in v:
+            if field not in valid_fields:
+                raise ValueError(f'Invalid field: {field}. Valid options: {valid_fields}')
+        return v
+
+
+class DiscordTestRequest(BaseModel):
+    """Request to send a test Discord message."""
+    integration_id: int
+
+
 class SlackTestRequest(BaseModel):
     """Request to send a test Slack message."""
     integration_id: int
@@ -211,6 +272,40 @@ def integration_to_response(integration: Integration) -> IntegrationResponse:
         last_error=integration.last_error,
         created_at=integration.created_at,
     )
+
+
+# Discord embed accent, as a DECIMAL int — Discord rejects "#rrggbb" strings.
+# 0xE0492F, the Sunset Horizon coral, so alerts read as ours.
+DISCORD_EMBED_COLOR = 14698287
+
+
+def send_discord_message(
+    webhook_url: str, embeds: list, content: str = "Rereflect Alert"
+) -> dict:
+    """Send a message to a Discord webhook.
+
+    CONTRACT: returns {"success": bool, ...} and NEVER raises — mirroring
+    `send_slack_message` below. The worker's `send_discord_message_webhook`
+    deliberately does the opposite (it raises), because its callers are written
+    around that. Do not swap them: reusing this one in the worker would make
+    every failure look like a success, since those call sites count a send as
+    delivered whenever the call does not raise.
+
+    Discord requires a body containing `content` and/or `embeds`; a body with
+    neither is a 400. Both are always sent — `content` is also what shows in
+    notification previews.
+    """
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                webhook_url,
+                json={"content": content, "embeds": embeds},
+            )
+            response.raise_for_status()
+            return {"success": True, "response": response.text}
+    except httpx.HTTPError as e:
+        logger.error(f"Discord webhook failed: {e}")
+        return {"success": False, "error": str(e)}
 
 
 def send_slack_message(webhook_url: str, blocks: list, text: str = "Rereflect Alert") -> dict:
@@ -295,6 +390,116 @@ def create_slack_webhook(
     logger.info(f"Created Slack integration {integration.id} for org {current_org.id}")
 
     return integration_to_response(integration)
+
+
+@router.post("/discord/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED)
+def create_discord_webhook(
+    data: DiscordWebhookCreateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db)
+):
+    """Create a new Discord webhook integration.
+
+    Webhook-only by design: Discord webhooks carry their own credential in the
+    URL, so there is no OAuth flow to mirror from the Slack routes.
+    """
+    from datetime import time
+
+    digest_time_obj = None
+    if data.digest_time:
+        try:
+            hours, minutes = map(int, data.digest_time.split(':'))
+            digest_time_obj = time(hours, minutes)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid digest_time format. Use HH:MM (e.g., 09:00)"
+            )
+
+    integration = Integration(
+        organization_id=current_org.id,
+        type="discord",
+        name=data.name,
+        config={
+            "webhook_url": data.webhook_url,
+            "integration_type": "webhook"
+        },
+        triggers=data.triggers,
+        included_fields=data.included_fields,
+        digest_time=digest_time_obj,
+        message_template=data.message_template,
+        is_active=True,
+    )
+
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+
+    logger.info(f"Created Discord integration {integration.id} for org {current_org.id}")
+
+    return integration_to_response(integration)
+
+
+@router.post("/discord/test", response_model=SlackTestResponse)
+def test_discord_integration(
+    data: DiscordTestRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db)
+):
+    """Send a test message to verify a Discord integration.
+
+    A separate route rather than a generalised one: `/slack/test` filters
+    `type == "slack"` and branches on webhook-vs-OAuth, neither of which
+    applies here.
+    """
+    integration = db.query(Integration).filter(
+        Integration.id == data.integration_id,
+        Integration.organization_id == current_org.id,
+        Integration.type == "discord"
+    ).first()
+
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Discord integration not found"
+        )
+
+    config = integration.config or {}
+    webhook_url = config.get('webhook_url')
+    if not webhook_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Integration has no webhook_url configured."
+        )
+
+    embeds = [{
+        "title": "Rereflect test message",
+        "description": (
+            f"Your Discord integration **{integration.name}** is working correctly.\n\n"
+            "Alerts for urgent feedback, sentiment spikes, churn risk and volume "
+            "spikes will arrive here."
+        ),
+        "color": DISCORD_EMBED_COLOR,
+    }]
+
+    result = send_discord_message(
+        webhook_url=webhook_url,
+        embeds=embeds,
+        content="Rereflect test message",
+    )
+
+    if result.get("success"):
+        integration.last_used_at = datetime.utcnow()
+        db.commit()
+        return SlackTestResponse(success=True, message="Test message sent to Discord.")
+
+    integration.error_count = (integration.error_count or 0) + 1
+    integration.last_error = str(result.get("error"))
+    db.commit()
+    return SlackTestResponse(
+        success=False,
+        message=f"Discord test failed: {result.get('error')}"
+    )
 
 
 @router.get("/{integration_id}", response_model=IntegrationResponse)

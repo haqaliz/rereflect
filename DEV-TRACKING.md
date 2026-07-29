@@ -40,8 +40,9 @@ on 2026-07-29. **This is the highest-priority queue** — it is the first extern
 the project has had, and every item below traces to a named user ask rather than to an
 internal guess. `rereflect-next` should pick from here before the older roadmap sections.
 
-Two of the four comments needed no build work and are recorded under *No build required*
-so nobody re-litigates them.
+**Two batches so far, seven comments total:** batch 1 (four comments) and batch 2 (three
+comments, added 2026-07-29). Five of the seven needed no build work and are recorded under
+*No build required* so nobody re-litigates them.
 
 ### P0 — `automation-worker-triggers-dead` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
 > Shipped: worker-side mirror `automation_feedback_trigger.py` (two triggers, four actions,
@@ -169,7 +170,49 @@ so nobody re-litigates them.
 - **Why P1:** direct user ask, lands on the existing automations trigger/action spine, and
   P0 makes its Slack delivery path actually work. Do P0 first or this ships broken.
 
-### P2 — Native Discord webhook support (feat, unblocked)
+### P2 — Native Discord webhook support — **SHIPPED** on `feat/discord-notifications` (2026-07-29)
+> Discord integration CRUD + test route, a sender per process (backend returns a status
+> dict, worker raises — matching each process's existing Slack contract), and Discord
+> dispatch on the main alert pipe and the health-drop path. Frontend: `DiscordIcon`, provider
+> tile, and fixes to the `intercom ? … : Slack` ternaries that would otherwise have rendered
+> a Discord row with a Slack icon and a Test button that 404s.
+> Backend 63 passed · worker 1417 passed · frontend 1523 passed.
+>
+> **Scope deliberately excluded** the automations notify channel: there is no channels editor
+> in the automations UI at all, so `channels: ["discord"]` would have been unreachable except
+> via a seeded template or a direct API call. Also excluded: per-user `channel_discord`
+> preference (schema change), the Slack-mrkdwn custom-template path, and 429 retry.
+
+### P5 — Discord rides the Slack notification toggle (limitation, NOT STARTED)
+- [ ] There is no `channel_discord` on `UserAlertPreference`, so `dispatch_alert` fires
+      Discord only when `counts["slack"] > 0` (`notification_dispatch.py:626-630`).
+      **Configure Discord, switch the Slack toggle off, and you receive nothing.** With both
+      integrations active, both get every alert, with no per-type routing.
+- [ ] Fix is a `channel_discord` column + Alembic migration + a Settings → Notifications
+      toggle, then decoupling the two dispatch calls.
+- **Why P5:** documented in `docs/SELF_HOSTING.md` and the changelog, so it is a known
+  limitation rather than a surprise — but it will read as a bug to the first person who hits it.
+
+### P6 — Dead anomaly-alert functions (cleanup, NOT STARTED)
+- [ ] `services/worker-service/src/tasks/anomaly.py::_send_anomaly_slack` is fully
+      implemented and **never called** — anomaly alerts route via `_dispatch_anomaly_alerts`
+      → `dispatch_alert` (`anomaly.py:169` → `:185`). Its new Discord twin
+      `_send_anomaly_discord` mirrors it, so there are now two tested, orphaned functions.
+- [ ] Discord anomaly alerts **do** work, through the main pipe — this is dead code, not a
+      delivery gap.
+- [ ] Decide: wire them up, or delete both. Deleting only the Discord one would leave the
+      next person wiring up the Slack one with no Discord equivalent.
+
+### P7 — Provider duplication is now structural (debt, NOT STARTED)
+- [ ] The integration-selection loop (`query type == <provider>, is_active`) is duplicated
+      **four** times and the low-level sender **three** times across the two processes.
+      Discord made both worse. Adding a fifth provider (Teams is already named in the
+      `Integration.type` comment) means another full round.
+- [ ] Deliberately not refactored during the Discord work — a provider abstraction would
+      touch every Slack path at once, and that scope was explicitly declined. Deferred debt,
+      not avoided debt.
+
+### ~~P2 (original entry)~~ — superseded, kept for the reasoning
 - [ ] Discord is not supported. Its webhook API requires a `{content}` or `{embeds}` body;
       the custom-webhook dispatcher posts Rereflect's own JSON envelope, so aiming an
       endpoint at a Discord URL returns **400**. The URL validator accepts it
@@ -178,7 +221,20 @@ so nobody re-litigates them.
       built — not a new transport.
 - **Why P2:** same user, same sentence as P1, but strictly smaller and independent.
 
-### P3 — Discoverability: Analytics trends already exist (docs/marketing, no backend work)
+### P3 — Discoverability: Analytics trends — **SHIPPED** on `chore/trends-discoverability` (2026-07-29)
+> Docs only, no code. The README Highlights row said "Trends, distributions and top-insight
+> tables", which is true and tells a reader nothing — rewritten to name the 7/30/90-day
+> ranges, the five time series, and the ↑/↓/→ per-theme arrows. Added a
+> `docs/SELF_HOSTING.md` section that also states the two real limits (90-day cap; bucketed
+> counts, **not** statistical change detection) and points at
+> `batch_sentiment_threshold` for people who want an alert rather than a chart.
+>
+> **Deliberately did not touch** `README.md`'s "ingests customer feedback from CSV, email,
+> webhooks and Slack" line or the *Sources & integrations* row — those are the target of the
+> concurrent `chore/intercom-zendesk-docs` work, which is fixing the same class of
+> under-selling for the ingestion side.
+
+### ~~P3 (original entry)~~ — superseded, kept for the reasoning
 > "one thing i'd love to see is a built in trend view over time … watch how sentiment and
 > recurring pain points shift week to week rather than just looking at a snapshot"
 
@@ -193,11 +249,68 @@ so nobody re-litigates them.
       days**, and it is bucketed counts — **not** statistical change detection. Longer
       retention and anomaly flagging are the real follow-ups if asked again.
 
+### P1 — Intercom/Zendesk ingestion: shipped, invisible, and half-documented (batch 2, NOT STARTED)
+> "integrating directly with Intercom or Zendesk so feedback flows in automatically instead
+> of pasting tickets manually. Would save a ton of time on weekly reviews."
+>
+> Triaged 2026-07-29 against the shipped code. **Both integrations already exist.** This is
+> the same class as the P3 analytics-trends item — a user asking for something that shipped —
+> except that here one half of the ask is genuinely unreachable for a self-hoster.
+
+**Part A — discoverability (docs/marketing, no backend work).** Straight repeat of P3.
+- [ ] `README.md:38` says Rereflect "ingests customer feedback from CSV, email, webhooks
+      and Slack", and the Highlights table at `README.md:61` says "CSV import, email,
+      webhooks and Slack in". **Both omit Zendesk, Intercom, Jira, Linear and Asana**, all
+      of which are registered, `available=True` source types in
+      `feedback_sources.py::list_source_types`. The README is the first thing a evaluator
+      reads, and it under-sells the product against the exact ask this user made.
+- [ ] Zendesk is the strongest answer available today and it is fully real: connect with
+      subdomain + agent email + API token, **incremental polling out of the box** plus an
+      optional HMAC-signed webhook for real-time, auto-provisioned feedback source,
+      opt-in status-sync. Documented at `docs/SELF_HOSTING.md#connecting-zendesk`. Nothing
+      to build — just say it exists.
+
+**Part B — Intercom is marketed but not operable on a self-host (real gap).**
+- [ ] Intercom connect is **OAuth-only** (`integrations.py:754` → 403
+      `"Intercom OAuth is not configured. Set INTERCOM_CLIENT_ID environment variable"`).
+      `INTERCOM_CLIENT_ID`, `INTERCOM_CLIENT_SECRET` and `INTERCOM_REDIRECT_URI` appear in
+      **no** `.env.example`, **no** `.env.prod.example`, **neither** docker-compose file and
+      **nowhere** in `docs/SELF_HOSTING.md` (which has a "Connecting Zendesk" section and no
+      Intercom counterpart). A self-hoster clicking "Connect to Intercom" in the UI gets an
+      error and has no documented way to resolve it short of reading the route source.
+- [ ] Meanwhile `services/landing-web/lib/integrations.ts:147` sells it as
+      *"Authorize via OAuth in one click"*. That is a promise the shipped artifact cannot
+      keep without undocumented setup.
+- [ ] Intercom ingestion is **webhook-only in practice**:
+      `worker-service/src/tasks/integrations.py:167` `IntercomConnector.fetch_new_items` is
+      a placeholder that logs `"not implemented"` and returns nothing
+      (*"TODO: Implement actual Intercom API integration in Month 2"*), while
+      `integrations.py:30` still selects `type.in_(["intercom", "zendesk"])` for polling. So
+      there is no pull path — if the webhook is not wired, nothing arrives. Note the
+      user's phrasing is "flows in automatically", which is exactly the pull path.
+- [ ] **Minimum honest fix:** document the Intercom app + OAuth env vars in
+      `SELF_HOSTING.md` and `.env.prod.example` (mirroring the Zendesk section), and state
+      plainly that Intercom ingestion is webhook-driven. **Follow-up:** either implement
+      `IntercomConnector.fetch_new_items` against the Conversations API, or add a token-paste
+      (non-OAuth) connect path following the Zendesk/Jira/Asana BYO-token precedent — OAuth
+      was rejected as "awkward for self-host" for *every other* integration, and Intercom is
+      the last one still requiring it.
+- **Why P1:** direct user ask; Part A is nearly free and immediately answers them; Part B is
+  a shipped-and-marketed integration that a self-hoster cannot actually turn on, which is the
+  same credibility problem as the P0 automations bugs, just on the acquisition path.
+
 ### No build required (recorded so they are not re-opened)
-- Two comments were **pure positive signal** on the no-telemetry / self-hosted / BYOK
-  positioning and on local-pipeline-without-an-API-key working out of the box. No ask
+- **Batch 1 — two comments** were **pure positive signal** on the no-telemetry / self-hosted
+  / BYOK positioning and on local-pipeline-without-an-API-key working out of the box. No ask
   attached. Worth noting that **both** independently named privacy/BYOK as the hook — that
   is the messaging that is landing, and it should stay first on the landing page.
+- **Batch 2 — two more comments (2026-07-29)**, same shape, no ask attached: one on
+  MIT + self-hosted + no telemetry *and* the free VADER pipeline producing a clean sentiment
+  breakdown with no API key; one on BYOK as data control plus "not locking anyone into a
+  specific model". **Four of seven comments now independently name privacy/BYOK/OSS as the
+  hook, and two specifically praise the zero-key local pipeline.** That is a settled result:
+  keep BYOK-and-no-telemetry first on the landing page, and keep the "works with no API key"
+  claim prominent — it is doing real acquisition work and is cheap to keep true.
 
 ---
 

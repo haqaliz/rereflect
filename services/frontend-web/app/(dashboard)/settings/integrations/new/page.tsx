@@ -32,9 +32,22 @@ import {
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import { DiscordIcon } from '@/components/icons/DiscordIcon';
 
-type IntegrationType = 'slack' | 'intercom';
+type IntegrationType = 'slack' | 'intercom' | 'discord';
 type ConnectionMethod = 'oauth' | 'webhook';
+
+// Discord is webhook-only — the backend validator accepts only these two hosts
+// (discordapp.com is the legacy host still issued by some servers). Mirrored
+// here for a good client-side error message; the backend is authoritative.
+const DISCORD_WEBHOOK_URL_PREFIXES = [
+  'https://discord.com/api/webhooks/',
+  'https://discordapp.com/api/webhooks/',
+];
+
+function isValidDiscordWebhookUrl(url: string): boolean {
+  return DISCORD_WEBHOOK_URL_PREFIXES.some(prefix => url.startsWith(prefix));
+}
 
 function NewIntegrationContent() {
   const router = useRouter();
@@ -111,16 +124,27 @@ function NewIntegrationContent() {
   const handleWebhookSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (integrationType === 'discord' && !isValidDiscordWebhookUrl(form.webhook_url)) {
+      setError('Discord webhook URLs must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      await integrationsAPI.createSlackWebhook({
+      const payload = {
         name: form.name,
         webhook_url: form.webhook_url,
         triggers: form.triggers,
         digest_time: form.digest_time,
         message_template: form.message_template || undefined,
-      });
+      };
+      if (integrationType === 'discord') {
+        await integrationsAPI.createDiscordWebhook(payload);
+      } else {
+        await integrationsAPI.createSlackWebhook(payload);
+      }
       router.push('/settings/integrations');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create integration');
@@ -156,6 +180,33 @@ function NewIntegrationContent() {
 
   const needsDigestTime = form.triggers.includes('daily_digest') || form.triggers.includes('weekly_digest');
 
+  const headerIconBg =
+    integrationType === 'intercom'
+      ? 'bg-[#1F8DED]/10'
+      : integrationType === 'discord'
+      ? 'bg-[#5865F2]/10'
+      : 'bg-secondary';
+  const headerIcon =
+    integrationType === 'intercom' ? (
+      <IntercomIcon className="w-8 h-8" />
+    ) : integrationType === 'discord' ? (
+      <DiscordIcon className="w-8 h-8" />
+    ) : (
+      <SlackIcon className="w-8 h-8" />
+    );
+  const headerTitle =
+    integrationType === 'intercom'
+      ? 'New Intercom Integration'
+      : integrationType === 'discord'
+      ? 'New Discord Integration'
+      : 'New Slack Integration';
+  const headerDescription =
+    integrationType === 'intercom'
+      ? 'Connect Rereflect to your Intercom workspace'
+      : integrationType === 'discord'
+      ? 'Connect Rereflect to a Discord channel via webhook'
+      : 'Connect Rereflect to a Slack channel';
+
   return (
     <div className="min-h-screen pattern-bg">
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -169,22 +220,12 @@ function NewIntegrationContent() {
             Back to Integrations
           </Link>
           <div className="flex items-center space-x-3">
-            <div className={`p-3 rounded-xl ${integrationType === 'intercom' ? 'bg-[#1F8DED]/10' : 'bg-secondary'}`}>
-              {integrationType === 'intercom' ? (
-                <IntercomIcon className="w-8 h-8" />
-              ) : (
-                <SlackIcon className="w-8 h-8" />
-              )}
+            <div className={`p-3 rounded-xl ${headerIconBg}`}>
+              {headerIcon}
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                {integrationType === 'intercom' ? 'New Intercom Integration' : 'New Slack Integration'}
-              </h1>
-              <p className="text-muted-foreground">
-                {integrationType === 'intercom'
-                  ? 'Connect Rereflect to your Intercom workspace'
-                  : 'Connect Rereflect to a Slack channel'}
-              </p>
+              <h1 className="text-3xl font-bold text-foreground">{headerTitle}</h1>
+              <p className="text-muted-foreground">{headerDescription}</p>
             </div>
           </div>
         </div>
@@ -196,7 +237,7 @@ function NewIntegrationContent() {
             <CardDescription>Choose which service to connect</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <button
                 type="button"
                 onClick={() => { setIntegrationType('slack'); setConnectionMethod('oauth'); setError(null); }}
@@ -233,6 +274,26 @@ function NewIntegrationContent() {
                   <div>
                     <h4 className="font-semibold">Intercom</h4>
                     <p className="text-xs text-muted-foreground">Analyze support conversations with AI</p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setIntegrationType('discord'); setConnectionMethod('webhook'); setError(null); }}
+                className={`p-4 rounded-lg border-2 text-left transition-all ${
+                  integrationType === 'discord'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${integrationType === 'discord' ? 'bg-[#5865F2]/10' : 'bg-secondary'}`}>
+                    <DiscordIcon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">Discord</h4>
+                    <p className="text-xs text-muted-foreground">Get feedback alerts in your Discord server</p>
                   </div>
                 </div>
               </button>
@@ -402,14 +463,18 @@ function NewIntegrationContent() {
           </Card>
         )}
 
-        {/* Webhook Flow (Slack only) */}
-        {integrationType === 'slack' && connectionMethod === 'webhook' && (
+        {/* Webhook Flow (Slack webhook, or Discord — Discord is webhook-only) */}
+        {((integrationType === 'slack' && connectionMethod === 'webhook') || integrationType === 'discord') && (
           <form onSubmit={handleWebhookSubmit} className="space-y-6">
             {/* Webhook URL */}
             <Card className="animate-slide-up stagger-2">
               <CardHeader>
                 <CardTitle>Webhook Configuration</CardTitle>
-                <CardDescription>Enter your Slack Incoming Webhook URL</CardDescription>
+                <CardDescription>
+                  {integrationType === 'discord'
+                    ? 'Enter your Discord Incoming Webhook URL'
+                    : 'Enter your Slack Incoming Webhook URL'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -417,13 +482,19 @@ function NewIntegrationContent() {
                   <Input
                     id="webhook_url"
                     type="url"
-                    placeholder="https://hooks.slack.com/services/..."
+                    placeholder={
+                      integrationType === 'discord'
+                        ? 'https://discord.com/api/webhooks/...'
+                        : 'https://hooks.slack.com/services/...'
+                    }
                     value={form.webhook_url}
                     onChange={e => setForm(prev => ({ ...prev, webhook_url: e.target.value }))}
                     required
                   />
                   <p className="text-xs text-muted-foreground">
-                    Get this from Slack: App Settings → Incoming Webhooks → Add New Webhook
+                    {integrationType === 'discord'
+                      ? 'Get this from Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL'
+                      : 'Get this from Slack: App Settings → Incoming Webhooks → Add New Webhook'}
                   </p>
                 </div>
               </CardContent>
@@ -483,7 +554,11 @@ function NewIntegrationContent() {
                     </Tooltip>
                   </TooltipProvider>
                 </CardTitle>
-                <CardDescription>Customize the message sent to Slack</CardDescription>
+                <CardDescription>
+                  {integrationType === 'discord'
+                    ? 'Customize the message sent to Discord'
+                    : 'Customize the message sent to Slack'}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Variable Pills */}
@@ -539,7 +614,9 @@ function NewIntegrationContent() {
                   />
                   <div className="flex items-center justify-between">
                     <p className="text-xs text-muted-foreground">
-                      Slack mrkdwn: *bold*, _italic_, `code`, &gt; quote
+                      {integrationType === 'discord'
+                        ? 'Discord markdown: **bold**, *italic*, `code`, > quote'
+                        : 'Slack mrkdwn: *bold*, _italic_, `code`, > quote'}
                     </p>
                     <Button
                       type="button"
