@@ -5,6 +5,37 @@ Every feature is unlocked; the app runs on your own infrastructure with your own
 
 Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `DEV-TRACKING.md`).
 
+## Unreleased
+
+### Fixed — Churn `resolution_time` factor was permanently dead
+
+The `resolution_time` churn factor (10 of the 100 points in every customer's churn score)
+has never actually run. `_compute_heuristic_churn_risk` imported `FeedbackWorkflowEvent`
+from `src.models.feedback_workflow_event`, a submodule that has never existed in
+worker-service — the class is exported from `src.models` directly. The `ModuleNotFoundError`
+was swallowed by a bare `except Exception: pass`, so `resolution_score_pts` was always `0`
+and every customer's factor breakdown showed `"Insufficient resolution data"` as if that
+were a real finding, since churn explainability shipped (M1.4). This is the third instance
+of the same bug class in this repo — worker-service importing a backend-api-only path inside
+a bare `try/except` (see GitHub #3, `f5d43234`; and `52c763dd`).
+
+**Effect on your data:** on each customer's next analysis, churn scores can rise by up to 10
+points, and some customers will move up a risk band, purely because this factor starts
+contributing for the first time — not because anything about those customers changed. This
+is a correction, not new risk. Historical `churn_risk_factors` rows are **not** backfilled by
+this fix (fix-forward, no bulk rewrite); they keep their stale `"Insufficient resolution
+data"` label until each item is naturally re-analyzed. If you want existing rows recomputed
+immediately, `services/backend-api/scripts/backfill_churn_factors.py` exists for exactly that
+and can be run as an opt-in operator command — it is not run automatically by this fix.
+
+While fixing this, the other four customer-level factors (`sentiment_trend`,
+`feedback_frequency`, `pain_severity`, `feature_density`) — which shared the same untested
+gap, just not the same bug — got DB-backed tests proving each one does score correctly.
+The `except Exception: pass` blocks around all five customer-level factors now log a warning
+naming the failed factor instead of swallowing it silently, so this class of bug can't hide
+again the same way. Per-factor isolation is unchanged: one failing factor still can't void
+the other eight.
+
 ## v1.0.0 — 2026-07-26
 
 **The 1.0 release.** Feature work for this milestone was already complete — every PRD in the
