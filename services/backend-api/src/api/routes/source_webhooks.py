@@ -264,13 +264,22 @@ def verify_intercom_signature(body: bytes, signature: str, secret: str) -> bool:
 
     Returns:
         True if signature is valid
+
+    Fails closed: an empty/None secret returns False, matching
+    `_verify_zendesk_signature`. INTERCOM_CLIENT_SECRET being unset is the
+    default state of every install (it is documented nowhere), so skipping
+    verification in that case would accept arbitrary unsigned payloads.
     """
     if not secret:
-        logger.warning("INTERCOM_CLIENT_SECRET not configured, skipping signature verification")
-        return True
+        logger.warning("INTERCOM_CLIENT_SECRET not configured, rejecting webhook (fails closed)")
+        return False
 
     expected = "sha1=" + hmac.new(secret.encode(), body, hashlib.sha1).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    try:
+        return hmac.compare_digest(expected, signature)
+    except TypeError:
+        # compare_digest raises TypeError on a non-ASCII str argument.
+        return False
 
 
 @router.post("/intercom/events")
