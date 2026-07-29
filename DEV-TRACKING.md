@@ -299,6 +299,83 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   a shipped-and-marketed integration that a self-hoster cannot actually turn on, which is the
   same credibility problem as the P0 automations bugs, just on the acquisition path.
 
+### P0 — `intercom-webhook-unauthenticated-cross-org-write` (bug, NOT STARTED)
+> Found 2026-07-29 while tracing Intercom for the P1 docs work. **Verified by code trace**,
+> not inferred. Two separate defects that **compose into one exploitable path**, which is why
+> they are filed together — fixing either alone leaves the hole open.
+
+- [ ] **(a) The Intercom webhook fails open.** `verify_intercom_signature`
+      (`services/backend-api/src/api/routes/source_webhooks.py:268-270`) returns `True`
+      unconditionally when `INTERCOM_CLIENT_SECRET` is empty, logging only a warning. That
+      env var is **documented nowhere** (see P1), so **unset is the default state of every
+      install**. `POST /api/v1/webhooks/intercom/events` therefore accepts arbitrary
+      unsigned payloads.
+- [ ] **(b) Missing `app_id` unscopes the org filter.** In `_find_matching_sources`
+      (`services/worker-service/src/tasks/source_events.py:142-161`) the whole
+      integration-matching block sits behind `if workspace_id:`. A payload without `app_id`
+      skips it, leaving the query filtered only by `source_type="intercom"` and
+      `is_active=True` — i.e. **matching every active Intercom source in every organization
+      on the instance.**
+- [ ] **Composed consequence:** on a default self-hosted install, an unauthenticated caller
+      who knows the URL can inject feedback into **arbitrary organizations**. Multi-tenant
+      isolation is the one guarantee a self-hosted multi-org deployment cannot compromise on.
+- [ ] `services/backend-api/tests/test_intercom.py` already exercises the
+      `workspace_id=None` case (asserting only that the event is queued) — the test encodes
+      the dangerous input as normal and asserts nothing about tenancy.
+- [ ] **Fix:** make `verify_intercom_signature` fail **closed** exactly like
+      `_verify_zendesk_signature` (`source_webhooks.py:383-403`), whose docstring already
+      calls out the contrast — so the correct pattern was known and simply not applied here.
+      Then make a missing `workspace_id` return `[]` rather than falling through.
+- **Why P0:** unauthenticated cross-tenant write. Deliberately **not** documented in
+  `docs/SELF_HOSTING.md` on the `chore/intercom-zendesk-docs` branch — writing it up publicly
+  while unpatched would publish a working exploit. **This should be the next branch after the
+  docs land**, ahead of any Intercom feature work.
+
+### P1 — `oauth-tokens-stored-plaintext` (bug, NOT STARTED)
+- [ ] `Integration.oauth_access_token` is a plain `Text` column and
+      `services/backend-api/src/api/routes/integrations.py` never calls
+      `encrypt_api_key`/`decrypt_api_key` on the **Slack or Intercom** OAuth paths — while
+      every newer BYOK integration (Zendesk, Jira, Asana, HubSpot, Salesforce) does encrypt.
+      OAuth was simply never migrated when the encryption pattern was introduced.
+- [ ] **`services/backend-api/src/models/integration.py:19` carries the comment "OAuth tokens
+      (encrypted at application level before storage)" — which is false.** A reader auditing
+      this file is actively misled into believing it is handled. Fix the code; if the fix is
+      deferred, the comment must be corrected *immediately* either way.
+- [ ] Needs a migration to encrypt existing rows in place.
+
+### P1 — `integrations-routes-missing-rbac` (bug, NOT STARTED)
+- [ ] `services/backend-api/src/api/routes/integrations.py` contains **zero** occurrences of
+      `403`, `require_admin_or_owner` or `require_owner`. `get_current_org` validates the JWT
+      but never checks `current_user.role`.
+- [ ] So a **`member` can drive the OAuth connect flow via the API**, contradicting the RBAC
+      table in `CLAUDE.md` ("Manage integrations: Owner ✅ / Admin ✅ / Member ❌"). The
+      frontend hides the UI; the backend does not enforce it — the classic shape of an
+      access-control gap that looks fine in manual testing.
+- [ ] Audit the other integration route modules for the same omission before assuming it is
+      confined to this file.
+
+### P2 — `intercom-writeback-orphaned` (bug/cleanup, NOT STARTED)
+- [ ] `services/backend-api/src/services/intercom_service.py`
+      (`add_note_to_conversation`, `close_conversation`, `get_admin_id`) has **no production
+      caller anywhere in the repo** — `grep` across `services/` returns only
+      `tests/test_intercom.py`. No route, task, workflow hook or automation engine imports it.
+- [ ] The landing page sold this as **"Two-Way Sync"**; that claim is being removed on
+      `chore/intercom-zendesk-docs`. Either wire the module into the feedback status-change
+      path or delete it — but the copy must not return until it is wired.
+- [ ] **Detection lesson, worth generalising:** the module has thorough unit tests against
+      mocked `httpx`, and they all pass. Tests that mock the boundary prove the function
+      works in isolation and say nothing about whether anything calls it. This is the same
+      family as the P0/P0b dead-import bugs: **green tests over code that never executes in
+      production.** A "is this reachable from an entrypoint?" sweep would have caught all
+      three.
+
+### P3 — `oauth-state-in-process-dict` (bug, NOT STARTED)
+- [ ] `oauth_states` (`services/backend-api/src/api/routes/integrations.py:39`) is a
+      module-level Python dict with no TTL and no Redis/DB backing. OAuth callbacks fail
+      intermittently on any multi-replica backend, since the callback may land on a different
+      process than the one that issued the authorize URL. Affects Slack and Intercom.
+- [ ] Also an unbounded in-memory store — entries are never expired.
+
 ### No build required (recorded so they are not re-opened)
 - **Batch 1 — two comments** were **pure positive signal** on the no-telemetry / self-hosted
   / BYOK positioning and on local-pipeline-without-an-API-key working out of the box. No ask
