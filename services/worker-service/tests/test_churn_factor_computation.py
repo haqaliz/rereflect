@@ -8,8 +8,10 @@ TDD tests for churn risk factor computation (M1.4 Phase 2):
 - churn_risk_factors stored on feedback after analysis
 """
 import pytest
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 from src.tasks.analysis import _compute_heuristic_churn_risk
+from src.models import FeedbackItem, FeedbackWorkflowEvent
 
 
 EXPECTED_FACTOR_KEYS = {
@@ -378,3 +380,83 @@ class TestBackwardCompatibility:
         )
         score, _ = _compute_heuristic_churn_risk(fb)
         assert score == 0
+
+
+class TestCustomerLevelFactorsWithDB:
+    """DB-backed coverage for the 5 customer-level factors (M1.4 phase 3).
+
+    Unlike the rest of this file, these tests exercise `_compute_heuristic_churn_risk`
+    with a real (in-memory SQLite) `db` session and persisted `FeedbackItem` /
+    `FeedbackWorkflowEvent` rows — the only way to prove these factors' SQL actually
+    runs, rather than assuming it does because the function returns without error.
+
+    See docs/planning/churn-customer-factor-coverage/customer-factor-coverage/spec.md S2.
+    """
+
+    def test_resolution_time_scores_10_for_slow_resolution(self, db, test_org):
+        """A feedback item resolved 9 days after creation should score resolution_time=10.
+
+        Proves the `resolution_time` factor, which was dead (analysis.py:821 imported
+        `FeedbackWorkflowEvent` from a submodule that doesn't exist in worker-service —
+        the ModuleNotFoundError was swallowed by the enclosing `except Exception: pass`).
+        """
+        now = datetime.utcnow()
+        created_at = now - timedelta(days=10)
+
+        feedback = FeedbackItem(
+            organization_id=test_org.id,
+            text="The bug I reported took forever to fix",
+            customer_email="slow-resolution@example.com",
+            created_at=created_at,
+        )
+        db.add(feedback)
+        db.commit()
+        db.refresh(feedback)
+
+        event = FeedbackWorkflowEvent(
+            feedback_id=feedback.id,
+            organization_id=test_org.id,
+            event_type="status_changed",
+            new_value="resolved",
+            created_at=created_at + timedelta(days=9),
+        )
+        db.add(event)
+        db.commit()
+
+        _, factors = _compute_heuristic_churn_risk(feedback, db=db)
+
+        assert factors["resolution_time"]["score"] == 10
+        assert "9.0" in factors["resolution_time"]["label"]
+
+    def test_resolution_time_scores_0_for_fast_resolution(self, db, test_org):
+        """A feedback item resolved 1 day after creation should score resolution_time=0,
+        with a label naming the average — proving the branch actually ran rather than
+        just falling through to the "insufficient data" default.
+        """
+        now = datetime.utcnow()
+        created_at = now - timedelta(days=10)
+
+        feedback = FeedbackItem(
+            organization_id=test_org.id,
+            text="Fixed same day, thanks!",
+            customer_email="fast-resolution@example.com",
+            created_at=created_at,
+        )
+        db.add(feedback)
+        db.commit()
+        db.refresh(feedback)
+
+        event = FeedbackWorkflowEvent(
+            feedback_id=feedback.id,
+            organization_id=test_org.id,
+            event_type="status_changed",
+            new_value="resolved",
+            created_at=created_at + timedelta(days=1),
+        )
+        db.add(event)
+        db.commit()
+
+        _, factors = _compute_heuristic_churn_risk(feedback, db=db)
+
+        assert factors["resolution_time"]["score"] == 0
+        assert "Resolved within" in factors["resolution_time"]["label"]
