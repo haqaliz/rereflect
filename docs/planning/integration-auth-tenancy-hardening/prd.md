@@ -450,6 +450,56 @@ other end.
 but A1 does not depend on it: a single-org install with `INTERNAL_EVENTS_SECRET` unset is publicly
 writable by anyone who has read this repo.
 
+### A7 — `/api/internal/events/emit` has NO production caller (verified)
+
+Grepped `services/worker-service/src` and `services/analysis-engine/src`: **no reference** to
+`events/emit`, `emit_event`, or `INTERNAL_SECRET`. The worker's only outbound HTTP is
+`webhook_delivery.py:143` (customer webhooks) and `email.py:72` (Resend). The endpoint's own
+docstring says *"Internal endpoint for Celery workers to push events"* — no worker does.
+
+Meanwhile `emit_event` **is** used heavily (`feedback.py:320,706,933`, `public_api.py:611-831`) —
+but always as a **direct in-process call** inside backend-api, never over HTTP. The HTTP endpoint
+exists solely for the cross-process case that was never built.
+
+**Consequences:**
+- **Failing it closed carries zero migration risk.** Nothing calls it, so nothing breaks.
+- This is the **third** instance of the repo's recurring "green tests over code that never executes
+  in production" family — after `intercom_service.py` (P2, orphaned) and the dead-import bugs
+  (P0/P0b). `test_event_emitter.py` covers the endpoint thoroughly; coverage says nothing about
+  reachability.
+- **Recommended follow-up (not this branch):** decide whether to wire it up or delete it, exactly
+  as `DEV-TRACKING.md` framed `intercom_service.py`. Hardening it now is correct regardless — an
+  unreachable-from-our-code endpoint is still reachable from the internet.
+
+---
+
+## FINAL SCOPE (decided 2026-07-29, supersedes the Requirements section above)
+
+Sweep items 1–3. RBAC and the remaining sweep items drop to follow-ups.
+
+| # | Requirement | Shadow? |
+|---|---|---|
+| **F1** | `events_ws.py`: remove the `"dev-secret"` default (refuse/fail when unset) + `hmac.compare_digest` | No — zero callers (A7) |
+| **F2** | Intercom signature fails closed | No — ingestion never worked |
+| **F3** | Slack signature: shadow + operator visibility (M4/M5 stand) | **Yes** — live traffic |
+| **F4** | Email/Resend signature: shadow + operator visibility, same rationale as Slack | **Yes** — live traffic |
+| **F5** | Tenancy guard `if not X: return []` on **all four** branches (slack, intercom, email, webhook) | No — never legitimate |
+| **F6** | Invert `test_email_webhooks.py:367-378`; rewrite `test_intercom.py:294-325` | — |
+| **F7** | A `test_missing_*_returns_empty_not_cross_tenant_fanout` twin per branch, two orgs seeded | — |
+| **F8** | Create `worker-service/tests/test_source_events.py` (does not exist) | — |
+| **F9** | Document `INTERCOM_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`, `RESEND_INBOUND_WEBHOOK_SECRET`, `INTERNAL_EVENTS_SECRET` in `.env.example`, `.env.prod.example`, `SELF_HOSTING.md` | — |
+| **F10** | **GitHub Security Advisory on merge**, naming affected versions + required env vars (resolves G1) | — |
+
+**Shadow principle, applied consistently:** a provider whose ingestion demonstrably works today
+gets shadow + visibility on the *signature* flip; one that has never worked fails closed
+immediately. **Tenancy guards are never shadowed** — a missing discriminator is not legitimate
+traffic for any provider.
+
+**Dropped to follow-ups:** RBAC on `integrations.py` (M6/M7) and the `models/integration.py`
+comment (M9) — still real, still filed; Linear fail-closed + `webhook_secret` encryption (needs a
+migration); Zendesk replay window; the generic webhook's `dict(request.headers)` persistence;
+`JWT_SECRET` default; OAuth state TTL; the `events/emit` wire-up-or-delete decision.
+
 ---
 
 ## Out of Scope
