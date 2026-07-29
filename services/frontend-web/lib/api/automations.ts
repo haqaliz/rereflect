@@ -8,7 +8,8 @@ export type TriggerType =
   | 'churn_risk_level_change'
   | 'feedback_category_match'
   | 'churn_probability_threshold'
-  | 'usage_trend';
+  | 'usage_trend'
+  | 'batch_sentiment_threshold';
 
 export type ActionType =
   | 'auto_assign'
@@ -139,6 +140,7 @@ export const TRIGGER_TYPE_LABELS: Record<TriggerType, string> = {
   feedback_category_match: 'Category Match',
   churn_probability_threshold: 'Churn probability threshold',
   usage_trend: 'Usage Trend',
+  batch_sentiment_threshold: 'Batch Sentiment Threshold',
 };
 
 export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
