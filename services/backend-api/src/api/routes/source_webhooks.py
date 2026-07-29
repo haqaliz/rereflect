@@ -46,7 +46,12 @@ def verify_slack_signature(body: str, timestamp: str, signature: str, secret: st
         True if signature is valid
     """
     if not secret:
-        logger.warning("SLACK_SIGNING_SECRET not configured, skipping signature verification")
+        logger.warning(
+            "SECURITY-SHADOW: signature verification unconfigured — "
+            "SLACK_SIGNING_SECRET is not set, so this Slack webhook is accepted "
+            "unverified. A future release will reject it once enforcement lands. "
+            "See docs/SELF_HOSTING.md to configure the secret."
+        )
         return True
 
     # Check timestamp (prevent replay attacks - 5 minute window)

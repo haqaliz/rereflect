@@ -134,6 +134,56 @@ def seed_copilot_system_templates(db) -> None:
         )
 
 
+def warn_unconfigured_webhook_secrets(db) -> None:
+    """
+    Boot-time visibility for Slack/email webhook shadow mode (Phase 4).
+
+    verify_slack_signature and _verify_webhook_signature already log a
+    SECURITY-SHADOW warning on every unsigned request when their secret is
+    unset, but that per-request log is easy to miss under normal traffic.
+    This does the same check once, loudly, at startup — and only when it
+    actually matters (there is a live integration/source that depends on
+    the missing secret), so a fresh install with nothing configured yet
+    doesn't warn about a gap nobody has hit.
+
+    Never blocks boot: any error here is caught and logged, matching
+    seed_copilot_system_templates's contract.
+    """
+    try:
+        from src.api.routes.source_webhooks import SLACK_SIGNING_SECRET
+        from src.api.routes.email_webhooks import RESEND_INBOUND_WEBHOOK_SECRET
+        from src.models.integration import Integration
+        from src.models.feedback_source import FeedbackSource
+
+        if not SLACK_SIGNING_SECRET:
+            has_active_slack = db.query(Integration).filter(
+                Integration.type == "slack",
+                Integration.is_active == True,  # noqa: E712 — SQLAlchemy filter, not a Python bool compare
+            ).first() is not None
+            if has_active_slack:
+                logger.warning(
+                    "SECURITY-SHADOW: signature verification unconfigured — an active "
+                    "Slack integration exists but SLACK_SIGNING_SECRET is not set. "
+                    "Inbound Slack webhooks are being accepted unverified. See "
+                    "docs/SELF_HOSTING.md to configure the secret before enforcement lands."
+                )
+
+        if not RESEND_INBOUND_WEBHOOK_SECRET:
+            has_active_email_source = db.query(FeedbackSource).filter(
+                FeedbackSource.source_type == "email",
+                FeedbackSource.is_active == True,  # noqa: E712
+            ).first() is not None
+            if has_active_email_source:
+                logger.warning(
+                    "SECURITY-SHADOW: signature verification unconfigured — an active "
+                    "email feedback source exists but RESEND_INBOUND_WEBHOOK_SECRET is "
+                    "not set. Inbound email webhooks are being accepted unverified. See "
+                    "docs/SELF_HOSTING.md to configure the secret before enforcement lands."
+                )
+    except Exception as e:
+        logger.warning(f"warn_unconfigured_webhook_secrets: check failed, boot continues: {e}")
+
+
 def run_migrations():
     """Run Alembic migrations on startup."""
     try:
@@ -207,6 +257,19 @@ async def lifespan(app: FastAPI):
             _byok_db.close()
     except Exception as e:
         logger.warning(f"Could not seed env BYOK keys: {e}")
+    # Phase 4 (webhook-auth-tenancy): loud, one-time boot warning if a live
+    # Slack integration or email source depends on a signing secret that
+    # isn't set. warn_unconfigured_webhook_secrets never raises on its own,
+    # but this outer try/except matches the rest of this function's contract.
+    try:
+        from src.database.session import SessionLocal
+        _webhook_secret_db = SessionLocal()
+        try:
+            warn_unconfigured_webhook_secrets(_webhook_secret_db)
+        finally:
+            _webhook_secret_db.close()
+    except Exception as e:
+        logger.warning(f"Could not check webhook secret configuration: {e}")
     yield
     # Shutdown: cleanup if needed
 

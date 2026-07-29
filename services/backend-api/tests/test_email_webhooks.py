@@ -365,17 +365,36 @@ class TestWebhookSignatureVerification:
         assert response.json()["detail"] == "Invalid webhook signature"
 
     @patch("src.api.routes.email_webhooks.RESEND_INBOUND_WEBHOOK_SECRET", None)
-    def test_missing_secret_skips_verification(
+    def test_missing_secret_accepts_in_shadow_but_warns(
         self,
         client: TestClient,
         db: Session,
         email_source: FeedbackSource,
+        caplog: pytest.LogCaptureFixture,
     ):
-        """Should skip verification and continue when webhook secret is not configured."""
+        """Shadow mode: with the secret unset, verification still accepts the
+        request (email ingestion has live traffic and must not silently break),
+        but it must log the SECURITY-SHADOW marker so an operator can find and
+        fix the gap before a later release starts enforcing it.
+
+        This test previously asserted the opposite of the two things that
+        matter: it only checked `result is True` under the docstring "Should
+        skip verification and continue", which pinned silent fail-open as the
+        expected, correct behaviour. The coverage of `result is True` is kept
+        (shadow mode really does still accept), but it is no longer presented
+        as the desired end state — the added caplog assertion is the point of
+        this test now.
+        """
         from src.api.routes.email_webhooks import _verify_webhook_signature
 
-        result = _verify_webhook_signature(b'{"test": true}', {})
+        with caplog.at_level("WARNING"):
+            result = _verify_webhook_signature(b'{"test": true}', {})
+
         assert result is True
+        assert any(
+            "SECURITY-SHADOW: signature verification unconfigured" in record.message
+            for record in caplog.records
+        )
 
 
 # ============================================================================

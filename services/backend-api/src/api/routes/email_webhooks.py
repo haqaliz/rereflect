@@ -43,7 +43,12 @@ RESEND_API_BASE = "https://api.resend.com"
 def _verify_webhook_signature(body: bytes, headers: dict) -> bool:
     """Verify Resend webhook signature using svix."""
     if not RESEND_INBOUND_WEBHOOK_SECRET:
-        logger.warning("RESEND_INBOUND_WEBHOOK_SECRET not configured, skipping verification")
+        logger.warning(
+            "SECURITY-SHADOW: signature verification unconfigured — "
+            "RESEND_INBOUND_WEBHOOK_SECRET is not set, so this inbound email webhook is "
+            "accepted unverified. A future release will reject it once enforcement lands. "
+            "See docs/SELF_HOSTING.md to configure the secret."
+        )
         return True
 
     try:
