@@ -428,3 +428,47 @@ def test_update_rule_usage_trend_going_active_does_not_seed(
     assert response.status_code == 200
     assert response.json()["mode"] == "active"
     assert fake_redis.setex_calls == []
+
+
+# ---------------------------------------------------------------------------
+# 7. Pin: a batch_sentiment_threshold rule going active must NOT seed
+# cooldowns (batch-sentiment-trigger, Track A) — this trigger is org-wide,
+# not per-customer, so there is no per-customer cooldown to seed; the
+# shadow-by-default template (A4) covers the activation-stampede risk,
+# following the usage_trend precedent above. This test pins that decision.
+# ---------------------------------------------------------------------------
+
+def _batch_sentiment_rule(db: Session, org: Organization, mode: str = "shadow") -> AutomationRule:
+    rule = AutomationRule(
+        organization_id=org.id,
+        name="Batch Sentiment Alert",
+        trigger_type="batch_sentiment_threshold",
+        trigger_config={
+            "sentiment": "negative",
+            "window_hours": 24,
+            "mode": "percentage",
+            "threshold": 0.5,
+            "min_total": 5,
+        },
+        actions=[{"type": "send_notification", "config": {"recipients": "admins", "channels": ["dashboard"]}}],
+        cooldown_hours=24,
+        mode=mode,
+    )
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+def test_update_rule_batch_sentiment_threshold_going_active_does_not_seed(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict, fake_redis: FakeRedis
+):
+    rule = _batch_sentiment_rule(db, test_organization, mode="shadow")
+    _make_health(db, test_organization, "above@test.com", 0.99)
+
+    response = client.put(
+        f"/api/v1/automations/{rule.id}", json={"mode": "active"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "active"
+    assert fake_redis.setex_calls == []
