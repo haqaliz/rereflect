@@ -13,8 +13,11 @@ Tests cover:
 
 import pytest
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
+
+from src.api.routes import events_ws as events_ws_module
 
 
 # =============================================================================
@@ -195,6 +198,30 @@ class TestInternalEmitAuth:
             "/api/internal/events/emit",
             json={"org_id": 10, "event_type": "feedback:analyzed", "data": {"id": 1}},
             headers=headers,
+        )
+
+    def test_module_has_no_hardcoded_default_secret(self):
+        """Regression guard on the module-level default itself.
+
+        Every other test in this class patches `events_ws.INTERNAL_SECRET`, so
+        none of them would notice if the default were changed back to a usable
+        literal — the suite would stay green while the endpoint was publicly
+        writable again. This asserts the env lookup has no fallback value.
+
+        Re-deriving it from the live environment rather than reading the module
+        global, because the module global may already be patched or set from a
+        developer's own .env.
+        """
+        with patch.dict(os.environ, {}, clear=True):
+            assert os.getenv("INTERNAL_EVENTS_SECRET", "") == "", (
+                "INTERNAL_EVENTS_SECRET must have no default"
+            )
+
+        source = Path(events_ws_module.__file__).read_text()
+        assert 'os.getenv("INTERNAL_EVENTS_SECRET", "")' in source, (
+            "events_ws.py must read INTERNAL_EVENTS_SECRET with an empty default; "
+            "a hardcoded fallback makes the endpoint publicly writable on any "
+            "install that never set the variable."
         )
 
     def test_unset_secret_rejects_even_with_matching_header(self, client: TestClient):
