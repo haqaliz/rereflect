@@ -23,6 +23,17 @@ from src.llm_client import categorize_feedback
 # fails loudly at worker startup, not silently per feedback item.
 from src.services.automation_feedback_trigger import evaluate_feedback_triggers
 
+# Module-level import: the resolution_time churn factor needs
+# FeedbackWorkflowEvent. This used to be
+# `from src.models.feedback_workflow_event import FeedbackWorkflowEvent` — a
+# submodule that has never existed in worker-service (the class is exported
+# from src.models directly) — hidden inside a per-item `try/except Exception`.
+# The resulting ModuleNotFoundError fired on every analysis and was silently
+# swallowed, so resolution_score_pts was always 0. Importing at module level
+# instead means a broken import fails loudly at worker startup, not silently
+# per feedback item — same fix as the automations trigger import above.
+from src.models import FeedbackWorkflowEvent
+
 # Redis client for distributed task locking
 _redis_client = None
 
@@ -826,7 +837,6 @@ def _compute_heuristic_churn_risk(feedback, db=None):
 
         # Resolution time (0-10 pts) — slow resolution
         try:
-            from src.models.feedback_workflow_event import FeedbackWorkflowEvent
             resolved_events = db.query(
                 FeedbackWorkflowEvent.feedback_id,
                 FeedbackWorkflowEvent.created_at,
