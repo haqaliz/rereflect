@@ -299,7 +299,48 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   a shipped-and-marketed integration that a self-hoster cannot actually turn on, which is the
   same credibility problem as the P0 automations bugs, just on the acquisition path.
 
-### P0 — `intercom-webhook-unauthenticated-cross-org-write` (bug, NOT STARTED)
+### P0 — `intercom-webhook-unauthenticated-cross-org-write` — **FIXED** on `feat/integration-auth-tenancy-hardening` (2026-07-29)
+> Shipped as `integration-auth-tenancy-hardening`. Both halves closed, plus more than was
+> triaged here. See `docs/planning/integration-auth-tenancy-hardening/`.
+>
+> **The triage below was narrower than the defect.** A full sweep of every JWT-less endpoint found:
+> - **Slack has the identical pair of defects** — same fail-open verifier, same unscoped
+>   fall-through. The claim below that the adjacent branch was guarded was wrong: that
+>   `else: return []` hangs off the inner `if matching_integration_ids:`, not off the
+>   discriminator check. **Zendesk is the only branch that was ever correct**, and it had been
+>   fixed as a point fix that was never swept.
+> - **The tenancy guard was needed on four branches**, not one: slack, intercom, email, webhook.
+> - **The inbound-email (Resend) verifier also failed open**, and resolves its org by matching an
+>   attacker-supplied address across every org's sources. Its rate limit is keyed on the
+>   *resolved* org, so it throttles the victim.
+> - **`/api/internal/events/emit` was worse than this P0** — `INTERNAL_EVENTS_SECRET` defaulted to
+>   the literal `"dev-secret"`, compared with `!=`, with `org_id` taken from the request body. It
+>   needs no integration configured at all. Fixed; it also turns out to have **no production
+>   caller** (see [[dead-crossprocess-surface]]), so failing it closed was migration-free.
+> - **`_verify_linear_signature` also failed open** — found by the new cross-verifier test, not by
+>   the sweep. Fixed; behaviour-neutral (its sole caller already guarded).
+>
+> **The severity in this entry overstates what landed.** "Inject feedback into arbitrary
+> organizations" is not what happened: a separate payload-shape bug (route queues the unwrapped
+> `data`, adapter expects the full envelope) means `extract_content` always returns empty text, so
+> **no `FeedbackItem` was ever created — Intercom ingestion has never worked in any release.** What
+> actually landed per foreign org was a `FeedbackSourceEvent` log row with attacker-controlled JSON.
+> **That shape bug is an accident, not a control** — it was the only thing blocking full feedback
+> injection, so the tenancy guard had to land first. It now has, permanently neutralising the hazard.
+>
+> **A valid signature cannot identify a tenant here.** `INTERCOM_CLIENT_SECRET` is a single global
+> env var, unlike Zendesk's per-org `webhook_secret` which is looked up *by* the discriminator. So
+> the signature and `app_id` fixes are independent controls and both were load-bearing.
+>
+> **Slack and email ship in shadow** (accept + `SECURITY-SHADOW` log + startup warning + a Settings
+> badge) because their ingestion works and a hard flip would stop real traffic. Intercom and Linear
+> fail closed immediately. `tests/test_webhook_verifiers_fail_closed.py` enumerates all seven
+> verifiers and allowlists exactly those two — flipping either breaks that test by design, so the
+> shadow period cannot become permanent.
+>
+> Backend 4593 passed · worker 1430 passed · frontend 1526 passed · single alembic head.
+
+<details><summary>Original triage (kept for the reasoning)</summary>
 > Found 2026-07-29 while tracing Intercom for the P1 docs work. **Verified by code trace**,
 > not inferred. Two separate defects that **compose into one exploitable path**, which is why
 > they are filed together — fixing either alone leaves the hole open.
@@ -330,8 +371,43 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   `docs/SELF_HOSTING.md` on the `chore/intercom-zendesk-docs` branch — writing it up publicly
   while unpatched would publish a working exploit. **This should be the next branch after the
   docs land**, ahead of any Intercom feature work.
+</details>
 
-### P1 — `oauth-tokens-stored-plaintext` (bug, NOT STARTED)
+### Follow-ups opened by that branch (all NOT STARTED)
+
+- **`intercom-envelope-shape`** — the route queues `payload["data"]` unwrapped while
+  `IntercomAdapter` expects the full envelope, so Intercom has never produced a feedback item.
+  **Now safe to fix at any time** — the tenancy guard removed the hazard that made ordering
+  matter. Documented as a known limitation in `SELF_HOSTING.md` and the changelog until it lands.
+- **`slack-email-signature-enforcement`** — flip the two shadow-mode verifiers to fail closed and
+  delete their entries from `SHADOW_ALLOWLIST` in `tests/test_webhook_verifiers_fail_closed.py`
+  (that test fails until you do). Update the `SELF_HOSTING.md` table, which still describes them
+  as accepting unverified deliveries.
+- **`linear-webhook-secret-plaintext`** — Linear is the only integration storing `webhook_secret`
+  unencrypted; Zendesk/Jira/Asana all round-trip through `encrypt_api_key`. Needs a backfill
+  migration.
+- **`zendesk-replay-window`** — Zendesk already receives `X-Zendesk-Webhook-Signature-Timestamp`
+  and feeds it into the HMAC but never checks freshness. Content-dedup blocks duplicate content,
+  **not** status-transition replay: `_handle_zendesk_status_change`, `reconcile_issue` and
+  `reconcile_task` all run before any dedup check, so a captured "ticket closed" delivery can
+  undo manual triage indefinitely. One line, reusing Slack's 300s guard.
+- **`generic-webhook-persists-headers`** — `source_webhooks.py:229-233` writes
+  `dict(request.headers)` into `FeedbackSourceEvent.event_data`, including the source's own
+  `X-Webhook-Secret`. Anyone with read access to that table can forge the webhook.
+- **`events-emit-wire-up-or-delete`** — the endpoint has no production caller. Same call as
+  `intercom-writeback-orphaned` (P2): wire it up or delete it.
+- **`jwt-secret-default`** — `src/api/auth.py:11` defaults to `"dev-secret-key"`. Same class as
+  the `events/emit` default, far larger blast radius.
+
+### P1 — `oauth-tokens-stored-plaintext` (bug, NOT STARTED — **false comment corrected 2026-07-29**)
+> The encryption fix is still outstanding: it needs a backfill migration for existing rows and was
+> deliberately kept out of `feat/integration-auth-tenancy-hardening` so a P0 wasn't held up behind
+> a data migration.
+>
+> **The false comment at `models/integration.py:19` IS fixed** — it claimed tokens were "encrypted
+> at application level before storage", which was never true and actively misled anyone auditing
+> that file. It now states plainly that they are plaintext, names the integrations that *do*
+> encrypt, and says not to restore the old wording without doing the work.
 - [ ] `Integration.oauth_access_token` is a plain `Text` column and
       `services/backend-api/src/api/routes/integrations.py` never calls
       `encrypt_api_key`/`decrypt_api_key` on the **Slack or Intercom** OAuth paths — while
