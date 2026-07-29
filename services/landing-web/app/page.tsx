@@ -405,7 +405,7 @@ export default function Home() {
                   'Sentiment, pain points & feature requests',
                   '30-day churn prediction & health scores',
                   'AI Copilot — ask your feedback anything',
-                  '6+ integrations: Slack, Intercom, Linear…',
+                  'Integrations: Slack, Intercom, Zendesk, Jira, Linear & more…',
                   'Bring your own LLM key — or run free on VADER',
                   'MIT licensed — fork it, change it, own it',
                 ].map((feat) => (

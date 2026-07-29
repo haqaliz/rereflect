@@ -144,13 +144,12 @@ export const integrations: Integration[] = [
     hoverBorder: 'hover:border-[#286EFA]/30',
     heroMessage: 'Your support conversations contain the most honest customer feedback. Rereflect connects to Intercom and automatically extracts sentiment, pain points, and feature requests from every conversation — so nothing falls through the cracks.',
     howItWorks: [
-      { step: '1', title: 'Connect Intercom', description: 'Authorize via OAuth in one click. Rereflect connects to your Intercom workspace securely.' },
+      { step: '1', title: 'Connect Intercom', description: 'Register your own Intercom app and set INTERCOM_CLIENT_ID, INTERCOM_CLIENT_SECRET and INTERCOM_REDIRECT_URI first — see docs/SELF_HOSTING.md#connecting-intercom. Then authorize via OAuth to connect your workspace.' },
       { step: '2', title: 'Conversations Flow In', description: 'New conversations, replies, and ratings are automatically sent to Rereflect via webhooks.' },
       { step: '3', title: 'AI Extracts Insights', description: 'Our AI analyzes each conversation for sentiment, categorizes feedback, and flags churn risks on your dashboard.' },
     ],
     features: [
-      { title: 'Conversation Sync', description: 'New conversations, customer replies, and satisfaction ratings are automatically imported as they happen.', icon: 'MessageCircle' },
-      { title: 'Two-Way Sync', description: 'Add notes back to Intercom conversations and close resolved tickets — all from Rereflect.', icon: 'RefreshCw' },
+      { title: 'Conversation Sync', description: 'New conversations, customer replies, and satisfaction ratings arrive via Intercom webhooks as they happen — nothing is imported without the webhook subscribed.', icon: 'MessageCircle' },
       { title: 'Rating Analysis', description: 'Customer satisfaction ratings are correlated with conversation content to understand what drives good and bad scores.', icon: 'Star' },
       { title: 'Support Patterns', description: 'Discover recurring themes across hundreds of conversations. See which issues generate the most tickets.', icon: 'TrendingUp' },
       { title: 'Churn Risk Detection', description: 'AI identifies frustrated customers from conversation tone and content before they cancel.', icon: 'AlertTriangle' },
@@ -163,11 +162,12 @@ export const integrations: Integration[] = [
     ],
     faqs: SHARED_FAQS,
     setupSteps: [
-      { step: 1, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
-      { step: 2, title: 'Click "Connect Intercom"', description: 'You\'ll be redirected to Intercom to authorize Rereflect via OAuth.' },
-      { step: 3, title: 'Configure conversation triggers', description: 'Choose which conversation types to monitor: new conversations, replies, ratings, or all of the above.' },
-      { step: 4, title: 'Set up a feedback source', description: 'Create an Intercom feedback source to start receiving conversations in your dashboard.' },
-      { step: 5, title: 'Start analyzing conversations', description: 'Conversations flow in automatically. View insights on your dashboard within minutes.' },
+      { step: 1, title: 'Register an Intercom app', description: 'Create an app in the Intercom Developer Hub, then set INTERCOM_CLIENT_ID, INTERCOM_CLIENT_SECRET, INTERCOM_REDIRECT_URI and FRONTEND_URL on your Rereflect backend and restart it — see docs/SELF_HOSTING.md#connecting-intercom.' },
+      { step: 2, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
+      { step: 3, title: 'Click "Connect Intercom"', description: 'You\'ll be redirected to Intercom to authorize Rereflect via OAuth. This creates the connection to your workspace.' },
+      { step: 4, title: 'Create an Intercom feedback source', description: 'Only once the connection exists can you create a feedback source and attach it — this is what starts receiving conversations.' },
+      { step: 5, title: 'Subscribe the webhook', description: 'In your Intercom app, subscribe conversation.user.created, conversation.user.replied and conversation.rating.added to Rereflect\'s webhook endpoint. Without this step, no conversations arrive — there is no polling fallback.' },
+      { step: 6, title: 'Watch conversations become feedback', description: 'Once the webhook is wired, new conversations, replies, and ratings appear on your dashboard within minutes.' },
     ],
   },
   {

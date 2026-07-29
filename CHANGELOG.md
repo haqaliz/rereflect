@@ -7,6 +7,43 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Fixed — We were telling people shipped integrations didn't exist
+
+A 1.0.0 user asked us to build Intercom and Zendesk ingestion "so feedback flows in
+automatically instead of pasting tickets manually." Both already shipped. They asked
+because our own landing-page FAQ told them Zendesk was **planned** — four months after it
+shipped — and because the README described the product as ingesting only "CSV, email,
+webhooks and Slack," omitting Intercom, Zendesk, Jira, Linear and Asana.
+
+Corrected everywhere: the FAQ, both README source lines, and the `SELF_HOSTING.md`
+outbound-call table (which claims to be the exhaustive list of every network call a
+Rereflect instance makes, and was missing Intercom, Linear and Discord — a gap that
+undercuts the zero-telemetry claim it exists to support).
+
+The landing page also advertised Intercom **"Two-Way Sync"** — adding notes back to
+conversations and closing resolved tickets. That never worked. The code exists but nothing
+in the app has ever called it, so the claim is removed rather than softened.
+
+### Added — Intercom self-hosting guide
+
+`docs/SELF_HOSTING.md` gained a "Connecting Intercom" section. Intercom is the one
+integration that requires OAuth rather than a pasted token, which means the operator must
+register an Intercom app and set `INTERCOM_CLIENT_ID`, `INTERCOM_CLIENT_SECRET` and
+`INTERCOM_REDIRECT_URI` before anything works — and none of that was documented anywhere,
+so clicking "Connect to Intercom" on a fresh install just failed with no way to find out
+why. The three variables are now in `.env.example` and `.env.prod.example` too.
+
+**Known limitations, stated plainly in the guide:** Intercom is **webhook-only** — unlike
+Zendesk there is no polling fallback, so if you don't subscribe the webhook, nothing
+arrives at all. `INTERCOM_REDIRECT_URI` defaults to `localhost:8000` and must be overridden
+on any real deployment. The integration must be connected *before* you create the feedback
+source. Intercom feedback is not linked to a customer profile automatically — the contact
+email lands in `source_metadata`, not on the item itself, so Customer 360 enrichment does
+not happen the way it does for Zendesk.
+
+If you want support tickets flowing in with the least setup, Zendesk remains the better
+path: a pasted API token, and polling that works without exposing any public URL.
+
 ### Added — Discord alerts
 
 Rereflect can now post alerts to Discord. Settings → Integrations → Discord, paste a

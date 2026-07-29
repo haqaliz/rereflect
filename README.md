@@ -35,10 +35,11 @@
 
 ## What is Rereflect?
 
-Rereflect ingests customer feedback from CSV, email, webhooks and Slack, then uses
-NLP and (optionally) an LLM to classify sentiment, surface pain points and feature
-requests, flag urgent churn risks, and route everything through a team workflow —
-all behind a multi-tenant dashboard you host yourself.
+Rereflect ingests customer feedback from CSV, email, webhooks, Slack, Intercom and
+Zendesk, syncs with issue trackers like Linear, Jira and Asana, then uses NLP and
+(optionally) an LLM to classify sentiment, surface pain points and feature requests,
+flag urgent churn risks, and route everything through a team workflow — all behind a
+multi-tenant dashboard you host yourself.
 
 - 🔓 **100% open source (MIT).** No "open core", no locked features.
 - 🏠 **Self-hosted — your data never leaves your box.** Ships with Docker Compose.
@@ -58,7 +59,7 @@ all behind a multi-tenant dashboard you host yourself.
 | 📉 **Churn risk scoring** | Per-item churn risk with suggested actions, plus cohort analytics and playbooks. Optional **CRM-sourced churn label suggestions** — if you've connected HubSpot or Salesforce, Rereflect can read lost renewals and propose them as churn labels. **Off by default and default-deny** (nothing is suggested until you name your renewal pipelines), and every suggestion is **confirmed by a human** in a review queue before it becomes a label — a lost renewal is not always a churn. Includes an optional on-demand backfill over your closed-lost history. A second, **CRM-free** source does the same from **sustained product-usage decline** (opt-in, shadow mode first) — same review queue, same human-confirm rule; a usage drop is not always churn either. |
 | 🧑‍💼 **Customer 360 + timeline** | Per-customer health profile with a unified, paginated activity timeline (feedback, product usage, churn and health-score events); CRM enrichment (HubSpot, Salesforce) with optional health-score writeback to both HubSpot and Salesforce — also readable over the public API. |
 | 🗂️ **Team workflow** | Kanban board, statuses, auto-assignment rules and round-robin routing. |
-| 🔌 **Sources & integrations** | CSV import, email, webhooks and Slack in; alerts and digests out. |
+| 🔌 **Sources & integrations** | **Inbound:** CSV import, email, webhooks and Slack, plus support desks (Intercom, Zendesk). **Issue trackers:** Jira, Linear and Asana. **CRM:** HubSpot and Salesforce. **Outbound:** alerts and digests via Slack and Discord. |
 | 📊 **Trends over time & sharing** | Not just a snapshot: `/analytics` plots **average sentiment, volume, urgent count, pain points and feature requests over 7/30/90 days** (daily or weekly buckets), and each top pain point and feature request carries an ↑/↓/→ arrow so you can see which themes are actually **accelerating** rather than just loud. Plus source breakdown, saved views, CSV export, PDF export and read-only share links. |
 | 👥 **Multi-tenant + RBAC** | Organization isolation with Owner / Admin / Member roles. |
 

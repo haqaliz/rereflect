@@ -26,7 +26,7 @@ const faqs = [
   },
   {
     q: 'What integrations are included?',
-    a: 'Slack (OAuth), Intercom (OAuth + webhooks), email forwarding, CSV import, webhooks for custom sources, and Linear. Zendesk and HubSpot integrations are planned. All integrations are configured in your self-hosted instance — no hosted service required.',
+    a: 'Inbound feedback sources: Slack, Intercom, Zendesk, email forwarding, CSV import, and custom webhooks. Outbound issue trackers: Jira, Linear, and Asana. CRM: HubSpot and Salesforce. Alerts and digests go out via Slack and Discord — Discord is available as an alert destination, not yet as a feedback source. All integrations are configured in your self-hosted instance — no hosted service required.',
   },
   {
     q: 'Does it support single sign-on (SSO)?',

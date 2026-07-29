@@ -1,67 +1,102 @@
-# Card — native Discord notification channel
+# Card — Intercom/Zendesk ingestion: shipped, invisible, and half-documented
 
-**Type:** feat · **Slug:** `discord-notifications` · **Branch:** `feat/discord-notifications`
-**Source:** direct v1.0.0 user request. No GitHub issue. **DEV-TRACKING P2.**
+**Type:** chore (docs/marketing) · **Slug:** `ingestion-source-visibility`
+**Branch:** `chore/intercom-zendesk-docs`
+**Source:** Freeform — no GitHub issue. **DEV-TRACKING P1**, *Post-1.0.0 User Feedback
+Backlog*, opened 2026-07-29 (batch 2).
 
 ---
 
 ## The user's words
 
-> "it would be great if you could plug in a **Slack or Discord** webhook to get pinged
-> whenever a batch of new feedback crosses a certain sentiment threshold."
+> "Love the BYOK setup and self-hosted angle, feels rare these days. One thing that would
+> make it way more useful for me is integrating directly with **Intercom or Zendesk so
+> feedback flows in automatically** instead of pasting tickets manually. Would save a ton of
+> time on weekly reviews."
 
-Third and last piece of that one sentence. The other two shipped:
+Triaged against the shipped code on 2026-07-29. **Both integrations already exist.** The
+user could not find them. Same class as the P3 analytics-trends discoverability item — with
+the difference that one half of the ask (Intercom) is genuinely unreachable on a fresh
+self-host.
 
-| Piece | Status |
-|---|---|
-| Slack delivery actually works | `52c763dd` — the `slack` channel was silently dropped and logged as success |
-| The batch sentiment trigger | `7bd735be` — `batch_sentiment_threshold`, first org-wide trigger |
-| **Discord delivery** | **this card** |
+## What is actually true in the code
 
-## Why Discord isn't just "another webhook URL"
-
-Rereflect already has generic outbound webhooks (Settings → Webhooks) and the URL validator
-accepts any `https://` URL — so a Discord webhook URL *saves fine today*. It just doesn't
-work: the dispatcher posts Rereflect's own JSON envelope, and Discord's webhook API requires
-a body containing `content` or `embeds`. Discord replies **400**, and the failure only shows
-in the delivery log.
-
-So the gap is a **payload formatter**, not a transport. That is why this is a notification
-channel rather than a webhook tweak.
-
-## Decision already made
-
-**Ship it as a `discord` notification channel**, mirroring the `slack` channel — `Integration`
-rows with `type="discord"`, a `discord` member in `KNOWN_NOTIFY_CHANNELS`, and a Discord
-embed formatter. Rejected: sniffing the URL in the generic webhook path, which would make
-webhook behaviour depend on a hostname and still leave Discord unusable as an automation
-notification channel.
-
-Encouraging sign: `Integration.type`'s inline comment already reads
-`# 'slack', 'discord', 'teams'` — the model anticipated this.
-
-## The trap to avoid (learned the hard way this session)
-
-The Slack senders have **two different error contracts**:
-
-| Sender | Process | On failure |
+| | Zendesk | Intercom |
 |---|---|---|
-| `send_slack_message` (`backend-api/src/api/routes/integrations.py:216`) | backend | returns `{"success": False, ...}`, **never raises** |
-| `send_slack_message_webhook` (`worker-service/src/tasks/alerts.py:207`) | worker | **raises** |
+| Connect method | subdomain + agent email + API token (BYO token) | **OAuth only** |
+| Operator env vars needed | none (per-org, in-app) | `INTERCOM_CLIENT_ID`, `INTERCOM_CLIENT_SECRET`, `INTERCOM_REDIRECT_URI` |
+| Those env vars documented | n/a | **nowhere** |
+| Pull / polling ingestion | real incremental poller | **unimplemented placeholder** |
+| Webhook ingestion | yes (HMAC-SHA256, fails closed) | yes (HMAC-SHA1, **skips verification if secret unset**) |
+| `SELF_HOSTING.md` section | yes, "Connecting Zendesk" | **none** |
+| Registered source type | `available=True` | `available=True` |
 
-The Discord senders must match the contract of whichever process they live in, and the
-`_execute_notify` implementations differ accordingly. Mixing them up silently changes failure
-semantics — the exact class of bug this session has fixed three times.
+Evidence (all verified 2026-07-29, not inferred):
+
+- `services/backend-api/src/api/routes/feedback_sources.py::list_source_types` registers
+  `slack`, `intercom`, `webhook`, `linear`, `jira`, `zendesk`, `asana` all with
+  `available=True`. Only `discord` and `email` differ.
+- `services/backend-api/src/api/routes/integrations.py:34-36` reads the three `INTERCOM_*`
+  env vars; line 754 raises **500** *"Intercom OAuth is not configured. Set
+  INTERCOM_CLIENT_ID environment variable."* when the client id is empty. (Corrected — the
+  initial triage called this a 403; it is a 500. There is **no** role check on these routes
+  at all, which is its own finding — see the understanding note.)
+- `INTERCOM_REDIRECT_URI` defaults to `http://localhost:8000/api/v1/integrations/intercom/oauth/callback`,
+  so every non-localhost deployment **must** override it and register the same value in the
+  Intercom app.
+- Those three vars appear in **no** `.env.example`, **no** `.env.prod.example`, **neither**
+  docker-compose file, and **nowhere** in `docs/SELF_HOSTING.md`.
+- `services/backend-api/src/api/routes/source_webhooks.py:276`
+  `POST /api/v1/webhooks/intercom/events` — HMAC-SHA1 over the raw body via the
+  `X-Hub-Signature` header, keyed by `INTERCOM_CLIENT_SECRET`. `verify_intercom_signature`
+  (line 256) **skips verification with a warning** when the secret is unset, unlike Zendesk
+  which fails closed — the contrast is called out in `_verify_zendesk_signature`'s docstring.
+- `services/worker-service/src/tasks/integrations.py:167` `IntercomConnector.fetch_new_items`
+  logs `"IntercomConnector.fetch_new_items called (not implemented)"` and returns nothing —
+  *"TODO: Implement actual Intercom API integration in Month 2"* — while line 30 still
+  selects `Integration.type.in_(["intercom", "zendesk"])` for polling.
+- `README.md:38` and `README.md:61` both describe inbound sources as "CSV, email, webhooks
+  and Slack", omitting all five of Zendesk, Intercom, Jira, Linear, Asana.
+- `services/landing-web/lib/integrations.ts:147` sells Intercom as
+  *"Authorize via OAuth in one click."*
+
+## Scope — in
+
+1. **README source list.** Fix `README.md:38` and `README.md:61` to reflect what ships,
+   distinguishing **inbound sources** (CSV, email, webhooks, Slack, Zendesk, Intercom) from
+   **outbound work-management targets** (Jira, Linear, Asana).
+2. **Intercom setup docs** in `docs/SELF_HOSTING.md`, mirroring the existing "Connecting
+   Zendesk" section (~line 1330): creating the Intercom app, the three env vars, the webhook
+   endpoint + HMAC-SHA1 verification, and the handled conversation topics.
+3. **`.env.prod.example`** — add the three `INTERCOM_*` vars.
+4. **State the webhook-only limitation honestly.** Intercom has no pull path; if the webhook
+   is not wired, nothing arrives. The user's ask was "flows in automatically", which is
+   exactly the missing path, so this must not be glossed.
+5. **Consider softening** `services/landing-web/lib/integrations.ts:147`, which promises
+   one-click OAuth that in fact requires undocumented operator setup.
+
+## Scope — out (recorded as P1 Part B follow-ups in `DEV-TRACKING.md`)
+
+- Implementing `IntercomConnector.fetch_new_items` against the Conversations API.
+- Adding a token-paste (non-OAuth) Intercom connect path following the
+  Zendesk/Jira/Asana BYO-token precedent.
+
+**No backend, worker or frontend application code changes.** Docs, example env, and
+marketing copy only.
+
+## Why it matters
+
+Zendesk already fully satisfies the user's ask and they did not know. Intercom is marketed
+on the landing page and offered in the UI, but errors out on a fresh self-host with no
+documented remedy — the same credibility problem as the P0 automations bugs, on the
+acquisition path instead of the notification path.
 
 ## Open questions for the PRD
 
-- Which existing alert paths should also reach Discord? There are three separate Slack
-  dispatch sites (`_dispatch_slack_health_alert`, `_dispatch_slack_alert`,
-  `_send_legacy_slack_alerts`). Doing all of them is a much bigger job than the notify channel.
-- Discord webhook URL validation: `discord.com/api/webhooks/` — but also the legacy
-  `discordapp.com` host. Accept both? Reject non-Discord hosts like the Slack validator does?
-- Embed vs plain `content`? Embeds look better and support fields/colour; `content` is
-  simpler and never fails schema validation.
-- Rate limits: Discord webhooks are ~5 requests/2s per webhook and return 429 with
-  `retry_after`. Slack's sender ignores rate limiting entirely. Do we handle 429, or accept
-  the same limitation for consistency?
+- Is the missing-secret **signature-verification skip** on the Intercom webhook in scope to
+  *document as a warning*, out of scope entirely, or serious enough to escalate as its own
+  security item? (It is a real fail-open on an unauthenticated public endpoint.)
+- Does the landing-page copy get softened, or does documenting the setup make the
+  "one click" claim true enough to leave alone?
+- Does `.env.example` (the minimal local-dev file) get the vars too, or only
+  `.env.prod.example`?

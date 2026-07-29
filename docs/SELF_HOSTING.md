@@ -21,6 +21,7 @@ default) treats every instance as fully featured.
 - [CRM churn-label suggestions (opt-in)](#crm-churn-label-suggestions-opt-in)
 - [Connecting Jira](#connecting-jira)
 - [Connecting Zendesk](#connecting-zendesk)
+- [Connecting Intercom](#connecting-intercom)
 - [Connecting Asana](#connecting-asana)
 - [Single Sign-On (OIDC)](#single-sign-on-oidc)
 - [Single Sign-On (SAML 2.0)](#single-sign-on-saml-20)
@@ -96,7 +97,7 @@ The only outbound calls a Rereflect instance ever makes are ones you configure y
 |---|---|
 | Your LLM provider (OpenAI / Anthropic / Google) | Only if you add a BYOK key **and** set `ai_analysis_enabled=true`. Omit the key and nothing is contacted. |
 | Your local model endpoint (Ollama, etc.) | Only if you point Settings → AI at one. Stays on your network. |
-| Integrations (Slack, Jira, Zendesk, Asana, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
+| Integrations (Slack, Discord, Jira, Zendesk, Asana, Intercom, Linear, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
 | Your Sentry project | Only if you set `SENTRY_DSN` — see below. |
 
 ### Optional error tracking (Sentry), off by default
@@ -1566,6 +1567,126 @@ it by hand.
 Because Rereflect is self-hosted and open-source, the Zendesk integration has no
 plan gate, seat limit, or usage cap — polling, webhooks, status-sync, and
 Customer 360 enrichment are available to every organization running the app.
+
+## Connecting Intercom
+
+Intercom is an **inbound feedback source**: new conversations, replies, and ratings
+become feedback items, analyzed like any other source.
+
+Note that Intercom items are **not** linked to a customer profile automatically —
+see the note on customer email below. That is a real difference from Zendesk, where
+the requester's email is attached to the feedback item and drives Customer 360
+enrichment.
+
+**Shipped scope for this release:**
+
+- **Webhook-only.** Unlike Zendesk, there is **no periodic pull** — if the
+  webhook is not wired, nothing arrives. Rereflect's daily 02:00 UTC
+  integration sync step is a no-op for Intercom.
+- Three conversation topics are handled (listed in step 5).
+- One feedback item per conversation event, de-duplicated by conversation and
+  part ID.
+- **Customer email is not populated** on the feedback item itself — it appears in
+  `source_metadata` as `author_email` or `contact_email`, and only when the
+  source's field mapping enables author/context enrichment.
+- **No write-back.** Rereflect does not add notes to or close Intercom
+  conversations.
+- Requires an OAuth app you register yourself; there is no token-paste path
+  (unlike Zendesk, Jira, and Asana).
+
+### 1. Create an Intercom app
+
+1. In the Intercom Developer Hub, create a new app and note the **Client ID**
+   and **Client Secret**.
+2. In the OAuth settings, register the redirect URL — it must **exactly match**
+   the value you will set as `INTERCOM_REDIRECT_URI` in step 2.
+3. Configure your app's permissions in the Developer Hub to allow Rereflect to
+   read conversations and contacts, and to subscribe to conversation webhooks.
+   (Rereflect requests no scopes in the authorize URL — permissions are declared
+   on the app itself.)
+
+### 2. Configure environment variables
+
+Set these in your backend `.env`:
+
+| Variable | Purpose |
+|----------|---------|
+| `INTERCOM_CLIENT_ID` | Intercom app Client ID |
+| `INTERCOM_CLIENT_SECRET` | Intercom app Client Secret. **Also the HMAC secret for webhook verification** (step 5) — required, not optional. |
+| `INTERCOM_REDIRECT_URI` | Must exactly match the redirect URL registered on the Intercom app. **Defaults to `http://localhost:8000/api/v1/integrations/intercom/oauth/callback` — you must override this for any non-localhost deployment.** |
+| `FRONTEND_URL` | Used to build the post-OAuth redirect back to the app |
+
+Restart the backend after setting these so the OAuth routes pick them up.
+
+> **INTERCOM_CLIENT_SECRET is required.** This variable must be set before the
+> webhook endpoint is exposed. It serves as the HMAC signing key for incoming
+> webhook deliveries.
+
+### 3. Connect from the app
+
+Go to **Settings → Integrations**, click **Add Integration**, choose **Intercom**,
+give it a name, and click **Connect to Intercom**. You'll be redirected to Intercom
+to authorize the app, then redirected back to Rereflect connected.
+
+If `INTERCOM_CLIENT_ID` is unset, the OAuth flow returns **HTTP 500 "Intercom
+OAuth is not configured"** — this is a configuration error, not a permissions
+error.
+
+### 4. Create the Intercom feedback source
+
+**This must happen after step 3.** An Intercom feedback source requires an
+`integration_id` from the connected integration. Creating a source before
+completing step 3 returns **HTTP 400 "Intercom sources require an
+integration_id"**.
+
+Go to **Feedback Sources → New Source** and select **Intercom**. The workspace is
+carried over from the integration automatically. Configure the trigger (new
+conversations, replies, ratings, or all), optional keyword filters, and whether
+to auto-import or queue pending review.
+
+### 5. Subscribe the Intercom webhook
+
+**This step is not optional — it is the only ingestion path.** Without a
+subscribed webhook, no Intercom data will ever reach Rereflect.
+
+In your Intercom app's settings, go to **Webhooks** and configure a delivery
+target:
+
+1. **Delivery URL:** `POST <your-api-base>/api/v1/webhooks/intercom/events`
+   (e.g., `https://your-backend.example.com/api/v1/webhooks/intercom/events` for
+   production, or `http://localhost:8000/api/v1/webhooks/intercom/events` for
+   local development).
+2. **Subscribe to exactly these topics:**
+   - `conversation.user.created`
+   - `conversation.user.replied`
+   - `conversation.rating.added`
+
+Any other topics are accepted by Rereflect but ignored. Rereflect verifies each
+delivery by checking the `X-Hub-Signature` header as **HMAC-SHA1** over the raw
+request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
+
+### Verify
+
+- **Settings → Integrations → Intercom** shows connection status and the
+  workspace name once connected.
+- New Intercom conversations appear as feedback items, analyzed for sentiment,
+  within a minute or two — or in the pending-review queue if `auto_import` is off.
+- If nothing arrives, the webhook is the first thing to check: the endpoint must be
+  reachable from the public internet, and the subscription must cover the three
+  topics in step 5. Intercom's own webhook delivery log is the fastest way to see
+  whether deliveries are leaving Intercom and what response they got.
+
+> **Cross-origin note:** the OAuth flow relies on an HttpOnly cookie to bind
+> the authorization request to your browser session. If your frontend and
+> backend are on different origins, your reverse proxy / CORS config must
+> send `Access-Control-Allow-Credentials: true` with a specific (non-`*`)
+> allowed origin, or the callback will fail to verify.
+
+### All features unlocked
+
+Because Rereflect is self-hosted and open-source, the Intercom integration has
+no plan gate, seat limit, or usage cap — webhooks and Customer 360 enrichment
+are available to every organization running the app.
 
 ## Connecting Asana
 
