@@ -218,6 +218,28 @@ def send_slack_message_webhook(webhook_url: str, blocks: list, text: str) -> Dic
         return {"success": True, "status_code": response.status_code}
 
 
+def send_discord_message_webhook(webhook_url: str, embeds: list, content: str) -> Dict:
+    """Send a message to Discord via webhook.
+
+    Sender contract (worker-service, THE CONTRACT — docs/planning/discord-notifications/
+    alert-pipe/spec.md): unlike the backend-api sender of the same name, this one lets
+    failures RAISE (response.raise_for_status(), nothing caught here), matching
+    send_slack_message_webhook above. Callers are responsible for catching per-integration.
+
+    Discord requires the body to carry `content` and/or `embeds` or it 400s — always send
+    both: `content` as a short plain-text fallback, `embeds` for the formatted body.
+    """
+    import httpx
+
+    with httpx.Client(timeout=10) as client:
+        response = client.post(
+            webhook_url,
+            json={"content": content, "embeds": embeds},
+        )
+        response.raise_for_status()
+        return {"success": True, "status_code": response.status_code}
+
+
 def send_slack_message_oauth(access_token: str, channel_id: str, blocks: list, text: str) -> Dict:
     """Send a message to Slack via OAuth token (Bot API)."""
     import httpx

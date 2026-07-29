@@ -37,6 +37,15 @@ export interface CreateSlackWebhookData {
   message_template?: string;
 }
 
+export interface CreateDiscordWebhookData {
+  name: string;
+  webhook_url: string;
+  triggers?: string[];
+  included_fields?: string[];
+  digest_time?: string;
+  message_template?: string;
+}
+
 export interface UpdateIntegrationData {
   name?: string;
   triggers?: string[];
@@ -112,6 +121,11 @@ export const integrationsAPI = {
     return response.data;
   },
 
+  createDiscordWebhook: async (data: CreateDiscordWebhookData): Promise<Integration> => {
+    const response = await apiClient.post('/api/v1/integrations/discord/webhook', data);
+    return response.data;
+  },
+
   update: async (id: number, data: UpdateIntegrationData): Promise<Integration> => {
     const response = await apiClient.patch(`/api/v1/integrations/${id}`, data);
     return response.data;
@@ -123,6 +137,13 @@ export const integrationsAPI = {
 
   testSlack: async (integrationId: number): Promise<SlackTestResponse> => {
     const response = await apiClient.post('/api/v1/integrations/slack/test', {
+      integration_id: integrationId,
+    });
+    return response.data;
+  },
+
+  testDiscord: async (integrationId: number): Promise<SlackTestResponse> => {
+    const response = await apiClient.post('/api/v1/integrations/discord/test', {
       integration_id: integrationId,
     });
     return response.data;

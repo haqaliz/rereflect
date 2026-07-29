@@ -170,7 +170,49 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 - **Why P1:** direct user ask, lands on the existing automations trigger/action spine, and
   P0 makes its Slack delivery path actually work. Do P0 first or this ships broken.
 
-### P2 — Native Discord webhook support (feat, unblocked)
+### P2 — Native Discord webhook support — **SHIPPED** on `feat/discord-notifications` (2026-07-29)
+> Discord integration CRUD + test route, a sender per process (backend returns a status
+> dict, worker raises — matching each process's existing Slack contract), and Discord
+> dispatch on the main alert pipe and the health-drop path. Frontend: `DiscordIcon`, provider
+> tile, and fixes to the `intercom ? … : Slack` ternaries that would otherwise have rendered
+> a Discord row with a Slack icon and a Test button that 404s.
+> Backend 63 passed · worker 1417 passed · frontend 1523 passed.
+>
+> **Scope deliberately excluded** the automations notify channel: there is no channels editor
+> in the automations UI at all, so `channels: ["discord"]` would have been unreachable except
+> via a seeded template or a direct API call. Also excluded: per-user `channel_discord`
+> preference (schema change), the Slack-mrkdwn custom-template path, and 429 retry.
+
+### P5 — Discord rides the Slack notification toggle (limitation, NOT STARTED)
+- [ ] There is no `channel_discord` on `UserAlertPreference`, so `dispatch_alert` fires
+      Discord only when `counts["slack"] > 0` (`notification_dispatch.py:626-630`).
+      **Configure Discord, switch the Slack toggle off, and you receive nothing.** With both
+      integrations active, both get every alert, with no per-type routing.
+- [ ] Fix is a `channel_discord` column + Alembic migration + a Settings → Notifications
+      toggle, then decoupling the two dispatch calls.
+- **Why P5:** documented in `docs/SELF_HOSTING.md` and the changelog, so it is a known
+  limitation rather than a surprise — but it will read as a bug to the first person who hits it.
+
+### P6 — Dead anomaly-alert functions (cleanup, NOT STARTED)
+- [ ] `services/worker-service/src/tasks/anomaly.py::_send_anomaly_slack` is fully
+      implemented and **never called** — anomaly alerts route via `_dispatch_anomaly_alerts`
+      → `dispatch_alert` (`anomaly.py:169` → `:185`). Its new Discord twin
+      `_send_anomaly_discord` mirrors it, so there are now two tested, orphaned functions.
+- [ ] Discord anomaly alerts **do** work, through the main pipe — this is dead code, not a
+      delivery gap.
+- [ ] Decide: wire them up, or delete both. Deleting only the Discord one would leave the
+      next person wiring up the Slack one with no Discord equivalent.
+
+### P7 — Provider duplication is now structural (debt, NOT STARTED)
+- [ ] The integration-selection loop (`query type == <provider>, is_active`) is duplicated
+      **four** times and the low-level sender **three** times across the two processes.
+      Discord made both worse. Adding a fifth provider (Teams is already named in the
+      `Integration.type` comment) means another full round.
+- [ ] Deliberately not refactored during the Discord work — a provider abstraction would
+      touch every Slack path at once, and that scope was explicitly declined. Deferred debt,
+      not avoided debt.
+
+### ~~P2 (original entry)~~ — superseded, kept for the reasoning
 - [ ] Discord is not supported. Its webhook API requires a `{content}` or `{embeds}` body;
       the custom-webhook dispatcher posts Rereflect's own JSON envelope, so aiming an
       endpoint at a Discord URL returns **400**. The URL validator accepts it
