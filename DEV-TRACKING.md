@@ -129,7 +129,33 @@ so nobody re-litigates them.
   (`worker-service/src/notification_dispatch.py::_dispatch_slack_health_alert`) does post
   to Slack. Only the automations engine drops it.
 
-### P1 — Batch-level sentiment threshold trigger (feat, unblocked)
+### P1 — Batch-level sentiment threshold trigger — **SHIPPED** on `feat/batch-sentiment-trigger` (2026-07-29)
+> New `batch_sentiment_threshold` trigger — the first **org-wide** one. Config: `sentiment`,
+> `window_hours` (1–168), `mode` (percentage/count), `threshold`, `min_total` (sample floor).
+> Evaluated in the existing per-item worker seam (not a new Celery beat task — the action
+> executors need a feedback object, and a new dispatch path is a new silently-never-fires
+> surface). Org-wide cooldown identity via a `"__org__"` sentinel kept out of
+> `AutomationExecution.customer_email`. Template ships in shadow. Seam test included, and
+> verified to catch the bug class by temporarily breaking the registration.
+> Backend 4544 passed · worker 1394 passed · frontend 1507 passed.
+> **Defaults are reasoned, not measured** — documented as such in `docs/SELF_HOSTING.md`.
+
+### P4 — `[id]/page.tsx` category-match editor writes the wrong config keys (bug, NOT STARTED)
+> Found 2026-07-29 while mapping the trigger-registration surface for P1. Not ours; scoped out.
+
+- [ ] `services/frontend-web/app/(dashboard)/settings/automations/[id]/page.tsx`'s
+      `CategoryMatchTriggerFields` reads and writes `config.tags` and `config.urgent`
+      (~lines 96, 145), while `new/page.tsx`'s `CategoryMatchConfig` **and** the backend's
+      `FeedbackCategoryConfig` use `categories` and `is_urgent`.
+- [ ] **Consequence:** editing an existing category-match rule through the detail page writes
+      keys the backend ignores. The edit appears to save and silently does nothing to the
+      rule's actual matching behaviour.
+- [ ] Fix is a rename in one component plus a test that round-trips create → edit → verify
+      the persisted config keys.
+- **Why P4:** real and user-visible, but narrower than the delivery bugs — it affects editing
+  an existing rule, not whether rules fire at all.
+
+### ~~P1 (original entry)~~ — superseded, kept for the reasoning
 > "it would be great if you could plug in a Slack or Discord webhook to get pinged whenever
 > a **batch** of new feedback crosses a certain sentiment threshold."
 
