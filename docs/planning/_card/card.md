@@ -1,101 +1,60 @@
-# Card — churn resolution-time factor silently dead
+# Card — batch sentiment threshold trigger
 
-**Type:** bug · **Slug:** `churn-customer-factor-coverage` · **Branch:** `bug/worker-resolution-time-scoring`
-**Source:** freeform — found 2026-07-29 sweeping worker-service for imports that resolve to
-nothing, during the `automations-delivery-integrity` work (merged `52c763dd`). No GitHub issue.
-**Tracked as:** DEV-TRACKING **P0b**.
-
-> `_card/card.md` is per-worktree by design; the previous card remains in `master` history.
+**Type:** feat · **Slug:** `batch-sentiment-trigger` · **Branch:** `feat/batch-sentiment-trigger`
+**Source:** direct v1.0.0 user request. No GitHub issue. **DEV-TRACKING P1.**
 
 ---
 
-## Brief (as given)
+## The user's words
 
-`services/worker-service/src/tasks/analysis.py:821` does
+> "Honestly the bring your own key setup is really nice, but it would be great if you could
+> plug in a Slack or Discord webhook to get pinged whenever **a batch of new feedback crosses
+> a certain sentiment threshold**. Would make triaging way faster for our team."
 
-```python
-from src.models.feedback_workflow_event import FeedbackWorkflowEvent
-```
+Two asks in one sentence. The delivery half (Slack) and the Discord half are handled
+separately (Slack shipped in `52c763dd`; Discord is DEV-TRACKING P2). **This card is the
+trigger half only.**
 
-but that submodule does not exist in worker-service — the class lives at `src.models`
-(`src/models/__init__.py:551`). Proven empirically:
+## Why today's triggers don't cover it
 
-```
->>> from src.models.feedback_workflow_event import FeedbackWorkflowEvent
-ModuleNotFoundError: No module named 'src.models.feedback_workflow_event'
->>> from src.models import FeedbackWorkflowEvent
-<class 'src.models.FeedbackWorkflowEvent'>          # works
-```
+`sentiment_pattern` fires when **one customer** sends ≥ `count` feedbacks of a given
+sentiment within `days`. It is a *per-customer* signal — "this account is souring".
 
-The `except Exception: pass` at ~line 873 swallows it, so `resolution_score_pts` is always
-`0` and `resolution_label` never leaves its default.
+The user is asking about *aggregate* sentiment — "our incoming feedback as a whole just got
+worse". A spike of angry feedback from 30 different customers trips nothing today, because no
+single customer crosses the per-customer count. That is precisely the triage case they
+describe.
 
-Fix: correct the import, and narrow the bare `except` so this class of failure cannot hide.
+## Decisions already made (do not re-litigate)
 
-This is the **third instance of a recurring repo bug class** — worker-service importing
-backend-api modules it can never have, inside a bare `try/except`. See CLAUDE.md
-"Automations engine (two copies)" and the memory note.
+- **Rolling time window, not per-import.** Evaluate the org's feedback over a configurable
+  trailing window. "A batch" is undefined for streaming sources — Zendesk, Intercom, email
+  forwarding, the public API all arrive continuously — so a per-import trigger would silently
+  never fire for most ingestion paths. That silent-never-fires failure mode is the exact class
+  of bug fixed twice already this session, and is not worth reintroducing deliberately.
+- **Threshold configurable on both axes** — negative *share* (percentage) and *absolute
+  count* — rather than picking one for the user. This was the open question in the reply
+  draft; making it configurable answers it by design.
+- Delivery reuses the existing notification channels. No new delivery code.
 
----
+## Prior art to follow
 
-## Phase 2 dig — what the brief got right, and what it missed
-
-### Confirmed
-
-- `_compute_heuristic_churn_risk(feedback, db)` in `worker-service/src/tasks/analysis.py` is
-  the **only** implementation. There is no backend twin, so the two processes cannot disagree.
-  (`backend-api/scripts/backfill_churn_factors.py:68` imports the worker's function by putting
-  worker `src` on `sys.path`, with a stub fallback that hardcodes
-  `"resolution_time": {"score": 0, ... "label": "Backfilled"}`.)
-- Defaults at `analysis.py:700-701`: `resolution_score_pts = 0`,
-  `resolution_label = "Insufficient resolution data"`.
-- Factor assembled at `analysis.py:926`:
-  `"resolution_time": {"score": resolution_score_pts, "max": 10, "label": resolution_label}`.
-- Total is `sum(v["score"] for v in factors.values())`, capped at 100.
-
-### Consequences the brief understated
-
-1. **It is user-visible, not just numeric.** M1.4 shipped "AI explainability on churn risk:
-   show factor breakdown". Every customer's breakdown has always read
-   **"Insufficient resolution data"** for resolution time. Users have been shown a
-   confident-looking explanation of a factor that never ran.
-2. **Scores are not merely 10 points low — they are differently ranked.** A customer with a
-   genuinely slow resolution history should gain 10 points relative to one resolved quickly.
-   Since neither ever gains, the *ordering* between customers is wrong too, and everything
-   downstream keys off it: risk banding, the at-risk queue, alert thresholds, and the
-   isotonic churn calibrator that was fit on these very factor values.
-
-### The real finding — why it survived, and what else is unproven
-
-Every one of the 9 factors is wrapped in its own `try/except Exception: pass`. The test
-suite covers the **feedback-level** factors for real behaviour, but the **customer-level**
-factors are only asserted in the `customer_email=None` / `db=None` cases, where `0` is the
-correct answer.
-
-Across **both** churn test files (`tests/test_churn_factor_computation.py` — 38 tests — and
-`tests/test_churn_heuristic.py`), `_compute_heuristic_churn_risk` is **never once called
-with a real DB session.** The only `db=` occurrence in either file is `db=None`
-(`test_churn_factor_computation.py:321`).
-
-So five factors worth **50 of the 100 points** have **zero behavioural coverage**:
-
-| Factor | Max | Behavioural coverage | Status |
-|---|---|---|---|
-| `sentiment_trend` | 15 | none | unproven |
-| `feedback_frequency` | 10 | none | unproven |
-| `resolution_time` | 10 | none | **provably broken** |
-| `pain_severity` | 10 | none | unproven |
-| `feature_density` | 5 | none | unproven |
-
-**A one-line import fix would leave four untested factors and the swallowing `except`
-pattern intact.** The fix that actually prevents recurrence is DB-backed tests for all five
-— which simultaneously proves or disproves the other four.
+- `sentiment_pattern` in `services/worker-service/src/services/automation_feedback_trigger.py`
+  (the worker mirror that actually evaluates feedback triggers in production).
+- The `usage_trend` trigger is the closest structural precedent for a *state* trigger with a
+  config object and a frontend checkbox group.
+- `usage_decline_outreach` template ships in `mode="shadow"` — good precedent for a new
+  trigger whose firing rate is unknown on real data.
 
 ## Open questions for the PRD
 
-- Should the four unproven factors be in scope, or only proven-and-fixed?
-- Do historical `churn_risk_factors` rows need recomputing, or is fixing forward enough?
-  (`backfill_churn_factors.py` exists and could be reused.)
-- Does the isotonic churn calibrator need a refit once the factor starts contributing?
-- Should the bare `except Exception: pass` become a logged warning across all nine factors,
-  or only the one being fixed?
+- **Cooldown identity.** Every existing cooldown key is
+  `automation_cooldown:{rule_id}:{customer_email}`. A batch trigger is org-wide with no single
+  customer. What goes in that slot, and does an empty string collide with anything?
+- **Evaluation cadence.** Evaluate on every analysed feedback item (cheap per item, but the
+  window query runs constantly), or on a Celery beat schedule (fewer queries, coarser
+  latency)? Latency matters for a triage alert.
+- **Minimum sample size.** 2 negative out of 3 total is 67% and almost certainly noise. Does
+  the trigger need a floor before a percentage threshold is meaningful?
+- **What does `feedback_id` mean in the execution log** for a trigger that is about many items?
+- Should it ship in `shadow` by default, like `usage_decline_outreach`?
