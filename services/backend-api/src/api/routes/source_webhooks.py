@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from src.database.session import get_db
 from src.models import FeedbackSource, FeedbackSourceEvent
+from src.models.intercom_integration import IntercomIntegration
 from src.models.zendesk_integration import ZendeskIntegration
 from src.services.zendesk_status_reconcile import reconcile_ticket
 from src.utils.encryption import decrypt_api_key
@@ -287,26 +288,97 @@ def verify_intercom_signature(body: bytes, signature: str, secret: str) -> bool:
         return False
 
 
+# Parsing happens before verification (see the route docstring), so the body an
+# unauthenticated caller can make us parse must be bounded. Intercom
+# conversation payloads are small; 1 MiB is generous.
+INTERCOM_MAX_BODY_BYTES = 1 * 1024 * 1024
+
+
+def _intercom_candidate_secrets(db: Session, workspace_id: Optional[str]) -> list:
+    """Secrets that could legitimately have signed a delivery for this workspace.
+
+    Per-org first (token-paste orgs store their Developer Hub app's client
+    secret), then the global env var if set (OAuth orgs, which have no per-org
+    row). Returning [] means nothing can verify -- the caller then rejects,
+    which is the fail-closed behaviour
+    tests/test_webhook_verifiers_fail_closed.py enforces for every verifier.
+    """
+    secrets = []
+
+    if workspace_id:
+        rows = (
+            db.query(IntercomIntegration)
+            .filter(
+                IntercomIntegration.workspace_id == workspace_id,
+                IntercomIntegration.is_active == True,  # noqa: E712
+                IntercomIntegration.client_secret.isnot(None),
+            )
+            .all()
+        )
+        for row in rows:
+            try:
+                secrets.append(decrypt_api_key(row.client_secret))
+            except Exception:
+                # A single undecryptable row must not take down verification
+                # for every other tenant sharing this workspace id.
+                logger.warning(
+                    "Could not decrypt the Intercom client secret for "
+                    "integration %s; skipping it as a candidate",
+                    row.id,
+                )
+
+    if INTERCOM_CLIENT_SECRET:
+        secrets.append(INTERCOM_CLIENT_SECRET)
+
+    return secrets
+
+
 @router.post("/intercom/events")
-async def handle_intercom_webhook(request: Request):
+async def handle_intercom_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Handle incoming Intercom webhook events.
 
-    Verifies HMAC-SHA1 signature, parses the event topic,
-    and queues supported conversation events for async processing.
+    Verifies the HMAC-SHA1 signature against the *connecting organization's*
+    client secret, parses the event topic, and queues supported conversation
+    events for async processing.
+
+    ORDERING: the body is parsed BEFORE the signature is verified, which is
+    unusual and deliberate. Intercom signs with the Developer Hub app's client
+    secret, and which secret applies is determined by `app_id` -- which lives in
+    the body. So `app_id` is read from the unverified payload for exactly one
+    purpose: choosing which candidate keys to try. A forged `app_id` selects a
+    secret the attacker cannot sign with, so the HMAC still fails and the
+    request is still rejected. Nothing else is trusted before verification, and
+    the body is size-bounded because an unauthenticated caller can now make us
+    parse it.
+
+    This is what makes verification per-tenant. The 1.0.0 changelog recorded the
+    opposite as a hard limitation ("a valid signature cannot identify a tenant
+    here") because a single global env var was the only key available; a
+    token-paste org supplies its own.
     """
     body = await request.body()
 
-    # Verify Intercom signature
-    signature = request.headers.get("X-Hub-Signature", "")
-    if not verify_intercom_signature(body, signature, INTERCOM_CLIENT_SECRET):
-        raise HTTPException(status_code=401, detail="Invalid signature")
+    if len(body) > INTERCOM_MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Payload too large")
 
-    # Parse payload
+    # Parse payload (see ORDERING above -- used only to select candidate keys
+    # until the signature has been verified).
     try:
         payload = json.loads(body.decode("utf-8"))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    signature = request.headers.get("X-Hub-Signature", "")
+    candidate_secrets = _intercom_candidate_secrets(db, payload.get("app_id"))
+    if not any(
+        verify_intercom_signature(body, signature, secret)
+        for secret in candidate_secrets
+    ):
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
     topic = payload.get("topic", "")
 
