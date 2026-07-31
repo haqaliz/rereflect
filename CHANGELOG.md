@@ -50,14 +50,29 @@ request, warn at startup when an active integration has no secret, and are flagg
 Settings → Integrations. A future release rejects them. The test allowlisting them fails the
 moment that happens, so the grace period cannot quietly become permanent.
 
-### Known limitation — Intercom ingestion does not produce feedback items
+### Fixed — Intercom ingestion never produced a feedback item, in any release
 
-This affects every release to date, not just this one. Intercom webhook deliveries are
-received and authenticated, but a payload-shape mismatch between the webhook route and the
-Intercom adapter empties the extracted text before a feedback item is created. If you have
-connected Intercom and seen events arrive with no feedback appearing, that is why, and it is
-not your configuration. Documented in `docs/SELF_HOSTING.md`; a fix is tracked separately.
-Zendesk is the closest fully-working inbound source today.
+If you connected Intercom and saw events arriving but no feedback appearing, that was this
+bug, not your configuration.
+
+Deliveries were received and authenticated correctly, but the webhook route handed the
+worker's Intercom adapter only the inner `data` object while the adapter reads `topic` and
+`data.item` off the **full** envelope. It therefore saw an empty topic and an empty item on
+every delivery, extracted empty text, and stopped before creating anything. The route now
+passes the whole envelope.
+
+**Why it survived two green test suites.** Both halves were tested and both passed — the
+adapter against the full envelope, the route against the stripped one — and they disagreed
+with each other. Nothing tested the *seam*, because the two halves live in different
+services that cannot import each other. The fix therefore ships with a golden envelope
+fixture committed once and read by both suites: the backend asserts "this is what I send",
+the worker asserts "given this, I produce a feedback item". Either side drifting now breaks
+its own assertion.
+
+**Still missing on a self-host:** connecting Intercom continues to require registering your
+own OAuth app — there is no token-paste path yet, and no periodic pull, so nothing arrives
+unless the webhook is wired. Both are in progress. Zendesk remains the most complete inbound
+source today.
 
 ### Fixed — We were telling people shipped integrations didn't exist
 
