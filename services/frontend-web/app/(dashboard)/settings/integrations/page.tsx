@@ -50,6 +50,7 @@ import { linearAPI, LinearConnectionStatus } from '@/lib/api/linear';
 import { hubspotAPI, HubSpotConnectionStatus } from '@/lib/api/hubspot';
 import { salesforceAPI, SalesforceConnectionStatus } from '@/lib/api/salesforce';
 import { jiraAPI, JiraConnectionStatus } from '@/lib/api/jira';
+import { intercomAPI, IntercomConnectionStatus } from '@/lib/api/intercom';
 import { zendeskAPI, ZendeskConnectionStatus } from '@/lib/api/zendesk';
 import { asanaAPI, AsanaConnectionStatus } from '@/lib/api/asana';
 import { getOauthErrorMessage } from '@/lib/oauthErrors';
@@ -78,6 +79,7 @@ function IntegrationsContent() {
   const [hubspotStatus, setHubspotStatus] = useState<HubSpotConnectionStatus | null>(null);
   const [salesforceStatus, setSalesforceStatus] = useState<SalesforceConnectionStatus | null>(null);
   const [jiraStatus, setJiraStatus] = useState<JiraConnectionStatus | null>(null);
+  const [intercomStatus, setIntercomStatus] = useState<IntercomConnectionStatus | null>(null);
   const [zendeskStatus, setZendeskStatus] = useState<ZendeskConnectionStatus | null>(null);
   const [asanaStatus, setAsanaStatus] = useState<AsanaConnectionStatus | null>(null);
   const [linearTesting, setLinearTesting] = useState(false);
@@ -128,7 +130,7 @@ function IntegrationsContent() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [integrationResponse, linearStatusResponse, hubspotStatusResponse, salesforceStatusResponse, jiraStatusResponse, zendeskStatusResponse, asanaStatusResponse] = await Promise.allSettled([
+      const [integrationResponse, linearStatusResponse, hubspotStatusResponse, salesforceStatusResponse, jiraStatusResponse, zendeskStatusResponse, asanaStatusResponse, intercomStatusResponse] = await Promise.allSettled([
         integrationsAPI.list(),
         linearAPI.getStatus(),
         hubspotAPI.getStatus(),
@@ -136,6 +138,7 @@ function IntegrationsContent() {
         jiraAPI.getStatus(),
         zendeskAPI.getStatus(),
         asanaAPI.getStatus(),
+        intercomAPI.getStatus(),
       ]);
       if (integrationResponse.status === 'fulfilled') {
         setIntegrations(integrationResponse.value.integrations);
@@ -151,6 +154,9 @@ function IntegrationsContent() {
       }
       if (jiraStatusResponse.status === 'fulfilled') {
         setJiraStatus(jiraStatusResponse.value);
+      }
+      if (intercomStatusResponse.status === 'fulfilled') {
+        setIntercomStatus(intercomStatusResponse.value);
       }
       if (zendeskStatusResponse.status === 'fulfilled') {
         setZendeskStatus(zendeskStatusResponse.value);
@@ -1307,6 +1313,33 @@ function IntegrationsContent() {
                         </div>
                         <p className="text-sm text-muted-foreground">
                           Create issues directly from feedback
+                        </p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    </div>
+                  </div>
+                </Link>
+              )}
+
+              {/* Intercom - Available (only shown when not connected).
+                  Token-paste path; the older OAuth wizard entry still exists
+                  under settings/integrations/new and both remain supported. */}
+              {!intercomStatus?.connected && (
+                <Link href="/settings/integrations/intercom">
+                  <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-[#1F8DED]/10 rounded-lg">
+                        <IntercomIcon className="w-6 h-6" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Intercom</span>
+                          <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                            Available
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Pull conversations as feedback
                         </p>
                       </div>
                       <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
