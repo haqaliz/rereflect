@@ -1671,21 +1671,28 @@ request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
 
 - **Settings → Integrations → Intercom** shows connection status and the
   workspace name once connected.
-> ### ⚠️ Known limitation — Intercom does not currently produce feedback items
+> ### ✅ Fixed — Intercom now produces feedback items
 >
-> Deliveries are received, authenticated and recorded, but a payload-shape
-> mismatch between the webhook route and the Intercom adapter means the extracted
-> text is always empty, so the event is ignored before a feedback item is created.
-> **This affects every release to date, not just this one.**
+> Every release up to and including 1.0.0 received, authenticated and recorded
+> Intercom deliveries but never created a feedback item: a payload-shape mismatch
+> between the webhook route and the Intercom adapter emptied the extracted text
+> first. If you connected Intercom and saw events arriving with no feedback, that
+> was why, and it was not your setup.
 >
-> Nothing you can configure works around it — if you connect Intercom and see
-> events arriving but no feedback, this is why, and it is not your setup. A fix is
-> tracked separately. Zendesk is the closest fully-working inbound source if you
-> need one today.
+> This is fixed. The route now hands the adapter the full event envelope, and the
+> contract between them is pinned by a shared fixture read from both services'
+> test suites so it cannot silently drift again.
 
-- Once the limitation above is resolved, new Intercom conversations will appear as
-  feedback items, analyzed for sentiment, within a minute or two — or in the
-  pending-review queue if `auto_import` is off.
+> ### ⚠️ Still OAuth-only on a self-host
+>
+> Connecting Intercom requires registering your own OAuth app and setting
+> `INTERCOM_CLIENT_ID` / `INTERCOM_CLIENT_SECRET` (above). Unlike Zendesk, Jira and
+> Asana there is **no token-paste path yet**, and there is still **no periodic
+> pull** — if the webhook is not wired, nothing arrives. Both are in progress.
+> Zendesk remains the most complete inbound source today.
+
+- New Intercom conversations appear as feedback items, analyzed for sentiment,
+  within a minute or two — or in the pending-review queue if `auto_import` is off.
 - If nothing arrives, the webhook is the first thing to check: the endpoint must be
   reachable from the public internet, and the subscription must cover the three
   topics in step 5. Intercom's own webhook delivery log is the fastest way to see

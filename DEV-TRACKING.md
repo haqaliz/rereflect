@@ -375,10 +375,20 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 
 ### Follow-ups opened by that branch (all NOT STARTED)
 
-- **`intercom-envelope-shape`** — the route queues `payload["data"]` unwrapped while
-  `IntercomAdapter` expects the full envelope, so Intercom has never produced a feedback item.
-  **Now safe to fix at any time** — the tenancy guard removed the hazard that made ordering
-  matter. Documented as a known limitation in `SELF_HOSTING.md` and the changelog until it lands.
+- ~~**`intercom-envelope-shape`**~~ — **FIXED** on `fix/intercom-envelope-seam` (2026-07-31).
+  The route queued `payload["data"]` unwrapped while `IntercomAdapter` expects the full
+  envelope, so Intercom had never produced a feedback item in any release. One production
+  line. The adapter was untouched — it was always correct, and its own tests already fed it
+  the full envelope and passed.
+  **The generalizable lesson, and the reason this is the fourth instance of the family at
+  line 441 below:** both sides were tested, both green, and they disagreed with each other,
+  because the two halves live in different services that cannot import each other, so no
+  single test could see the seam. The fix ships a golden envelope fixture committed once and
+  read by **both** suites (`services/worker-service/tests/fixtures/intercom_webhook_envelope.json`)
+  — backend asserts "this is what I send", worker asserts "given this, I create an item".
+  A one-sided test would have left the seam exactly as exposed. Prefer this shape for any
+  contract that crosses the backend/worker boundary.
+  See `docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/`.
 - **`slack-email-signature-enforcement`** — flip the two shadow-mode verifiers to fail closed and
   delete their entries from `SHADOW_ALLOWLIST` in `tests/test_webhook_verifiers_fail_closed.py`
   (that test fails until you do). Update the `SELF_HOSTING.md` table, which still describes them
