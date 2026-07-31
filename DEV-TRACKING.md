@@ -270,6 +270,22 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
       opt-in status-sync. Documented at `docs/SELF_HOSTING.md#connecting-zendesk`. Nothing
       to build — just say it exists.
 
+> **CLOSED 2026-08-01** on `feat/intercom-selfhost-ingestion`. Part A landed earlier on
+> `chore/intercom-zendesk-docs`. Part B is now done in full: token-paste connect (the
+> access-token path Intercom's own docs recommend for own-workspace access), a 15-minute
+> conversation pull sharing the webhook's de-duplication core, per-workspace webhook
+> signature verification, `customer_email` so Intercom feedback reaches Customer 360, and a
+> settings page. The envelope defect that made Intercom produce nothing in any release
+> shipped separately as `fix/intercom-envelope-seam`.
+>
+> **Note the follow-up below was wrong about the fix.** It proposed implementing
+> `IntercomConnector.fetch_new_items`. That abstraction was dead for *both* providers —
+> `ZendeskConnector.fetch_new_items` was also a stub, and Zendesk's real pull has always
+> lived in `zendesk_sync.py`. Implementing it would have produced a third instance of the
+> dead-code family at line 441. The connector layer and its scheduled no-op are deleted.
+>
+> See `docs/planning/intercom-selfhost-ingestion/`.
+
 **Part B — Intercom is marketed but not operable on a self-host (real gap).**
 - [ ] Intercom connect is **OAuth-only** (`integrations.py:754` → 403
       `"Intercom OAuth is not configured. Set INTERCOM_CLIENT_ID environment variable"`).
@@ -408,6 +424,25 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   `intercom-writeback-orphaned` (P2): wire it up or delete it.
 - **`jwt-secret-default`** — `src/api/auth.py:11` defaults to `"dev-secret-key"`. Same class as
   the `events/emit` default, far larger blast radius.
+
+### Found while doing the Intercom work (2026-08-01)
+
+- **`purge-playbook-executions` had never run — FIXED.** The beat entry referenced
+  `tasks.churn_playbooks.purge_old_executions`, missing the `src.` prefix every other
+  entry carries, so it resolved to nothing and the 90-day purge never fired. Fixed on
+  `feat/intercom-selfhost-ingestion`, and safe to fix *now* specifically: churn playbooks
+  shipped 2026-07-19, so nothing is 90 days old yet and the first run deletes nothing.
+  In three months the first successful run would have purged a real backlog unannounced.
+  A new `tests/test_beat_schedule_integrity.py` resolves every scheduled task name to a
+  real function so this class cannot recur — it is the same "wired at one end, dead at the
+  other" shape as the P0/P0b import bugs and the orphaned write-back module.
+- **`signup-promo-banner-vestigial` (NOT STARTED).** `app/signup/page.tsx` still renders an
+  invite banner gated on a hardcoded `VALID_PROMO_CODES` list read from a `?promo=` query
+  param. There is no promo backend and no billing, so it can neither grant nor withhold
+  anything. Its plan-tier copy ("3 months of Pro free", "2,500 feedback/mo") was corrected
+  on the Intercom branch because it was actively misleading, but **the mechanism itself is
+  vestigial and should probably be deleted** — deliberately left standing rather than
+  removing a UI surface outside that card's scope.
 
 ### P1 — `oauth-tokens-stored-plaintext` (bug, NOT STARTED — **false comment corrected 2026-07-29**)
 > The encryption fix is still outstanding: it needs a backfill migration for existing rows and was

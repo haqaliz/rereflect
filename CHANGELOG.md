@@ -69,10 +69,50 @@ fixture committed once and read by both suites: the backend asserts "this is wha
 the worker asserts "given this, I produce a feedback item". Either side drifting now breaks
 its own assertion.
 
-**Still missing on a self-host:** connecting Intercom continues to require registering your
-own OAuth app — there is no token-paste path yet, and no periodic pull, so nothing arrives
-unless the webhook is wired. Both are in progress. Zendesk remains the most complete inbound
-source today.
+### Added — Intercom now connects with a pasted token and pulls on its own
+
+Intercom was the last integration that still required registering an OAuth app, which is
+awkward on a self-host and is exactly why every other integration — Zendesk, Jira, Asana,
+HubSpot — takes a pasted credential instead.
+
+**Connect with an access token.** Create a private app in your Intercom Developer Hub, copy
+its Access Token from Configure → Authentication, and paste it into
+**Settings → Integrations → Intercom**. Rereflect validates it, resolves your workspace and
+provisions the feedback source. This is Intercom's own recommended path for accessing your
+own workspace. Existing OAuth connections keep working; an organization uses one path or the
+other.
+
+**Conversations pull every 15 minutes.** Previously Intercom had no pull at all — if the
+webhook was not wired, nothing ever arrived. This is what the original request ("so feedback
+flows in automatically") actually asked for. The pull and the webhook share one
+de-duplication path, so a conversation becomes one feedback item however it reaches you.
+
+**Webhook signatures are now verified per workspace.** The 1.0.0 notes recorded this as
+impossible: *"a valid signature cannot identify a tenant here"*, because the signing key was
+a single global environment variable. Supplying your app's Client Secret at connect time
+changes that — deliveries are verified against your workspace specifically. It is optional;
+without it the pull still works, and webhook deliveries are rejected rather than trusted.
+
+**Intercom feedback now reaches Customer 360.** Items carry the customer's email, so they
+feed health scores and churn signals like every other source. A reply written by one of your
+own admins will not overwrite the customer on the item.
+
+*Honest limits:* up to 15 minutes of latency without a webhook; the pull ingests the first
+message of a conversation, with replies and ratings arriving via webhook only; a large
+backlog drains over several runs. No claim is made about analysis quality — this changes
+whether feedback arrives and whether it links to a customer, nothing else.
+
+### Fixed — A weekly cleanup job had never run
+
+The beat schedule referenced `tasks.churn_playbooks.purge_old_executions`, missing the `src.`
+prefix every other entry carries, so it resolved to nothing and the 90-day purge of playbook
+execution records never ran. Found by a new test that resolves every scheduled task name to
+a real function — the same "wired at one end, dead at the other" shape as the Intercom
+envelope bug above, caught by a guard rather than by a user.
+
+Fixing it activates a delete, so the timing matters: churn playbooks shipped 2026-07-19, so
+no execution is 90 days old yet and the first run removes nothing. Left unfixed for another
+three months, the first successful run would have purged a real backlog with no warning.
 
 ### Fixed — We were telling people shipped integrations didn't exist
 

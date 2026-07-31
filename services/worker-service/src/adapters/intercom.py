@@ -18,6 +18,21 @@ def strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
+def _contact_email(author: Dict[str, Any]) -> Optional[str]:
+    """The customer's email, when the author is a customer rather than staff.
+
+    Intercom author types: "user"/"contact"/"lead" are the customer;
+    "admin"/"bot" are your own team. Attributing a teammate's reply to a
+    customer profile would corrupt that customer's health and churn signals, so
+    a non-customer author yields no customer_email rather than a wrong one.
+    """
+    if not author:
+        return None
+    if author.get("type") not in ("user", "contact", "lead"):
+        return None
+    return author.get("email") or None
+
+
 class IntercomAdapter(BaseSourceAdapter):
     """
     Adapter for Intercom webhook events.
@@ -101,6 +116,11 @@ class IntercomAdapter(BaseSourceAdapter):
         author = msg.get("author", {})
         return {
             "text": body,
+            # customer_email is what links an item to a customer profile, and
+            # therefore to health scores, churn and Customer 360. Without it an
+            # ingested Intercom item is invisible to everything downstream --
+            # it arrives, but nothing can act on it.
+            "customer_email": _contact_email(author),
             "metadata": {
                 "conversation_id": item.get("id"),
                 "author_id": author.get("id"),
@@ -114,6 +134,7 @@ class IntercomAdapter(BaseSourceAdapter):
         author = item.get("author", {})
         return {
             "text": body,
+            "customer_email": _contact_email(author),
             "metadata": {
                 "conversation_id": item.get("conversation_id"),
                 "part_id": item.get("id"),

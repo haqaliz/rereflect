@@ -275,14 +275,16 @@ per-org subdomain and therefore no DNS gate needed — the same reasoning Asana 
 | # | Risk | Mitigation |
 |---|---|---|
 | K1 | **Widening the tenancy discriminator re-opens the P0.** | Characterization tests first; missing-`workspace_id` → `[]` tested per path; trusted-column-only rule tested. |
-| K2 | **Private apps may not be able to subscribe to webhooks** — unverified against Intercom's docs. | The plan must verify before building R4. If they cannot, R4 degrades to pull-only and the webhook path stays OAuth-global — the feature still delivers the user's actual ask. **Do not let this be settled by assumption.** |
+| ~~K2~~ | ~~Private apps may not be able to subscribe to webhooks~~ — **RESOLVED 2026-07-31, favourably.** Intercom's docs: webhook subscriptions are configured per-app under *Developer Hub → Configure → Webhooks*, and "for **private apps**, the Intercom data you access is your own, so you're already good to go". R4 stays in scope. | **New constraint carried into R4's plan:** "you can only subscribe to webhooks now via your Developer Hub — API-based subscription is not available." Rereflect **cannot auto-provision the subscription**; the operator configures the endpoint + topics manually. This is a docs requirement (mirroring Zendesk's manual webhook setup), not a code one. |
 | K3 | Intercom's conversation-search pagination/rate-limit shape differs from Zendesk's incremental model. | R5 requires verifying the endpoint contract before implementing; S2 covers throttling. |
 | K4 | **Nobody connects it** (pre-mortem 1) — adoption is unvalidated. | S1 measures rather than assumes. Stated as an honest limit, not hidden. |
 | K5 | Conversation→contact resolution costs an extra API call per conversation. | Side-load/batch where the API allows; degrade gracefully per R7. |
 | K6 | Deleting the `BaseConnector` layer touches Zendesk's registered-but-dead path. | Confirm no live caller; Zendesk's real pull (`zendesk_sync.py`) is provably independent of it. |
 
-**Open question O1:** does an Intercom private app expose webhook topic subscription
-(K2)? Blocks only R4's shape, not the branch.
+~~**Open question O1:** does an Intercom private app expose webhook topic subscription
+(K2)?~~ **Closed 2026-07-31 — yes**, via Developer Hub → Configure → Webhooks; private
+apps need no additional permission scopes. Subscription is Developer-Hub-only (no API),
+so setup instructions are the deliverable, not provisioning code.
 **Open question O2:** exact conversation-search filter/pagination contract (K3).
 
 ---

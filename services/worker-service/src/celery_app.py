@@ -45,7 +45,6 @@ celery_app = Celery(
     include=[
         "src.tasks.analysis",
         "src.tasks.alerts",
-        "src.tasks.integrations",
         "src.tasks.source_events",
         "src.tasks.anomaly",
         "src.tasks.insights",
@@ -62,6 +61,7 @@ celery_app = Celery(
         "src.tasks.salesforce_sync",
         "src.tasks.salesforce_writeback",
         "src.tasks.churn_backfill_task",
+        "src.tasks.intercom_sync",
         "src.tasks.zendesk_sync",
         "src.tasks.jira_sync",
         "src.tasks.zendesk_status_sync",
@@ -117,10 +117,6 @@ celery_app.conf.beat_schedule = {
         "schedule": 300.0,
     },
     # Sync integrations daily at 2 AM
-    "sync-integrations-daily": {
-        "task": "src.tasks.integrations.sync_all_integrations",
-        "schedule": crontab(hour=2, minute=0),
-    },
     # Weekly digest: Every hour at :05, task filters by user's preferred day+hour
     "send-weekly-digests": {
         "task": "src.tasks.alerts.send_weekly_digests",
@@ -195,8 +191,20 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=2, minute=45, day_of_week=0),
     },
     # Purge churn playbook execution logs older than 90 days — Sundays 03:00 UTC
+    # NOTE: this entry was missing the `src.` prefix every other task name
+    # carries, so it resolved to nothing and the 90-day purge has never run in
+    # any deployment. Found by tests/test_beat_schedule_integrity.py.
+    #
+    # Repairing it ACTIVATES a delete, which is normally something to stage
+    # carefully (cf. migration 12a1003fbfe0, which moved newly-repaired
+    # automation rules into shadow mode rather than springing them on
+    # operators). It is safe to simply fix here because of timing: churn
+    # playbooks shipped 2026-07-19, so on 2026-08-01 no ChurnPlaybookExecution
+    # can be 90 days old yet and the first run deletes nothing. Left broken for
+    # another three months, the first successful run would have purged a real
+    # backlog with no warning.
     "purge-playbook-executions": {
-        "task": "tasks.churn_playbooks.purge_old_executions",
+        "task": "src.tasks.churn_playbooks.purge_old_executions",
         "schedule": crontab(hour=3, minute=0, day_of_week=0),
     },
     # Refit per-org churn calibration models — Mondays 07:45 UTC
@@ -244,6 +252,14 @@ celery_app.conf.beat_schedule = {
     "sync-salesforce-daily": {
         "task": "src.tasks.salesforce_sync.sync_all_salesforce",
         "schedule": crontab(hour=3, minute=45),
+    },
+    # Poll Intercom conversations every 15 minutes (intercom-selfhost-ingestion
+    # pull-sync aspect). Same fixed-interval cadence as the Zendesk pull below.
+    # This is the path that makes "feedback flows in automatically" true for
+    # Intercom -- before it, Intercom had no pull at all.
+    "sync-intercom-every-15-min": {
+        "task": "src.tasks.intercom_sync.sync_all_intercom",
+        "schedule": 900.0,  # every 15 minutes
     },
     # Poll Zendesk incremental tickets every 15 minutes (ingestion-pull
     # aspect — see docs/planning/zendesk-integration/ingestion-pull/plan_20260705.md

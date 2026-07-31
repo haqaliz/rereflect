@@ -57,6 +57,7 @@ from .hubspot_integration import HubSpotIntegration
 from .crm_enrichment import CrmEnrichment
 from .salesforce_integration import SalesforceIntegration
 from .jira_integration import JiraIntegration, FeedbackJiraIssue
+from .intercom_integration import IntercomIntegration
 from .zendesk_integration import ZendeskIntegration
 from .feedback_zendesk_sync import FeedbackZendeskSync
 from .asana_integration import AsanaIntegration, FeedbackAsanaTask
@@ -132,6 +133,7 @@ __all__ = [
     "SalesforceIntegration",
     "JiraIntegration",
     "FeedbackJiraIssue",
+    "IntercomIntegration",
     "ZendeskIntegration",
     "FeedbackZendeskSync",
     "AsanaIntegration",
