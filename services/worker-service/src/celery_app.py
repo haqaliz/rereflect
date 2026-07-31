@@ -62,6 +62,7 @@ celery_app = Celery(
         "src.tasks.salesforce_sync",
         "src.tasks.salesforce_writeback",
         "src.tasks.churn_backfill_task",
+        "src.tasks.intercom_sync",
         "src.tasks.zendesk_sync",
         "src.tasks.jira_sync",
         "src.tasks.zendesk_status_sync",
@@ -244,6 +245,14 @@ celery_app.conf.beat_schedule = {
     "sync-salesforce-daily": {
         "task": "src.tasks.salesforce_sync.sync_all_salesforce",
         "schedule": crontab(hour=3, minute=45),
+    },
+    # Poll Intercom conversations every 15 minutes (intercom-selfhost-ingestion
+    # pull-sync aspect). Same fixed-interval cadence as the Zendesk pull below.
+    # This is the path that makes "feedback flows in automatically" true for
+    # Intercom -- before it, Intercom had no pull at all.
+    "sync-intercom-every-15-min": {
+        "task": "src.tasks.intercom_sync.sync_all_intercom",
+        "schedule": 900.0,  # every 15 minutes
     },
     # Poll Zendesk incremental tickets every 15 minutes (ingestion-pull
     # aspect — see docs/planning/zendesk-integration/ingestion-pull/plan_20260705.md
