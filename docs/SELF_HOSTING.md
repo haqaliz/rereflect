@@ -1573,26 +1573,81 @@ Customer 360 enrichment are available to every organization running the app.
 Intercom is an **inbound feedback source**: new conversations, replies, and ratings
 become feedback items, analyzed like any other source.
 
-Note that Intercom items are **not** linked to a customer profile automatically —
-see the note on customer email below. That is a real difference from Zendesk, where
-the requester's email is attached to the feedback item and drives Customer 360
-enrichment.
+**There are two ways to connect. Use the access token.**
 
-**Shipped scope for this release:**
+| | Access token (recommended) | OAuth |
+|---|---|---|
+| Setup | Paste a token from your own Intercom app | Register an OAuth app, set 3 env vars |
+| Pull sync | Yes — every 15 minutes | Yes |
+| Real-time webhook | Yes, verified against **your** workspace | Yes, verified against a global secret |
+| Suits | Self-hosting | Multi-workspace / legacy installs |
 
-- **Webhook-only.** Unlike Zendesk, there is **no periodic pull** — if the
-  webhook is not wired, nothing arrives. Rereflect's daily 02:00 UTC
-  integration sync step is a no-op for Intercom.
-- Three conversation topics are handled (listed in step 5).
-- One feedback item per conversation event, de-duplicated by conversation and
-  part ID.
-- **Customer email is not populated** on the feedback item itself — it appears in
-  `source_metadata` as `author_email` or `contact_email`, and only when the
-  source's field mapping enables author/context enrichment.
+The access-token path is Intercom's own recommendation for this case: *"An Access
+Token is for if you're using the API to access data in your own Intercom
+workspace, in other words, building a private app."* It matches how you connect
+Zendesk, Jira, Asana and HubSpot. Existing OAuth connections keep working
+unchanged; an organization uses one path or the other, never both.
+
+**Shipped scope:**
+
+- **Pull sync every 15 minutes**, plus an optional webhook for near-instant
+  delivery. Both share one de-duplication path, so a conversation becomes one
+  feedback item however it arrives.
+- Three conversation topics are handled (listed under *Webhooks* below).
+- **Customer email is populated** from the conversation's author when that
+  author is a customer, so Intercom feedback feeds Customer 360, health scores
+  and churn. A reply written by one of your own admins does not overwrite the
+  customer on the item.
 - **No write-back.** Rereflect does not add notes to or close Intercom
   conversations.
-- Requires an OAuth app you register yourself; there is no token-paste path
-  (unlike Zendesk, Jira, and Asana).
+
+---
+
+## Connecting Intercom with an access token
+
+### 1. Create a private app
+
+1. In the **Intercom Developer Hub**, create a new app on your workspace.
+2. Open **Configure → Authentication** and copy the **Access Token**.
+3. If you want real-time webhooks, also open **Basic Info** and copy the
+   **Client Secret** — Intercom signs webhook deliveries with it.
+
+### 2. Connect in Rereflect
+
+**Settings → Integrations → Intercom**, paste the Access Token (and the Client
+Secret if you have one), and connect. Rereflect validates the token, resolves
+your workspace, and provisions an Intercom feedback source automatically.
+
+Conversations start arriving within 15 minutes. Nothing else is required.
+
+### 3. Add a webhook (optional)
+
+The pull sync alone is enough. Add a webhook only if you want conversations to
+appear within seconds instead of minutes.
+
+1. In the Developer Hub, open **Configure → Webhooks**.
+2. Set the endpoint to `https://<your-rereflect-host>/api/v1/webhooks/intercom/events`.
+3. Subscribe to `conversation.user.created`, `conversation.user.replied` and
+   `conversation.rating.added`.
+
+> Intercom offers **no API for creating webhook subscriptions** — *"you can only
+> subscribe to webhooks now via your Developer Hub"* — so this step is manual and
+> Rereflect cannot do it for you.
+
+**If you did not store a Client Secret, webhook deliveries are rejected.**
+Verification fails closed by design: with no secret there is nothing to verify
+against, and accepting unsigned deliveries would let anyone who knows the URL
+inject feedback. The 15-minute pull is unaffected. Reconnect with the secret to
+enable webhooks.
+
+---
+
+## Connecting Intercom with OAuth (legacy)
+
+Only needed if you already use this path. It requires registering an OAuth app
+and setting `INTERCOM_CLIENT_ID`, `INTERCOM_CLIENT_SECRET` and
+`INTERCOM_REDIRECT_URI`. Webhook deliveries are verified against the single
+global `INTERCOM_CLIENT_SECRET` rather than per workspace.
 
 ### 1. Create an Intercom app
 
@@ -1683,13 +1738,17 @@ request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
 > contract between them is pinned by a shared fixture read from both services'
 > test suites so it cannot silently drift again.
 
-> ### ⚠️ Still OAuth-only on a self-host
+> ### Honest limits
 >
-> Connecting Intercom requires registering your own OAuth app and setting
-> `INTERCOM_CLIENT_ID` / `INTERCOM_CLIENT_SECRET` (above). Unlike Zendesk, Jira and
-> Asana there is **no token-paste path yet**, and there is still **no periodic
-> pull** — if the webhook is not wired, nothing arrives. Both are in progress.
-> Zendesk remains the most complete inbound source today.
+> - The pull runs every 15 minutes, so without a webhook a conversation can take
+>   that long to appear.
+> - The pull ingests the **first message** of a conversation. Replies and ratings
+>   arrive through the webhook only.
+> - A very large backlog drains over several runs rather than one — each run
+>   fetches up to 20 pages and the cursor resumes where it stopped.
+> - No claim is made about analysis quality. This determines whether feedback
+>   arrives and whether it links to a customer; sentiment and categorization
+>   behave exactly as they do for every other source.
 
 - New Intercom conversations appear as feedback items, analyzed for sentiment,
   within a minute or two — or in the pending-review queue if `auto_import` is off.

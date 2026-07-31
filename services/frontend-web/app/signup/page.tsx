@@ -334,11 +334,17 @@ function SignupPageContent() {
               <div className="flex items-start gap-3">
                 <Sparkles className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                 <div>
+                  {/* Pre-pivot copy promised "3 months of Pro free" and a
+                      2,500 feedback/mo cap. There are no plans and no billing
+                      — Rereflect is free and every feature is unlocked (see
+                      CLAUDE.md, "Plans & Feature Gating"), so that offer could
+                      never be honoured or withheld. Whether this banner should
+                      exist at all is tracked separately in DEV-TRACKING. */}
                   <p className="font-semibold text-foreground">
-                    You&apos;ve been invited! 3 months of Pro free
+                    You&apos;ve been invited to Rereflect
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    2,500 feedback/mo &middot; Slack &amp; Intercom &middot; Trends Analytics &middot; Priority Support
+                    Free and open source &middot; every feature unlocked &middot; runs on your own infrastructure
                   </p>
                 </div>
               </div>
