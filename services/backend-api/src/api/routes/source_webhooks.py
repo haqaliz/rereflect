@@ -324,13 +324,25 @@ async def handle_intercom_webhook(request: Request):
     # Extract workspace_id (app_id) for source matching
     workspace_id = payload.get("app_id")
 
-    # Queue for async processing
+    # Queue for async processing.
+    #
+    # event_data MUST be the full envelope, not payload["data"]. IntercomAdapter
+    # (worker-service/src/adapters/intercom.py) reads `topic` and `data.item` off
+    # the whole payload in extract_content, get_external_ids, _get_body_text and
+    # fetch_context. Passing only the inner `data` object left it with topic=""
+    # and item={}, so it extracted empty text and _process_event_for_source
+    # returned "empty_text" -- meaning Intercom created no feedback item in any
+    # release up to 1.0.0.
+    #
+    # The contract is pinned from both sides against one committed fixture:
+    #   services/worker-service/tests/fixtures/intercom_webhook_envelope.json
+    # See docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/.
     try:
         task_id = queue_source_event(
             source_type="intercom",
             external_event_id=conversation_id,
             event_type=topic,
-            event_data=payload.get("data", {}),
+            event_data=payload,
             provider_context={
                 "conversation_id": conversation_id,
                 "workspace_id": workspace_id,

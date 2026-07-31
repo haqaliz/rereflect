@@ -3,6 +3,7 @@ import pytest
 import hmac
 import hashlib
 import json
+import pathlib
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -410,7 +411,15 @@ class TestIntercomWebhook:
         vulnerability (missing app_id -> None -> matches every org's source
         in worker-service's _find_matching_sources) as the expected
         contract. Rewritten, not extended: the payload now includes app_id
-        and the assertion follows it through."""
+        and the assertion follows it through.
+
+        Rewritten a second time, for the same reason: it also asserted
+        `event_data=payload["data"]`, pinning the envelope-strip defect that
+        meant Intercom produced no feedback item in any release up to 1.0.0.
+        IntercomAdapter reads `topic` and `data.item` off the FULL envelope
+        (worker-service/src/adapters/intercom.py), so the route must queue
+        the whole payload. See
+        docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/."""
         payload = {
             "topic": "conversation.user.created",
             "app_id": "abc123",
@@ -435,7 +444,7 @@ class TestIntercomWebhook:
             source_type="intercom",
             external_event_id="conv_100",
             event_type="conversation.user.created",
-            event_data=payload["data"],
+            event_data=payload,
             provider_context={"conversation_id": "conv_100", "workspace_id": "abc123"},
         )
 
@@ -620,3 +629,79 @@ class TestIntercomService:
 
         result = add_note_to_conversation("token", "conv_1", "admin_1", "note")
         assert result is False
+
+
+# ============================================================================
+# Cross-service envelope contract
+# ============================================================================
+
+
+GOLDEN_ENVELOPE_PATH = (
+    # tests/ -> backend-api/ -> services/
+    pathlib.Path(__file__).resolve().parents[2]
+    / "worker-service"
+    / "tests"
+    / "fixtures"
+    / "intercom_webhook_envelope.json"
+)
+
+
+def load_golden_envelope() -> dict:
+    """Load the Intercom envelope contract shared with the worker suite.
+
+    Deliberately raises rather than skipping when the file is absent. A skip
+    would turn the one test guarding this seam into a silent no-op -- which is
+    the exact failure mode that let the envelope defect ship in every release.
+    """
+    if not GOLDEN_ENVELOPE_PATH.exists():
+        raise AssertionError(
+            f"Golden Intercom envelope fixture missing at {GOLDEN_ENVELOPE_PATH}. "
+            "It is a shared contract also read by "
+            "services/worker-service/tests/test_intercom_envelope_seam.py -- "
+            "restore it rather than skipping this test."
+        )
+    return json.loads(GOLDEN_ENVELOPE_PATH.read_text())
+
+
+class TestIntercomEnvelopeContract:
+    """Pins the shape the route hands to the queue.
+
+    IntercomAdapter (worker-service) reads `topic` and `data.item` off the FULL
+    envelope. The route used to queue only `payload["data"]`, so the adapter saw
+    topic="" and item={}, extracted empty text, and no FeedbackItem was ever
+    created -- in any release up to 1.0.0.
+
+    Both halves of the seam assert against the same fixture on disk:
+    worker-service proves "this envelope produces a feedback item", and this
+    test proves "this envelope is what we send". Neither service can import the
+    other, which is why the defect survived two green suites.
+
+    See docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/.
+    """
+
+    @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
+    @patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-contract")
+    def test_route_queues_the_full_envelope(
+        self,
+        mock_queue: MagicMock,
+        client: TestClient,
+    ):
+        envelope = load_golden_envelope()
+        body = json.dumps(envelope).encode()
+        sig = _make_intercom_signature(body, "webhook-secret")
+
+        response = client.post(
+            "/api/v1/webhooks/intercom/events",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Hub-Signature": sig},
+        )
+
+        assert response.status_code == 200
+        queued = mock_queue.call_args.kwargs["event_data"]
+        assert queued == envelope, (
+            "The route must queue the whole envelope. Queuing only the inner "
+            "`data` object leaves IntercomAdapter with topic='' and item={}, "
+            "which extracts empty text and creates no feedback item."
+        )
+        assert queued["topic"] == "conversation.user.created"
+        assert queued["data"]["item"]["id"] == "conv_golden_100"
