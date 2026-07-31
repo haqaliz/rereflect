@@ -1220,6 +1220,49 @@ class SalesforceIntegration(Base):
     )
 
 
+class IntercomIntegration(Base):
+    """Intercom connection per org (token-paste) — no-FK mirror for worker read access.
+
+    The worker needs this to resolve an inbound Intercom event to an organization:
+    `_find_matching_sources` matches the payload's `app_id` against `workspace_id`.
+    Without the mirror a token-paste-connected org matches nothing and ingests
+    nothing, since its FeedbackSource carries `integration_id=None` and so cannot
+    be reached through the OAuth `Integration` filter either.
+
+    worker-service cannot import backend-api (the worker image copies only
+    worker-service/src and analysis-engine/src/analyzer), hence the duplication.
+    Keep in sync with services/backend-api/src/models/intercom_integration.py —
+    parity enforced by
+    test_intercom_tenancy_discriminator.py::TestModelParity::test_worker_and_backend_intercom_integration_columns_match.
+
+    See docs/planning/intercom-selfhost-ingestion/tenancy-discriminator/.
+    """
+    __tablename__ = "intercom_integrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    access_token = Column(Text, nullable=False)
+    client_secret = Column(Text, nullable=True)
+    token_hint = Column(String(8), nullable=True)
+    workspace_id = Column(String(255), nullable=False)
+    workspace_name = Column(String(255), nullable=True)
+    admin_id = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    connected_by_user_id = Column(Integer, nullable=True)
+    connected_at = Column(DateTime, nullable=False)
+    last_synced_at = Column(DateTime, nullable=True)
+    last_sync_status = Column(String(50), nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('organization_id', name='uq_intercom_integrations_org_id'),
+        Index('ix_intercom_integrations_org_id', 'organization_id'),
+        Index('ix_intercom_integrations_workspace_id', 'workspace_id'),
+    )
+
+
 class ZendeskIntegration(Base):
     """Zendesk connection per org — no-FK mirror for worker read access (ingestion-core aspect).
 

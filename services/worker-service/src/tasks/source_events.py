@@ -107,7 +107,14 @@ def _find_matching_sources(
     provider_context: Dict[str, Any],
 ) -> List:
     """Find FeedbackSource configurations that match the event."""
-    from src.models import FeedbackSource, Integration, ZendeskIntegration
+    from sqlalchemy import or_
+
+    from src.models import (
+        FeedbackSource,
+        Integration,
+        IntercomIntegration,
+        ZendeskIntegration,
+    )
 
     query = db.query(FeedbackSource).filter(
         FeedbackSource.source_type == source_type,
@@ -143,10 +150,25 @@ def _find_matching_sources(
         else:
             return []
 
-    # For Intercom events, match by workspace_id via the integration. Same
-    # cross-tenant reasoning as slack above -- and workspace_id can be `""`
-    # (the Intercom OAuth callback stores it with a "" default), so `not x`
-    # is required, not `is None`.
+    # For Intercom events, match by workspace_id. Same cross-tenant reasoning as
+    # slack above -- and workspace_id can be `""` (the Intercom OAuth callback
+    # stores it with a "" default), so `not x` is required, not `is None`.
+    #
+    # Intercom has TWO credential paths, deliberately (see
+    # docs/planning/intercom-selfhost-ingestion/prd.md D4):
+    #
+    #   OAuth       -> Integration.config["workspace_id"], source linked by
+    #                  FeedbackSource.integration_id
+    #   token-paste -> IntercomIntegration.workspace_id, source linked by
+    #                  organization_id (its FeedbackSource has integration_id=None,
+    #                  because token-paste is own-auth like zendesk/jira, so it can
+    #                  never be reached through the OAuth filter)
+    #
+    # The two clauses are OR'd. Both are `IN` over id lists already narrowed by
+    # workspace_id, so this widens WHICH rows can match without widening the outer
+    # filter itself -- the fall-through that made this function the site of an
+    # unauthenticated cross-tenant write is untouched, and the empty-return below
+    # still fires when neither path yields a match.
     elif source_type == "intercom":
         workspace_id = provider_context.get("workspace_id")
         if not workspace_id:
@@ -163,12 +185,28 @@ def _find_matching_sources(
             if config.get("workspace_id") == workspace_id:
                 matching_integration_ids.append(integration.id)
 
+        token_paste_org_ids = [
+            row.organization_id
+            for row in db.query(IntercomIntegration).filter(
+                IntercomIntegration.workspace_id == workspace_id,
+                IntercomIntegration.is_active == True,
+            ).all()
+        ]
+
+        clauses = []
         if matching_integration_ids:
-            query = query.filter(
+            clauses.append(
                 FeedbackSource.integration_id.in_(matching_integration_ids)
             )
-        else:
+        if token_paste_org_ids:
+            clauses.append(
+                FeedbackSource.organization_id.in_(token_paste_org_ids)
+            )
+
+        if not clauses:
             return []
+
+        query = query.filter(or_(*clauses))
 
     # For email events, match by source_id directly (webhook handler already
     # resolved). Same cross-tenant reasoning as slack/intercom above.
