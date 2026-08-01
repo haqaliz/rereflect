@@ -80,7 +80,11 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   request below — pointing a user at the "Negative Sentiment Alert" template today points
   them at something inert.
 
-### P0b — `worker-resolution-time-scoring-dead` (bug, NOT STARTED) — same class, one-line fix
+### P0b — `worker-resolution-time-scoring-dead` — **FIXED**, merged `26818cf8`
+> Marked NOT STARTED long after it shipped. Corrected 2026-08-01. The `resolution_time`
+> churn factor scores correctly; `bug/worker-resolution-time-scoring` fixed the
+> `FeedbackWorkflowEvent` import and added DB-backed coverage for all five customer-level
+> factors. **Do not re-do it.** Original triage kept below for the reasoning.
 > Found 2026-07-29 by sweeping worker-service for imports that resolve to nothing.
 > **Verified empirically**, not inferred.
 
@@ -456,6 +460,35 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   on the Intercom branch because it was actively misleading, but **the mechanism itself is
   vestigial and should probably be deleted** — deliberately left standing rather than
   removing a UI surface outside that card's scope.
+
+### Deferred v2 — Intercom (opened 2026-08-01, all NOT STARTED)
+
+Recorded here rather than only in `docs/planning/intercom-selfhost-ingestion/` so they are
+visible from the backlog. None block anything; the integration is fully operable without them.
+
+- **`intercom-pull-replies-and-ratings`** — the 15-minute pull ingests the **first message**
+  of a conversation only. Replies and ratings arrive via the webhook path, so a pull-only
+  install (no webhook wired) never sees them. Needs conversation-parts fetching.
+- **`intercom-writeback`** — still no write-back; `intercom_service.py` remains orphaned with
+  zero production callers. Existing P2 below covers the wire-or-delete decision. **No
+  "Two-Way Sync" copy may return until it is wired.**
+- **`intercom-backlog-drain-visibility`** — a large backlog drains over several 20-page runs
+  with no operator-visible progress; the settings page shows a count but not "N remaining".
+- **`intercom-oauth-path-retirement`** — two credential paths now coexist (D4). If nobody is
+  using OAuth, retiring it removes a second tenancy discriminator to keep correct. Needs
+  evidence of use before deciding.
+
+### Roadmap hygiene (2026-08-01)
+
+Two entries were **present but wrong**, which is worse than absent — someone acting on either
+would have wasted a day:
+
+- P0b was marked NOT STARTED months after it shipped. Corrected.
+- `AI-TRACKING.md` M4.3 (Industry Benchmarks) sat in Q4 as seven live checkboxes while the M5
+  section of the same file described it as dropped and non-viable. Struck, with the reason.
+
+**When closing work, correct the marker in the same commit.** Every stale marker found so far
+was left by a branch that shipped the fix and did not update the row.
 
 ### P1 — `oauth-tokens-stored-plaintext` (bug, NOT STARTED — **false comment corrected 2026-07-29**)
 > The encryption fix is still outstanding: it needs a backfill migration for existing rows and was

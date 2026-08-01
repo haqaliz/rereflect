@@ -385,14 +385,24 @@
 - [x] Model versioning: track model performance over time, rollback if accuracy drops — **delivered 2026-07-24 as `classifier-model-versioning-rollback`**: `GET /classifier/versions` (per-version metrics) + roll-back-to-any-version, made **durable** by a per-type auto-promotion hold (the weekly refit no longer silently re-promotes over a manual rollback) + `POST /classifier/resume` + audit. See `docs/planning/classifier-model-versioning-rollback/`.
 - [x] Plan gate: removed — all features unlocked in the open-source self-hosted edition
 
-#### M4.3 — Industry Benchmarks (2 weeks)
-- [ ] Opt-in benchmark program: customers choose to contribute anonymized aggregate metrics
-- [ ] Industry classification: SaaS, ecommerce, fintech, healthcare, etc. (org setting)
-- [ ] Benchmark metrics: NPS, sentiment distribution, churn rate, response time, feedback volume
-- [ ] Benchmark display: "Your churn rate is 15% higher than similar SaaS companies" on dashboard
-- [ ] Benchmark trends: "Industry average NPS improved 5% this quarter, yours declined 3%"
-- [ ] Privacy: only aggregate metrics (counts, averages, percentiles). Zero text, zero emails, zero PII.
-- [ ] Plan gate: Pro+ (incentive to upgrade)
+#### M4.3 — Industry Benchmarks — **DROPPED, not deferred** (struck 2026-08-01)
+
+> **This milestone is not buildable and will not be built.** It is struck rather than left
+> unchecked, because seven open checkboxes read as planned work and this is not planned work.
+>
+> Benchmarks require a **cross-tenant pool** of aggregate metrics. Rereflect is single-tenant
+> self-hosted: each install sees only its own data and there is no central service to
+> aggregate into, and adding one would contradict the no-telemetry positioning that four of
+> seven post-1.0.0 user comments independently named as the reason they chose the product
+> (`DEV-TRACKING.md`, "No build required"). The M5 strategic framing already states this —
+> "a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks were
+> dropped)" — so the roadmap was contradicting itself.
+>
+> The `Plan gate: Pro+` line was doubly stale: there are no plans.
+>
+> ~~Opt-in benchmark program, industry classification, benchmark metrics/display/trends,
+> aggregate-only privacy model, Pro+ gate.~~ If a hosted multi-tenant mode ever exists
+> (`SELF_HOSTED=false`), reopen this from scratch rather than resurrecting these items.
 
 #### M4.4 — AI Workflow Automation (3 weeks) — COMPLETE
 - [x] Auto-escalation rules: "If health score drops below 30, auto-assign to CS lead + create urgent notification"
