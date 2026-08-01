@@ -68,12 +68,33 @@ annotated list):
 | Variable | Purpose |
 |----------|---------|
 | `DATABASE_URL` | PostgreSQL connection string |
-| `JWT_SECRET` | Secret for signing auth tokens (random 32+ chars) |
+| `JWT_SECRET` | **Required.** Secret for signing auth tokens (random 32+ chars). The app refuses to start without it — see the note below. |
 | `LLM_ENCRYPTION_KEY` | Fernet key used to encrypt stored BYOK LLM keys |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Seeds the first admin account |
 | `CORS_ORIGINS` | Comma-separated allowed frontend origins |
 | `SELF_HOSTED` | Keep `true` — unlocks all features |
 | `ai_analysis_enabled` | `false` by default — runs on free local VADER |
+
+> ### ⚠️ `JWT_SECRET` is now required — upgrading installs must set it
+>
+> Rereflect previously fell back to a built-in default when `JWT_SECRET` was
+> unset, and `.env.example` shipped the variable commented out. That default
+> string is published in this repository, so on any install that never set the
+> variable, **every authentication token could be forged by anyone** — the same
+> applied to OIDC and Salesforce OAuth state values, which are signed with the
+> same key.
+>
+> The application now refuses to start without it, rather than starting up
+> quietly forgeable. Generate one and set it:
+>
+> ```bash
+> openssl rand -hex 32
+> ```
+>
+> **Existing sessions will be invalidated** when you set a new value, and users
+> will need to sign in again. That is intended: tokens signed with the old
+> default should not have been trusted. Setting `JWT_SECRET` to that former
+> default is rejected explicitly.
 
 ## Running with no API key ($0, fully local)
 

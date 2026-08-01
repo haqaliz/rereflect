@@ -58,6 +58,7 @@ const DISCONNECTED = {
   last_synced_at: null,
   last_sync_status: null,
   last_error: null,
+  feedback_items_ingested: 0,
 };
 
 const CONNECTED = {
@@ -71,6 +72,7 @@ const CONNECTED = {
   last_synced_at: '2026-08-01T10:00:00Z',
   last_sync_status: 'ok',
   last_error: null,
+  feedback_items_ingested: 42,
 };
 
 function asAdmin() {
@@ -202,6 +204,26 @@ describe('IntercomSettingsPage', () => {
 
     expect(
       await screen.findByText(/nothing will be ingested/)
+    ).toBeInTheDocument();
+  });
+
+  it('shows the ingested-item count when connected', async () => {
+    mockGetStatus.mockResolvedValue(CONNECTED);
+
+    render(<IntercomSettingsPage />);
+
+    expect(await screen.findByText('42')).toBeInTheDocument();
+  });
+
+  it('explains a connected-but-zero state instead of just showing 0', async () => {
+    // The half-state that would otherwise look like a bug: syncing fine, but
+    // nothing has arrived because nobody has written in since connecting.
+    mockGetStatus.mockResolvedValue({ ...CONNECTED, feedback_items_ingested: 0 });
+
+    render(<IntercomSettingsPage />);
+
+    expect(
+      await screen.findByText(/no feedback has been ingested yet/i)
     ).toBeInTheDocument();
   });
 

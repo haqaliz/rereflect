@@ -69,6 +69,36 @@ fixture committed once and read by both suites: the backend asserts "this is wha
 the worker asserts "given this, I produce a feedback item". Either side drifting now breaks
 its own assertion.
 
+### Security — `JWT_SECRET` is now required, and two webhook weaknesses are closed
+
+**If you never set `JWT_SECRET`, set one before upgrading — the app will not start without
+it, and that is deliberate.**
+
+`JWT_SECRET` fell back to a value published in this repository, and `.env.example` shipped
+the variable commented out, so unset was the default state of an install following the docs.
+Every authentication token on such an install could be forged by anyone who read the source;
+the same key signs OIDC and Salesforce OAuth state. Generate one with `openssl rand -hex 32`.
+Existing sessions are invalidated when you set it — tokens signed with the old default should
+never have been trusted. Setting `JWT_SECRET` to that former default is rejected explicitly.
+
+**Zendesk webhook replay.** The signature timestamp was included in the HMAC but never
+checked for freshness, so a captured delivery could be resent indefinitely and would verify
+every time. Because status reconciliation runs before de-duplication, a replayed "ticket
+closed" could undo manual triage repeatedly. Deliveries older or newer than 300 seconds are
+now rejected, matching the guard Slack's verifier already had.
+
+**Credentials in the event log.** The generic inbound webhook stored all request headers
+verbatim, including the source's own `X-Webhook-Secret` — the credential that authenticates
+the endpoint — so read access to that table was enough to forge deliveries. Credential
+headers are now stripped before anything is persisted.
+
+### Fixed — Editing an automation rule's categories did nothing
+
+The automation detail page wrote its category-match settings under key names the backend does
+not read, so editing an existing rule appeared to save and changed nothing about what the rule
+matched. Creating a rule was unaffected. Rules saved while this was broken still show their
+values in the editor, and saving them again now persists correctly.
+
 ### Added — Intercom now connects with a pasted token and pulls on its own
 
 Intercom was the last integration that still required registering an OAuth app, which is
