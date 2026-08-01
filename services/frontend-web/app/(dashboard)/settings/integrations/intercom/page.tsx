@@ -195,6 +195,10 @@ export default function IntercomSettingsPage() {
                   <dt className="text-muted-foreground">Status</dt>
                   <dd>{status.last_sync_status || '—'}</dd>
                 </div>
+                <div>
+                  <dt className="text-muted-foreground">Feedback ingested</dt>
+                  <dd>{status.feedback_items_ingested ?? 0}</dd>
+                </div>
               </dl>
 
               {status.last_error && (
@@ -203,6 +207,20 @@ export default function IntercomSettingsPage() {
                   <AlertDescription>{status.last_error}</AlertDescription>
                 </Alert>
               )}
+
+              {status.has_feedback_source &&
+                status.feedback_items_ingested === 0 &&
+                status.last_synced_at && (
+                  <Alert>
+                    <AlertCircle className="w-4 h-4" />
+                    <AlertDescription>
+                      Connected and syncing, but no feedback has been ingested
+                      yet. That is expected if no one has written in since you
+                      connected — Rereflect only picks up conversations updated
+                      after that point, and never backfills history.
+                    </AlertDescription>
+                  </Alert>
+                )}
 
               {!status.has_feedback_source && (
                 <Alert>

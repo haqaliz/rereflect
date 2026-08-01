@@ -94,19 +94,23 @@ function CategoryMatchTriggerFields({
   onChange: (config: Record<string, any>) => void;
   disabled?: boolean;
 }) {
-  const tags: string[] = config.tags ?? [];
+  // Read `categories` (what the backend's FeedbackCategoryConfig and the
+  // worker evaluator actually use), falling back to the legacy `tags` key so
+  // rules previously saved through this page -- which wrote keys the backend
+  // ignored -- still display their values instead of appearing empty.
+  const tags: string[] = config.categories ?? config.tags ?? [];
   const [tagInput, setTagInput] = useState('');
 
   const addTag = () => {
     const tag = tagInput.trim().toLowerCase();
     if (tag && !tags.includes(tag)) {
-      onChange({ ...config, tags: [...tags, tag] });
+      onChange({ ...config, categories: [...tags, tag] });
       setTagInput('');
     }
   };
 
   const removeTag = (tag: string) => {
-    onChange({ ...config, tags: tags.filter(t => t !== tag) });
+    onChange({ ...config, categories: tags.filter(t => t !== tag) });
   };
 
   return (
@@ -144,8 +148,8 @@ function CategoryMatchTriggerFields({
       <div className="flex items-center gap-2">
         <Checkbox
           id="trigger-urgent"
-          checked={config.urgent ?? false}
-          onCheckedChange={checked => !disabled && onChange({ ...config, urgent: !!checked })}
+          checked={config.is_urgent ?? config.urgent ?? false}
+          onCheckedChange={checked => !disabled && onChange({ ...config, is_urgent: !!checked })}
           disabled={disabled}
         />
         <label htmlFor="trigger-urgent" className="text-sm cursor-pointer">

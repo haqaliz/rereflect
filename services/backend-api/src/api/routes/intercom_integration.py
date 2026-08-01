@@ -146,6 +146,12 @@ class IntercomStatusResponse(BaseModel):
     last_synced_at: Optional[datetime] = None
     last_sync_status: Optional[str] = None
     last_error: Optional[str] = None
+    # How many feedback items this integration has actually produced.
+    # Whether self-hosters use Intercom at all is unvalidated; this measures it
+    # rather than assuming it, following the readiness-counter precedent set by
+    # usage-decline-churn-labels. A connected integration sitting at 0 is the
+    # single most useful thing an operator can know about it.
+    feedback_items_ingested: int = 0
 
 
 class IntercomDisconnectResponse(BaseModel):
@@ -184,6 +190,20 @@ def _has_active_oauth_connection(db: Session, org_id: int) -> bool:
         )
         .first()
         is not None
+    )
+
+
+def _count_ingested_items(db: Session, org_id: int) -> int:
+    """Feedback items this org has ingested from Intercom."""
+    from src.models.feedback import FeedbackItem
+
+    return (
+        db.query(FeedbackItem)
+        .filter(
+            FeedbackItem.organization_id == org_id,
+            FeedbackItem.source == "intercom",
+        )
+        .count()
     )
 
 
@@ -242,6 +262,7 @@ def _build_status_response(
         last_synced_at=row.last_synced_at,
         last_sync_status=row.last_sync_status,
         last_error=row.last_error,
+        feedback_items_ingested=_count_ingested_items(db, org_id),
     )
 
 

@@ -141,7 +141,11 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 > Backend 4544 passed · worker 1394 passed · frontend 1507 passed.
 > **Defaults are reasoned, not measured** — documented as such in `docs/SELF_HOSTING.md`.
 
-### P4 — `[id]/page.tsx` category-match editor writes the wrong config keys (bug, NOT STARTED)
+### P4 — `[id]/page.tsx` category-match editor writes the wrong config keys — **FIXED** 2026-08-01 (`bug/backlog-batch`)
+> The editor now writes `categories`/`is_urgent`, matching `FeedbackCategoryConfig` and the
+> worker evaluator, and still READS the legacy `tags`/`urgent` keys so rules saved while the
+> bug was live still display their values instead of appearing empty. Pinned by
+> `settings/automations/__tests__/CategoryMatchConfigKeys.test.tsx`.
 > Found 2026-07-29 while mapping the trigger-registration surface for P1. Not ours; scoped out.
 
 - [ ] `services/frontend-web/app/(dashboard)/settings/automations/[id]/page.tsx`'s
@@ -412,17 +416,26 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 - **`linear-webhook-secret-plaintext`** — Linear is the only integration storing `webhook_secret`
   unencrypted; Zendesk/Jira/Asana all round-trip through `encrypt_api_key`. Needs a backfill
   migration.
-- **`zendesk-replay-window`** — Zendesk already receives `X-Zendesk-Webhook-Signature-Timestamp`
+- ~~**`zendesk-replay-window`**~~ — **FIXED** 2026-08-01. 300s window, matching Slack's.
+  **Note for anyone touching this:** Zendesk's signature timestamp is **ISO-8601**
+  (`2026-07-05T00:00:00Z`), not Slack's Unix epoch. A first attempt parsed it as an int and
+  rejected every genuine delivery; 15 existing tests caught it. Those tests had hardcoded a
+  month-old timestamp, which is how the missing window went unnoticed. ORIGINAL ENTRY: — Zendesk already receives `X-Zendesk-Webhook-Signature-Timestamp`
   and feeds it into the HMAC but never checks freshness. Content-dedup blocks duplicate content,
   **not** status-transition replay: `_handle_zendesk_status_change`, `reconcile_issue` and
   `reconcile_task` all run before any dedup check, so a captured "ticket closed" delivery can
   undo manual triage indefinitely. One line, reusing Slack's 300s guard.
-- **`generic-webhook-persists-headers`** — `source_webhooks.py:229-233` writes
+- ~~**`generic-webhook-persists-headers`**~~ — **FIXED** 2026-08-01. Credential headers
+  (`x-webhook-secret`, `authorization`, signature headers, `cookie`) are stripped
+  case-insensitively before an event is persisted. ORIGINAL ENTRY: — `source_webhooks.py:229-233` writes
   `dict(request.headers)` into `FeedbackSourceEvent.event_data`, including the source's own
   `X-Webhook-Secret`. Anyone with read access to that table can forge the webhook.
 - **`events-emit-wire-up-or-delete`** — the endpoint has no production caller. Same call as
   `intercom-writeback-orphaned` (P2): wire it up or delete it.
-- **`jwt-secret-default`** — `src/api/auth.py:11` defaults to `"dev-secret-key"`. Same class as
+- ~~**`jwt-secret-default`**~~ — **FIXED** 2026-08-01. No default; the app refuses to start
+  without `JWT_SECRET`, and the old public default is rejected explicitly so it cannot be
+  pasted back in as a "fix". **Upgrading installs must set it, and existing sessions are
+  invalidated** — documented in `SELF_HOSTING.md`. ORIGINAL ENTRY: — `src/api/auth.py:11` defaults to `"dev-secret-key"`. Same class as
   the `events/emit` default, far larger blast radius.
 
 ### Found while doing the Intercom work (2026-08-01)

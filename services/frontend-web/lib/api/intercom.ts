@@ -27,6 +27,9 @@ export interface IntercomConnectionStatus {
   last_synced_at: string | null;
   last_sync_status: string | null;
   last_error: string | null;
+  // How many feedback items this integration has produced. A connected
+  // integration sitting at 0 is the most useful thing an operator can know.
+  feedback_items_ingested: number;
 }
 
 export interface IntercomConnectRequest {

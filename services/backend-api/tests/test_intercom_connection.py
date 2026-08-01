@@ -522,3 +522,61 @@ class TestStatusAndDisconnect:
             .first()
         )
         assert source is not None, "the feedback source must survive a disconnect"
+
+
+class TestIngestedItemCount:
+    """S1 -- the readiness counter.
+
+    Whether self-hosters actually use Intercom is unvalidated. A connected
+    integration reporting 0 ingested items after a week is the clearest signal
+    an operator can get that something is wrong (or that nobody is writing in),
+    and it is the only thing that distinguishes "working" from "connected".
+    """
+
+    def test_status_reports_zero_before_anything_arrives(
+        self, client: TestClient, owner_headers: dict
+    ):
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=intercom_client_ok(),
+        ):
+            _connect(client, owner_headers)
+
+        response = client.get(
+            "/api/v1/integrations/intercom/status", headers=owner_headers
+        )
+        assert response.status_code == 200
+        assert response.json()["feedback_items_ingested"] == 0
+
+    def test_status_counts_only_this_orgs_intercom_items(
+        self, client: TestClient, db: Session, owner_headers: dict, test_organization
+    ):
+        from src.models.feedback import FeedbackItem
+
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=intercom_client_ok(),
+        ):
+            _connect(client, owner_headers)
+
+        db.add_all(
+            [
+                FeedbackItem(
+                    organization_id=test_organization.id,
+                    text="from intercom",
+                    source="intercom",
+                ),
+                # A different source in the same org must not inflate the count.
+                FeedbackItem(
+                    organization_id=test_organization.id,
+                    text="from zendesk",
+                    source="zendesk",
+                ),
+            ]
+        )
+        db.commit()
+
+        response = client.get(
+            "/api/v1/integrations/intercom/status", headers=owner_headers
+        )
+        assert response.json()["feedback_items_ingested"] == 1
