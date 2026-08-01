@@ -12,6 +12,12 @@ os.environ["CACHE_ENABLED"] = "false"
 # behaviour should use `patch.dict(os.environ, {"SELF_HOSTED": "true"})`.
 os.environ.setdefault("SELF_HOSTED", "false")
 
+# src/api/auth.py refuses to import without JWT_SECRET (it used to default to a
+# literal published in this repo -- see tests/test_jwt_secret_required.py).
+# Deterministic value so tokens minted in one test verify in another; CI sets
+# its own equivalent in .github/workflows/ci.yml.
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret-not-used-outside-tests")
+
 import pytest
 from typing import Generator
 from unittest.mock import patch

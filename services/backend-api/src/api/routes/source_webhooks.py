@@ -11,6 +11,7 @@ import logging
 import os
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Mapping, Optional
 from urllib.parse import urlparse
 
@@ -31,6 +32,64 @@ router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
 # Environment variables
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 INTERCOM_CLIENT_SECRET = os.environ.get("INTERCOM_CLIENT_SECRET", "")
+
+# Replay window for Zendesk deliveries, matching Slack's existing 300s guard.
+ZENDESK_REPLAY_WINDOW_SECONDS = 300
+
+# Header names never persisted into FeedbackSourceEvent.event_data. The generic
+# inbound webhook used to store dict(request.headers) verbatim, which included
+# the source's own X-Webhook-Secret -- the credential that authenticates the
+# endpoint. Anyone with read access to that table could then forge deliveries.
+# Compared case-insensitively: HTTP header names are case-insensitive, so a
+# redaction that only matches lowercase is not a redaction.
+_SENSITIVE_HEADERS = frozenset(
+    {
+        "authorization",
+        "cookie",
+        "proxy-authorization",
+        "x-webhook-secret",
+        "x-hub-signature",
+        "x-hub-signature-256",
+        "x-slack-signature",
+        "x-zendesk-webhook-signature",
+        "x-api-key",
+    }
+)
+
+
+def _iso8601_skew_seconds(timestamp: str) -> Optional[float]:
+    """Absolute seconds between an ISO-8601 timestamp and now, or None.
+
+    Zendesk sends `X-Zendesk-Webhook-Signature-Timestamp` as ISO-8601 with a
+    trailing `Z` (e.g. "2026-07-05T00:00:00Z"), unlike Slack's Unix epoch.
+    Returns None when the value cannot be parsed, which callers treat as a
+    verification failure.
+    """
+    if not timestamp:
+        return None
+    try:
+        # fromisoformat handles "+00:00" but not the "Z" suffix before 3.11.
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return abs((datetime.now(timezone.utc) - parsed).total_seconds())
+
+
+def _safe_headers(headers: Mapping[str, str]) -> dict:
+    """Drop credential-bearing headers before an event is persisted.
+
+    Storing a secret in an event log is the same defect whether or not the
+    table is considered internal.
+    """
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() not in _SENSITIVE_HEADERS
+    }
 
 
 def verify_slack_signature(body: str, timestamp: str, signature: str, secret: str) -> bool:
@@ -235,7 +294,8 @@ async def handle_generic_webhook(
             event_data={
                 "payload": payload,
                 "content_hash": content_hash,
-                "headers": dict(request.headers),
+                # Credential headers stripped -- see _safe_headers.
+                "headers": _safe_headers(request.headers),
             },
             provider_context={
                 "webhook_id": webhook_id,
@@ -489,10 +549,37 @@ def _verify_zendesk_signature(body: bytes, timestamp: str, signature: str, secre
     Fails closed: an empty/None secret returns False (Zendesk's per-org
     webhook_secret is a required value once the webhook path is opted into,
     not an optional global env var like Intercom's INTERCOM_CLIENT_SECRET).
+
+    Also enforces timestamp freshness. Signing OVER the timestamp proves it was
+    not tampered with; it does not prove the delivery is not a replay. Without a
+    freshness window an attacker who captured one valid delivery could resend it
+    verbatim, indefinitely, and every signature check would pass. Content dedup
+    does not cover this: `_handle_zendesk_status_change`, `reconcile_issue` and
+    `reconcile_task` all run before any dedup check, so a captured
+    "ticket closed" delivery can undo manual triage over and over. Same 300s
+    window Slack's verifier already used.
     """
     if not secret:
         return False
     if not signature or not timestamp:
+        return False
+
+    # NOTE: Zendesk's timestamp is ISO-8601 ("2026-07-05T00:00:00Z"), NOT the
+    # Unix epoch Slack sends. Parsing it as an integer rejects every genuine
+    # delivery -- which is exactly what a first attempt at this check did, and
+    # what tests/test_zendesk_webhook.py caught.
+    skew = _iso8601_skew_seconds(timestamp)
+    if skew is None:
+        logger.warning("Zendesk webhook: unparseable signature timestamp")
+        return False
+
+    if skew > ZENDESK_REPLAY_WINDOW_SECONDS:
+        logger.warning(
+            "Zendesk webhook rejected: signature timestamp is %.0fs away from now "
+            "(window is %ss). Either a replayed delivery or severe clock skew.",
+            skew,
+            ZENDESK_REPLAY_WINDOW_SECONDS,
+        )
         return False
 
     expected = base64.b64encode(

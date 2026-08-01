@@ -53,6 +53,23 @@ def _make_zendesk_signature(body: bytes, timestamp: str, secret: str) -> str:
     return base64.b64encode(digest).decode()
 
 
+def _fresh_timestamp(offset_seconds: int = 0) -> str:
+    """A current ISO-8601 timestamp in Zendesk's header format.
+
+    These tests used to hardcode _fresh_timestamp(). That pinned the
+    absence of a replay window: any timestamp, however old, verified. Once
+    `_verify_zendesk_signature` gained the 300-second freshness check those
+    fixtures were weeks stale and every one of them 401'd -- correctly. They
+    now sign with a live timestamp, so they test the signature rather than
+    asserting a captured delivery is replayable forever.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    moment = datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+
 def _valid_ticket_payload(ticket_id=35436, subdomain=SUBDOMAIN):
     return {
         "subdomain": subdomain,
@@ -213,7 +230,7 @@ class TestVerifyZendeskSignature:
         from src.api.routes.source_webhooks import _verify_zendesk_signature
 
         body = b'{"ticket": {"id": 1}}'
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         secret = "whsec_abc"
         signature = base64.b64encode(
             hmac.new(secret.encode(), timestamp.encode() + body, hashlib.sha256).digest()
@@ -226,7 +243,7 @@ class TestVerifyZendeskSignature:
 
         body = b'{"ticket": {"id": 1}}'
         tampered_body = b'{"ticket": {"id": 2}}'
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         secret = "whsec_abc"
         signature = base64.b64encode(
             hmac.new(secret.encode(), timestamp.encode() + body, hashlib.sha256).digest()
@@ -238,8 +255,8 @@ class TestVerifyZendeskSignature:
         from src.api.routes.source_webhooks import _verify_zendesk_signature
 
         body = b'{"ticket": {"id": 1}}'
-        timestamp = "2026-07-05T00:00:00Z"
-        wrong_timestamp = "2026-07-05T00:00:01Z"
+        timestamp = _fresh_timestamp()
+        wrong_timestamp = _fresh_timestamp(1)
         secret = "whsec_abc"
         signature = base64.b64encode(
             hmac.new(secret.encode(), timestamp.encode() + body, hashlib.sha256).digest()
@@ -251,7 +268,7 @@ class TestVerifyZendeskSignature:
         from src.api.routes.source_webhooks import _verify_zendesk_signature
 
         body = b'{"ticket": {"id": 1}}'
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         signature = base64.b64encode(
             hmac.new(b"whsec_abc", timestamp.encode() + body, hashlib.sha256).digest()
         ).decode()
@@ -262,7 +279,7 @@ class TestVerifyZendeskSignature:
         from src.api.routes.source_webhooks import _verify_zendesk_signature
 
         body = b'{"ticket": {"id": 1}}'
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         signature = "irrelevant"
 
         assert _verify_zendesk_signature(body, timestamp, signature, None) is False
@@ -271,7 +288,7 @@ class TestVerifyZendeskSignature:
         from src.api.routes import source_webhooks
 
         body = b'{"ticket": {"id": 1}}'
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         secret = "whsec_abc"
         signature = base64.b64encode(
             hmac.new(secret.encode(), timestamp.encode() + body, hashlib.sha256).digest()
@@ -339,7 +356,7 @@ class TestZendeskSignatureEnforcement:
             content=json.dumps(payload).encode(),
             headers={
                 "Content-Type": "application/json",
-                "X-Zendesk-Webhook-Signature-Timestamp": "2026-07-05T00:00:00Z",
+                "X-Zendesk-Webhook-Signature-Timestamp": _fresh_timestamp(),
             },
         )
         assert response.status_code == 401
@@ -351,7 +368,7 @@ class TestZendeskSignatureEnforcement:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        sig = _make_zendesk_signature(body, "2026-07-05T00:00:00Z", WEBHOOK_SECRET_PLAIN)
+        sig = _make_zendesk_signature(body, _fresh_timestamp(), WEBHOOK_SECRET_PLAIN)
         response = client.post(
             "/api/v1/webhooks/zendesk/events",
             content=body,
@@ -369,7 +386,7 @@ class TestZendeskSignatureEnforcement:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         wrong_sig = _make_zendesk_signature(body, timestamp, "wrong-secret")
         response = client.post(
             "/api/v1/webhooks/zendesk/events",
@@ -391,7 +408,7 @@ class TestZendeskSignatureEnforcement:
         payload_b = _valid_ticket_payload(ticket_id=2)
         body_a = json.dumps(payload_a).encode()
         body_b = json.dumps(payload_b).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig_for_a = _make_zendesk_signature(body_a, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -412,7 +429,7 @@ class TestZendeskSignatureEnforcement:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         # Sign with some plausible secret -- doesn't matter, secret is None server-side.
         sig = _make_zendesk_signature(body, timestamp, "whatever")
         response = client.post(
@@ -435,7 +452,7 @@ class TestZendeskSignatureEnforcement:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         with patch(
@@ -468,7 +485,7 @@ class TestZendeskWebhookQueueing:
     ):
         payload = _valid_ticket_payload(ticket_id=35436)
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -496,7 +513,7 @@ class TestZendeskWebhookQueueing:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -529,7 +546,7 @@ class TestZendeskWebhookQueueing:
 
         payload = _valid_ticket_payload(ticket_id=35436)
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -571,7 +588,7 @@ class TestZendeskWebhookQueueing:
 
         payload = _valid_ticket_payload(ticket_id=35436)
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -593,7 +610,7 @@ class TestZendeskWebhookQueueing:
     ):
         payload = {"subdomain": SUBDOMAIN, "ticket": {"subject": "no id field"}}
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -615,7 +632,7 @@ class TestZendeskWebhookQueueing:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -649,7 +666,7 @@ class TestZendeskWebhookNever500s:
             (json.dumps(_valid_ticket_payload()).encode(), {"X-Zendesk-Webhook-Signature": "bogus"}),
             (
                 json.dumps(_valid_ticket_payload()).encode(),
-                {"X-Zendesk-Webhook-Signature-Timestamp": "2026-07-05T00:00:00Z"},
+                {"X-Zendesk-Webhook-Signature-Timestamp": _fresh_timestamp()},
             ),
         ],
     )
@@ -687,7 +704,7 @@ class TestZendeskWebhookNever500s:
     ):
         payload = _valid_ticket_payload()
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         with patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-1"):
@@ -767,7 +784,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=35436, status="solved")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -809,7 +826,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=35436, status="solved")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -842,7 +859,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=35436, status="open")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -875,7 +892,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=99999, status="solved")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -904,7 +921,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=35436, status="solved")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         wrong_sig = _make_zendesk_signature(body, timestamp, "wrong-secret")
 
         response = client.post(
@@ -956,7 +973,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=35436, status="solved")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
         headers = {
             "Content-Type": "application/json",
@@ -987,7 +1004,7 @@ class TestZendeskStatusChangeWebhook:
 
         payload = _status_change_payload(ticket_id=0, status="solved")
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
@@ -1020,7 +1037,7 @@ class TestZendeskStatusChangeWebhook:
         ticket.created path, byte-identical to the pre-existing behavior."""
         payload = _valid_ticket_payload(ticket_id=77777)
         body = json.dumps(payload).encode()
-        timestamp = "2026-07-05T00:00:00Z"
+        timestamp = _fresh_timestamp()
         sig = _make_zendesk_signature(body, timestamp, WEBHOOK_SECRET_PLAIN)
 
         response = client.post(
