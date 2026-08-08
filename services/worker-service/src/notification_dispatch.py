@@ -564,11 +564,11 @@ def dispatch_alert(
         metadata: Optional metadata dict
 
     Returns:
-        dict with counts: {inapp, slack, email}
+        dict with counts: {inapp, slack, discord, email}
     """
     from src.models import User, UserAlertPreference
 
-    counts = {"inapp": 0, "slack": 0, "email": 0}
+    counts = {"inapp": 0, "slack": 0, "discord": 0, "email": 0}
 
     with get_db_session() as db:
         users = db.query(User).filter(User.organization_id == org_id).all()
@@ -596,6 +596,7 @@ def dispatch_alert(
 
             channel_inapp = pref.channel_inapp if pref else True
             channel_slack = pref.channel_slack if pref else True
+            channel_discord = pref.channel_discord if pref else True
             channel_email = pref.channel_email if pref else False
 
             # In-app notification
@@ -616,6 +617,10 @@ def dispatch_alert(
             if channel_slack:
                 counts["slack"] += 1
 
+            # Discord alert (queued per-org, not per-user)
+            if channel_discord:
+                counts["discord"] += 1
+
             # Email (flagged for daily digest, not sent immediately)
             if channel_email:
                 counts["email"] += 1
@@ -625,8 +630,7 @@ def dispatch_alert(
         # Send Slack alert once per org if any user wants it
         if counts["slack"] > 0:
             _dispatch_slack_alert(org_id, alert_type, title, message, link)
-            # There is no separate channel_discord preference yet — Discord webhook
-            # integrations piggyback on the same "chat" toggle as Slack.
+        if counts["discord"] > 0:
             _dispatch_discord_alert(org_id, alert_type, title, message, link)
 
     return counts
