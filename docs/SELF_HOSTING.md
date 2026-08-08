@@ -693,16 +693,19 @@ in the delivery log. Use a Discord *integration*, not a custom webhook.
 **What reaches Discord.** The four main alert types — urgent feedback, sentiment spike,
 churn risk, volume spike — plus customer health-drop and recovery alerts.
 
-**⚠️ Discord currently rides on the Slack toggle.** There is no separate "Discord" channel
-preference yet. In Settings → Notifications the per-alert channel switch is still labelled
-**Slack**, and Discord fires whenever that switch is on and your org has an active Discord
-integration. Two consequences worth knowing before you rely on it:
+**Per-type Discord channel switch.** Settings → Notifications now has a **Discord** channel
+switch for each alert type, defaulting to **on** — so existing installs keep delivering to
+Discord exactly as before without any action. Slack and Discord are routed independently:
+you can have a type be Discord-only (Slack off), Slack-only (Discord off), both, or neither.
+Discord delivery still requires an active Discord integration; the switch alone does not
+deliver anything.
 
-- If you configure Discord and turn the Slack toggle **off**, you will receive **nothing**.
-- If you have both Slack and Discord integrations active, both receive every alert. There
-  is no way to route some alert types to one and some to the other.
+Two consequences worth knowing:
 
-A dedicated `channel_discord` preference is a schema change and is not in this release.
+- If you turn **both** the Slack and Discord switches off for a type, no chat-channel
+  delivery happens for it — the alert still lands in-app and by email if those are enabled.
+- The Slack and Discord switches are independent, so turning one off does not mute the
+  other.
 
 **Not covered by Discord in this release:**
 
