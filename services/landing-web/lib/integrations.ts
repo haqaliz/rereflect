@@ -267,7 +267,7 @@ export const integrations: Integration[] = [
       { title: 'One-Click Issue Creation', description: 'Turn any feedback item into a Jira issue in a couple of clicks, pre-filled with title, description, and customer context.', icon: 'FileText' },
       { title: 'Project & Issue-Type Picker', description: 'Choose which Jira project and issue type (Bug, Task, Story) each issue is created in — no hardcoded defaults.', icon: 'Tags' },
       { title: 'Feedback-to-Issue Linking', description: 'Every created issue is linked back to the originating feedback item, so context is never lost.', icon: 'RefreshCw' },
-      { title: 'Two-Way Status Sync', description: 'Opt in and Rereflect polls your linked Jira issues, moving the feedback item to In Review, Resolved, or Closed when the Jira status changes — no manual updating, and it never overwrites a status you set by hand.', icon: 'RefreshCw' },
+      { title: 'Two-Way Status Sync', description: 'Opt in and Rereflect keeps the feedback item in step with your linked Jira issues — a 15-minute poll works behind any firewall, and an optional real-time webhook applies the change the moment the issue moves, never overwriting a status you set by hand.', icon: 'RefreshCw' },
       { title: 'Cloud-Native', description: 'Built for Jira Cloud (*.atlassian.net) using the official REST API v3 with Basic auth.', icon: 'Zap' },
     ],
     useCases: [
@@ -339,7 +339,7 @@ export const integrations: Integration[] = [
     howItWorks: [
       { step: '1', title: 'Connect Asana', description: 'Paste a personal access token to authorize Rereflect — no OAuth redirect required.' },
       { step: '2', title: 'Create Tasks from Feedback', description: 'Pick a workspace and project, then create an Asana task directly from any feedback item — pre-filled with the feedback content and AI context.' },
-      { step: '3', title: 'Track the Link', description: 'Rereflect keeps a link between the feedback item and the Asana task, so your team can jump straight to the task that came from a customer.' },
+      { step: '3', title: 'Track the Link & Sync Status Back', description: 'Rereflect keeps a link between the feedback item and the Asana task — turn on status-sync and the feedback follows the task, moving to Resolved when it is completed (and back if it reopens).' },
     ],
     features: [
       { title: 'Token-Based Connection', description: 'Connect with a personal Asana access token — no OAuth app to register, no admin approval workflow required.', icon: 'KeyRound' },
@@ -347,6 +347,7 @@ export const integrations: Integration[] = [
       { title: 'Workspace & Project Picker', description: 'Choose which Asana workspace and project each task is created in — no hardcoded defaults.', icon: 'Tags' },
       { title: 'Feedback-to-Task Linking', description: 'Every created task is linked back to the originating feedback item, so context is never lost.', icon: 'RefreshCw' },
       { title: 'Duplicate-Safe', description: 'Creating a task twice from the same feedback item surfaces the existing linked task instead of silently duplicating it.', icon: 'Shield' },
+      { title: 'Status Sync (Poll + Real-Time)', description: 'Opt in and Rereflect follows linked Asana tasks — the feedback item moves to Resolved when the task is completed, via a 15-minute poll plus an optional real-time webhook.', icon: 'RefreshCw' },
     ],
     useCases: [
       { persona: 'Product Manager', role: 'B2B SaaS, Asana-based roadmap', quote: 'We used to manually re-type customer complaints into Asana tasks. Now I create the task right from the feedback card and the customer context comes with it.', icon: 'Layers' },
