@@ -191,12 +191,19 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 > via a seeded template or a direct API call. Also excluded: per-user `channel_discord`
 > preference (schema change), the Slack-mrkdwn custom-template path, and 429 retry.
 
-### P5 — Discord rides the Slack notification toggle (limitation, NOT STARTED)
-- [ ] There is no `channel_discord` on `UserAlertPreference`, so `dispatch_alert` fires
-      Discord only when `counts["slack"] > 0` (`notification_dispatch.py:626-630`).
-      **Configure Discord, switch the Slack toggle off, and you receive nothing.** With both
-      integrations active, both get every alert, with no per-type routing.
-- [ ] Fix is a `channel_discord` column + Alembic migration + a Settings → Notifications
+### P5 — Discord rides the Slack notification toggle — **SHIPPED** on `feat/discord-channel-preferences` (2026-08-09)
+> Delivered as `feat/discord-channel-preferences`, planned in
+> `docs/planning/discord-channel-preferences/`. A per-type `channel_discord` preference
+> (default **true** — opt-out, so existing Discord-sending orgs keep receiving) decouples
+> Discord dispatch from the Slack toggle on **both** worker pipes (`dispatch_alert` +
+> `dispatch_health_drop_alert`); the worker `UserAlertPreference` mirror also gained the
+> previously-missing `channel_intercom` column (drift closed). The API round-trips the
+> field with a `None = unchanged` sentinel so a stale client PUT cannot silently flip
+> Discord off. UI: per-type Discord switch in Settings → Notifications (Settings →
+> Integrations connection unchanged). **Still excluded (unchanged):** the automations
+> engine's `send_notification` channel list (no channels editor) — Discord stays out of
+> scope there.
+- [x] Fix is a `channel_discord` column + Alembic migration + a Settings → Notifications
       toggle, then decoupling the two dispatch calls.
 - **Why P5:** documented in `docs/SELF_HOSTING.md` and the changelog, so it is a known
   limitation rather than a surprise — but it will read as a bug to the first person who hits it.
