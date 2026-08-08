@@ -3,7 +3,7 @@
 **Slug:** `status-sync-realtime-mapping`
 **Branch:** `feat/status-sync-realtime-mapping`
 **Type:** feat (freeform; no GitHub issue)
-**Status:** Draft for review gate
+**Status:** **SHIPPED 2026-07-18** (merged to master as `feat/status-sync-realtime-mapping`; kept as the record — do not re-pick. Webhooks, mapping editor, race-guard, docs and security reviews all landed. Tracking markers corrected in `chore/status-sync-tracking-truth`.)
 **Author:** Rereflect (via `rereflect-begin-fast`)
 
 ---
