@@ -228,8 +228,14 @@ class TestDispatchDiscordHealthAlert:
 # ---------------------------------------------------------------------------
 
 class TestDispatchHealthDropAlertTriggersDiscord:
-    def test_calls_discord_health_dispatch_when_slack_channel_enabled(self, db):
-        from src.notification_dispatch import dispatch_health_drop_alert
+    """dispatch_health_drop_alert() must dispatch Slack and Discord independently,
+    each off its own channel preference — no piggybacking on the Slack toggle.
+
+    Same four-way matrix as the main pipe: slack-only, discord-only, both, and
+    no-pref-row defaults.
+    """
+
+    def _make_user_pref(self, db, channel_slack: bool, channel_discord: bool) -> int:
         from src.models import User, UserAlertPreference
 
         org = make_org(db)
@@ -238,24 +244,31 @@ class TestDispatchHealthDropAlertTriggersDiscord:
         db.commit()
         db.refresh(user)
 
-        db.add(UserAlertPreference(
+        pref = UserAlertPreference(
             user_id=user.id,
             alert_type="customer_health_drop",
             is_enabled=True,
             channel_inapp=False,
-            channel_slack=True,
+            channel_slack=channel_slack,
             channel_email=False,
-        ))
+        )
+        pref.channel_discord = channel_discord
+        db.add(pref)
         db.commit()
+        db.refresh(pref)
+        return org.id
+
+    def _dispatch_with_mocks(self, db, org_id: int):
+        from src.notification_dispatch import dispatch_health_drop_alert
 
         with patch("src.notification_dispatch._get_redis_client") as mock_redis:
             mock_redis.return_value.get.return_value = None
             with patch("src.notification_dispatch._check_org_plan") as mock_plan:
                 mock_plan.return_value = True
-                with patch("src.notification_dispatch._dispatch_slack_health_alert"):
+                with patch("src.notification_dispatch._dispatch_slack_health_alert") as mock_slack:
                     with patch("src.notification_dispatch._dispatch_discord_health_alert") as mock_discord:
                         dispatch_health_drop_alert(
-                            org_id=org.id,
+                            org_id=org_id,
                             customer_email="john@acme.com",
                             customer_name="John",
                             old_score=65,
@@ -266,6 +279,73 @@ class TestDispatchHealthDropAlertTriggersDiscord:
                             db=db,
                         )
 
+        return mock_slack, mock_discord
+
+    def test_slack_only_preference_skips_discord_dispatch(self, db):
+        org_id = self._make_user_pref(db, channel_slack=True, channel_discord=False)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org_id)
+
+        mock_slack.assert_called_once()
+        assert mock_slack.call_args.args[0] == org_id
+        mock_discord.assert_not_called()
+
+    def test_discord_only_preference_skips_slack_dispatch(self, db):
+        org_id = self._make_user_pref(db, channel_slack=False, channel_discord=True)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org_id)
+
+        mock_slack.assert_not_called()
         mock_discord.assert_called_once()
-        call_args = mock_discord.call_args.args
-        assert call_args[0] == org.id
+        assert mock_discord.call_args.args[0] == org_id
+
+    def test_both_channels_enabled_dispatches_both(self, db):
+        org_id = self._make_user_pref(db, channel_slack=True, channel_discord=True)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org_id)
+
+        mock_slack.assert_called_once()
+        assert mock_slack.call_args.args[0] == org_id
+        mock_discord.assert_called_once()
+        assert mock_discord.call_args.args[0] == org_id
+
+    def test_no_preference_row_defaults_to_slack_and_discord(self, db):
+        from src.models import User
+
+        org = make_org(db)
+        user = User(email="user@test.com", organization_id=org.id, role="owner")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org.id)
+
+        mock_slack.assert_called_once()
+        assert mock_slack.call_args.args[0] == org.id
+        mock_discord.assert_called_once()
+        assert mock_discord.call_args.args[0] == org.id
+
+    def test_counts_dict_includes_discord_key(self, db):
+        from src.notification_dispatch import dispatch_health_drop_alert
+
+        org_id = self._make_user_pref(db, channel_slack=True, channel_discord=True)
+
+        with patch("src.notification_dispatch._get_redis_client") as mock_redis:
+            mock_redis.return_value.get.return_value = None
+            with patch("src.notification_dispatch._check_org_plan") as mock_plan:
+                mock_plan.return_value = True
+                with patch("src.notification_dispatch._dispatch_slack_health_alert"):
+                    with patch("src.notification_dispatch._dispatch_discord_health_alert"):
+                        counts = dispatch_health_drop_alert(
+                            org_id=org_id,
+                            customer_email="john@acme.com",
+                            customer_name="John",
+                            old_score=65,
+                            new_score=42,
+                            old_risk_level="moderate",
+                            new_risk_level="at_risk",
+                            components=COMPONENTS,
+                            db=db,
+                        )
+
+        assert counts == {"inapp": 0, "slack": 1, "discord": 1, "email": 0}
