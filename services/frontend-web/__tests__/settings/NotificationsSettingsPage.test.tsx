@@ -3,8 +3,9 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 // Mock next/navigation
 const mockPush = vi.fn();
+const mockRouter = { push: mockPush };
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => mockRouter,
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/settings/notifications',
 }));

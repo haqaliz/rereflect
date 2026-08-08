@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import { DiscordIcon } from '@/components/icons/DiscordIcon';
 
 const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; hasThreshold: boolean; thresholdLabel?: string; thresholdUnit?: string; hasDualThreshold?: boolean; planGate?: string[] }> = {
   urgent_feedback: {
@@ -80,14 +81,14 @@ const ALERT_TYPE_CONFIG: Record<string, { label: string; description: string; ha
 };
 
 const DEFAULT_PREFERENCES: AlertPreference[] = [
-  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
-  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
-  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'customer_health_drop', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, drop_threshold: 15, retention_days: 30 },
+  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
+  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
+  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'customer_health_drop', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, drop_threshold: 15, retention_days: 30 },
 ];
 
 const HOUR_OPTIONS = [
@@ -119,6 +120,7 @@ const RETENTION_OPTIONS = [
 const CHANNEL_CONFIG = [
   { key: 'channel_inapp' as const, label: 'In-App', icon: Monitor },
   { key: 'channel_slack' as const, label: 'Slack', icon: null, customIcon: 'slack' },
+  { key: 'channel_discord' as const, label: 'Discord', icon: null, customIcon: 'discord' },
   { key: 'channel_intercom' as const, label: 'Intercom', icon: null, customIcon: 'intercom' },
   { key: 'channel_email' as const, label: 'Email', icon: Mail },
 ];
@@ -265,6 +267,7 @@ export default function NotificationsSettingsPage() {
     const channels: string[] = [];
     if (pref.channel_inapp) channels.push('In-App');
     if (pref.channel_slack) channels.push('Slack');
+    if (pref.channel_discord) channels.push('Discord');
     if (pref.channel_intercom) channels.push('Intercom');
     if (pref.channel_email) channels.push('Email');
     return channels;
@@ -274,6 +277,8 @@ export default function NotificationsSettingsPage() {
     switch (channelKey) {
       case 'channel_slack':
         return <SlackIcon className={size} />;
+      case 'channel_discord':
+        return <DiscordIcon className={size} />;
       case 'channel_intercom':
         return <IntercomIcon className={size} />;
       default:
@@ -394,6 +399,11 @@ export default function NotificationsSettingsPage() {
                               <SlackIcon className="w-3.5 h-3.5" />
                             </div>
                           )}
+                          {pref.channel_discord && (
+                            <div className="p-1 rounded bg-secondary" title="Discord">
+                              <DiscordIcon className="w-3.5 h-3.5" />
+                            </div>
+                          )}
                           {pref.channel_intercom && (
                             <div className="p-1 rounded bg-secondary" title="Intercom">
                               <IntercomIcon className="w-3.5 h-3.5" />
@@ -444,6 +454,8 @@ export default function NotificationsSettingsPage() {
                       <div className="flex items-center gap-2.5">
                         {channel.customIcon === 'slack' ? (
                           <SlackIcon className="w-5 h-5" />
+                        ) : channel.customIcon === 'discord' ? (
+                          <DiscordIcon className="w-5 h-5" />
                         ) : channel.customIcon === 'intercom' ? (
                           <IntercomIcon className="w-5 h-5" />
                         ) : channel.icon ? (

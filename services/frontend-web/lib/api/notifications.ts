@@ -23,6 +23,7 @@ export interface AlertPreference {
   is_enabled: boolean;
   channel_email: boolean;
   channel_slack: boolean;
+  channel_discord: boolean;
   channel_inapp: boolean;
   channel_intercom: boolean;
   threshold_value: number | null;
