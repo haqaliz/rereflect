@@ -1,55 +1,57 @@
-# Card — `chore/status-sync-tracking-truth`
+# Card — `feat/discord-channel-preferences`
 
-**Type:** chore (freeform — no GitHub issue)
-**Branch:** `chore/status-sync-tracking-truth`
-**Worktree:** `.claude/worktrees/feat-status-sync-realtime-mapping` (renamed branch in place)
+**Type:** feat (freeform — no GitHub issue)
+**Branch:** `feat/discord-channel-preferences`
+**Worktree:** `.claude/worktrees/feat-discord-channel-preferences`
 **Opened:** 2026-08-09
+**Traces to:** DEV-TRACKING P5 (`DEV-TRACKING.md:194-202`) — Post-1.0.0 User Feedback Backlog
+**Picked by:** `rereflect-next` (previous session) — the one remaining user-visible
+defect on the batch-2 ask path (Discord webhook + batch sentiment trigger both shipped;
+this is the leftover).
 
 ## The problem
 
-`rereflect-next` (previous session) recommended building `status-sync-realtime-mapping`
-as the next feature — real-time Jira/Asana webhooks + a status-mapping editor UI.
-Digging at the start of `rbf feat status-sync-realtime-mapping` proved the feature
-**already shipped on master 2026-07-18**: `StatusMappingEditor.tsx` mounted in all
-three status-sync cards, `jira_webhook.py` + `asana_webhook.py` (handshake + HMAC,
-fail-closed) registered in `main.py:395,398`, `status_mapping` on Jira/Asana GET
-`/status`, the race-safe conditional-`UPDATE` writer, webhook enable/secret-reveal
-UI, SELF_HOSTING docs, and two security re-reviews — all merged as
-`feat/status-sync-realtime-mapping`, planned in
-`docs/planning/status-sync-realtime-mapping/`.
+Discord alerting **rides the Slack notification toggle**. In
+`services/worker-service/src/notification_dispatch.py`, `dispatch_alert` fires the
+Discord webhook only when `counts["slack"] > 0` (~line 626), and the code comment says
+it directly: *"There is no separate channel_discord preference yet."*
 
-What had NOT been done: **the tracking docs still claimed it was deferred** —
-the exact "close the marker in the same commit" defect DEV-TRACKING's roadmap-hygiene
-note (2026-08-01) warns about, and the reason the previous pick was wrong.
+Consequences (from DEV-TRACKING P5):
 
-## What this chore fixes
+- **Configure Discord, switch the Slack toggle off → you receive nothing.**
+- With **both** integrations active, both get every alert, with **no per-type routing**
+  — you cannot have email-only for one alert type and Discord for another.
 
-Stale "deferred v2" markers, corrected against the shipped code (each claim
-verified by reading the card components + webhook routes before editing):
+This is a documented limitation (SELF_HOSTING.md + changelog), so it is not a surprise
+to existing users — but it will read as a bug to the first person who hits it, on the
+exact path a user asked for ("plug in a Slack or Discord webhook to get pinged").
 
-- `AI-TRACKING.md` rows for Jira / Zendesk / Asana — removed the shipped
-  webhook + mapping-editor items from the deferred lists, appended a
-  "shipped 2026-07-18" sentence per row, updated the surface cells.
-- `DEV-TRACKING.md` M3.2 (Jira) / M3.3 (Asana) / M3.4 (Zendesk) — new shipped
-  bullet per section; deferred lists now keep only the genuinely-unbuilt items
-  (OAuth 3LO, Server/Data Center, section/custom-field mapping, outbound
-  webhook-on-change, etc.).
-- `docs/planning/status-sync-realtime-mapping/prd.md` — Status header marked
-  SHIPPED so it cannot be re-picked.
+## The fix (minimal slice)
 
-## What stays deferred (intentionally untouched)
+- `channel_discord` column on `UserAlertPreference` + Alembic migration
+  (backend model; worker reads it via its own model mirror).
+- A Settings → Notifications toggle (per-user alert preferences), mirroring the Slack
+  per-type toggles.
+- Decouple the two dispatch calls in the worker: Slack dispatch keys off
+  `counts["slack"]`, Discord dispatch keys off `channel_discord` (per-type aware).
+- Default for existing rows: **TBD** (inherit Slack-toggle behavior vs default-on) —
+  open question, decide up front so the migration doesn't silently change who gets
+  alerted. See PRD.
 
-Jira: OAuth 3LO, Server/Data Center, outbound webhook-on-jira-change, multiple sites.
-Asana: OAuth 2.0, section/custom-field → `in_review` mapping, assignee/due-date
-mapping, team-scoped-project picker, multiple workspaces. Zendesk: OAuth flow,
-per-comment ingestion, backfill, filters, multiple subdomains, outbound
-webhook-on-zendesk-change.
+## Scope guards (from DEV-TRACKING, do not expand)
 
-## Evidence (shipped state)
+- The **automations engine's notify path has no channels editor** (`DEV-TRACKING.md:189-191`
+  — Discord was deliberately excluded there because `channels: ["discord"]` would be
+  unreachable except via a seeded template or direct API call). **This branch stays at
+  alert dispatch; the automations channels editor is out of scope.**
+- No new notification *types* — this is per-channel routing of existing types.
+- Slack behavior must stay byte-identical for orgs that never touch the new toggle.
 
-- `git log`: `1ab04994` (mapping editor mount), `369bd462` (StatusMappingEditor),
-  `14fc718d` (jira webhook), `70428d2f` (asana webhook), `ce711b4b` (race guard),
-  `f5bfb43f`/`0bf3fb06` (sec reviews) — all ancestors of master.
-- Frontend: `components/settings/{Jira,Asana,Zendesk}StatusSyncCard.tsx` + tests.
-- Backend: `services/backend-api/src/api/routes/{jira,asana}_webhook.py`.
-- Docs: `docs/SELF_HOSTING.md` "Real-time webhook (optional)" sections.
+## Related shipped work
+
+- `feat/discord-notifications` (2026-07-29, SHIPPED): Discord integration CRUD + test
+  route, sender per process (backend returns status dict, worker raises), dispatch on
+  the main alert pipe and the health-drop path, `DiscordIcon`, provider tile, ternary
+  fixes. Slack-mrkdwn template path and 429 retry deliberately excluded there.
+- `notification_dispatch.py` — the shared alert pipe: per-type preferences, counts,
+  Slack/email/in-app channels, digests.
