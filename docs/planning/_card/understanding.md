@@ -1,110 +1,97 @@
-# Phase 2 — Understanding: `integrations-routes-missing-rbac`
+# Understanding — `oauth-tokens-stored-plaintext`
 
-**Dug:** 2026-08-09, against the worktree `bug/integrations-routes-missing-rbac`
-(base `2884b870`). Three parallel dig agents (router inventory / RBAC machinery /
-sibling-module audit). Premise verified, blast radius expanded — see F1–F3.
+**Phase 2 dig output** · branch `bug/oauth-tokens-stored-plaintext` · 2026-08-09
 
----
+## What the bug really is
 
-## What the bug is really asking
+Slack and Intercom OAuth flows in `services/backend-api/src/api/routes/integrations.py`
+store the provider access token **in plaintext** in the generic `integrations` table
+(`Integration.oauth_access_token`, a plain `Text` column). Every newer BYOK integration
+(Zendesk, Jira, Asana, HubSpot, Salesforce) encrypts with Fernet (`encrypt_api_key`/
+`decrypt_api_key` in `src/utils/encryption.py`, key from `LLM_ENCRYPTION_KEY`). The OAuth
+paths were never migrated onto that pattern.
 
-`services/backend-api/src/api/routes/integrations.py` has **zero** role checks
-(`require_admin_or_owner`/`require_owner`/403 — verified by grep, two "admin/owner"
-hits are an Intercom API field name). Every route only requires `get_current_org`
-(JWT-valid, no role check). So a `member`-role user can create/delete/test Slack and
-Discord integrations, mutate integration config, and drive both OAuth connect flows
-via the API — contradicting the RBAC matrix ("Manage integrations: Owner ✅ / Admin ✅ /
-Member ❌"). The frontend hides the Integrations tab from members; the backend never did.
+**Real-world consequence:** on any self-hosted install, a live Slack/Intercom token —
+write access to the workspace/helpdesk — sits in plaintext in the DB. The repo's own
+users named privacy/BYOK/no-telemetry as the hook (DEV-TRACKING "No build required",
+four of seven comments); this is the class of gap that would poison that positioning.
 
-## F1 — The named file, exactly (14 routes, 10 gateable)
+## Verified facts (code-confirmed, not inferred)
 
-| Route | Write? | Gate? |
+**Write sites (plaintext today):**
+- `routes/integrations.py:912` — `slack_oauth_callback`, `oauth_access_token=access_token` with a literal `# In production, encrypt this!` comment
+- `routes/integrations.py:1089` — `intercom_oauth_callback`, no comment
+
+**Read sites that must decrypt (exactly once, at the call site):**
+- backend: `integrations.py:683` (`test_slack_integration` → `send_slack_message_oauth`), `feedback_sources.py:621` (truthiness guard) + `:637` (Bearer header, `list_slack_channels`)
+- worker (no encryption module exists there — local `_decrypt` mirror required): `alerts.py:445`, `source_events.py:314` (Slack + Intercom `fetch_context`), `anomaly.py:270`, `notification_dispatch.py:104` + `:701`
+
+**Truthiness traps:** Fernet ciphertext is a non-empty string, so every `if not
+integration.oauth_access_token` / `and integration.oauth_access_token` guard keeps
+passing. Nothing breaks loudly — instead the send paths would post **ciphertext as the
+Bearer token** → 401 from the provider. Decrypt must happen at the send sites; guards
+stay as-is (ciphertext is truthy).
+
+**Worker precedent (the pattern to copy):** module-local `_decrypt(token)` with inline
+`from cryptography.fernet import Fernet` + `os.environ["LLM_ENCRYPTION_KEY"]`
+(zendesk_sync.py:80, hubspot_sync.py:45, salesforce_sync.py:80 …). zendesk_sync also
+defines the R6 error contract for the worker: missing key → `{"status": "error",
+"reason": "missing_encryption_key"}`, no retry.
+
+**Backfill migration:** chained to head `a9b8c7d6e5f4` (currently the single head; CI
+asserts exactly one). Repo convention: **zero migrations import `src.` modules**; the
+one existing Fernet migration (`h1i2j3k4l5m6:122`) reads `os.environ` and imports
+`cryptography.fernet` inline — but it **silently fell back to plaintext** when the key
+was missing, which a security backfill must NOT do. `LLM_ENCRYPTION_KEY` is available at
+migration time in production (Dockerfile runs `alembic upgrade head` in-container with
+the compose-injected key) and in CI (dummy key set before upgrade; clean DB → zero
+rows). Locally, `alembic/env.py` does not `load_dotenv()` — operators must export it.
+Offline mode (`--sql`) cannot run a Python-transform backfill (all repo backfills are
+online-only).
+
+## Contradictions surfaced (flagged, not papered over)
+
+1. **The false comment is already fixed.** `models/integration.py:19-25` no longer
+   claims "encrypted at application level"; it now states plainly that tokens are
+   plaintext, names the encrypting integrations, references this exact tracking entry,
+   and says "Do not restore the old comment without doing the encryption." The card's
+   "correct the false comment" item is therefore **already done** (DEV-TRACKING.md:505-507
+   says the same). The fix no longer includes that step.
+2. **Latent sibling defect found in the dig:** `worker-service/src/tasks/intercom_sync.py:76-80`
+   `_decrypt` does `from src.utils.encryption import decrypt_api_key` — a module that
+   does **not exist in the worker image**. Same family as the P0/P0b dead-import bugs;
+   masked because tests monkeypatch `_decrypt`. Affects the *dedicated* Intercom
+   token-paste table (`IntercomIntegration`), **not** the generic `integrations` table —
+   out of scope for this card, but must be recorded as a follow-up in DEV-TRACKING so
+   it is not re-discovered the hard way.
+3. **`oauth_refresh_token` / `oauth_expires_at` are dead columns** for these providers
+   (never written by either flow; zero read sites). Out of scope — do not touch.
+
+## Open questions for the PRD
+
+- **Fail-closed migration vs. operator who never set `LLM_ENCRYPTION_KEY`:** the app
+  otherwise runs fine without it (integration saves 422). Fail-closed means `alembic
+  upgrade head` **aborts the deploy** for those installs. Card mandates fail-loud;
+  SELF_HOSTING.md callout needed. (Not a question of whether — how loud, and where
+  documented.)
+- **Already-encrypted rows:** a reconnect post-deploy rotates the token and would write
+  ciphertext. The backfill must skip rows already Fernet-encrypted (prefix `gAAAAA` or
+  try-decrypt-and-skip) — no double encryption.
+- **`downgrade()`:** repo precedent is best-effort decrypt with `except Exception: pass`
+  (h1i2j3k4l5m6:194-224). Mirror it or document destructive? (Precedent says mirror.)
+- **Tests to pin:** `test_intercom.py:199` asserts stored token equals the raw
+  `"xyztoken123"` — must flip to "ciphertext + decrypt round-trip". Any equivalent Slack
+  callback assertion. Worker send-path tests must assert the decrypted token reaches the
+  Bearer header (not ciphertext) — i.e. a regression test that would have caught the
+  truthiness trap.
+
+## Affected areas
+
+| Area | Service | Files |
 |---|---|---|
-| `GET /` list | read | yes (sibling pattern gates reads too) |
-| `POST /slack/webhook`, `POST /discord/webhook` | write | yes |
-| `POST /discord/test`, `POST /slack/test` | external send | yes |
-| `GET /{id}`, `GET /{id}/logs` | read | yes (sibling pattern) |
-| `PATCH /{id}`, `DELETE /{id}` | write | yes |
-| `GET /slack/template-variables` | static, **zero auth today** | decide (see F4) |
-| `GET /slack/oauth/connect`, `GET /intercom/oauth/connect` | mints state | **yes — this is the P1** |
-| `GET /slack/oauth/callback`, `GET /intercom/oauth/callback` | creates row | **cannot gate — JWT-less browser redirect, state-verified** |
-
-`send_slack_message` / `send_discord_message` are imported by the automations engine
-(`automation_engine.py:649`) and patched by tests by module path — signatures must not
-change; only route-level deps are added. `oauth_states` dict is seeded directly by
-`tests/test_intercom.py:153-157` — name and location must stay.
-
-## F2 — The audit found TWO more full omissions (same class, same severity)
-
-- **`linear_integration.py` — 17 routes, 0 role deps** (only inert `require_feature`).
-  WRITE routes reachable by members: `GET /connect` (OAuth), `DELETE /disconnect`,
-  `PUT /config`, `POST /test`, **`POST /issues` (member can create Linear issues)**
-  `PUT /team-mappings`, `PUT /status-mappings`. Linear's OAuth callback (`GET /callback`)
-  is JWT-less like the others.
-- **`feedback_sources.py` — 8 routes, 0 role deps.** WRITE routes: `POST /`,
-  `PATCH /{source_id}`, `DELETE /{source_id}`. These back the top-level
-  `/feedback-sources` pages, which the frontend does NOT role-gate — so this hole is
-  live in the UI, not just the API.
-
-**Partially covered:** `webhooks.py` — all 5 writes gated; 3 GET reads ungated
-(webhooks list/get/deliveries) — matches the member-visible Webhooks nav item. **Leave
-as-is** unless the matrix is read strictly (recommend: leave, flag in PRD).
-
-**Correct baseline (do not touch):** zendesk (7/7), jira (12/12), asana (12/12),
-intercom (3/3), hubspot (11/11), salesforce (11 + JWT-less callback), oidc (3/3),
-saml (3/3), api_keys (4/4). **The fix is restoring integrations/linear/feedback-sources
-to the pattern every sibling already uses.**
-
-## F3 — Test pattern to mirror
-
-- Dep style: decorator `dependencies=[Depends(require_admin_or_owner)]` (sibling
-  integration routers; `integrations.py` already uses that style for
-  `require_feature`). Failed check → 403, plain-string detail.
-- Fixtures: conftest `auth_headers` = **admin** (existing tests keep passing untouched).
-  Add per-file `member_user/member_headers` (+ `owner_*` if needed) minted via
-  `create_access_token({"user_id", "organization_id", "role"})` — copy the pattern from
-  `tests/test_oidc_config.py:114-159` / `tests/test_jira_connection.py:94-139`.
-- Assert member → `== 403` strictly (do NOT copy the loose `in [200, 403]` legacy
-  style from `test_team.py:353-371`). Mirror `test_oidc_config.py:298-308` and
-  `test_jira_connection.py:550-567`.
-- Only `tests/test_integrations.py` (admin-only, keeps passing) and
-  `tests/test_intercom.py` (plan-gate 403 with dict body — unchanged) cover the named
-  file today. No member/owner role tests exist for it.
-
-## F4 — Decisions the PRD must settle
-
-1. **Scope = three modules** (`integrations.py` + `linear_integration.py` +
-   `feedback_sources.py`)? Recommendation: yes — same class, and the triage note
-   (DEV-TRACKING.md:528-529) explicitly demanded the audit; the previous hardening
-   branch (`integration-auth-tenancy-hardening`) also swept every instance.
-2. **Reads**: gate ALL routes including GETs on `integrations.py` and
-   `linear_integration.py` (matches every sibling router) vs reads-only-member.
-   Recommendation: gate all — consistent, and the matrix grants members no
-   integration-status reads. For `feedback_sources.py`: gate writes, leave GETs open
-   (its pages are top-level/member-visible today; gating reads would 403 every member
-   view with no UI change).
-3. **Frontend**: the card said "no frontend changes" but the audit shows three member-
-   reachable surfaces would newly 403: `settings/integrations/[id]` + `new` pages,
-   the Linear branch of `feedbacks/[id]/create-issue`, and `feedback-sources/*` write
-   buttons. Options: (a) backend-only, accept member 403s on those pages (jira/asana
-   issue creation already 403s for members today — so linear becoming consistent is a
-   fix, not a regression); (b) also add the existing `isAdminOrOwner` redirect pattern
-   to those pages. Recommendation: (a) in this branch, (b) as an immediately-following
-   chore — or (b) in-branch if the user prefers one PR.
-4. **`GET /slack/template-variables`** is fully unauthenticated today. Gate with
-   admin/owner (recommended — no legit unauthenticated consumer) or leave public?
-5. **OAuth callbacks** stay JWT-less (provider redirect) — gate the *connect* step
-   only; document the residual (state-guarded) risk. Matches the Salesforce precedent.
-
-## Contradictions / flags surfaced (do not paper over)
-
-- The card's "the UI already hides integration management from members" claim is
-  **false in three places** (F4#3). The `settings/integrations` *hub* page redirects
-  members (AppSidebar `requiredRole: 'admin'` at `components/AppSidebar.tsx:142`), but
-  `settings/integrations/[id]`, `new`, the `feedbacks/[id]/create-issue` Linear branch,
-  and every `feedback-sources/*` page have no role guard. CLAUDE.md's
-  `components/SettingsTabs.tsx` reference is stale — the component doesn't exist.
-- `webhooks.py` GET reads are deliberately member-visible and match the UI; not part of
-  this bug.
-- `GET /slack/template-variables` being fully unauthenticated is itself a (minor)
-  defect in the "no auth = bug" class — flag, don't silently fix.
+| OAuth write paths | backend-api | `src/api/routes/integrations.py` (912, 1089) |
+| Backend read sites | backend-api | `integrations.py:683`, `feedback_sources.py:621,637` |
+| Worker read sites | worker-service | `alerts.py:445`, `source_events.py:314`, `anomaly.py:270`, `notification_dispatch.py:104,701` |
+| Backfill | backend-api | new `alembic/versions/*_encrypt_integration_oauth_tokens.py`, head `a9b8c7d6e5f4` |
+| Tests | both | `test_intercom.py:199` flip; new encryption/decrypt/migration tests |
+| Docs | repo | `SELF_HOSTING.md` fail-closed callout; DEV-TRACKING marker → FIXED in same commit |

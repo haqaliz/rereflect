@@ -266,6 +266,21 @@ naming the failed factor instead of swallowing it silently, so this class of bug
 again the same way. Per-factor isolation is unchanged: one failing factor still can't void
 the other eight.
 
+### Security — Slack and Intercom OAuth tokens are now encrypted at rest
+
+`Integration.oauth_access_token` is Fernet-encrypted before storage for Slack and Intercom,
+exactly like every other integration credential. Both OAuth callbacks encrypt on write
+(saving without `LLM_ENCRYPTION_KEY` returns 422, never 500), all read sites decrypt on read,
+and the worker's alert/sync paths decrypt locally rather than importing the backend.
+
+**If you are upgrading an existing install, set `LLM_ENCRYPTION_KEY` before running
+migrations.** The upgrade migration encrypts existing plaintext rows in place and **fails
+closed** when the key is unset — `alembic upgrade head` aborts with a `RuntimeError`
+containing a generate-a-key command rather than leaving your OAuth tokens in plaintext.
+Operators who never set the key (integration saves already required it) should generate one
+with that command, add it to `.env`, and re-run `alembic upgrade head`. See *OAuth token
+encryption & the upgrade requirement* in `docs/SELF_HOSTING.md`.
+
 ## v1.0.0 — 2026-07-26
 
 **The 1.0 release.** Feature work for this milestone was already complete — every PRD in the

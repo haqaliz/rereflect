@@ -96,6 +96,26 @@ annotated list):
 > default should not have been trusted. Setting `JWT_SECRET` to that former
 > default is rejected explicitly.
 
+> ### ⚠️ OAuth token encryption & the upgrade requirement
+>
+> Slack and Intercom OAuth tokens are now encrypted at rest with Fernet, exactly
+> like every other integration credential (BYOK keys, Zendesk, Jira, Asana,
+> HubSpot, Salesforce). **Upgrading installs must have `LLM_ENCRYPTION_KEY` set
+> before running migrations**: `alembic upgrade head` now **fails closed** with a
+> `RuntimeError` when the key is unset, rather than silently leaving OAuth tokens
+> in plaintext:
+>
+> ```text
+> LLM_ENCRYPTION_KEY is not set; refusing to leave OAuth tokens in plaintext. Generate a Fernet key (e.g. python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"), set LLM_ENCRYPTION_KEY, and re-run `alembic upgrade head`.
+> ```
+>
+> If you never set `LLM_ENCRYPTION_KEY` (integration saves already return 422
+> without it), generate one with the command shown in the error, add it to `.env`
+> for both the backend and the worker, and re-run `alembic upgrade head`. Existing
+> plaintext rows are encrypted in place on the first upgrade; rotating the key
+> afterwards invalidates every stored token — already true for all integrations,
+> so pick a key once and keep it.
+
 ## Running with no API key ($0, fully local)
 
 Out of the box (`ai_analysis_enabled=false`, no LLM key), Rereflect runs the **free

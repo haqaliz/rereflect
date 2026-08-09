@@ -16,11 +16,20 @@ discriminator, and a positive case proving the guard didn't also break
 legitimate resolution.
 """
 
+import os
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.models import Organization, FeedbackSource, Integration, ZendeskIntegration
+
+ENCRYPTION_KEY = "F5XVApZxzOVKc2xrZlnI6ouXipDzsxflzFn2Ki_5_yk="
+
+
+def _encrypt(secret: str) -> str:
+    from cryptography.fernet import Fernet
+    return Fernet(ENCRYPTION_KEY.encode()).encrypt(secret.encode()).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -318,3 +327,106 @@ class TestZendeskBranchUnchanged:
         assert [s.id for s in _find_matching_sources(db, "zendesk", {"subdomain": "orga"})] == [
             source_a.id
         ]
+
+
+# ---------------------------------------------------------------------------
+# _process_event_for_source -- OAuth token decryption before fetch_context
+# (worker decrypt mirrors: source_events.py:314 covers Slack AND Intercom --
+# one decrypt, one path.)
+# ---------------------------------------------------------------------------
+
+
+class TestProcessEventForSourceDecrypt:
+    """_process_event_for_source must hand adapter.fetch_context the PLAINTEXT
+    token, never the ciphertext stored in integrations.oauth_access_token."""
+
+    def _setup(self, db, source_type: str, token: str):
+        org = _make_org(db, name=f"{source_type.title()} Context Co")
+        integ = Integration(
+            organization_id=org.id,
+            type=source_type,
+            config={"integration_type": "oauth"},
+            oauth_access_token=token,
+            is_active=True,
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+
+        source = FeedbackSource(
+            organization_id=org.id,
+            integration_id=integ.id,
+            source_type=source_type,
+            is_active=True,
+            auto_import=False,
+            triggers={},
+            field_mapping={"include_context": True},
+            provider_config={"channel_id": "C123"} if source_type == "slack" else {},
+        )
+        db.add(source)
+        db.commit()
+        db.refresh(source)
+        return org, integ, source
+
+    def _adapter(self):
+        adapter = MagicMock()
+        adapter.check_triggers.return_value = True
+        adapter.get_external_ids.return_value = ("ext-1", "msg-1")
+        adapter.extract_content.return_value = {"text": "Billing is broken", "metadata": {}}
+        adapter.fetch_context.return_value = {}
+        return adapter
+
+    def _call(self, db, source, adapter):
+        from src.tasks.source_events import _process_event_for_source
+
+        event_data = {"channel": "C123", "ts": "123.456"}
+        return _process_event_for_source(
+            db,
+            source,
+            adapter,
+            "evt-1",
+            "message",
+            event_data,
+        )
+
+    def test_slack_path_decrypts_before_fetch_context(self, db):
+        org, integ, source = self._setup(db, "slack", _encrypt("xoxb-slack-context"))
+        assert "xoxb-slack-context" not in integ.oauth_access_token
+        adapter = self._adapter()
+
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+            result = self._call(db, source, adapter)
+
+        assert adapter.fetch_context.call_args.args[1] == "xoxb-slack-context"
+        assert result["status"] == "pending_created"
+
+    def test_intercom_path_decrypts_before_fetch_context(self, db):
+        org, integ, source = self._setup(db, "intercom", _encrypt("intercom-context-token"))
+        assert "intercom-context-token" not in integ.oauth_access_token
+        adapter = self._adapter()
+
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+            result = self._call(db, source, adapter)
+
+        assert adapter.fetch_context.call_args.args[1] == "intercom-context-token"
+        assert result["status"] == "pending_created"
+
+    def test_missing_key_records_error_without_fetching_context(self, db):
+        org, integ, source = self._setup(db, "slack", _encrypt("xoxb-slack-context"))
+        adapter = self._adapter()
+
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""}):
+            result = self._call(db, source, adapter)
+
+        assert result == {"source_id": source.id, "status": "context_fetch_error"}
+        adapter.fetch_context.assert_not_called()
+
+    def test_corrupt_ciphertext_records_error_without_fetching_context(self, db):
+        org, integ, source = self._setup(db, "slack", "garbage-not-fernet")
+        adapter = self._adapter()
+
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+            result = self._call(db, source, adapter)
+
+        assert result == {"source_id": source.id, "status": "context_fetch_error"}
+        adapter.fetch_context.assert_not_called()

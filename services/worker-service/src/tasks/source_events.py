@@ -4,15 +4,33 @@ Handles events from all source types (Slack, webhooks, etc.) using the adapter p
 """
 
 import logging
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 from celery import shared_task
 
+from cryptography.fernet import InvalidToken
+
 from src.database import get_db_session
 from src.adapters import get_adapter
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Local token decryption (mirrors zendesk_sync.py _decrypt)
+# R6: Worker cannot import from backend-api; uses its own Fernet helper.
+# ---------------------------------------------------------------------------
+
+
+def _decrypt(token: str) -> str:
+    """Decrypt a Fernet-encrypted string using LLM_ENCRYPTION_KEY."""
+    from cryptography.fernet import Fernet
+    key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if not key:
+        raise ValueError("LLM_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode()).decrypt(token.encode()).decode()
 
 
 @shared_task(
@@ -304,16 +322,27 @@ def _process_event_for_source(
     field_mapping = source.field_mapping or {}
     content = adapter.extract_content(event_data, field_mapping)
 
-    # Fetch additional context if needed
+    # Fetch additional context if needed. Decrypt exactly once, right before
+    # fetch_context (this is the Slack AND Intercom path). A missing key or
+    # corrupt ciphertext is a non-transient config error: log + error outcome,
+    # never retry, never raise.
     access_token = None
-    if source.integration_id:
-        integration = db.query(Integration).filter(
-            Integration.id == source.integration_id
-        ).first()
-        if integration:
-            access_token = integration.oauth_access_token
-
     if field_mapping.get("include_context") or field_mapping.get("include_author"):
+        if source.integration_id:
+            integration = db.query(Integration).filter(
+                Integration.id == source.integration_id
+            ).first()
+            if integration:
+                try:
+                    access_token = _decrypt(integration.oauth_access_token)
+                except (ValueError, InvalidToken) as exc:
+                    logger.error(
+                        "Failed to decrypt OAuth token for integration %s: %s",
+                        integration.id,
+                        exc,
+                    )
+                    return {"source_id": source_id, "status": "context_fetch_error"}
+
         context = adapter.fetch_context(event_data, access_token, field_mapping)
         content["metadata"].update(context)
 

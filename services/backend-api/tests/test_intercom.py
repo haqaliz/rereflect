@@ -1,4 +1,5 @@
 """Tests for Intercom integration endpoints."""
+import os
 import pytest
 import hmac
 import hashlib
@@ -12,6 +13,9 @@ from src.models.integration import Integration
 from src.models.organization import Organization
 from src.models.user import User
 from src.api.auth import hash_password, create_access_token
+from src.utils.encryption import decrypt_api_key
+
+TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 
 # ============================================================================
@@ -180,10 +184,11 @@ class TestIntercomOAuthCallback:
         mock_client_instance.get.return_value = mock_me_response
 
         with patch("src.api.routes.integrations.httpx.Client", return_value=mock_client_instance):
-            response = client.get(
-                f"/api/v1/integrations/intercom/oauth/callback?code=authcode123&state={test_state}",
-                follow_redirects=False,
-            )
+            with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+                response = client.get(
+                    f"/api/v1/integrations/intercom/oauth/callback?code=authcode123&state={test_state}",
+                    follow_redirects=False,
+                )
 
         # Should redirect to frontend with success
         assert response.status_code == 307
@@ -196,9 +201,57 @@ class TestIntercomOAuthCallback:
         ).first()
         assert integration is not None
         assert integration.name == "My Intercom"
-        assert integration.oauth_access_token == "xyztoken123"
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            stored_token = integration.oauth_access_token
+            assert stored_token != "xyztoken123"
+            assert decrypt_api_key(stored_token) == "xyztoken123"
         assert integration.config["workspace_name"] == "Test Workspace"
         assert integration.config["admin_id"] == "admin_123"
+
+    @patch("src.api.routes.integrations.INTERCOM_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.integrations.INTERCOM_CLIENT_SECRET", "test-client-secret")
+    @patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""})
+    def test_callback_missing_key_returns_422(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+    ):
+        """Should reject with 422 (never silently store plaintext) when LLM_ENCRYPTION_KEY is unset."""
+        from src.api.routes.integrations import oauth_states
+
+        test_state = "test-state-missing-key"
+        oauth_states[test_state] = {
+            "organization_id": test_organization.id,
+            "name": "My Intercom",
+            "provider": "intercom",
+        }
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"token": "xyztoken123"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_me_response = MagicMock()
+        mock_me_response.json.return_value = {
+            "id": "admin_123",
+            "app": {"name": "Test Workspace", "id_code": "ws_abc"},
+        }
+        mock_me_response.raise_for_status = MagicMock()
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.post.return_value = mock_token_response
+        mock_client_instance.get.return_value = mock_me_response
+
+        with patch("src.api.routes.integrations.httpx.Client", return_value=mock_client_instance):
+            response = client.get(
+                f"/api/v1/integrations/intercom/oauth/callback?code=authcode123&state={test_state}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 422
+        assert "LLM_ENCRYPTION_KEY" in response.json()["detail"]
 
     def test_callback_rejects_invalid_state(self, client: TestClient):
         """Should redirect with error when state is invalid."""

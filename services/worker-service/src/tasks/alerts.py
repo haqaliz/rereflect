@@ -4,11 +4,14 @@ Supports configurable triggers and customizable message templates.
 """
 
 import logging
+import os
 import re
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
 from celery import shared_task
+
+from cryptography.fernet import InvalidToken
 
 from src.database import get_db_session
 
@@ -34,6 +37,21 @@ def get_sentiment_emoji(sentiment_label: Optional[str]) -> str:
         "negative": "😟",
     }
     return emoji_map.get(sentiment_label or "", "📝")
+
+
+# ---------------------------------------------------------------------------
+# Local token decryption (mirrors zendesk_sync.py _decrypt)
+# R6: Worker cannot import from backend-api; uses its own Fernet helper.
+# ---------------------------------------------------------------------------
+
+
+def _decrypt(token: str) -> str:
+    """Decrypt a Fernet-encrypted string using LLM_ENCRYPTION_KEY."""
+    from cryptography.fernet import Fernet
+    key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if not key:
+        raise ValueError("LLM_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode()).decrypt(token.encode()).decode()
 
 
 def render_template(template: str, feedback_item: Any) -> str:
@@ -418,6 +436,16 @@ def send_slack_alert(
                 return {"status": "no_oauth_token"}
             if not config.get("channel_id"):
                 return {"status": "no_channel_id"}
+            # Decrypt exactly once, before the send. A missing key or corrupt
+            # ciphertext is a non-transient config error: error dict, never
+            # retry, never raise out of the task.
+            try:
+                access_token = _decrypt(integration.oauth_access_token)
+            except (ValueError, InvalidToken) as e:
+                logger.error(
+                    f"Failed to decrypt Slack OAuth token for integration {integration.id}: {e}"
+                )
+                return {"status": "error", "reason": "token_decrypt_failed"}
         else:
             if not config.get("webhook_url"):
                 return {"status": "no_webhook_url"}
@@ -442,7 +470,7 @@ def send_slack_alert(
         try:
             if integration_type == "oauth":
                 result = send_slack_message_oauth(
-                    access_token=integration.oauth_access_token,
+                    access_token=access_token,
                     channel_id=config.get("channel_id"),
                     blocks=blocks,
                     text=fallback_text,

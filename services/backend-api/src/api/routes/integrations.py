@@ -19,6 +19,8 @@ from src.database.session import get_db
 from src.models.integration import Integration, SlackAlertLog
 from src.models.organization import Organization
 from src.api.dependencies import get_current_org, require_admin_or_owner, require_feature
+from src.utils.encryption import encrypt_api_key, decrypt_api_key
+from cryptography.fernet import InvalidToken
 
 logger = logging.getLogger(__name__)
 
@@ -680,14 +682,21 @@ def test_slack_integration(
 
     # Send via webhook or OAuth depending on integration type
     if integration_type == "oauth":
-        access_token = integration.oauth_access_token
         channel_id = config.get('channel_id')
 
-        if not access_token:
+        if not integration.oauth_access_token:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Integration has no OAuth token configured"
             )
+
+        try:
+            access_token = decrypt_api_key(integration.oauth_access_token)
+        except (ValueError, InvalidToken) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Slack OAuth token cannot be decrypted. If LLM_ENCRYPTION_KEY changed, reconnect the integration.",
+            ) from exc
 
         if not channel_id:
             raise HTTPException(
@@ -896,6 +905,15 @@ def slack_oauth_callback(
 
         logger.info(f"Slack OAuth successful for team {team_name} ({team_id})")
 
+        try:
+            stored_token = encrypt_api_key(access_token)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot store Slack token: LLM_ENCRYPTION_KEY is not set. "
+                       "Set LLM_ENCRYPTION_KEY in your environment and reconnect.",
+            ) from exc
+
         # Create integration with OAuth token
         integration = Integration(
             organization_id=organization_id,
@@ -909,7 +927,7 @@ def slack_oauth_callback(
                 "channel_id": incoming_webhook.get("channel_id"),
                 "channel_name": incoming_webhook.get("channel"),
             },
-            oauth_access_token=access_token,  # In production, encrypt this!
+            oauth_access_token=stored_token,
             triggers=["urgent"],
             is_active=True,
         )
@@ -930,6 +948,8 @@ def slack_oauth_callback(
         return RedirectResponse(
             url=f"{FRONTEND_URL}/settings/integrations?oauth_error=network_error"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Slack OAuth unexpected error: {e}")
         return RedirectResponse(
@@ -1075,6 +1095,15 @@ def intercom_oauth_callback(
 
         logger.info(f"Intercom OAuth successful for workspace {workspace_name} ({workspace_id})")
 
+        try:
+            stored_token = encrypt_api_key(access_token)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot store Intercom token: LLM_ENCRYPTION_KEY is not set. "
+                       "Set LLM_ENCRYPTION_KEY in your environment and reconnect.",
+            ) from exc
+
         # Create integration with OAuth token
         integration = Integration(
             organization_id=organization_id,
@@ -1086,7 +1115,7 @@ def intercom_oauth_callback(
                 "workspace_name": workspace_name,
                 "admin_id": admin_id,
             },
-            oauth_access_token=access_token,
+            oauth_access_token=stored_token,
             triggers=["urgent"],
             is_active=True,
         )
@@ -1107,6 +1136,8 @@ def intercom_oauth_callback(
         return RedirectResponse(
             url=f"{FRONTEND_URL}/settings/integrations?oauth_error=network_error"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Intercom OAuth unexpected error: {e}")
         return RedirectResponse(

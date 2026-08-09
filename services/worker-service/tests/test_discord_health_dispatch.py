@@ -8,10 +8,23 @@ build_health_alert_blocks (so call sites only branch on integration.type), and
 _dispatch_discord_health_alert to send it. Discord webhooks cannot render the
 Slack version's actions/button block, so the customer URL goes in the embed's
 "url" field instead.
+
+Also pins the worker decrypt mirror at notification_dispatch.py:104:
+_dispatch_slack_health_alert must hand send_slack_message_oauth the PLAINTEXT
+token, and a missing key / corrupt ciphertext must log-and-skip the integration
+(the file's local error shape) without raising.
 """
+import os
 from unittest.mock import patch, MagicMock
 
 from src.models import Organization, Integration
+
+ENCRYPTION_KEY = "F5XVApZxzOVKc2xrZlnI6ouXipDzsxflzFn2Ki_5_yk="
+
+
+def _encrypt(secret: str) -> str:
+    from cryptography.fernet import Fernet
+    return Fernet(ENCRYPTION_KEY.encode()).encrypt(secret.encode()).decode()
 
 
 COMPONENTS = {
@@ -221,6 +234,80 @@ class TestDispatchDiscordHealthAlert:
                 _dispatch_discord_health_alert(org.id, [{"title": "x"}], "content")
 
         assert mock_send.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_slack_health_alert() -- OAuth token decryption (worker decrypt mirrors)
+# ---------------------------------------------------------------------------
+
+class TestDispatchSlackHealthAlert:
+    """_dispatch_slack_health_alert (notification_dispatch.py:104) must decrypt
+    integrations.oauth_access_token before sending; a missing key or corrupt
+    ciphertext logs and skips the integration (the file's local error shape —
+    there is no channel_errors dict on this path) without raising."""
+
+    def _make_slack_oauth_integration(self, db, org_id: int, token: str) -> Integration:
+        integ = Integration(
+            organization_id=org_id,
+            type="slack",
+            config={"integration_type": "oauth", "channel_id": "C1"},
+            oauth_access_token=token,
+            is_active=True,
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+        return integ
+
+    def test_plaintext_token_reaches_send_slack_message_oauth(self, db):
+        from src.notification_dispatch import _dispatch_slack_health_alert
+
+        org = make_org(db)
+        integ = self._make_slack_oauth_integration(db, org.id, _encrypt("xoxb-health-dispatch"))
+        assert "xoxb-health-dispatch" not in integ.oauth_access_token
+
+        blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "health drop"}}]
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+                 patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+                _dispatch_slack_health_alert(org.id, blocks, "health drop text")
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args.kwargs["access_token"] == "xoxb-health-dispatch"
+        assert mock_send.call_args.kwargs["channel_id"] == "C1"
+
+    def test_missing_key_logs_and_skips_without_sending(self, db):
+        from src.notification_dispatch import _dispatch_slack_health_alert
+
+        org = make_org(db)
+        self._make_slack_oauth_integration(db, org.id, _encrypt("xoxb-health-dispatch"))
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+                 patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""}):
+                _dispatch_slack_health_alert(org.id, [{"type": "section"}], "text")
+
+        mock_send.assert_not_called()
+
+    def test_corrupt_ciphertext_logs_and_skips_without_sending(self, db):
+        from src.notification_dispatch import _dispatch_slack_health_alert
+
+        org = make_org(db)
+        self._make_slack_oauth_integration(db, org.id, "garbage-not-fernet")
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+                 patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+                _dispatch_slack_health_alert(org.id, [{"type": "section"}], "text")
+
+        mock_send.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

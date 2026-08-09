@@ -7,10 +7,23 @@ per TestDispatchAnomalyAlerts) and is easy to forget when adding Discord support
 This adds its Discord counterpart, _send_anomaly_discord, patched at the import site
 (src.tasks.anomaly.send_discord_message_webhook) since anomaly.py imports it at
 module top.
+
+Also pins the worker decrypt mirror at anomaly.py:270: _send_anomaly_slack must
+decrypt integrations.oauth_access_token before calling send_slack_message_oauth
+(patched at src.tasks.alerts, where anomaly.py's function-body `from ... import`
+resolves it at call time).
 """
+import os
 from unittest.mock import patch, MagicMock
 
 from src.models import Organization, Integration
+
+ENCRYPTION_KEY = "F5XVApZxzOVKc2xrZlnI6ouXipDzsxflzFn2Ki_5_yk="
+
+
+def _encrypt(secret: str) -> str:
+    from cryptography.fernet import Fernet
+    return Fernet(ENCRYPTION_KEY.encode()).encrypt(secret.encode()).decode()
 
 
 def make_org(db) -> Organization:
@@ -117,3 +130,66 @@ class TestSendAnomalyDiscord:
             _send_anomaly_discord(db, org, anomaly)
 
         assert mock_send.call_count == 2
+
+
+class TestSendAnomalySlack:
+    """_send_anomaly_slack must decrypt the OAuth token before sending.
+
+    Log-and-skip error contract: a missing key or corrupt ciphertext logs and
+    skips the integration — no API call, no raise out of the task.
+    """
+
+    def _make_slack_oauth_integration(self, db, org_id: int, token: str) -> Integration:
+        integ = Integration(
+            organization_id=org_id,
+            type="slack",
+            config={"integration_type": "oauth", "channel_id": "C1"},
+            oauth_access_token=token,
+            is_active=True,
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+        return integ
+
+    def test_plaintext_token_reaches_send_slack_message_oauth(self, db):
+        from src.tasks.anomaly import _send_anomaly_slack
+
+        org = make_org(db)
+        integ = self._make_slack_oauth_integration(db, org.id, _encrypt("xoxb-anomaly"))
+        assert "xoxb-anomaly" not in integ.oauth_access_token
+        anomaly = make_anomaly()
+
+        with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+             patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+            _send_anomaly_slack(db, org, anomaly)
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args.kwargs["access_token"] == "xoxb-anomaly"
+        assert mock_send.call_args.kwargs["channel_id"] == "C1"
+
+    def test_missing_key_logs_and_skips_without_sending(self, db):
+        from src.tasks.anomaly import _send_anomaly_slack
+
+        org = make_org(db)
+        self._make_slack_oauth_integration(db, org.id, _encrypt("xoxb-anomaly"))
+        anomaly = make_anomaly()
+
+        with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+             patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""}):
+            _send_anomaly_slack(db, org, anomaly)
+
+        mock_send.assert_not_called()
+
+    def test_corrupt_ciphertext_logs_and_skips_without_sending(self, db):
+        from src.tasks.anomaly import _send_anomaly_slack
+
+        org = make_org(db)
+        self._make_slack_oauth_integration(db, org.id, "garbage-not-fernet")
+        anomaly = make_anomaly()
+
+        with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+             patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+            _send_anomaly_slack(db, org, anomaly)
+
+        mock_send.assert_not_called()

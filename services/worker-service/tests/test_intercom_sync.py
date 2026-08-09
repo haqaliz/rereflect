@@ -36,6 +36,16 @@ from src.models import FeedbackSource, IntercomIntegration, Organization
 
 WORKSPACE = "ws_pull_test"
 
+# R4 — the worker's _decrypt must work in the worker import universe
+# (src.utils.encryption does not exist in the worker image), so the production
+# path is exercised with a REAL Fernet round-trip, never a monkeypatched _decrypt.
+ENCRYPTION_KEY = "F5XVApZxzOVKc2xrZlnI6ouXipDzsxflzFn2Ki_5_yk="
+
+
+def _encrypt(secret: str) -> str:
+    from cryptography.fernet import Fernet
+    return Fernet(ENCRYPTION_KEY.encode()).encrypt(secret.encode()).decode()
+
 
 def _make_org(db, name="Pull Co") -> Organization:
     org = Organization(name=name, plan="pro")
@@ -45,10 +55,10 @@ def _make_org(db, name="Pull Co") -> Organization:
     return org
 
 
-def _make_integration(db, org_id, connected_at=None, last_synced_at=None):
+def _make_integration(db, org_id, connected_at=None, last_synced_at=None, access_token="enc:blob"):
     row = IntercomIntegration(
         organization_id=org_id,
-        access_token="enc:blob",
+        access_token=access_token,
         workspace_id=WORKSPACE,
         is_active=True,
         connected_at=connected_at or datetime(2026, 7, 1, 12, 0, 0),
@@ -422,13 +432,13 @@ class TestAuthFailureHandling:
         from src.tasks.intercom_sync import _sync_intercom_org_body
 
         org = _make_org(db)
-        integ = _make_integration(db, org.id)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
         _make_source(db, org.id)
         _patch_db_session(monkeypatch, db)
 
         import src.tasks.intercom_sync as mod
 
-        monkeypatch.setattr(mod, "_decrypt", lambda _: "tok")
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
         failing = MagicMock()
         failing.search_conversations.side_effect = IntercomAuthError("401")
         failing.close = MagicMock()
@@ -446,14 +456,14 @@ class TestAuthFailureHandling:
         from src.tasks.intercom_sync import _sync_intercom_org_body
 
         org = _make_org(db)
-        integ = _make_integration(db, org.id)
+        secret = "super-secret-token-value"
+        integ = _make_integration(db, org.id, access_token=_encrypt(secret))
         _make_source(db, org.id)
         _patch_db_session(monkeypatch, db)
 
         import src.tasks.intercom_sync as mod
 
-        secret = "super-secret-token-value"
-        monkeypatch.setattr(mod, "_decrypt", lambda _: secret)
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
         client = _fake_client([([], None)])
         monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
 
@@ -461,6 +471,19 @@ class TestAuthFailureHandling:
             _sync_intercom_org_body(MagicMock(), integ.id)
 
         assert secret not in caplog.text
+
+
+class TestDecryptLocalFernet:
+    """R4 — intercom_sync._decrypt must round-trip a real Fernet token WITHOUT
+    any monkeypatch: src.utils.encryption does not exist in the worker image,
+    so the old body raised ModuleNotFoundError on every call."""
+
+    def test_decrypt_round_trips_a_real_fernet_token(self, monkeypatch):
+        from src.tasks.intercom_sync import _decrypt
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        token = _encrypt("intercom-plain-secret")
+        assert _decrypt(token) == "intercom-plain-secret"
 
 
 class TestTaskRegistration:
