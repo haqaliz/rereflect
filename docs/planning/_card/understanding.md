@@ -1,143 +1,110 @@
-# Phase 2 — Understanding: `feat/discord-channel-preferences`
+# Phase 2 — Understanding: `integrations-routes-missing-rbac`
 
-**Dug:** 2026-08-09, against the worktree at `feat/discord-channel-preferences`
-(base `4fe117d3`). Three parallel dig agents (worker / backend / frontend) mapped
-the notification system; both disputed claims re-verified directly with `file:line`
-reads after synthesis. Live-verified: single alembic head `8114adde5d96`.
-
----
-
-## What the feature is really asking
-
-Discord alerting currently **rides the Slack per-type toggle**: a user cannot
-receive Discord alerts without Slack being on for the same alert type, and cannot
-route types independently to each channel. The fix is a `channel_discord` per-type
-preference on `UserAlertPreference` (per-user, per-alert-type row — the model
-already follows the column-per-channel pattern), surfaced in the Settings →
-Notifications page, and honoured by the worker's dispatch.
-
-**The honest one-line framing:** *configure Discord, switch the Slack toggle off,
-and you receive nothing* — DEV-TRACKING P5.
+**Dug:** 2026-08-09, against the worktree `bug/integrations-routes-missing-rbac`
+(base `2884b870`). Three parallel dig agents (router inventory / RBAC machinery /
+sibling-module audit). Premise verified, blast radius expanded — see F1–F3.
 
 ---
 
-## F1 — The coupling, exactly (premise verified)
+## What the bug is really asking
 
-Two sites in the worker gate Discord on the Slack flag:
+`services/backend-api/src/api/routes/integrations.py` has **zero** role checks
+(`require_admin_or_owner`/`require_owner`/403 — verified by grep, two "admin/owner"
+hits are an Intercom API field name). Every route only requires `get_current_org`
+(JWT-valid, no role check). So a `member`-role user can create/delete/test Slack and
+Discord integrations, mutate integration config, and drive both OAuth connect flows
+via the API — contradicting the RBAC matrix ("Manage integrations: Owner ✅ / Admin ✅ /
+Member ❌"). The frontend hides the Integrations tab from members; the backend never did.
 
-- **Main pipe** — `services/worker-service/src/notification_dispatch.py:626-631`:
-  `if counts["slack"] > 0: _dispatch_slack_alert(...)` then
-  `_dispatch_discord_alert(...)` unconditionally inside the same block. Comment
-  at 628-629: *"There is no separate channel_discord preference yet — Discord
-  webhook integrations piggyback on the same 'chat' toggle as Slack."*
-- **Health-drop pipe** — `notification_dispatch.py:443-468`:
-  `if any_slack:` sends `_dispatch_slack_health_alert` **and**
-  `_dispatch_discord_health_alert` from the same flag. No `channel_discord` read
-  anywhere in the function (only `channel_slack` at :417).
+## F1 — The named file, exactly (14 routes, 10 gateable)
 
-`channel_discord` does not exist anywhere in the worktree (backend model, worker
-model, migrations, frontend types, tests) — grepped, zero hits.
+| Route | Write? | Gate? |
+|---|---|---|
+| `GET /` list | read | yes (sibling pattern gates reads too) |
+| `POST /slack/webhook`, `POST /discord/webhook` | write | yes |
+| `POST /discord/test`, `POST /slack/test` | external send | yes |
+| `GET /{id}`, `GET /{id}/logs` | read | yes (sibling pattern) |
+| `PATCH /{id}`, `DELETE /{id}` | write | yes |
+| `GET /slack/template-variables` | static, **zero auth today** | decide (see F4) |
+| `GET /slack/oauth/connect`, `GET /intercom/oauth/connect` | mints state | **yes — this is the P1** |
+| `GET /slack/oauth/callback`, `GET /intercom/oauth/callback` | creates row | **cannot gate — JWT-less browser redirect, state-verified** |
 
----
+`send_slack_message` / `send_discord_message` are imported by the automations engine
+(`automation_engine.py:649`) and patched by tests by module path — signatures must not
+change; only route-level deps are added. `oauth_states` dict is seeded directly by
+`tests/test_intercom.py:153-157` — name and location must stay.
 
-## F2 — The worker health-drop path is production-dormant (scope wrinkle)
+## F2 — The audit found TWO more full omissions (same class, same severity)
 
-- The worker's `dispatch_health_drop_alert` (with its Slack + Discord health
-  builders/dispatchers) has **no production caller** in worker-service — grep
-  shows only its definition and tests.
-- The live path is backend-only: `health_score_service.py:877,900`
-  (`_do_dispatch_health_drop_alert`) → `notification_dispatch_helpers.py:133`
-  `dispatch_health_drop_alert_impl`, which creates **in-app `Notification` rows
-  only** (is_enabled + channel_inapp; never Slack/Discord), despite a docstring
-  (lines 148-150) claiming it "delegates dedup and Slack to the worker".
-- Consequence: in production today, `customer_health_drop` alerts never reach
-  Slack or Discord at all. The health-drop Discord coupling is exercised by tests
-  (`test_discord_health_dispatch.py`, `test_health_dispatch.py`) but not by any
-  live dispatch.
-- **Decision for the PRD:** fix the health-drop worker path for consistency
-  (same pattern, tests already pin it, and it is the documented home of
-  Slack/Discord health alerts) — or scope to the main pipe and record the
-  health-drop coupling as dead-code debt. Recommendation: fix both; leaving one
-  coupled recreates the trap for whoever wires the worker path.
+- **`linear_integration.py` — 17 routes, 0 role deps** (only inert `require_feature`).
+  WRITE routes reachable by members: `GET /connect` (OAuth), `DELETE /disconnect`,
+  `PUT /config`, `POST /test`, **`POST /issues` (member can create Linear issues)**
+  `PUT /team-mappings`, `PUT /status-mappings`. Linear's OAuth callback (`GET /callback`)
+  is JWT-less like the others.
+- **`feedback_sources.py` — 8 routes, 0 role deps.** WRITE routes: `POST /`,
+  `PATCH /{source_id}`, `DELETE /{source_id}`. These back the top-level
+  `/feedback-sources` pages, which the frontend does NOT role-gate — so this hole is
+  live in the UI, not just the API.
 
----
+**Partially covered:** `webhooks.py` — all 5 writes gated; 3 GET reads ungated
+(webhooks list/get/deliveries) — matches the member-visible Webhooks nav item. **Leave
+as-is** unless the matrix is read strictly (recommend: leave, flag in PRD).
 
-## F3 — Model mirror drift (trap to avoid)
+**Correct baseline (do not touch):** zendesk (7/7), jira (12/12), asana (12/12),
+intercom (3/3), hubspot (11/11), salesforce (11 + JWT-less callback), oidc (3/3),
+saml (3/3), api_keys (4/4). **The fix is restoring integrations/linear/feedback-sources
+to the pattern every sibling already uses.**
 
-- Backend model: `services/backend-api/src/models/user_alert_preference.py:5-25`
-  — columns: `is_enabled`, `channel_email` (default False), `channel_slack`
-  (default True), `channel_inapp` (default True), `channel_intercom` (default
-  False), `threshold_value`, `retention_days`, `drop_threshold` handled as a
-  secondary row (`_DROP_THRESHOLD_KEY`). UNIQUE(user_id, alert_type).
-- Worker mirror: `services/worker-service/src/models/__init__.py:379-395` — same
-  shape **minus `channel_intercom`** (the `d3e4f5g6h7i8` migration never landed
-  in the mirror). Pre-existing drift; `channel_discord` must be added to **both**
-  copies or the worker silently ignores it (the automations-engine trap class,
-  per CLAUDE.md).
-- Migration precedent to copy: `d3e4f5g6h7i8_add_channel_intercom_to_alert_prefs.py`
-  (`add_column(... server_default='false')`). New migration chains onto
-  `8114adde5d96`; CI asserts one head.
+## F3 — Test pattern to mirror
 
----
+- Dep style: decorator `dependencies=[Depends(require_admin_or_owner)]` (sibling
+  integration routers; `integrations.py` already uses that style for
+  `require_feature`). Failed check → 403, plain-string detail.
+- Fixtures: conftest `auth_headers` = **admin** (existing tests keep passing untouched).
+  Add per-file `member_user/member_headers` (+ `owner_*` if needed) minted via
+  `create_access_token({"user_id", "organization_id", "role"})` — copy the pattern from
+  `tests/test_oidc_config.py:114-159` / `tests/test_jira_connection.py:94-139`.
+- Assert member → `== 403` strictly (do NOT copy the loose `in [200, 403]` legacy
+  style from `test_team.py:353-371`). Mirror `test_oidc_config.py:298-308` and
+  `test_jira_connection.py:550-567`.
+- Only `tests/test_integrations.py` (admin-only, keeps passing) and
+  `tests/test_intercom.py` (plan-gate 403 with dict body — unchanged) cover the named
+  file today. No member/owner role tests exist for it.
 
-## F4 — Backend API + frontend plumbing
+## F4 — Decisions the PRD must settle
 
-- Routes: `GET/PUT /api/v1/notifications/preferences`
-  (`routes/notifications.py:325-442`). `AlertPreferenceUpdate` (L98-133) requires
-  all channel bools on PUT (wholesale copy, L396-410) — adding
-  `channel_discord: bool = False` as an optional field keeps the API
-  backward-compatible; `AlertPreferenceItem` (L82-91) already shows the
-  `channel_intercom=False` default pattern.
-- Frontend: `lib/api/notifications.ts:21-31` `AlertPreference` interface (needs
-  `channel_discord`); `app/(dashboard)/settings/notifications/page.tsx` —
-  `CHANNEL_CONFIG` (L119-124: In-App, Slack, Intercom, Email — the list a Discord
-  entry joins), `DEFAULT_PREFERENCES` (L82-91, all 8 types need the new key or
-  first-load renders `undefined`), `getActiveChannels` (L264-271) and
-  `renderChannelIcon` (L273-282) need Discord branches, Customize dialog
-  iterates `CHANNEL_CONFIG` (L442-459).
-- The page renders channel toggles **unconditionally** (no integration-connected
-  state is fetched; there is no integrations hook/context). Keep Discord
-  consistent: render the toggle unconditionally — the org-level Discord
-  connection is a separate surface (Settings → Integrations).
-- Frontend test coupling: `__tests__/settings/NotificationsSettingsPage.test.tsx:255-277`
-  assumes Email is the **last** switch in the dialog — Discord must be inserted
-  before Email (e.g. In-App, Slack, Discord, Intercom, Email) or the test
-  updated; fixtures L69-91 also need the new key.
-- Worker test coupling: `test_discord_dispatch.py:213-251` and
-  `test_discord_health_dispatch.py:230-271` assert Discord fires from
-  `channel_slack=True` — both must be reworked to assert the new pref.
-
----
-
-## Open questions for the PRD
-
-1. **Default for `channel_discord`.** Follow the `channel_intercom` precedent
-   (`False` — Discord becomes per-user per-type opt-in; existing Discord-sending
-   orgs stop getting Discord after upgrade until a user toggles it) **or**
-   default `True` matching `channel_slack` (existing behavior preserved where
-   Slack is on; the feature becomes opt-*out* per type; orgs that had Slack off
-   start receiving Discord — a visible behavior change the UI makes legible).
-   Needs a decision; card's original caveat.
-2. **Health-drop scope** (F2): fix both worker paths or only the main pipe.
-3. **Counts dict shape.** `counts` is `{"inapp", "slack", "email"}` in
-   `dispatch_alert` (L571) and `{"inapp", "slack", "email"}`-family in the
-   health-drop path — add a `"discord"` key (return contract is a status dict;
-   check exact-shape assertions in `test_health_dispatch.py` before committing).
-4. **Channel order in the dialog** (frontend test index math) — insert Discord
-   after Slack, before Email.
-
----
+1. **Scope = three modules** (`integrations.py` + `linear_integration.py` +
+   `feedback_sources.py`)? Recommendation: yes — same class, and the triage note
+   (DEV-TRACKING.md:528-529) explicitly demanded the audit; the previous hardening
+   branch (`integration-auth-tenancy-hardening`) also swept every instance.
+2. **Reads**: gate ALL routes including GETs on `integrations.py` and
+   `linear_integration.py` (matches every sibling router) vs reads-only-member.
+   Recommendation: gate all — consistent, and the matrix grants members no
+   integration-status reads. For `feedback_sources.py`: gate writes, leave GETs open
+   (its pages are top-level/member-visible today; gating reads would 403 every member
+   view with no UI change).
+3. **Frontend**: the card said "no frontend changes" but the audit shows three member-
+   reachable surfaces would newly 403: `settings/integrations/[id]` + `new` pages,
+   the Linear branch of `feedbacks/[id]/create-issue`, and `feedback-sources/*` write
+   buttons. Options: (a) backend-only, accept member 403s on those pages (jira/asana
+   issue creation already 403s for members today — so linear becoming consistent is a
+   fix, not a regression); (b) also add the existing `isAdminOrOwner` redirect pattern
+   to those pages. Recommendation: (a) in this branch, (b) as an immediately-following
+   chore — or (b) in-branch if the user prefers one PR.
+4. **`GET /slack/template-variables`** is fully unauthenticated today. Gate with
+   admin/owner (recommended — no legit unauthenticated consumer) or leave public?
+5. **OAuth callbacks** stay JWT-less (provider redirect) — gate the *connect* step
+   only; document the residual (state-guarded) risk. Matches the Salesforce precedent.
 
 ## Contradictions / flags surfaced (do not paper over)
 
-- The `notification_dispatch_helpers.py:148-150` docstring claim ("delegates
-  dedup and Slack to the worker-service notification_dispatch when called from
-  the Celery context") is false in code — no delegation exists. Separate defect,
-  noted; **not** in scope for this feature (flag in PRD as related finding).
-- The worker mirror missing `channel_intercom` (F3) is a live divergence; adding
-  `channel_discord` to both copies is in scope, back-filling `channel_intercom`
-  into the mirror is a judgement call (recommend: add both columns to the mirror
-  in the same migration to stop the drift — or explicitly leave `channel_intercom`
-  as separate debt).
-- `_send_anomaly_discord` / `_send_anomaly_slack` (`tasks/anomaly.py:220,285`)
-  are dead code with tests (DEV-TRACKING P6) — not touched here.
+- The card's "the UI already hides integration management from members" claim is
+  **false in three places** (F4#3). The `settings/integrations` *hub* page redirects
+  members (AppSidebar `requiredRole: 'admin'` at `components/AppSidebar.tsx:142`), but
+  `settings/integrations/[id]`, `new`, the `feedbacks/[id]/create-issue` Linear branch,
+  and every `feedback-sources/*` page have no role guard. CLAUDE.md's
+  `components/SettingsTabs.tsx` reference is stale — the component doesn't exist.
+- `webhooks.py` GET reads are deliberately member-visible and match the UI; not part of
+  this bug.
+- `GET /slack/template-variables` being fully unauthenticated is itself a (minor)
+  defect in the "no auth = bug" class — flag, don't silently fix.

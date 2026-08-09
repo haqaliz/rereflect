@@ -1,57 +1,59 @@
-# Card — `feat/discord-channel-preferences`
+# Card — `integrations-routes-missing-rbac`
 
-**Type:** feat (freeform — no GitHub issue)
-**Branch:** `feat/discord-channel-preferences`
-**Worktree:** `.claude/worktrees/feat-discord-channel-preferences`
+**Type:** bug (freeform — no GitHub issue)
+**Branch:** `bug/integrations-routes-missing-rbac`
+**Worktree:** `.claude/worktrees/bug-integrations-routes-missing-rbac`
 **Opened:** 2026-08-09
-**Traces to:** DEV-TRACKING P5 (`DEV-TRACKING.md:194-202`) — Post-1.0.0 User Feedback Backlog
-**Picked by:** `rereflect-next` (previous session) — the one remaining user-visible
-defect on the batch-2 ask path (Discord webhook + batch sentiment trigger both shipped;
-this is the leftover).
+**Traces to:** DEV-TRACKING P1 (`DEV-TRACKING.md:520-529`) — Post-1.0.0 User Feedback Backlog
+**Picked by:** `rereflect-next` (previous session) — highest-severity remaining item in
+the repo's own highest-priority queue (DEV-TRACKING.md:39-41 says pick here before older
+roadmap sections).
 
 ## The problem
 
-Discord alerting **rides the Slack notification toggle**. In
-`services/worker-service/src/notification_dispatch.py`, `dispatch_alert` fires the
-Discord webhook only when `counts["slack"] > 0` (~line 626), and the code comment says
-it directly: *"There is no separate channel_discord preference yet."*
+`services/backend-api/src/api/routes/integrations.py` contains **zero** occurrences of
+`403`, `require_admin_or_owner` or `require_owner`. `get_current_org` validates the JWT
+but never checks `current_user.role` (DEV-TRACKING.md:521-522).
 
-Consequences (from DEV-TRACKING P5):
+So a **`member` can drive the OAuth connect flow via the API**, contradicting the RBAC
+table in CLAUDE.md ("Manage integrations: Owner ✅ / Admin ✅ / Member ❌"). The frontend
+hides the UI; the backend does not enforce it — "the classic shape of an access-control
+gap that looks fine in manual testing" (DEV-TRACKING.md:526-527).
 
-- **Configure Discord, switch the Slack toggle off → you receive nothing.**
-- With **both** integrations active, both get every alert, with **no per-type routing**
-  — you cannot have email-only for one alert type and Discord for another.
-
-This is a documented limitation (SELF_HOSTING.md + changelog), so it is not a surprise
-to existing users — but it will read as a bug to the first person who hits it, on the
-exact path a user asked for ("plug in a Slack or Discord webhook to get pinged").
+Triage also requires: **audit the other integration route modules for the same omission
+before assuming it is confined to this file** (DEV-TRACKING.md:528-529).
 
 ## The fix (minimal slice)
 
-- `channel_discord` column on `UserAlertPreference` + Alembic migration
-  (backend model; worker reads it via its own model mirror).
-- A Settings → Notifications toggle (per-user alert preferences), mirroring the Slack
-  per-type toggles.
-- Decouple the two dispatch calls in the worker: Slack dispatch keys off
-  `counts["slack"]`, Discord dispatch keys off `channel_discord` (per-type aware).
-- Default for existing rows: **TBD** (inherit Slack-toggle behavior vs default-on) —
-  open question, decide up front so the migration doesn't silently change who gets
-  alerted. See PRD.
+- Add `require_admin_or_owner` (admin/owner-only) / `require_owner` (owner-only) role
+  dependencies to the integration routes in `routes/integrations.py`, mapped per-endpoint
+  against the RBAC matrix — not blanket-gated (some routes may be legitimately
+  member-accessible, e.g. read-only status checks).
+- Audit sibling integration route modules (zendesk, hubspot, salesforce, jira, asana,
+  linear, slack, intercom, discord, webhook routes) for the same omission and fix where
+  the matrix requires.
+- Pin the behavior with tests asserting 403 for `member`, 200 for `admin`/`owner`.
 
-## Scope guards (from DEV-TRACKING, do not expand)
+## Scope guards (from DEV-TRACKING + the card, do not expand)
 
-- The **automations engine's notify path has no channels editor** (`DEV-TRACKING.md:189-191`
-  — Discord was deliberately excluded there because `channels: ["discord"]` would be
-  unreachable except via a seeded template or direct API call). **This branch stays at
-  alert dispatch; the automations channels editor is out of scope.**
-- No new notification *types* — this is per-channel routing of existing types.
-- Slack behavior must stay byte-identical for orgs that never touch the new toggle.
+- **No frontend changes** — the UI already hides integration management from members.
+- **Do not** bundle the sibling P1 `oauth-tokens-stored-plaintext`
+  (DEV-TRACKING.md:500-518) or P3 `oauth-state-in-process-dict` (DEV-TRACKING.md:546-551)
+  into this card; if the dig shows they're trivial to ride along, note them but keep this
+  branch scoped to role enforcement.
+- `send_slack_message()` / `send_discord_message()` helpers in `routes/integrations.py`
+  are *called by* automations/alert paths — verify the helpers' callers before touching
+  the module's public functions; only the route-level role checks change here.
+- A `member` must still be able to do everything the RBAC matrix grants members:
+  view feedback, import CSV, view team list/invites. Nothing that reads
+  integration *status* in a way the matrix allows may be broken.
 
-## Related shipped work
+## Related context
 
-- `feat/discord-notifications` (2026-07-29, SHIPPED): Discord integration CRUD + test
-  route, sender per process (backend returns status dict, worker raises), dispatch on
-  the main alert pipe and the health-drop path, `DiscordIcon`, provider tile, ternary
-  fixes. Slack-mrkdwn template path and 429 retry deliberately excluded there.
-- `notification_dispatch.py` — the shared alert pipe: per-type preferences, counts,
-  Slack/email/in-app channels, digests.
+- RBAC matrix: CLAUDE.md (repo root, "Role-Based Access Control" section).
+- Enforcement pattern: `src/api/dependencies.py` — `require_admin_or_owner`,
+  `require_owner`; usage precedent in `routes/team.py` (`Depends(require_admin_or_owner)`
+  on invite) and billing (owner).
+- Prior art: `integration-auth-tenancy-hardening` (2026-07-29) — the same backlog's P0
+  webhook-tenancy fix; the branch's own `tests/test_webhook_verifiers_fail_closed.py`
+  established the "audit all instances, not one" pattern.
