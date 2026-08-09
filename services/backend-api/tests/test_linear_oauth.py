@@ -3,6 +3,7 @@ Tests for Linear OAuth flow endpoints.
 Covers: connect URL generation, callback token exchange, disconnect, status check.
 """
 
+import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
@@ -11,6 +12,15 @@ from sqlalchemy.orm import Session
 from src.models.organization import Organization
 from src.models.user import User
 from src.api.auth import hash_password, create_access_token
+from src.utils.encryption import encrypt_api_key
+
+TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+
+def _encrypt(plain: str) -> str:
+    """Encrypt a credential for a fixture row (Fernet key only needed here)."""
+    with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+        return encrypt_api_key(plain)
 
 
 # ============================================================================
@@ -64,7 +74,7 @@ def linear_integration(db: Session, test_organization: Organization):
         linear_org_name="Acme Linear",
         connected_by_user_id=None,
         is_active=True,
-        webhook_secret="webhook-secret-123",
+        webhook_secret=_encrypt("webhook-secret-123"),
         webhook_id="webhook-uuid-1",
     )
     db.add(integration)
@@ -457,7 +467,7 @@ class TestLinearStatus:
             linear_org_id="org-1",
             linear_org_name="Test",
             is_active=False,
-            webhook_secret="secret",
+            webhook_secret=_encrypt("secret"),
         )
         db.add(integration)
         db.commit()

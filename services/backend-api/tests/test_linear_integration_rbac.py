@@ -5,6 +5,7 @@ Regression coverage for the P1 gap where member-role users could drive
 Linear OAuth connect/disconnect, edit config, and create issues.
 Per the RBAC matrix, integration management is Owner/Admin only.
 """
+import os
 import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
@@ -14,6 +15,15 @@ from src.models.organization import Organization
 from src.models.user import User
 from src.models.feedback import FeedbackItem
 from src.api.auth import hash_password, create_access_token
+from src.utils.encryption import encrypt_api_key
+
+TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+
+def _encrypt(plain: str) -> str:
+    """Encrypt a credential for a fixture row (Fernet key only needed here)."""
+    with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+        return encrypt_api_key(plain)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +64,7 @@ def linear_integration(db: Session, test_organization: Organization):
         linear_org_name="Test Linear",
         connected_by_user_id=None,
         is_active=True,
-        webhook_secret="wh_secret",
+        webhook_secret=_encrypt("wh_secret"),
         webhook_id="webhook-uuid-1",
     )
     db.add(integration)

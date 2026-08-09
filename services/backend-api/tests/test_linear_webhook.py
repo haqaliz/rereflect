@@ -15,18 +15,23 @@ Tests cover:
 import hashlib
 import hmac
 import json
+import os
 import pytest
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 from src.models.organization import Organization
 from src.models.user import User
 from src.models.feedback import FeedbackItem
 from src.api.auth import hash_password
+from src.utils.encryption import encrypt_api_key
 
 
 WEBHOOK_SECRET = "wh_test_secret_abc123"
 WEBHOOK_URL = "/api/v1/webhooks/linear/inbound"
+
+TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +96,18 @@ def post_webhook(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _fernet_key_env():
+    """Set LLM_ENCRYPTION_KEY for every test in this module.
+
+    The verify path decrypts webhook_secret (Fernet), and decrypt reads the
+    env var lazily — without it every verification would fail as a key
+    mismatch rather than as a signature mismatch.
+    """
+    with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+        yield
+
+
 @pytest.fixture
 def pro_org(db: Session) -> Organization:
     org = Organization(name="Pro Org", plan="pro")
@@ -137,7 +154,7 @@ def linear_integration(db: Session, pro_org: Organization, pro_user: User):
         linear_org_name="Pro Org Linear",
         connected_by_user_id=pro_user.id,
         is_active=True,
-        webhook_secret=WEBHOOK_SECRET,
+        webhook_secret=encrypt_api_key(WEBHOOK_SECRET),
     )
     db.add(integration)
     db.commit()
