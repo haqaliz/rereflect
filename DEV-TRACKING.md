@@ -517,7 +517,23 @@ was left by a branch that shipped the fix and did not update the row.
       deferred, the comment must be corrected *immediately* either way.
 - [ ] Needs a migration to encrypt existing rows in place.
 
-### P1 — `integrations-routes-missing-rbac` (bug, NOT STARTED)
+### P1 — `integrations-routes-missing-rbac` — **FIXED** on `bug/integrations-routes-missing-rbac` (2026-08-09)
+> Shipped: `require_admin_or_owner` on all 12 JWT routes in `integrations.py` (incl. the
+> previously-**unauthenticated** `GET /slack/template-variables`, now gated; the two OAuth
+> callbacks stay JWT-less by design — provider browser redirect, state-guarded, pinned by
+> the sweep test), all 16 JWT routes in `linear_integration.py` (the audit's surprise —
+> the only provider module besides this file with zero role deps; `POST /issues` was
+> member-reachable), and the 3 write routes in `feedback_sources.py` (GETs stay
+> member-open — its pages are top-level/member-reachable by design). Commits
+> `2defcc33`/`3b76a566`/`538aa80e` (member→403 tests RED-first per module) +
+> `2e071c56` (sweep-guard `tests/test_integration_rbac_sweep.py` enumerates every
+> integration/config router module so the zero-deps class cannot silently recur — mirror
+> of `test_webhook_verifiers_fail_closed.py`). Backend suite 4674 passed. **Follow-up
+> (chore, not started): `frontend-integration-role-guards`** — 3 member-reachable
+> surfaces now 403 after gating: `settings/integrations/[id]` + `new` pages, the Linear
+> branch of `feedbacks/[id]/create-issue` (Jira/Asana already 403 for members), and
+> `feedback-sources/*` write buttons. See `docs/planning/integration-routes-rbac/`.
+
 - [ ] `services/backend-api/src/api/routes/integrations.py` contains **zero** occurrences of
       `403`, `require_admin_or_owner` or `require_owner`. `get_current_org` validates the JWT
       but never checks `current_user.role`.
