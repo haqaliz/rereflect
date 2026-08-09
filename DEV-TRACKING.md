@@ -424,7 +424,14 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   delete their entries from `SHADOW_ALLOWLIST` in `tests/test_webhook_verifiers_fail_closed.py`
   (that test fails until you do). Update the `SELF_HOSTING.md` table, which still describes them
   as accepting unverified deliveries.
-- **`linear-webhook-secret-plaintext`** — Linear is the only integration storing `webhook_secret`
+- ~~**`linear-webhook-secret-plaintext`**~~ — **FIXED** on `bug/linear-webhook-secret-plaintext`
+  (2026-08-09). Linear's `webhook_secret` is now Fernet-encrypted at rest like every other
+  integration: encrypt-on-write at the OAuth callback (missing `LLM_ENCRYPTION_KEY` → 422,
+  never 500), decrypt-once at the verify boundary with a diagnostic warning naming the
+  integration, fail-closed backfill migration `d3a2c5b7e9f4` (chained to `c7d8e9f0a1b2`),
+  ciphertext-contract fixtures, and the sweep-guard
+  `tests/test_credential_encryption_sweep.py` pinning that no route may write a credential
+  column without the encrypt helper. ORIGINAL ENTRY: — Linear is the only integration storing `webhook_secret`
   unencrypted; Zendesk/Jira/Asana all round-trip through `encrypt_api_key`. Needs a backfill
   migration.
 - ~~**`zendesk-replay-window`**~~ — **FIXED** 2026-08-01. 300s window, matching Slack's.

@@ -16,7 +16,7 @@ class LinearIntegration(Base):
     connected_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     connected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    webhook_secret = Column(String(255), nullable=False)
+    webhook_secret = Column(String(255), nullable=False)  # Fernet-encrypted webhook secret
     webhook_id = Column(String(255), nullable=True)  # Linear webhook UUID for deletion
 
     # Issue template defaults (used when creating issues from feedback)
