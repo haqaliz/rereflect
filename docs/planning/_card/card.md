@@ -1,59 +1,68 @@
-# Card — `integrations-routes-missing-rbac`
+# Card — `oauth-tokens-stored-plaintext`
 
 **Type:** bug (freeform — no GitHub issue)
-**Branch:** `bug/integrations-routes-missing-rbac`
-**Worktree:** `.claude/worktrees/bug-integrations-routes-missing-rbac`
+**Branch:** `bug/oauth-tokens-stored-plaintext`
+**Worktree:** `.claude/worktrees/bug-oauth-tokens-stored-plaintext`
 **Opened:** 2026-08-09
-**Traces to:** DEV-TRACKING P1 (`DEV-TRACKING.md:520-529`) — Post-1.0.0 User Feedback Backlog
-**Picked by:** `rereflect-next` (previous session) — highest-severity remaining item in
-the repo's own highest-priority queue (DEV-TRACKING.md:39-41 says pick here before older
-roadmap sections).
+**Traces to:** DEV-TRACKING P1 (`DEV-TRACKING.md:500-518`) — Post-1.0.0 User Feedback Backlog
+**Picked by:** `rereflect-next` — highest-severity remaining item in the repo's own
+highest-priority queue (DEV-TRACKING.md:39-41 says pick here before older roadmap sections).
 
 ## The problem
 
-`services/backend-api/src/api/routes/integrations.py` contains **zero** occurrences of
-`403`, `require_admin_or_owner` or `require_owner`. `get_current_org` validates the JWT
-but never checks `current_user.role` (DEV-TRACKING.md:521-522).
+`Integration.oauth_access_token` is a plain `Text` column and
+`services/backend-api/src/api/routes/integrations.py` never calls
+`encrypt_api_key`/`decrypt_api_key` on the **Slack or Intercom OAuth paths** — while
+every newer BYOK integration (Zendesk, Jira, Asana, HubSpot, Salesforce) does encrypt
+(DEV-TRACKING.md:509-513). OAuth was simply never migrated when the encryption pattern
+was introduced. Live Slack/Intercom tokens are stored in plaintext at rest on every
+self-hosted install.
 
-So a **`member` can drive the OAuth connect flow via the API**, contradicting the RBAC
-table in CLAUDE.md ("Manage integrations: Owner ✅ / Admin ✅ / Member ❌"). The frontend
-hides the UI; the backend does not enforce it — "the classic shape of an access-control
-gap that looks fine in manual testing" (DEV-TRACKING.md:526-527).
+`services/backend-api/src/models/integration.py:19` carries the comment "OAuth tokens
+(encrypted at application level before storage)" — **which is false**. A reader auditing
+this file is actively misled into believing it is handled. The comment must be corrected
+in the same commit as the fix (DEV-TRACKING.md:514-517).
 
-Triage also requires: **audit the other integration route modules for the same omission
-before assuming it is confined to this file** (DEV-TRACKING.md:528-529).
+The encryption fix needs a **backfill migration** for existing rows and was deliberately
+kept out of `feat/integration-auth-tenancy-hardening` so a P0 wasn't held up behind a
+data migration (DEV-TRACKING.md:501-503). It is the designated next card.
 
 ## The fix (minimal slice)
 
-- Add `require_admin_or_owner` (admin/owner-only) / `require_owner` (owner-only) role
-  dependencies to the integration routes in `routes/integrations.py`, mapped per-endpoint
-  against the RBAC matrix — not blanket-gated (some routes may be legitimately
-  member-accessible, e.g. read-only status checks).
-- Audit sibling integration route modules (zendesk, hubspot, salesforce, jira, asana,
-  linear, slack, intercom, discord, webhook routes) for the same omission and fix where
-  the matrix requires.
-- Pin the behavior with tests asserting 403 for `member`, 200 for `admin`/`owner`.
+- Route the **Slack and Intercom OAuth connect/callback paths** in `routes/integrations.py`
+  through the existing Fernet `encrypt_api_key`/`decrypt_api_key` helpers (the same
+  pattern Zendesk/Jira/Asana/HubSpot/Salesforce already use) — encrypt on write, decrypt
+  on read at the use site.
+- **Alembic backfill migration** that encrypts existing plaintext rows in place. Must fail
+  loudly (not silently leave rows plaintext) if the Fernet key is absent at migration time.
+- Correct the false comment at `models/integration.py:19`.
+- Pin with tests: stored value is ciphertext (not the raw token), round-trips through
+  decrypt, existing plaintext rows migrate.
 
 ## Scope guards (from DEV-TRACKING + the card, do not expand)
 
-- **No frontend changes** — the UI already hides integration management from members.
-- **Do not** bundle the sibling P1 `oauth-tokens-stored-plaintext`
-  (DEV-TRACKING.md:500-518) or P3 `oauth-state-in-process-dict` (DEV-TRACKING.md:546-551)
-  into this card; if the dig shows they're trivial to ride along, note them but keep this
-  branch scoped to role enforcement.
-- `send_slack_message()` / `send_discord_message()` helpers in `routes/integrations.py`
-  are *called by* automations/alert paths — verify the helpers' callers before touching
-  the module's public functions; only the route-level role checks change here.
-- A `member` must still be able to do everything the RBAC matrix grants members:
-  view feedback, import CSV, view team list/invites. Nothing that reads
-  integration *status* in a way the matrix allows may be broken.
+- **This is a bug fix — no UI changes, no behavior changes** to the OAuth flows themselves.
+- **Do not** bundle the sibling P1 `oauth-state-in-process-dict` (DEV-TRACKING.md:546-551)
+  into this card; if the dig shows it's trivial to ride along, note it but keep this branch
+  scoped to encryption-at-rest.
+- **Do not** bundle the follow-up `linear-webhook-secret-plaintext` (the Linear webhook
+  secret unencrypted) unless the dig shows the same migration can cover both cleanly —
+  note it, keep the branch scoped.
+- The migration must not depend on application code at upgrade time beyond what Alembic
+  can import safely (follow the repo's existing migration conventions).
+- Token read sites (`oauth_access_token` consumers) must be audited so decrypting happens
+  exactly once, at the call site, with no double-decrypt.
 
 ## Related context
 
-- RBAC matrix: CLAUDE.md (repo root, "Role-Based Access Control" section).
-- Enforcement pattern: `src/api/dependencies.py` — `require_admin_or_owner`,
-  `require_owner`; usage precedent in `routes/team.py` (`Depends(require_admin_or_owner)`
-  on invite) and billing (owner).
-- Prior art: `integration-auth-tenancy-hardening` (2026-07-29) — the same backlog's P0
-  webhook-tenancy fix; the branch's own `tests/test_webhook_verifiers_fail_closed.py`
-  established the "audit all instances, not one" pattern.
+- Prior art — the encryption helpers: `encrypt_api_key`/`decrypt_api_key` usage in the
+  Zendesk/Jira/Asana/HubSpot/Salesforce routes (Fernet, key from env).
+- Prior art — backfill migrations in this repo: e.g. `public_id` backfill
+  (`n3o4p5q6r7s8`), churn probability columns (`6e4501930bf0`) — see
+  `services/backend-api/alembic/versions/`.
+- Roadmap hygiene rule (DEV-TRACKING.md:497): "When closing work, correct the marker in
+  the same commit" — the DEV-TRACKING P1 entry must be marked FIXED on the branch that
+  ships the fix.
+- False-comment class: the same "confident lie in the codebase" family as the P0/P0b
+  dead-import bugs — a comment that asserts a security property that does not hold is
+  worse than no comment.
