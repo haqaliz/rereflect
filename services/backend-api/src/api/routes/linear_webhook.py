@@ -12,6 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy.orm import Session
+from cryptography.fernet import InvalidToken
 
 from src.database.session import get_db
 from src.models.feedback import FeedbackItem
@@ -21,6 +22,7 @@ from src.models.linear_integration import (
     LinearIntegration,
     LinearStatusMapping,
 )
+from src.utils.encryption import decrypt_api_key
 
 # FastAPI dependency injection — imported with Depends at call site
 from fastapi import Depends
@@ -58,6 +60,11 @@ def _find_integration_by_secret(signature: str, body: bytes, db: Session) -> Opt
     """
     Find the LinearIntegration whose webhook_secret matches the given signature.
     Linear sends a single global webhook, so we check all active integrations.
+
+    Stored secrets are Fernet ciphertext; each candidate is decrypted exactly
+    once. A corrupt/undecryptable secret is treated as no-match (never a 500)
+    and logged as a warning naming the integration, so a changed
+    LLM_ENCRYPTION_KEY is diagnosable.
     """
     active_integrations = (
         db.query(LinearIntegration)
@@ -65,9 +72,17 @@ def _find_integration_by_secret(signature: str, body: bytes, db: Session) -> Opt
         .all()
     )
     for integration in active_integrations:
-        if integration.webhook_secret and _verify_linear_signature(
-            body, signature, integration.webhook_secret
-        ):
+        if not integration.webhook_secret:
+            continue
+        try:
+            secret = decrypt_api_key(integration.webhook_secret)
+        except (ValueError, InvalidToken) as exc:
+            logger.warning(
+                "linear_webhook: failed to decrypt webhook_secret for integration_id=%s (%s) — LLM_ENCRYPTION_KEY mismatch?",
+                integration.id, exc,
+            )
+            continue
+        if _verify_linear_signature(body, signature, secret):
             return integration
     return None
 

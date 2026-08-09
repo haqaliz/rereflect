@@ -37,6 +37,7 @@ from src.models.linear_integration import (
 from src.models.organization import Organization
 from src.models.user import User
 from src.services.linear_client import LinearClient
+from src.utils.encryption import encrypt_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -407,6 +408,15 @@ async def linear_oauth_callback(
         else:
             logger.info("Skipping Linear webhook creation for localhost environment")
 
+        try:
+            stored_secret = encrypt_api_key(webhook_secret)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Cannot store Linear webhook secret: LLM_ENCRYPTION_KEY is not set. "
+                       "Set it before connecting Linear.",
+            ) from exc
+
         # Upsert LinearIntegration (deactivate old if exists)
         existing = (
             db.query(LinearIntegration)
@@ -420,7 +430,7 @@ async def linear_oauth_callback(
             existing.connected_by_user_id = user_id
             existing.connected_at = datetime.utcnow()
             existing.is_active = True
-            existing.webhook_secret = webhook_secret
+            existing.webhook_secret = stored_secret
             existing.webhook_id = webhook_id
             existing.updated_at = datetime.utcnow()
             integration = existing
@@ -432,7 +442,7 @@ async def linear_oauth_callback(
                 linear_org_name=org_info["name"],
                 connected_by_user_id=user_id,
                 is_active=True,
-                webhook_secret=webhook_secret,
+                webhook_secret=stored_secret,
                 webhook_id=webhook_id,
             )
             db.add(integration)
@@ -465,6 +475,8 @@ async def linear_oauth_callback(
         return RedirectResponse(
             url=f"{FRONTEND_URL}/settings/integrations?oauth_error=network_error"
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Linear OAuth unexpected error: {exc}")
         return RedirectResponse(
