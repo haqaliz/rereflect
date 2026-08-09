@@ -278,8 +278,23 @@ migrations.** The upgrade migration encrypts existing plaintext rows in place an
 closed** when the key is unset — `alembic upgrade head` aborts with a `RuntimeError`
 containing a generate-a-key command rather than leaving your OAuth tokens in plaintext.
 Operators who never set the key (integration saves already required it) should generate one
-with that command, add it to `.env`, and re-run `alembic upgrade head`. See *OAuth token
-encryption & the upgrade requirement* in `docs/SELF_HOSTING.md`.
+with that command, add it to `.env`, and re-run `alembic upgrade head`. See *Integration
+credential encryption & the upgrade requirement* in `docs/SELF_HOSTING.md`.
+
+### Security — Linear webhook secrets are now encrypted at rest
+
+`LinearIntegration.webhook_secret` — the HMAC key that authenticates inbound Linear
+webhook deliveries — is Fernet-encrypted before storage, closing the last plaintext
+credential in the system (every other integration already encrypted at rest). The OAuth
+callback encrypts on write (saving without `LLM_ENCRYPTION_KEY` returns 422, never 500),
+and the webhook receiver decrypts exactly once at signature verification, logging a
+diagnostic warning when a stored secret cannot be decrypted instead of accepting the
+delivery.
+
+**Same upgrade requirement as the OAuth tokens above: set `LLM_ENCRYPTION_KEY` before
+running migrations.** The upgrade migration encrypts existing plaintext rows in place and
+fails closed when the key is unset. See *Integration credential encryption & the upgrade
+requirement* in `docs/SELF_HOSTING.md`.
 
 ## v1.0.0 — 2026-07-26
 
