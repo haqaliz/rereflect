@@ -254,6 +254,124 @@ class TestLinearOAuthCallback:
         assert integration.is_active is True
         assert integration.linear_org_name == "Acme Corp"
 
+    @patch("src.api.routes.linear_integration.LINEAR_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.linear_integration.LINEAR_CLIENT_SECRET", "test-client-secret")
+    def test_callback_stores_encrypted_webhook_secret(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+        test_user: User,
+    ):
+        """Should persist the Linear webhook secret as Fernet ciphertext, never plaintext."""
+        from src.api.routes.linear_integration import linear_oauth_states
+        from src.models.linear_integration import LinearIntegration
+        from src.utils.encryption import decrypt_api_key
+
+        raw_secret = "raw-webhook-secret-abc123"
+
+        test_state = "test-state-ciphertext"
+        linear_oauth_states[test_state] = {
+            "organization_id": test_organization.id,
+            "user_id": test_user.id,
+        }
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {
+            "access_token": "lin_oauth_token_xyz",
+            "token_type": "Bearer",
+            "scope": "read,write",
+        }
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_async_client = AsyncMock()
+        mock_async_client.post = AsyncMock(return_value=mock_token_response)
+        mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_async_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.api.routes.linear_integration.httpx.AsyncClient", return_value=mock_async_client):
+            with patch("src.api.routes.linear_integration.LinearClient") as MockLinearClient:
+                mock_linear = AsyncMock()
+                mock_linear.get_organization = AsyncMock(return_value={
+                    "id": "linear-org-123",
+                    "name": "Acme Corp",
+                })
+                mock_linear.create_webhook = AsyncMock(return_value={"id": "webhook-1"})
+                MockLinearClient.return_value = mock_linear
+
+                with patch(
+                    "src.api.routes.linear_integration.secrets.token_urlsafe",
+                    return_value=raw_secret,
+                ):
+                    with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+                        response = client.get(
+                            f"/api/v1/integrations/linear/callback?code=authcode123&state={test_state}",
+                            follow_redirects=False,
+                        )
+
+        assert response.status_code == 307
+
+        integration = db.query(LinearIntegration).filter(
+            LinearIntegration.organization_id == test_organization.id
+        ).first()
+        assert integration is not None
+        assert integration.webhook_secret.startswith("gAAAAA")
+        assert integration.webhook_secret != raw_secret
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            assert decrypt_api_key(integration.webhook_secret) == raw_secret
+
+    @patch("src.api.routes.linear_integration.LINEAR_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.linear_integration.LINEAR_CLIENT_SECRET", "test-client-secret")
+    @patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""})
+    def test_callback_missing_key_returns_422(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+        test_user: User,
+    ):
+        """Should reject with 422 (never silently store plaintext) when LLM_ENCRYPTION_KEY is unset."""
+        from src.api.routes.linear_integration import linear_oauth_states
+        from src.models.linear_integration import LinearIntegration
+
+        test_state = "test-state-missing-key"
+        linear_oauth_states[test_state] = {
+            "organization_id": test_organization.id,
+            "user_id": test_user.id,
+        }
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "lin_oauth_token_xyz"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_async_client = AsyncMock()
+        mock_async_client.post = AsyncMock(return_value=mock_token_response)
+        mock_async_client.__aenter__ = AsyncMock(return_value=mock_async_client)
+        mock_async_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.api.routes.linear_integration.httpx.AsyncClient", return_value=mock_async_client):
+            with patch("src.api.routes.linear_integration.LinearClient") as MockLinearClient:
+                mock_linear = AsyncMock()
+                mock_linear.get_organization = AsyncMock(return_value={
+                    "id": "linear-org-123",
+                    "name": "Acme Corp",
+                })
+                mock_linear.create_webhook = AsyncMock(return_value={"id": "webhook-1"})
+                MockLinearClient.return_value = mock_linear
+
+                response = client.get(
+                    f"/api/v1/integrations/linear/callback?code=authcode123&state={test_state}",
+                    follow_redirects=False,
+                )
+
+        assert response.status_code == 422
+        assert "LLM_ENCRYPTION_KEY" in response.json()["detail"]
+
+        integration = db.query(LinearIntegration).filter(
+            LinearIntegration.organization_id == test_organization.id
+        ).first()
+        assert integration is None
+
     def test_callback_rejects_invalid_state(self, client: TestClient):
         """Should redirect with error when state is invalid."""
         response = client.get(
