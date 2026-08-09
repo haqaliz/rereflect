@@ -75,9 +75,11 @@ MAX_PAGES_PER_RUN = 20
 
 def _decrypt(token: str) -> str:
     """Mirrors zendesk_sync._decrypt / hubspot_sync._decrypt."""
-    from src.utils.encryption import decrypt_api_key
-
-    return decrypt_api_key(token)
+    from cryptography.fernet import Fernet
+    key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if not key:
+        raise ValueError("LLM_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode()).decrypt(token.encode()).decode()
 
 
 def _to_unix_ts(dt: datetime) -> int:

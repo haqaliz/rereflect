@@ -5,14 +5,32 @@ Runs hourly via Celery Beat to detect negative sentiment spikes.
 
 import logging
 import math
+import os
 from datetime import datetime, timedelta
 
 from celery import shared_task
+
+from cryptography.fernet import InvalidToken
 
 from src.database import get_db_session
 from src.tasks.alerts import send_discord_message_webhook
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Local token decryption (mirrors zendesk_sync.py _decrypt)
+# R6: Worker cannot import from backend-api; uses its own Fernet helper.
+# ---------------------------------------------------------------------------
+
+
+def _decrypt(token: str) -> str:
+    """Decrypt a Fernet-encrypted string using LLM_ENCRYPTION_KEY."""
+    from cryptography.fernet import Fernet
+    key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if not key:
+        raise ValueError("LLM_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode()).decrypt(token.encode()).decode()
 
 
 @shared_task
@@ -266,8 +284,18 @@ def _send_anomaly_slack(db, org, anomaly):
             integration_type = config.get("integration_type", "webhook")
 
             if integration_type == "oauth" and integration.oauth_access_token and config.get("channel_id"):
+                # Decrypt exactly once before sending. A missing key or corrupt
+                # ciphertext is a non-transient config error: log and skip the
+                # integration, never retry, never raise out of the task.
+                try:
+                    access_token = _decrypt(integration.oauth_access_token)
+                except (ValueError, InvalidToken) as exc:
+                    logger.error(
+                        f"Failed to decrypt Slack OAuth token for integration {integration.id}: {exc}"
+                    )
+                    continue
                 send_slack_message_oauth(
-                    access_token=integration.oauth_access_token,
+                    access_token=access_token,
                     channel_id=config["channel_id"],
                     blocks=blocks,
                     text=text,

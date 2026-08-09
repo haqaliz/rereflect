@@ -10,10 +10,27 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 
+from cryptography.fernet import InvalidToken
+
 from src.database import get_db_session
 from src.tasks.alerts import send_discord_message_webhook
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Local token decryption (mirrors zendesk_sync.py _decrypt)
+# R6: Worker cannot import from backend-api; uses its own Fernet helper.
+# ---------------------------------------------------------------------------
+
+
+def _decrypt(token: str) -> str:
+    """Decrypt a Fernet-encrypted string using LLM_ENCRYPTION_KEY."""
+    from cryptography.fernet import Fernet
+    key = os.environ.get("LLM_ENCRYPTION_KEY")
+    if not key:
+        raise ValueError("LLM_ENCRYPTION_KEY is not set")
+    return Fernet(key.encode()).decrypt(token.encode()).decode()
 
 # Redis dedup key template
 HEALTH_ALERT_COOLDOWN_KEY = "health_alert_cooldown:{org_id}:{customer_email}"
@@ -100,8 +117,18 @@ def _dispatch_slack_health_alert(
                 channel_id = integration.alert_channel_id or config.get("channel_id")
 
                 if integration_type == "oauth" and integration.oauth_access_token and channel_id:
+                    # Decrypt exactly once before sending. A missing key or
+                    # corrupt ciphertext is a non-transient config error: log
+                    # and skip the integration, never retry, never raise.
+                    try:
+                        access_token = _decrypt(integration.oauth_access_token)
+                    except (ValueError, InvalidToken) as exc:
+                        logger.error(
+                            f"Failed to decrypt Slack OAuth token for integration {integration.id}: {exc}"
+                        )
+                        continue
                     send_slack_message_oauth(
-                        access_token=integration.oauth_access_token,
+                        access_token=access_token,
                         channel_id=channel_id,
                         blocks=blocks,
                         text=text,
@@ -697,8 +724,22 @@ def _dispatch_slack_alert(
                 channel_id = integration.alert_channel_id or config.get("channel_id")
 
                 if integration_type == "oauth" and integration.oauth_access_token and channel_id:
+                    # Decrypt exactly once before sending. A missing key or
+                    # corrupt ciphertext is a non-transient config error:
+                    # record it like any other send failure (error_count /
+                    # last_error bookkeeping) and skip — never retry, never
+                    # raise out of the task.
+                    try:
+                        access_token = _decrypt(integration.oauth_access_token)
+                    except (ValueError, InvalidToken) as exc:
+                        logger.error(
+                            f"Failed to decrypt Slack OAuth token for integration {integration.id}: {exc}"
+                        )
+                        integration.error_count = (integration.error_count or 0) + 1
+                        integration.last_error = str(exc) or "token_decrypt_failed"
+                        continue
                     send_slack_message_oauth(
-                        access_token=integration.oauth_access_token,
+                        access_token=access_token,
                         channel_id=channel_id,
                         blocks=blocks,
                         text=text,

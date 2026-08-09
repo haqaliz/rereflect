@@ -387,7 +387,6 @@ class TestProcessEventForSourceDecrypt:
             "evt-1",
             "message",
             event_data,
-            {"channel_id": "C123"},
         )
 
     def test_slack_path_decrypts_before_fetch_context(self, db):
