@@ -254,6 +254,41 @@ class TestSignatureVerification:
         response = post_webhook(client, payload, secret="wrong_secret_xyz")
         assert response.status_code == 401
 
+    def test_corrupt_stored_secret_returns_401_and_warns(
+        self, client: TestClient, db: Session, pro_org: Organization, pro_user: User, caplog
+    ):
+        """A stored secret that cannot be decrypted must fail closed (401),
+        and the failure must be diagnosable via a warning naming the
+        integration — the changed-key / corrupt-ciphertext path."""
+        from src.models.linear_integration import LinearIntegration
+        corrupt = LinearIntegration(
+            organization_id=pro_org.id,
+            access_token="enc_token",
+            linear_org_id="lin_org_corrupt",
+            linear_org_name="Corrupt Linear",
+            connected_by_user_id=pro_user.id,
+            is_active=True,
+            webhook_secret="gAAAAA" + "x" * 40,
+        )
+        db.add(corrupt)
+        db.commit()
+
+        payload = issue_update_payload()
+        body = json.dumps(payload).encode()
+        sig = make_linear_signature(body, WEBHOOK_SECRET)
+        with caplog.at_level("WARNING", logger="src.api.routes.linear_webhook"):
+            response = client.post(
+                WEBHOOK_URL,
+                content=body,
+                headers={"Content-Type": "application/json", "Linear-Signature": sig},
+            )
+        assert response.status_code == 401
+        assert any(
+            "failed to decrypt webhook_secret" in r.message
+            and "integration_id=" in r.message
+            for r in caplog.records
+        )
+
 
 # ---------------------------------------------------------------------------
 # 3. Non-Issue event types ignored
