@@ -10,13 +10,28 @@ the Slack version — or the integration-health UI silently goes stale.
 Patched at the import site (src.notification_dispatch.send_discord_message_webhook)
 per the spec: notification_dispatch.py imports it at module top, so patching the
 definition site in src.tasks.alerts would pass while patching nothing.
+
+Also pins the worker decrypt mirror at notification_dispatch.py:701:
+_dispatch_slack_alert must hand send_slack_message_oauth the PLAINTEXT token
+(patched at src.tasks.alerts — its function-body `from ... import` resolves the
+name at call time), and a missing key / corrupt ciphertext must be recorded via
+the file's local error shape (integration.error_count / last_error bookkeeping,
+like any other send failure) without raising.
 """
+import os
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from src.models import Organization, Integration
+
+ENCRYPTION_KEY = "F5XVApZxzOVKc2xrZlnI6ouXipDzsxflzFn2Ki_5_yk="
+
+
+def _encrypt(secret: str) -> str:
+    from cryptography.fernet import Fernet
+    return Fernet(ENCRYPTION_KEY.encode()).encrypt(secret.encode()).decode()
 
 
 def make_org(db) -> Organization:
@@ -317,3 +332,99 @@ class TestDispatchAlertTriggersDiscord:
                     )
 
         assert counts == {"inapp": 0, "slack": 1, "discord": 1, "email": 0}
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_slack_alert() -- OAuth token decryption (worker decrypt mirrors)
+# ---------------------------------------------------------------------------
+
+class TestDispatchSlackAlert:
+    """_dispatch_slack_alert (notification_dispatch.py:701) must decrypt
+    integrations.oauth_access_token before sending; a missing key or corrupt
+    ciphertext is recorded like any other send failure (error_count / last_error
+    bookkeeping — the file's local error shape) without raising."""
+
+    def _make_slack_oauth_integration(self, db, org_id: int, token: str) -> Integration:
+        integ = Integration(
+            organization_id=org_id,
+            type="slack",
+            config={"integration_type": "oauth", "channel_id": "C1"},
+            oauth_access_token=token,
+            is_active=True,
+        )
+        db.add(integ)
+        db.commit()
+        db.refresh(integ)
+        return integ
+
+    def test_plaintext_token_reaches_send_slack_message_oauth(self, db):
+        from src.notification_dispatch import _dispatch_slack_alert
+
+        org = make_org(db)
+        integ = self._make_slack_oauth_integration(db, org.id, _encrypt("xoxb-alert-dispatch"))
+        assert "xoxb-alert-dispatch" not in integ.oauth_access_token
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+                 patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+                _dispatch_slack_alert(
+                    org_id=org.id,
+                    alert_type="urgent_feedback",
+                    title="Urgent feedback",
+                    message="msg",
+                    link="/feedbacks/1",
+                )
+
+        mock_send.assert_called_once()
+        assert mock_send.call_args.kwargs["access_token"] == "xoxb-alert-dispatch"
+        assert mock_send.call_args.kwargs["channel_id"] == "C1"
+
+    def test_missing_key_records_error_without_sending(self, db):
+        from src.notification_dispatch import _dispatch_slack_alert
+
+        org = make_org(db)
+        integ = self._make_slack_oauth_integration(db, org.id, _encrypt("xoxb-alert-dispatch"))
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+                 patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""}):
+                _dispatch_slack_alert(
+                    org_id=org.id,
+                    alert_type="urgent_feedback",
+                    title="Urgent feedback",
+                    message="msg",
+                    link="/feedbacks/1",
+                )
+
+        mock_send.assert_not_called()
+        db.refresh(integ)
+        assert integ.error_count == 1
+        assert integ.last_error
+
+    def test_corrupt_ciphertext_records_error_without_sending(self, db):
+        from src.notification_dispatch import _dispatch_slack_alert
+
+        org = make_org(db)
+        integ = self._make_slack_oauth_integration(db, org.id, "garbage-not-fernet")
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+            with patch("src.tasks.alerts.send_slack_message_oauth") as mock_send, \
+                 patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ENCRYPTION_KEY}):
+                _dispatch_slack_alert(
+                    org_id=org.id,
+                    alert_type="urgent_feedback",
+                    title="Urgent feedback",
+                    message="msg",
+                    link="/feedbacks/1",
+                )
+
+        mock_send.assert_not_called()
+        db.refresh(integ)
+        assert integ.error_count == 1
+        assert integ.last_error
