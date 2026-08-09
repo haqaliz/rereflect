@@ -19,7 +19,12 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from src.api.dependencies import get_current_org, get_current_user, require_feature
+from src.api.dependencies import (
+    get_current_org,
+    get_current_user,
+    require_admin_or_owner,
+    require_feature,
+)
 from src.database.session import get_db
 from src.models.feedback import FeedbackItem
 from src.models.feedback_workflow_event import FeedbackWorkflowEvent
@@ -298,7 +303,7 @@ def _add_timeline_entry(
 @router.get(
     "/connect",
     response_model=LinearConnectResponse,
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def linear_oauth_connect(
     current_org: Organization = Depends(get_current_org),
@@ -470,7 +475,7 @@ async def linear_oauth_callback(
 @router.delete(
     "/disconnect",
     response_model=LinearDisconnectResponse,
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 async def linear_disconnect(
     current_org: Organization = Depends(get_current_org),
@@ -507,7 +512,7 @@ async def linear_disconnect(
     )
 
 
-@router.get("/status", response_model=LinearStatusResponse)
+@router.get("/status", response_model=LinearStatusResponse, dependencies=[Depends(require_admin_or_owner)])
 def linear_status(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db),
@@ -575,7 +580,7 @@ ISSUE_TEMPLATE_VARIABLES = [
 @router.get(
     "/config",
     response_model=LinearConfigResponse,
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def get_linear_config(
     current_org: Organization = Depends(get_current_org),
@@ -592,7 +597,7 @@ def get_linear_config(
 @router.put(
     "/config",
     response_model=LinearConfigResponse,
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def update_linear_config(
     data: LinearConfigUpdateRequest,
@@ -615,7 +620,7 @@ def update_linear_config(
 
 @router.post(
     "/test",
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 async def test_linear_connection(
     current_org: Organization = Depends(get_current_org),
@@ -638,7 +643,7 @@ async def test_linear_connection(
         }
 
 
-@router.get("/template-variables")
+@router.get("/template-variables", dependencies=[Depends(require_admin_or_owner)])
 def get_linear_template_variables():
     """Get available template variables for Linear issue templates."""
     return {
@@ -654,7 +659,7 @@ def get_linear_template_variables():
 
 @router.post(
     "/issues",
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
     status_code=201,
 )
 async def create_linear_issue(
@@ -796,7 +801,7 @@ async def create_linear_issue(
 @router.get(
     "/issues",
     response_model=List[LinkedIssueResponse],
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def get_linked_issues(
     feedback_id: int = Query(..., description="Feedback item ID"),
@@ -822,7 +827,7 @@ def get_linked_issues(
 
 @router.get(
     "/teams",
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 async def get_linear_teams(
     current_org: Organization = Depends(get_current_org),
@@ -836,7 +841,7 @@ async def get_linear_teams(
 
 @router.get(
     "/projects",
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 async def get_linear_projects(
     team_id: str = Query(..., description="Linear team ID"),
@@ -851,7 +856,7 @@ async def get_linear_projects(
 
 @router.get(
     "/labels",
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 async def get_linear_labels(
     current_org: Organization = Depends(get_current_org),
@@ -870,7 +875,7 @@ async def get_linear_labels(
 @router.get(
     "/team-mappings",
     response_model=List[TeamMappingResponse],
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def get_team_mappings(
     current_org: Organization = Depends(get_current_org),
@@ -889,7 +894,7 @@ def get_team_mappings(
 @router.put(
     "/team-mappings",
     response_model=List[TeamMappingResponse],
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def update_team_mappings(
     mappings: List[TeamMappingItem],
@@ -931,7 +936,7 @@ def update_team_mappings(
 @router.get(
     "/status-mappings",
     response_model=List[StatusMappingResponse],
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def get_status_mappings(
     current_org: Organization = Depends(get_current_org),
@@ -950,7 +955,7 @@ def get_status_mappings(
 @router.put(
     "/status-mappings",
     response_model=List[StatusMappingResponse],
-    dependencies=[Depends(require_feature("linear_integration"))],
+    dependencies=[Depends(require_admin_or_owner), Depends(require_feature("linear_integration"))],
 )
 def update_status_mappings(
     mappings: List[StatusMappingItem],
