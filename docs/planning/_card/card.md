@@ -1,68 +1,72 @@
-# Card — `oauth-tokens-stored-plaintext`
+# Card — `linear-webhook-secret-plaintext`
 
 **Type:** bug (freeform — no GitHub issue)
-**Branch:** `bug/oauth-tokens-stored-plaintext`
-**Worktree:** `.claude/worktrees/bug-oauth-tokens-stored-plaintext`
+**Branch:** `bug/linear-webhook-secret-plaintext`
+**Worktree:** `.claude/worktrees/bug-linear-webhook-secret-plaintext`
 **Opened:** 2026-08-09
-**Traces to:** DEV-TRACKING P1 (`DEV-TRACKING.md:500-518`) — Post-1.0.0 User Feedback Backlog
-**Picked by:** `rereflect-next` — highest-severity remaining item in the repo's own
-highest-priority queue (DEV-TRACKING.md:39-41 says pick here before older roadmap sections).
+**Traces to:** DEV-TRACKING.md:427-429 (follow-ups opened by `feat/integration-auth-tenancy-hardening`, all NOT STARTED)
+**Picked by:** `rereflect-next` — the designated follow-up of the just-merged
+`oauth-tokens-stored-plaintext` (PR #10, commit `737bbd5`): the last plaintext
+credential in the system.
 
 ## The problem
 
-`Integration.oauth_access_token` is a plain `Text` column and
-`services/backend-api/src/api/routes/integrations.py` never calls
-`encrypt_api_key`/`decrypt_api_key` on the **Slack or Intercom OAuth paths** — while
-every newer BYOK integration (Zendesk, Jira, Asana, HubSpot, Salesforce) does encrypt
-(DEV-TRACKING.md:509-513). OAuth was simply never migrated when the encryption pattern
-was introduced. Live Slack/Intercom tokens are stored in plaintext at rest on every
-self-hosted install.
+`services/backend-api/src/models/linear_integration.py:19` stores `webhook_secret`
+as a plain `String(255)` column. `services/backend-api/src/api/routes/linear_integration.py`
+generates it with `secrets.token_urlsafe(32)` on webhook enable (lines ~394-435) and never
+round-trips it through `encrypt_api_key`/`decrypt_api_key` — zero call sites (verified by
+grep, 2026-08-09). Every other integration encrypts at rest: Zendesk, Jira, Asana, HubSpot,
+Salesforce (API tokens) and now Slack + Intercom (OAuth tokens, PR #10). **Linear is the
+only integration storing a credential in plaintext** (DEV-TRACKING.md:427-429).
 
-`services/backend-api/src/models/integration.py:19` carries the comment "OAuth tokens
-(encrypted at application level before storage)" — **which is false**. A reader auditing
-this file is actively misled into believing it is handled. The comment must be corrected
-in the same commit as the fix (DEV-TRACKING.md:514-517).
-
-The encryption fix needs a **backfill migration** for existing rows and was deliberately
-kept out of `feat/integration-auth-tenancy-hardening` so a P0 wasn't held up behind a
-data migration (DEV-TRACKING.md:501-503). It is the designated next card.
+The secret is an operator-pasted value that Linear's dashboard uses to HMAC-sign inbound
+webhooks; whoever can read the `linear_integrations.webhook_secret` column can forge Linear
+webhook deliveries (issue events, feedback ingestion, status changes).
 
 ## The fix (minimal slice)
 
-- Route the **Slack and Intercom OAuth connect/callback paths** in `routes/integrations.py`
-  through the existing Fernet `encrypt_api_key`/`decrypt_api_key` helpers (the same
-  pattern Zendesk/Jira/Asana/HubSpot/Salesforce already use) — encrypt on write, decrypt
-  on read at the use site.
-- **Alembic backfill migration** that encrypts existing plaintext rows in place. Must fail
-  loudly (not silently leave rows plaintext) if the Fernet key is absent at migration time.
-- Correct the false comment at `models/integration.py:19`.
-- Pin with tests: stored value is ciphertext (not the raw token), round-trips through
-  decrypt, existing plaintext rows migrate.
+- Encrypt on write: route the webhook-enable / connect-rotation paths in
+  `linear_integration.py` through the existing Fernet `encrypt_api_key` helper (same
+  pattern as Zendesk/Jira/Asana/HubSpot/Salesforce).
+- Decrypt on read: exactly once, at the signature-verification call site. Verify whether the
+  verifier lives in backend-api only, or also in worker-service (worker cannot import
+  backend-api — needs a mirror like the OAuth-token decrypt mirrors from PR #10).
+- Alembic backfill migration encrypting existing plaintext rows in place; must fail loudly
+  (never silently leave rows plaintext) when the Fernet key is absent — follow the
+  `c7d8e9f0a1b2` precedent (`oauth-tokens-encryption-at-rest`), chained to current head,
+  single alembic head.
+- Sweep-guard test asserting no integration stores a plaintext credential (mirror of
+  `test_webhook_verifiers_fail_closed.py` / `test_worker_import_sweep.py` shape).
+- Pin with tests: stored value is ciphertext (not the raw secret), decrypt-on-verify
+  round-trips, existing plaintext rows migrate, single alembic head preserved.
 
 ## Scope guards (from DEV-TRACKING + the card, do not expand)
 
-- **This is a bug fix — no UI changes, no behavior changes** to the OAuth flows themselves.
-- **Do not** bundle the sibling P1 `oauth-state-in-process-dict` (DEV-TRACKING.md:546-551)
-  into this card; if the dig shows it's trivial to ride along, note it but keep this branch
-  scoped to encryption-at-rest.
-- **Do not** bundle the follow-up `linear-webhook-secret-plaintext` (the Linear webhook
-  secret unencrypted) unless the dig shows the same migration can cover both cleanly —
+- **This is a security bug fix — no UI changes, no behavior changes** to the Linear
+  webhook flow itself (HMAC verification semantics unchanged; the operator still pastes/
+  copies the same secret from Linear's dashboard).
+- **Do not** bundle `slack-email-signature-enforcement` (DEV-TRACKING.md:423-426) into this
+  card; note it, keep the branch scoped.
+- **Do not** bundle `oauth-state-in-process-dict` (DEV-TRACKING.md:571-576) into this card;
   note it, keep the branch scoped.
-- The migration must not depend on application code at upgrade time beyond what Alembic
-  can import safely (follow the repo's existing migration conventions).
-- Token read sites (`oauth_access_token` consumers) must be audited so decrypting happens
-  exactly once, at the call site, with no double-decrypt.
+- The migration must not depend on application code at upgrade time beyond what Alembic can
+  import safely (follow the repo's existing migration conventions — see the `c7d8e9f0a1b2`
+  backfill precedent).
+- Secret read sites must be audited so decrypting happens exactly once, at the call site,
+  with no double-decrypt and no plaintext left in the DB after migration.
+- Roadmap hygiene rule (DEV-TRACKING.md:497): "When closing work, correct the marker in the
+  same commit" — the DEV-TRACKING follow-up entry must be marked FIXED on the branch that
+  ships the fix.
 
 ## Related context
 
-- Prior art — the encryption helpers: `encrypt_api_key`/`decrypt_api_key` usage in the
-  Zendesk/Jira/Asana/HubSpot/Salesforce routes (Fernet, key from env).
-- Prior art — backfill migrations in this repo: e.g. `public_id` backfill
-  (`n3o4p5q6r7s8`), churn probability columns (`6e4501930bf0`) — see
-  `services/backend-api/alembic/versions/`.
-- Roadmap hygiene rule (DEV-TRACKING.md:497): "When closing work, correct the marker in
-  the same commit" — the DEV-TRACKING P1 entry must be marked FIXED on the branch that
-  ships the fix.
-- False-comment class: the same "confident lie in the codebase" family as the P0/P0b
-  dead-import bugs — a comment that asserts a security property that does not hold is
-  worse than no comment.
+- Prior art — the encryption helpers: `encrypt_api_key`/`decrypt_api_key` (Fernet, key from
+  env `LLM_ENCRYPTION_KEY`) in the Zendesk/Jira/Asana/HubSpot/Salesforce routes.
+- Prior art — backfill migrations in this repo: `oauth-tokens-encryption-at-rest`
+  migration `c7d8e9f0a1b2` (encrypts existing plaintext OAuth rows in place, fail-closed on
+  missing key) and its tests; the `public_id` backfill (`n3o4p5q6r7s8`).
+- Prior art — worker decrypt mirrors: PR #10 (`bug/oauth-tokens-stored-plaintext`, commits
+  `2b94bc41`, `eafd308c`) — worker-local `_decrypt` mirrors because worker-service cannot
+  import backend-api; pinned by `test_worker_import_sweep.py`.
+- False-comment class: same as `models/integration.py:19` (corrected on PR #10) — if any
+  Linear model comment claims encryption, correct it in the same commit.
