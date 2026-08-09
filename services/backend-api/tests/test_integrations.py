@@ -2,14 +2,20 @@
 Tests for integrations endpoints.
 """
 
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from unittest.mock import patch, MagicMock
 
+from src.models import FeedbackSource
 from src.models.integration import Integration
 from src.models.user import User
 from src.models.organization import Organization
 from src.api.auth import hash_password, create_access_token
+from src.utils.encryption import encrypt_api_key, decrypt_api_key
+
+TEST_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 
 @pytest.fixture
@@ -742,3 +748,330 @@ class TestTemplateVariablesAuth:
         response = client.get("/api/v1/integrations/slack/template-variables")
         assert response.status_code == 403
         assert response.json()["detail"] == "Not authenticated"
+
+
+class TestSlackOAuthCallback:
+    """Tests for GET /api/v1/integrations/slack/oauth/callback."""
+
+    @patch("src.api.routes.integrations.SLACK_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.integrations.SLACK_CLIENT_SECRET", "test-client-secret")
+    def test_callback_stores_encrypted_token(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+    ):
+        """Should store the OAuth token encrypted at rest, never plaintext."""
+        from src.api.routes.integrations import oauth_states
+
+        test_state = "test-state-abc123"
+        oauth_states[test_state] = {
+            "organization_id": test_organization.id,
+            "name": "My Slack",
+        }
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {
+            "ok": True,
+            "access_token": "xoxb-raw-token-123",
+            "team": {"id": "T123", "name": "Test Team"},
+            "bot_user_id": "B123",
+            "incoming_webhook": {"channel_id": "C123", "channel": "#feedback"},
+        }
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.post.return_value = mock_token_response
+
+        with patch("src.api.routes.integrations.httpx.Client", return_value=mock_client_instance):
+            with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+                response = client.get(
+                    f"/api/v1/integrations/slack/oauth/callback?code=authcode123&state={test_state}",
+                    follow_redirects=False,
+                )
+
+        assert response.status_code == 307
+        assert "oauth_success=true" in response.headers["location"]
+
+        integration = db.query(Integration).filter(
+            Integration.type == "slack",
+            Integration.organization_id == test_organization.id,
+        ).first()
+        assert integration is not None
+        stored_token = integration.oauth_access_token
+        assert stored_token != "xoxb-raw-token-123"
+        assert decrypt_api_key(stored_token) == "xoxb-raw-token-123"
+
+    @patch("src.api.routes.integrations.SLACK_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.integrations.SLACK_CLIENT_SECRET", "test-client-secret")
+    @patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""})
+    def test_callback_missing_key_returns_422(
+        self,
+        client: TestClient,
+        db: Session,
+        test_organization: Organization,
+    ):
+        """Should reject with 422 (never silently store plaintext) when LLM_ENCRYPTION_KEY is unset."""
+        from src.api.routes.integrations import oauth_states
+
+        test_state = "test-state-missing-key"
+        oauth_states[test_state] = {
+            "organization_id": test_organization.id,
+            "name": "My Slack",
+        }
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {
+            "ok": True,
+            "access_token": "xoxb-raw-token-123",
+            "team": {"id": "T123", "name": "Test Team"},
+        }
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.post.return_value = mock_token_response
+
+        with patch("src.api.routes.integrations.httpx.Client", return_value=mock_client_instance):
+            response = client.get(
+                f"/api/v1/integrations/slack/oauth/callback?code=authcode123&state={test_state}",
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 422
+        assert "LLM_ENCRYPTION_KEY" in response.json()["detail"]
+
+
+def _make_oauth_slack_integration(
+    db: Session,
+    org: Organization,
+    token: str,
+) -> Integration:
+    """Create a Slack OAuth integration with the given stored token."""
+    integration = Integration(
+        organization_id=org.id,
+        type="slack",
+        name="OAuth Slack",
+        config={"integration_type": "oauth", "channel_id": "C123", "workspace_id": "T123"},
+        oauth_access_token=token,
+        triggers=["urgent"],
+        is_active=True,
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+
+class TestSlackIntegrationOAuthRead:
+    """POST /api/v1/integrations/slack/test must send the DECRYPTED token.
+
+    Regression for the truthiness trap: a ciphertext token is truthy, so an
+    OAuth integration passes the `if not access_token` guard — the route must
+    decrypt before handing the token to send_slack_message_oauth.
+    """
+
+    def test_oauth_test_sends_decrypted_token(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            integration = _make_oauth_slack_integration(
+                db, test_organization, encrypt_api_key("xoxb-raw-token-123")
+            )
+            stored_token = integration.oauth_access_token
+
+        with patch("src.api.routes.integrations.send_slack_message_oauth") as mock_send:
+            mock_send.return_value = {"success": True, "response": "ok"}
+            response = client.post(
+                "/api/v1/integrations/slack/test",
+                headers=auth_headers,
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 200
+        assert mock_send.called
+        sent_token = mock_send.call_args.args[0]
+        assert sent_token == "xoxb-raw-token-123"
+        assert sent_token != stored_token
+
+    def test_oauth_test_corrupt_token_returns_400(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        integration = _make_oauth_slack_integration(
+            db, test_organization, "not-a-valid-fernet-token"
+        )
+
+        with patch("src.api.routes.integrations.send_slack_message_oauth") as mock_send:
+            response = client.post(
+                "/api/v1/integrations/slack/test",
+                headers=auth_headers,
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 400
+        assert "decrypt" in response.json()["detail"].lower()
+        mock_send.assert_not_called()
+
+    def test_oauth_test_missing_key_returns_400(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            integration = _make_oauth_slack_integration(
+                db, test_organization, encrypt_api_key("xoxb-raw-token-123")
+            )
+
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""}):
+            with patch("src.api.routes.integrations.send_slack_message_oauth") as mock_send:
+                response = client.post(
+                    "/api/v1/integrations/slack/test",
+                    headers=auth_headers,
+                    json={"integration_id": integration.id},
+                )
+
+        assert response.status_code == 400
+        assert "LLM_ENCRYPTION_KEY" in response.json()["detail"]
+        mock_send.assert_not_called()
+
+
+class TestListSlackChannelsRead:
+    """GET /api/v1/feedback-sources/{source_id}/slack/channels must send the
+    DECRYPTED token in the Authorization header.
+    """
+
+    def _make_source(
+        self, db: Session, org: Organization, integration: Integration
+    ) -> FeedbackSource:
+        source = FeedbackSource(
+            organization_id=org.id,
+            source_type="slack",
+            name="Slack Source",
+            integration_id=integration.id,
+            provider_config={},
+            triggers={},
+            field_mapping={},
+            auto_import=True,
+        )
+        db.add(source)
+        db.commit()
+        db.refresh(source)
+        return source
+
+    def test_list_channels_sends_decrypted_bearer(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            integration = _make_oauth_slack_integration(
+                db, test_organization, encrypt_api_key("xoxb-raw-token-123")
+            )
+            stored_token = integration.oauth_access_token
+        source = self._make_source(db, test_organization, integration)
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "ok": True,
+            "channels": [{"id": "C123", "name": "general", "is_private": False}],
+            "response_metadata": {"next_cursor": None},
+        }
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.get.return_value = mock_response
+
+        with patch("httpx.Client", return_value=mock_client_instance):
+            response = client.get(
+                f"/api/v1/feedback-sources/{source.id}/slack/channels",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        assert response.json()[0]["id"] == "C123"
+        sent_headers = mock_client_instance.get.call_args.kwargs["headers"]
+        assert sent_headers["Authorization"] == "Bearer xoxb-raw-token-123"
+        assert sent_headers["Authorization"] != f"Bearer {stored_token}"
+
+    def test_list_channels_corrupt_token_returns_400(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        integration = _make_oauth_slack_integration(
+            db, test_organization, "not-a-valid-fernet-token"
+        )
+        source = self._make_source(db, test_organization, integration)
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "ok": True,
+            "channels": [],
+            "response_metadata": {"next_cursor": None},
+        }
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.get.return_value = mock_response
+
+        with patch("httpx.Client", return_value=mock_client_instance) as mock_client:
+            response = client.get(
+                f"/api/v1/feedback-sources/{source.id}/slack/channels",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 400
+        assert "decrypt" in response.json()["detail"].lower()
+        mock_client.assert_not_called()
+
+    def test_list_channels_missing_key_returns_400(
+        self,
+        client: TestClient,
+        auth_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+            integration = _make_oauth_slack_integration(
+                db, test_organization, encrypt_api_key("xoxb-raw-token-123")
+            )
+        source = self._make_source(db, test_organization, integration)
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "ok": True,
+            "channels": [],
+            "response_metadata": {"next_cursor": None},
+        }
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.get.return_value = mock_response
+
+        with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": ""}):
+            with patch("httpx.Client", return_value=mock_client_instance) as mock_client:
+                response = client.get(
+                    f"/api/v1/feedback-sources/{source.id}/slack/channels",
+                    headers=auth_headers,
+                )
+
+        assert response.status_code == 400
+        assert "LLM_ENCRYPTION_KEY" in response.json()["detail"]
+        mock_client.assert_not_called()
