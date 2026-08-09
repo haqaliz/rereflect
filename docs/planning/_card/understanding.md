@@ -1,247 +1,143 @@
-# Phase 2 — Understanding: `feat/intercom-selfhost-ingestion`
+# Phase 2 — Understanding: `feat/discord-channel-preferences`
 
-**Dug:** 2026-07-30, against the worktree at `feat/intercom-selfhost-ingestion`
-(base `dc596f96`). Every claim below is a direct code read with a `file:line`.
-Live-verified: single alembic head `12a1003fbfe0`; backend + worker venvs on
-Python 3.12.13.
-
-> **Process note.** This dig was run in the main thread. Four parallel dig agents
-> were dispatched first (backend / worker / frontend / tests-docs) but all four
-> went idle without delivering reports, and nothing was retrievable from them, so
-> the mapping was redone directly rather than burning further budget on retries.
+**Dug:** 2026-08-09, against the worktree at `feat/discord-channel-preferences`
+(base `4fe117d3`). Three parallel dig agents (worker / backend / frontend) mapped
+the notification system; both disputed claims re-verified directly with `file:line`
+reads after synthesis. Live-verified: single alembic head `8114adde5d96`.
 
 ---
 
-## What the issue is really asking
+## What the feature is really asking
 
-A user asked for Intercom/Zendesk feedback to "flow in automatically instead of
-pasting tickets manually". Zendesk delivers this today. Intercom is registered,
-marketed, documented, and **structurally incapable of it** — for three
-independent reasons that have to be fixed together or not at all.
+Discord alerting currently **rides the Slack per-type toggle**: a user cannot
+receive Discord alerts without Slack being on for the same alert type, and cannot
+route types independently to each channel. The fix is a `channel_discord` per-type
+preference on `UserAlertPreference` (per-user, per-alert-type row — the model
+already follows the column-per-channel pattern), surfaced in the Settings →
+Notifications page, and honoured by the worker's dispatch.
 
-The honest one-line framing: **Intercom is a source that looks connected and
-produces nothing.**
-
----
-
-## F1 — The envelope defect: the route is wrong, the adapter is right
-
-- `services/backend-api/src/api/routes/source_webhooks.py:333` passes
-  `event_data=payload.get("data", {})` — the unwrapped `data` object.
-- `services/worker-service/src/adapters/intercom.py:88-89` reads
-  `event_data.get("topic", "")` and `event_data.get("data", {}).get("item", {})`.
-  Same full-envelope assumption at `intercom.py:73` (`_get_body_text`, keyword
-  triggers), `intercom.py:148` (`get_external_ids`, the dedup key) and
-  `intercom.py:171` (`fetch_context` enrichment) — **four sites, not one.**
-- So `topic` is `""` and `item` is `{}` on every delivery: no text, no dedup key,
-  no feedback item, ever.
-
-**Which side is the bug is not a judgement call — the tests settle it:**
-
-- `services/worker-service/tests/test_intercom_adapter.py:18,26,34,91-92,109-110`
-  feeds the adapter the **full envelope** (`{"topic": ..., "data": {"item": ...}}`)
-  and passes. The adapter's contract is the envelope.
-- `services/backend-api/tests/test_intercom.py:438` asserts
-  `event_data=payload["data"]` — it **pins the defect as correct**.
-
-So the production fix is in the route (pass the whole `payload`), and the RED
-step is inverting that one assertion. Note the route already reads the envelope
-correctly two lines earlier to derive `conversation_id`
-(`source_webhooks.py:319`) — this is a pure handoff slip, not a misunderstanding
-of Intercom's shape.
-
-**The generalizable finding:** both sides were tested, both green, in mutual
-disagreement, because **nothing tested the seam**. `DEV-TRACKING.md:441-446`
-already generalized this exact family ("green tests over code that never
-executes in production… a 'is this reachable from an entrypoint?' sweep would
-have caught all three"). This is the fourth instance. The missing artifact is a
-**contract test on the queue→adapter seam**, and it should be written so that it
-fails if either side drifts again — not a test of the route and a test of the
-adapter, which is what already exists and what already failed to catch this.
-
-## F2 — The tenancy discriminator silently blocks any token-paste connect
-
-`services/worker-service/src/tasks/source_events.py:150-171` — the Intercom
-branch of `_find_matching_sources` requires a non-empty
-`provider_context["workspace_id"]` and matches it against
-`Integration.config["workspace_id"]`, returning `[]` otherwise (correctly — this
-is the P0 tenancy fix).
-
-**Only the OAuth callback populates that config key.** A token-paste connect that
-wrote to a different row or a dedicated table would match nothing, and ingestion
-would silently produce zero items — the same failure mode as F1, arrived at from
-the other direction. Any token-paste design must therefore *also* land a
-matching branch here, and that must be a named, tested requirement rather than
-an implementation detail.
-
-Zendesk solved the identical problem differently and better
-(`source_events.py:193-207`): a dedicated `ZendeskIntegration` table matched by
-`subdomain → organization_id`, with the comment explaining exactly why it does
-not use `Integration.config`.
-
-**Feasibility, and it is good news:** the existing OAuth callback already calls
-`https://api.intercom.io/me` (`integrations.py:1066`) to obtain workspace
-identity from a bearer token. That endpoint needs only an access token, so a
-token-paste connect can validate the token *and* derive the workspace id in the
-same call — exactly the shape of `ZendeskClient.validate()`
-(`zendesk_integration.py:397-400`). Token-paste is genuinely reachable.
-
-## F3 — The webhook signature question, and why it may force pull-only
-
-- `verify_intercom_signature` uses the single global `INTERCOM_CLIENT_SECRET` and
-  now **fails closed** (`source_webhooks.py:303-304`).
-- `tests/test_webhook_verifiers_fail_closed.py:47-50` — `SHADOW_ALLOWLIST` holds
-  only `verify_slack_signature` and `email_webhooks._verify_webhook_signature`.
-  Intercom is **not** allowlisted, so any new verifier must fail closed to keep
-  that test green. Good: the guard rail is already in place.
-- Consequence: an install with no `INTERCOM_CLIENT_SECRET` rejects every Intercom
-  delivery. A token-paste org has no client secret.
-
-**Unlike Zendesk, a per-org webhook secret may not be available at all.** Zendesk
-webhooks are configured *in Zendesk* by the operator, who pastes a secret
-Rereflect generated (`zendesk_integration.py:441-453`, display-once). Intercom
-signs webhooks with **its app's own client secret**, which Rereflect does not
-choose. So the Zendesk pattern likely does not transfer.
-
-> ⚠️ **Marked unverified — the PRD must confirm against current Intercom docs.**
-> I have not verified against Intercom's live documentation whether (a) an access
-> token can be obtained without a Developer Hub app, and (b) whether an operator
-> who *does* create an app to get a token therefore also has a client secret that
-> could be stored per-org. Both bear directly on scope. **Do not let this be
-> settled by assumption.** The low-risk reading, and my recommendation: the
-> token-paste path is **pull-only**, and the webhook path stays app/OAuth-only.
-> That resolves the card's open question in favour of option (b), for a stated
-> technical reason rather than convenience — and it is also what the user asked
-> for, since "flows in automatically" is the pull path.
-
-## F4 — ⚠️ The tracking doc's proposed fix would build on dead scaffolding
-
-`DEV-TRACKING.md:293-297` proposes "implement `IntercomConnector.fetch_new_items`
-against the Conversations API". **That is the wrong seam, and following it would
-produce a third dead-code instance.** Evidence:
-
-- `ZendeskConnector.fetch_new_items` (`worker-service/src/tasks/integrations.py:180-190`)
-  is **also** a `"not implemented"` stub returning `[]`.
-- Zendesk's real, shipped incremental pull is a **separate module**,
-  `worker-service/src/tasks/zendesk_sync.py`, which does not touch
-  `BaseConnector` at all.
-- `sync_all_integrations` (`tasks/integrations.py:17`) is nonetheless registered
-  on the beat schedule (`celery_app.py:121`) and selects
-  `type.in_(["intercom", "zendesk"])` (`tasks/integrations.py:30`) — so a
-  scheduled job runs and calls two stubs. The whole `BaseConnector` layer is dead
-  scaffolding from "Month 2".
-
-**Recommendation:** build `intercom_sync.py` mirroring `zendesk_sync.py`, and
-delete (or explicitly neutralize) the dead `BaseConnector` layer rather than
-extending it. Deleting it is in scope precisely because leaving it invites the
-next person to make this same mistake.
-
-`zendesk_sync.py:1-57` is an unusually complete template and its documented
-decisions should be inherited deliberately:
-- cursor = `last_synced_at` falling back to `connected_at`, **never epoch/None**,
-  so a missing cursor can never trigger a historical backfill (D1);
-- route every fetched item through the **shared** core
-  (`_find_matching_sources` + `_process_event_for_source`) rather than creating
-  `FeedbackItem`s ad hoc — this is what makes pull and webhook share one dedup
-  path (D2, and the card's explicit guardrail);
-- synthesize a uniform `*.created` event and let `FeedbackSourceEvent` dedup
-  enforce "one item per conversation, ever", instead of guessing new-vs-updated (D3);
-- a static auth failure is operator-recoverable: record `last_sync_status` /
-  `last_error` **without** flipping `is_active` (D7).
-
-A new `worker-service/src/clients/intercom.py` is needed — `src/clients/` holds
-`zendesk/jira/asana/hubspot/salesforce` and no Intercom client.
-
-## F5 — Intercom feedback does not reach Customer 360 (scope question)
-
-`docs/SELF_HOSTING.md:1589-1592`: Intercom items **do not populate
-`customer_email`** — it appears only in `source_metadata`, and only when field
-mapping enables enrichment. Zendesk populates it by side-loading `users` and
-merging a flat `requester_email` client-side before the item reaches the shared
-core (`zendesk_sync.py:22-34`).
-
-So Intercom feedback today cannot feed health scores, churn, or Customer 360.
-Ingesting items that are invisible to the product's main value loop is a thin
-win; the pull path should side-load contacts the same way Zendesk does. **This
-is a scope decision for the PRD, not a given.**
-
-## F6 — RBAC: the precedent is clear, the gap is elsewhere
-
-`zendesk_integration.py:367,509,529` all carry
-`dependencies=[Depends(require_admin_or_owner)]`. Any new Intercom token-paste
-route must too. `DEV-TRACKING.md:422`'s claim is about the OAuth module
-(`integrations.py`) specifically, and fixing that module wholesale is a
-**separate card** — but a new route here must not inherit its omission.
-
-## F7 — Frontend: two competing patterns, pick the shipped one
-
-- Intercom connect lives in a **shared wizard**,
-  `frontend-web/app/(dashboard)/settings/integrations/new/page.tsx` — a
-  `slack | intercom | discord` type union (`:37`) with a `connectionMethod`
-  concept already present (`:263` sets `'oauth'`), calling
-  `integrationsAPI.getIntercomOAuthUrl` (`:116`) and surfacing
-  `"Failed to start Intercom OAuth"` (`:119`) on the 403.
-- The token-paste providers instead have **dedicated pages** with their own test
-  files: `settings/integrations/zendesk/page.tsx` (+ `__tests__/ZendeskPage.test.tsx`),
-  and the same for `jira/` and `asana/`.
-
-**Recommendation:** a dedicated `settings/integrations/intercom/page.tsx`
-following the Zendesk page, because that is the pattern with a shipped testing
-precedent. Leave the OAuth wizard entry intact for operators who use it.
-
-## F8 — Docs and copy are currently honest; keep them that way
-
-- `SELF_HOSTING.md:1581-1596` states plainly: webhook-only, no periodic pull,
-  daily sync is a no-op, no write-back, no token-paste path.
-  `SELF_HOSTING.md:1674` carries the "does not currently produce feedback items"
-  warning. `CHANGELOG.md:53-60` says the same. `INTERCOM_CLIENT_ID` is documented
-  in `.env.example:22`, `.env.prod.example:115`, `SELF_HOSTING.md:1614`.
-- **Every one of those statements becomes false when this lands** and must be
-  updated in the same branch — that list is the docs checklist.
-
-## F9 — Verified: the write-back module is still orphaned
-
-`grep` across `services/backend-api/src` + `services/worker-service/src` for
-`intercom_service` / `add_note_to_conversation` / `close_conversation` returns
-**only the definitions** in
-`services/backend-api/src/services/intercom_service.py:27,67`. Zero production
-callers, confirming `DEV-TRACKING.md:433-446`. Out of scope here (it is
-outbound, this card is inbound) — but it is the fourth "registered code that
-never runs" instance and the P2 call stands: wire it or delete it.
+**The honest one-line framing:** *configure Discord, switch the Slack toggle off,
+and you receive nothing* — DEV-TRACKING P5.
 
 ---
 
-## Ambiguities and open questions for the interview
+## F1 — The coupling, exactly (premise verified)
 
-1. **Webhook under token-paste** (F3) — pull-only, or a per-org secret? Needs an
-   Intercom-docs check, not an assumption. My recommendation: pull-only.
-2. **Customer email side-loading** (F5) — in scope, or a follow-up? Excluding it
-   ships ingestion that cannot reach Customer 360.
-3. **Delete the dead `BaseConnector` layer** (F4) — in this branch, or a separate
-   cleanup? It currently runs on a schedule and does nothing for two providers.
-4. **Backfill on connect.** Zendesk deliberately never backfills (cursor from
-   `connected_at`). Same for Intercom, or an opt-in bounded backfill? Precedent
-   says no backfill by default.
-5. **One Intercom connection per org?** Zendesk enforces one row per org; the CRM
-   integrations enforce one CRM per org. Presumably the same, worth stating.
-6. **Does the OAuth path stay?** Both paths coexisting means two credential
-   sources and two tenancy discriminators. Cheaper to support one — but removing
-   OAuth is a breaking change for anyone using it.
+Two sites in the worker gate Discord on the Slack flag:
 
-## Contradictions found (code vs docs)
+- **Main pipe** — `services/worker-service/src/notification_dispatch.py:626-631`:
+  `if counts["slack"] > 0: _dispatch_slack_alert(...)` then
+  `_dispatch_discord_alert(...)` unconditionally inside the same block. Comment
+  at 628-629: *"There is no separate channel_discord preference yet — Discord
+  webhook integrations piggyback on the same 'chat' toggle as Slack."*
+- **Health-drop pipe** — `notification_dispatch.py:443-468`:
+  `if any_slack:` sends `_dispatch_slack_health_alert` **and**
+  `_dispatch_discord_health_alert` from the same flag. No `channel_discord` read
+  anywhere in the function (only `channel_slack` at :417).
 
-| Claim | Where | Reality |
-|---|---|---|
-| "implement `IntercomConnector.fetch_new_items`" is the fix | `DEV-TRACKING.md:293` | That abstraction is dead for **both** providers; Zendesk's real pull is `zendesk_sync.py` (F4) |
-| Intercom polling is wired | `tasks/integrations.py:30` + `celery_app.py:121` | Beat runs daily and calls two stubs returning `[]` |
-| `intercom_service.py` might now be wired | — | Still zero production callers (F9) |
-| "2,500 feedback/mo · Slack & Intercom · Priority Support" | `frontend-web/app/signup/page.tsx:341` | Pre-pivot plan-tier copy; everything is unlocked (`CLAUDE.md` § Plans). Stale drift, **out of scope**, flagged |
+`channel_discord` does not exist anywhere in the worktree (backend model, worker
+model, migrations, frontend types, tests) — grepped, zero hits.
 
-## Affected surface (for decomposition)
+---
 
-| Service | Files |
-|---|---|
-| backend-api | `routes/source_webhooks.py` (envelope fix), a new `routes/intercom_integration.py` (token-paste connect/status/disconnect, modelled on `zendesk_integration.py`), a new `models/` row + migration, `tests/test_intercom.py` |
-| worker-service | new `tasks/intercom_sync.py`, new `clients/intercom.py`, `tasks/source_events.py` (match branch), `adapters/intercom.py` (unchanged if the route is fixed), `tasks/integrations.py` (delete dead layer), `celery_app.py` (beat), `tests/test_intercom_adapter.py` + a new seam test |
-| frontend-web | new `settings/integrations/intercom/page.tsx` + `__tests__`, the integrations API client, the tile registry |
-| docs | `SELF_HOSTING.md` (§ Connecting Intercom, the known-limitation block at :1674, the env table at :1614), `CHANGELOG.md:53-60`, `README.md`, `AI-TRACKING.md` (new/updated Intercom row), `DEV-TRACKING.md:252,378,293` |
+## F2 — The worker health-drop path is production-dormant (scope wrinkle)
+
+- The worker's `dispatch_health_drop_alert` (with its Slack + Discord health
+  builders/dispatchers) has **no production caller** in worker-service — grep
+  shows only its definition and tests.
+- The live path is backend-only: `health_score_service.py:877,900`
+  (`_do_dispatch_health_drop_alert`) → `notification_dispatch_helpers.py:133`
+  `dispatch_health_drop_alert_impl`, which creates **in-app `Notification` rows
+  only** (is_enabled + channel_inapp; never Slack/Discord), despite a docstring
+  (lines 148-150) claiming it "delegates dedup and Slack to the worker".
+- Consequence: in production today, `customer_health_drop` alerts never reach
+  Slack or Discord at all. The health-drop Discord coupling is exercised by tests
+  (`test_discord_health_dispatch.py`, `test_health_dispatch.py`) but not by any
+  live dispatch.
+- **Decision for the PRD:** fix the health-drop worker path for consistency
+  (same pattern, tests already pin it, and it is the documented home of
+  Slack/Discord health alerts) — or scope to the main pipe and record the
+  health-drop coupling as dead-code debt. Recommendation: fix both; leaving one
+  coupled recreates the trap for whoever wires the worker path.
+
+---
+
+## F3 — Model mirror drift (trap to avoid)
+
+- Backend model: `services/backend-api/src/models/user_alert_preference.py:5-25`
+  — columns: `is_enabled`, `channel_email` (default False), `channel_slack`
+  (default True), `channel_inapp` (default True), `channel_intercom` (default
+  False), `threshold_value`, `retention_days`, `drop_threshold` handled as a
+  secondary row (`_DROP_THRESHOLD_KEY`). UNIQUE(user_id, alert_type).
+- Worker mirror: `services/worker-service/src/models/__init__.py:379-395` — same
+  shape **minus `channel_intercom`** (the `d3e4f5g6h7i8` migration never landed
+  in the mirror). Pre-existing drift; `channel_discord` must be added to **both**
+  copies or the worker silently ignores it (the automations-engine trap class,
+  per CLAUDE.md).
+- Migration precedent to copy: `d3e4f5g6h7i8_add_channel_intercom_to_alert_prefs.py`
+  (`add_column(... server_default='false')`). New migration chains onto
+  `8114adde5d96`; CI asserts one head.
+
+---
+
+## F4 — Backend API + frontend plumbing
+
+- Routes: `GET/PUT /api/v1/notifications/preferences`
+  (`routes/notifications.py:325-442`). `AlertPreferenceUpdate` (L98-133) requires
+  all channel bools on PUT (wholesale copy, L396-410) — adding
+  `channel_discord: bool = False` as an optional field keeps the API
+  backward-compatible; `AlertPreferenceItem` (L82-91) already shows the
+  `channel_intercom=False` default pattern.
+- Frontend: `lib/api/notifications.ts:21-31` `AlertPreference` interface (needs
+  `channel_discord`); `app/(dashboard)/settings/notifications/page.tsx` —
+  `CHANNEL_CONFIG` (L119-124: In-App, Slack, Intercom, Email — the list a Discord
+  entry joins), `DEFAULT_PREFERENCES` (L82-91, all 8 types need the new key or
+  first-load renders `undefined`), `getActiveChannels` (L264-271) and
+  `renderChannelIcon` (L273-282) need Discord branches, Customize dialog
+  iterates `CHANNEL_CONFIG` (L442-459).
+- The page renders channel toggles **unconditionally** (no integration-connected
+  state is fetched; there is no integrations hook/context). Keep Discord
+  consistent: render the toggle unconditionally — the org-level Discord
+  connection is a separate surface (Settings → Integrations).
+- Frontend test coupling: `__tests__/settings/NotificationsSettingsPage.test.tsx:255-277`
+  assumes Email is the **last** switch in the dialog — Discord must be inserted
+  before Email (e.g. In-App, Slack, Discord, Intercom, Email) or the test
+  updated; fixtures L69-91 also need the new key.
+- Worker test coupling: `test_discord_dispatch.py:213-251` and
+  `test_discord_health_dispatch.py:230-271` assert Discord fires from
+  `channel_slack=True` — both must be reworked to assert the new pref.
+
+---
+
+## Open questions for the PRD
+
+1. **Default for `channel_discord`.** Follow the `channel_intercom` precedent
+   (`False` — Discord becomes per-user per-type opt-in; existing Discord-sending
+   orgs stop getting Discord after upgrade until a user toggles it) **or**
+   default `True` matching `channel_slack` (existing behavior preserved where
+   Slack is on; the feature becomes opt-*out* per type; orgs that had Slack off
+   start receiving Discord — a visible behavior change the UI makes legible).
+   Needs a decision; card's original caveat.
+2. **Health-drop scope** (F2): fix both worker paths or only the main pipe.
+3. **Counts dict shape.** `counts` is `{"inapp", "slack", "email"}` in
+   `dispatch_alert` (L571) and `{"inapp", "slack", "email"}`-family in the
+   health-drop path — add a `"discord"` key (return contract is a status dict;
+   check exact-shape assertions in `test_health_dispatch.py` before committing).
+4. **Channel order in the dialog** (frontend test index math) — insert Discord
+   after Slack, before Email.
+
+---
+
+## Contradictions / flags surfaced (do not paper over)
+
+- The `notification_dispatch_helpers.py:148-150` docstring claim ("delegates
+  dedup and Slack to the worker-service notification_dispatch when called from
+  the Celery context") is false in code — no delegation exists. Separate defect,
+  noted; **not** in scope for this feature (flag in PRD as related finding).
+- The worker mirror missing `channel_intercom` (F3) is a live divergence; adding
+  `channel_discord` to both copies is in scope, back-filling `channel_intercom`
+  into the mirror is a judgement call (recommend: add both columns to the mirror
+  in the same migration to stop the drift — or explicitly leave `channel_intercom`
+  as separate debt).
+- `_send_anomaly_discord` / `_send_anomaly_slack` (`tasks/anomaly.py:220,285`)
+  are dead code with tests (DEV-TRACKING P6) — not touched here.

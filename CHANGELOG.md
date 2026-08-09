@@ -7,6 +7,17 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Notifications — Discord now has its own per-type channel preference
+
+Settings → Notifications now shows a **Discord** channel switch for each alert type, default
+on. Slack and Discord are routed independently:
+
+- A type can now be **Discord-only** (Slack off) or **Slack-only** (Discord off) — previously
+  Discord rode the Slack toggle, so "Slack off" also silenced Discord.
+- The one behavior change: a type with Slack **off** and Discord **on** now delivers to
+  Discord. Existing installs (both on, or both off) behave exactly as before.
+- Automations' `send_notification` action still cannot target Discord (unchanged).
+
 ### Security — Inbound webhooks accepted unsigned requests, and could write to the wrong organization
 
 **If you run Rereflect with more than one organization on a single instance, upgrade.**

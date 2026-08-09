@@ -3,8 +3,9 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 // Mock next/navigation
 const mockPush = vi.fn();
+const mockRouter = { push: mockPush };
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => mockRouter,
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => '/settings/notifications',
 }));
@@ -43,6 +44,11 @@ vi.mock('@/components/icons/IntercomIcon', () => ({
     <svg data-testid="intercom-icon" className={className} />
   ),
 }));
+vi.mock('@/components/icons/DiscordIcon', () => ({
+  DiscordIcon: ({ className }: { className?: string }) => (
+    <svg data-testid="discord-icon" className={className} />
+  ),
+}));
 
 import { notificationsAPI } from '@/lib/api/notifications';
 import { preferencesAPI } from '@/lib/api/preferences';
@@ -66,13 +72,13 @@ const mockUserPrefs = {
 };
 
 const basePreferences = [
-  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
-  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
-  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
+  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
+  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
 ];
 
 const customerHealthDropPref = {
@@ -80,6 +86,7 @@ const customerHealthDropPref = {
   is_enabled: true,
   channel_email: false,
   channel_slack: true,
+  channel_discord: true,
   channel_inapp: true,
   channel_intercom: false,
   threshold_value: 50,
@@ -274,6 +281,72 @@ describe('NotificationsSettingsPage - Customer Health Drop channel checkboxes', 
     // Email is last and should be off (aria-checked="false")
     const emailSwitch = switches[switches.length - 1];
     expect(emailSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+});
+
+describe('NotificationsSettingsPage - Discord channel toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupLocalStorage();
+    setupMocks('pro');
+  });
+
+  it('renders a Discord channel switch in the customize dialog', async () => {
+    render(<NotificationsSettingsPage />);
+    await openCustomizeDialog('urgent_feedback');
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Discord')).toBeInTheDocument();
+    const discordRow = within(dialog).getByText('Discord').closest('.flex.items-center.justify-between');
+    expect(discordRow).not.toBeNull();
+    expect(within(discordRow as HTMLElement).getByRole('switch')).toBeInTheDocument();
+  });
+
+  it('keeps Email as the last channel switch', async () => {
+    render(<NotificationsSettingsPage />);
+    await openCustomizeDialog('urgent_feedback');
+
+    const dialog = screen.getByRole('dialog');
+    const switches = within(dialog).getAllByRole('switch');
+    const emailRow = within(dialog).getByText('Email').closest('.flex.items-center.justify-between');
+    expect(emailRow).not.toBeNull();
+    const emailSwitch = within(emailRow as HTMLElement).getByRole('switch');
+    expect(switches[switches.length - 1]).toBe(emailSwitch);
+  });
+
+  it('saves channel_discord in the update payload (Discord on, Slack off)', async () => {
+    render(<NotificationsSettingsPage />);
+    await openCustomizeDialog('feedback_assigned');
+
+    const dialog = screen.getByRole('dialog');
+    const discordRow = within(dialog).getByText('Discord').closest('.flex.items-center.justify-between');
+    const discordSwitch = within(discordRow as HTMLElement).getByRole('switch');
+    fireEvent.click(discordSwitch);
+
+    await waitFor(() => {
+      expect(screen.getByText('Save Changes')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => {
+      expect(notificationsAPI.updatePreferences).toHaveBeenCalled();
+      const callArgs = (notificationsAPI.updatePreferences as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const pref = callArgs.find((p: { alert_type: string }) => p.alert_type === 'feedback_assigned');
+      expect(pref).toBeDefined();
+      expect(pref.channel_discord).toBe(true);
+      expect(pref.channel_slack).toBe(false);
+    });
+  });
+
+  it('shows Discord in the active channel indicators when on', async () => {
+    render(<NotificationsSettingsPage />);
+
+    await waitFor(() => {
+      expect(getAlertPreferencesRow('urgent_feedback')).toBeInTheDocument();
+    });
+
+    const row = getAlertPreferencesRow('urgent_feedback')!;
+    expect(row.querySelector('[title="Discord"]')).toBeInTheDocument();
   });
 });
 

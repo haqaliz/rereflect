@@ -86,6 +86,7 @@ class AlertPreferenceItem(BaseModel):
     channel_slack: bool
     channel_inapp: bool
     channel_intercom: bool = False
+    channel_discord: bool = True
     threshold_value: Optional[float]
     retention_days: int = 30
     drop_threshold: Optional[int] = None  # customer_health_drop only (default 15)
@@ -102,6 +103,7 @@ class AlertPreferenceUpdate(BaseModel):
     channel_slack: bool
     channel_inapp: bool
     channel_intercom: bool = False
+    channel_discord: Optional[bool] = None
     threshold_value: Optional[float] = None
     retention_days: int = Field(30, ge=30, le=365)
     drop_threshold: Optional[int] = None  # customer_health_drop only (range 5-50)
@@ -358,6 +360,7 @@ def get_preferences(
             channel_slack=p.channel_slack,
             channel_inapp=p.channel_inapp,
             channel_intercom=p.channel_intercom,
+            channel_discord=p.channel_discord,
             threshold_value=p.threshold_value,
             retention_days=p.retention_days,
             drop_threshold=dt,
@@ -372,6 +375,7 @@ def get_preferences(
             channel_slack=True,
             channel_inapp=True,
             channel_intercom=False,
+            channel_discord=True,
             threshold_value=50.0,
             retention_days=30,
             drop_threshold=_DEFAULT_DROP_THRESHOLD,
@@ -399,6 +403,8 @@ def update_preferences(
             pref.channel_slack = item.channel_slack
             pref.channel_inapp = item.channel_inapp
             pref.channel_intercom = item.channel_intercom
+            if item.channel_discord is not None:
+                pref.channel_discord = item.channel_discord
             pref.threshold_value = item.threshold_value
             pref.retention_days = item.retention_days
         else:
@@ -410,6 +416,7 @@ def update_preferences(
                 channel_slack=item.channel_slack,
                 channel_inapp=item.channel_inapp,
                 channel_intercom=item.channel_intercom,
+                channel_discord=item.channel_discord if item.channel_discord is not None else True,
                 threshold_value=item.threshold_value,
                 retention_days=item.retention_days,
             )

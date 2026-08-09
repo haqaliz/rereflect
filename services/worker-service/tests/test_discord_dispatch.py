@@ -211,10 +211,13 @@ class TestDispatchDiscordAlert:
 
 
 class TestDispatchAlertTriggersDiscord:
-    """dispatch_alert() should trigger Discord alongside Slack for the main pipe."""
+    """dispatch_alert() must dispatch Slack and Discord independently, each off
+    its own channel preference — no piggybacking on the Slack toggle.
 
-    def test_dispatch_alert_calls_discord_dispatch_when_slack_channel_enabled(self, db):
-        from src.notification_dispatch import dispatch_alert
+    Four-way matrix: slack-only, discord-only, both, and no-pref-row defaults.
+    """
+
+    def _make_user_pref(self, db, channel_slack: bool, channel_discord: bool) -> int:
         from src.models import User, UserAlertPreference
 
         org = make_org(db)
@@ -223,15 +226,22 @@ class TestDispatchAlertTriggersDiscord:
         db.commit()
         db.refresh(user)
 
-        db.add(UserAlertPreference(
+        pref = UserAlertPreference(
             user_id=user.id,
             alert_type="urgent_feedback",
             is_enabled=True,
             channel_inapp=False,
-            channel_slack=True,
+            channel_slack=channel_slack,
             channel_email=False,
-        ))
+        )
+        pref.channel_discord = channel_discord
+        db.add(pref)
         db.commit()
+        db.refresh(pref)
+        return org.id
+
+    def _dispatch_with_mocks(self, db, org_id: int):
+        from src.notification_dispatch import dispatch_alert
 
         with patch("src.notification_dispatch.get_db_session") as mock_ctx:
             mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
@@ -240,12 +250,70 @@ class TestDispatchAlertTriggersDiscord:
             with patch("src.notification_dispatch._dispatch_slack_alert") as mock_slack:
                 with patch("src.notification_dispatch._dispatch_discord_alert") as mock_discord:
                     dispatch_alert(
-                        org_id=org.id,
+                        org_id=org_id,
                         alert_type="urgent_feedback",
                         title="Urgent feedback",
                         message="msg",
                         link="/feedbacks/1",
                     )
 
+        return mock_slack, mock_discord
+
+    def test_slack_only_preference_skips_discord_dispatch(self, db):
+        org_id = self._make_user_pref(db, channel_slack=True, channel_discord=False)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org_id)
+
+        mock_slack.assert_called_once()
+        mock_discord.assert_not_called()
+
+    def test_discord_only_preference_skips_slack_dispatch(self, db):
+        org_id = self._make_user_pref(db, channel_slack=False, channel_discord=True)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org_id)
+
+        mock_slack.assert_not_called()
+        mock_discord.assert_called_once()
+
+    def test_both_channels_enabled_dispatches_both(self, db):
+        org_id = self._make_user_pref(db, channel_slack=True, channel_discord=True)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org_id)
+
         mock_slack.assert_called_once()
         mock_discord.assert_called_once()
+
+    def test_no_preference_row_defaults_to_slack_and_discord(self, db):
+        from src.models import User
+
+        org = make_org(db)
+        user = User(email="user@test.com", organization_id=org.id, role="owner")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        mock_slack, mock_discord = self._dispatch_with_mocks(db, org.id)
+
+        mock_slack.assert_called_once()
+        mock_discord.assert_called_once()
+
+    def test_counts_dict_includes_discord_key(self, db):
+        from src.notification_dispatch import dispatch_alert
+
+        org_id = self._make_user_pref(db, channel_slack=True, channel_discord=True)
+
+        with patch("src.notification_dispatch.get_db_session") as mock_ctx:
+            mock_ctx.return_value.__enter__ = MagicMock(return_value=db)
+            mock_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+            with patch("src.notification_dispatch._dispatch_slack_alert"):
+                with patch("src.notification_dispatch._dispatch_discord_alert"):
+                    counts = dispatch_alert(
+                        org_id=org_id,
+                        alert_type="urgent_feedback",
+                        title="Urgent feedback",
+                        message="msg",
+                        link="/feedbacks/1",
+                    )
+
+        assert counts == {"inapp": 0, "slack": 1, "discord": 1, "email": 0}

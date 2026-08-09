@@ -322,15 +322,16 @@ def dispatch_health_drop_alert(
     1. Check plan gate (Pro+ required for customer_health_scores)
     2. Check Redis dedup (skip if cooldown active, unless risk level changed or score dropped further)
     3. Fetch user preferences for 'customer_health_drop' alert type
-    4. For each enabled user: create in-app notification, dispatch Slack, flag email
-    5. Set Redis cooldown key
-    6. Auto-trigger LLM analysis if stale (drop alerts only)
+    4. For each enabled user: create in-app notification, dispatch Slack, dispatch Discord, flag email
+    5. Send Slack and Discord alerts once per org (independently, per channel preference)
+    6. Set Redis cooldown key
+    7. Auto-trigger LLM analysis if stale (drop alerts only)
 
-    Returns dict with counts: {inapp, slack, email}
+    Returns dict with counts: {inapp, slack, discord, email}
     """
     from src.models import User, UserAlertPreference, CustomerHealth
 
-    counts = {"inapp": 0, "slack": 0, "email": 0}
+    counts = {"inapp": 0, "slack": 0, "discord": 0, "email": 0}
 
     # Determine if risk level changed (for dedup bypass)
     old_order = RISK_LEVEL_ORDER.get(old_risk_level, 0)
@@ -406,6 +407,7 @@ def dispatch_health_drop_alert(
         }
 
         any_slack = False
+        any_discord = False
         for user in users:
             pref = pref_by_user.get(user.id)
 
@@ -415,6 +417,7 @@ def dispatch_health_drop_alert(
 
             channel_inapp = pref.channel_inapp if pref else True
             channel_slack = pref.channel_slack if pref else True
+            channel_discord = pref.channel_discord if pref else True
             channel_email = pref.channel_email if pref else False
 
             if channel_inapp:
@@ -434,6 +437,10 @@ def dispatch_health_drop_alert(
             if channel_slack:
                 counts["slack"] += 1
                 any_slack = True
+
+            if channel_discord:
+                counts["discord"] += 1
+                any_discord = True
 
             if channel_email:
                 counts["email"] += 1
@@ -455,6 +462,8 @@ def dispatch_health_drop_alert(
             fallback_text = title
             _dispatch_slack_health_alert(org_id, blocks, fallback_text)
 
+        # 5. Send Discord alert once per org
+        if any_discord:
             discord_embeds = build_discord_health_alert_embeds(
                 customer_email=customer_email,
                 customer_name=customer_name,
@@ -465,16 +474,16 @@ def dispatch_health_drop_alert(
                 components=components,
                 is_recovery=is_recovery,
             )
-            _dispatch_discord_health_alert(org_id, discord_embeds, fallback_text)
+            _dispatch_discord_health_alert(org_id, discord_embeds, title)
 
-        # 5. Set Redis cooldown key
+        # 6. Set Redis cooldown key
         if not is_recovery:
             try:
                 redis_client.setex(cooldown_key, HEALTH_ALERT_COOLDOWN_TTL, str(new_score))
             except Exception as e:
                 logger.warning(f"Failed to set Redis cooldown for {customer_email}: {e}")
 
-        # 6. Auto-trigger LLM analysis for drop alerts
+        # 7. Auto-trigger LLM analysis for drop alerts
         if not is_recovery:
             try:
                 ch = session.query(CustomerHealth).filter(
@@ -564,11 +573,11 @@ def dispatch_alert(
         metadata: Optional metadata dict
 
     Returns:
-        dict with counts: {inapp, slack, email}
+        dict with counts: {inapp, slack, discord, email}
     """
     from src.models import User, UserAlertPreference
 
-    counts = {"inapp": 0, "slack": 0, "email": 0}
+    counts = {"inapp": 0, "slack": 0, "discord": 0, "email": 0}
 
     with get_db_session() as db:
         users = db.query(User).filter(User.organization_id == org_id).all()
@@ -596,6 +605,7 @@ def dispatch_alert(
 
             channel_inapp = pref.channel_inapp if pref else True
             channel_slack = pref.channel_slack if pref else True
+            channel_discord = pref.channel_discord if pref else True
             channel_email = pref.channel_email if pref else False
 
             # In-app notification
@@ -616,6 +626,10 @@ def dispatch_alert(
             if channel_slack:
                 counts["slack"] += 1
 
+            # Discord alert (queued per-org, not per-user)
+            if channel_discord:
+                counts["discord"] += 1
+
             # Email (flagged for daily digest, not sent immediately)
             if channel_email:
                 counts["email"] += 1
@@ -625,8 +639,7 @@ def dispatch_alert(
         # Send Slack alert once per org if any user wants it
         if counts["slack"] > 0:
             _dispatch_slack_alert(org_id, alert_type, title, message, link)
-            # There is no separate channel_discord preference yet — Discord webhook
-            # integrations piggyback on the same "chat" toggle as Slack.
+        if counts["discord"] > 0:
             _dispatch_discord_alert(org_id, alert_type, title, message, link)
 
     return counts
