@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.database.session import get_db
-from src.api.dependencies import get_current_org, require_feature
+from src.api.dependencies import get_current_org, require_admin_or_owner, require_feature
 from src.models import Organization, FeedbackSource, FeedbackSourceEvent, Integration
 
 logger = logging.getLogger(__name__)
@@ -277,7 +277,7 @@ def list_feedback_sources(
     return FeedbackSourceListResponse(sources=response_sources, total=len(sources))
 
 
-@router.post("/", response_model=FeedbackSourceResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=FeedbackSourceResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_or_owner)])
 def create_feedback_source(
     data: FeedbackSourceCreate,
     current_org: Organization = Depends(get_current_org),
@@ -496,7 +496,7 @@ def get_feedback_source(
     return FeedbackSourceResponse(**response_dict)
 
 
-@router.patch("/{source_id}", response_model=FeedbackSourceResponse)
+@router.patch("/{source_id}", response_model=FeedbackSourceResponse, dependencies=[Depends(require_admin_or_owner)])
 def update_feedback_source(
     source_id: int,
     data: FeedbackSourceUpdate,
@@ -555,7 +555,7 @@ def update_feedback_source(
     return FeedbackSourceResponse(**response_dict)
 
 
-@router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{source_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_or_owner)])
 def delete_feedback_source(
     source_id: int,
     current_org: Organization = Depends(get_current_org),
