@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 from src.database.session import get_db
 from src.api.dependencies import get_current_org, require_admin_or_owner, require_feature
 from src.models import Organization, FeedbackSource, FeedbackSourceEvent, Integration
+from src.utils.encryption import decrypt_api_key
+from cryptography.fernet import InvalidToken
 
 logger = logging.getLogger(__name__)
 
@@ -621,6 +623,14 @@ def list_slack_channels(
     if not integration or not integration.oauth_access_token:
         raise HTTPException(status_code=400, detail="Integration has no OAuth token")
 
+    try:
+        access_token = decrypt_api_key(integration.oauth_access_token)
+    except (ValueError, InvalidToken) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Slack OAuth token cannot be decrypted. If LLM_ENCRYPTION_KEY changed, reconnect the integration.",
+        ) from exc
+
     # Fetch channels from Slack API
     channels = []
     cursor = None
@@ -634,7 +644,7 @@ def list_slack_channels(
 
                 response = client.get(
                     "https://slack.com/api/conversations.list",
-                    headers={"Authorization": f"Bearer {integration.oauth_access_token}"},
+                    headers={"Authorization": f"Bearer {access_token}"},
                     params=params
                 )
                 data = response.json()

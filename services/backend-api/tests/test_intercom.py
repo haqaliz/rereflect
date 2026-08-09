@@ -184,10 +184,11 @@ class TestIntercomOAuthCallback:
         mock_client_instance.get.return_value = mock_me_response
 
         with patch("src.api.routes.integrations.httpx.Client", return_value=mock_client_instance):
-            response = client.get(
-                f"/api/v1/integrations/intercom/oauth/callback?code=authcode123&state={test_state}",
-                follow_redirects=False,
-            )
+            with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+                response = client.get(
+                    f"/api/v1/integrations/intercom/oauth/callback?code=authcode123&state={test_state}",
+                    follow_redirects=False,
+                )
 
         # Should redirect to frontend with success
         assert response.status_code == 307
