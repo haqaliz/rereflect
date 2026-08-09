@@ -497,15 +497,24 @@ would have wasted a day:
 **When closing work, correct the marker in the same commit.** Every stale marker found so far
 was left by a branch that shipped the fix and did not update the row.
 
-### P1 — `oauth-tokens-stored-plaintext` (bug, NOT STARTED — **false comment corrected 2026-07-29**)
-> The encryption fix is still outstanding: it needs a backfill migration for existing rows and was
-> deliberately kept out of `feat/integration-auth-tenancy-hardening` so a P0 wasn't held up behind
-> a data migration.
->
-> **The false comment at `models/integration.py:19` IS fixed** — it claimed tokens were "encrypted
-> at application level before storage", which was never true and actively misled anyone auditing
-> that file. It now states plainly that they are plaintext, names the integrations that *do*
-> encrypt, and says not to restore the old wording without doing the work.
+### P1 — `oauth-tokens-stored-plaintext` — **FIXED** on `bug/oauth-tokens-stored-plaintext` (2026-08-09)
+> Shipped: Slack/Intercom OAuth tokens are now encrypted at rest with Fernet like
+> every other integration. Encrypt-on-write at both OAuth callbacks (missing
+> `LLM_ENCRYPTION_KEY` → 422, never 500); decrypt at all 8 read sites (3 backend,
+> 5 worker) with the same never-500 contract; worker-local `_decrypt` mirrors
+> (worker-service cannot import backend-api); dead `intercom_sync` import fixed.
+> Fail-closed backfill migration `c7d8e9f0a1b2` (chained to head `a9b8c7d6e5f4`;
+> one alembic head) encrypts existing plaintext rows in place and aborts with
+> generate-a-key instructions when `LLM_ENCRYPTION_KEY` is unset; import sweep-guard
+> test (`test_worker_import_sweep.py`) pins the no-backend-import contract. Commits
+> `aaa82efb`..`895277ad` on `bug/oauth-tokens-stored-plaintext`. Backend 4719 passed
+> (9 new backend tests + 7 migration tests vs 4703 baseline); worker 1530 passed
+> (18 net new). **Follow-up (chore, not started): `intercom-oauth-path-retirement`** —
+> the legacy Intercom OAuth row in the generic integrations table is now write-only;
+> revisit retiring it (see the Deferred v2 entry above).
+> The false comment at `models/integration.py:19` is corrected; the migration's
+> error text is quoted verbatim in the SELF_HOSTING upgrade callout.
+
 - [ ] `Integration.oauth_access_token` is a plain `Text` column and
       `services/backend-api/src/api/routes/integrations.py` never calls
       `encrypt_api_key`/`decrypt_api_key` on the **Slack or Intercom** OAuth paths — while
