@@ -497,7 +497,7 @@ would have wasted a day:
 **When closing work, correct the marker in the same commit.** Every stale marker found so far
 was left by a branch that shipped the fix and did not update the row.
 
-### P1 — `oauth-tokens-stored-plaintext` — **FIXED** on `bug/oauth-tokens-stored-plaintext` (2026-08-09)
+### P1 — `oauth-tokens-stored-plaintext` — **FIXED**, merged `737bbd5` (#10, 2026-08-09)
 > Shipped: Slack/Intercom OAuth tokens are now encrypted at rest with Fernet like
 > every other integration. Encrypt-on-write at both OAuth callbacks (missing
 > `LLM_ENCRYPTION_KEY` → 422, never 500); decrypt at all 8 read sites (3 backend,
@@ -506,8 +506,8 @@ was left by a branch that shipped the fix and did not update the row.
 > Fail-closed backfill migration `c7d8e9f0a1b2` (chained to head `a9b8c7d6e5f4`;
 > one alembic head) encrypts existing plaintext rows in place and aborts with
 > generate-a-key instructions when `LLM_ENCRYPTION_KEY` is unset; import sweep-guard
-> test (`test_worker_import_sweep.py`) pins the no-backend-import contract. Commits
-> `aaa82efb`..`895277ad` on `bug/oauth-tokens-stored-plaintext`. Backend 4719 passed
+> test (`test_worker_import_sweep.py`) pins the no-backend-import contract. Merged
+> as `737bbd5` (PR #10) on 2026-08-09. Backend 4719 passed
 > (9 new backend tests + 7 migration tests vs 4703 baseline); worker 1530 passed
 > (18 net new). **Follow-up (chore, not started): `intercom-oauth-path-retirement`** —
 > the legacy Intercom OAuth row in the generic integrations table is now write-only;
