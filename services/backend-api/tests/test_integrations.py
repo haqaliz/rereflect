@@ -9,6 +9,33 @@ from sqlalchemy.orm import Session
 from src.models.integration import Integration
 from src.models.user import User
 from src.models.organization import Organization
+from src.api.auth import hash_password, create_access_token
+
+
+@pytest.fixture
+def member_user(db: Session, test_organization: Organization) -> User:
+    """Create a member-role user in the test org."""
+    user = User(
+        email="member@example.com",
+        password_hash=hash_password("password123"),
+        organization_id=test_organization.id,
+        role="member",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@pytest.fixture
+def member_headers(member_user: User) -> dict:
+    """Auth headers for a member-role user."""
+    token = create_access_token({
+        "user_id": member_user.id,
+        "organization_id": member_user.organization_id,
+        "role": member_user.role,
+    })
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -518,3 +545,200 @@ class TestSignatureVerificationConfiguredField:
 
         assert result["success"] is False
         assert "boom" in result["error"]
+
+
+class TestMemberRoleForbidden:
+    """Members must be forbidden from managing integrations (Owner/Admin only).
+
+    The RBAC matrix reserves integration management for Owner and Admin.
+    Every JWT-authenticated integrations route must reject a member token
+    with 403 before any handler logic runs.
+    """
+
+    def test_member_cannot_list_integrations(
+        self, client: TestClient, member_headers: dict
+    ):
+        response = client.get("/api/v1/integrations/", headers=member_headers)
+        assert response.status_code == 403
+
+    def test_member_cannot_create_slack_webhook(
+        self, client: TestClient, member_headers: dict
+    ):
+        response = client.post(
+            "/api/v1/integrations/slack/webhook",
+            headers=member_headers,
+            json={
+                "name": "Member Attempt",
+                "webhook_url": "https://hooks.slack.com/services/T123/B456/xyz789",
+                "triggers": ["urgent"],
+            },
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_create_discord_webhook(
+        self, client: TestClient, member_headers: dict
+    ):
+        response = client.post(
+            "/api/v1/integrations/discord/webhook",
+            headers=member_headers,
+            json={
+                "name": "Member Attempt",
+                "webhook_url": "https://discord.com/api/webhooks/123/abcXYZ",
+                "triggers": ["urgent"],
+            },
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_test_discord_integration(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        db: Session,
+        test_organization: Organization,
+    ):
+        from unittest.mock import patch
+
+        integration = Integration(
+            organization_id=test_organization.id,
+            type="discord",
+            name="Discord Target",
+            config={
+                "webhook_url": "https://discord.com/api/webhooks/123/abcXYZ",
+                "integration_type": "webhook",
+            },
+            triggers=["urgent"],
+            is_active=True,
+        )
+        db.add(integration)
+        db.commit()
+        db.refresh(integration)
+
+        with patch("src.api.routes.integrations.send_discord_message") as mock_send:
+            mock_send.return_value = {"success": True, "response": "ok"}
+            response = client.post(
+                "/api/v1/integrations/discord/test",
+                headers=member_headers,
+                json={"integration_id": integration.id},
+            )
+        assert response.status_code == 403
+        mock_send.assert_not_called()
+
+    def test_member_cannot_get_integration(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        test_integration: Integration,
+    ):
+        response = client.get(
+            f"/api/v1/integrations/{test_integration.id}",
+            headers=member_headers,
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_update_integration(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        test_integration: Integration,
+    ):
+        response = client.patch(
+            f"/api/v1/integrations/{test_integration.id}",
+            headers=member_headers,
+            json={"name": "Member Update"},
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_delete_integration(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        test_integration: Integration,
+    ):
+        response = client.delete(
+            f"/api/v1/integrations/{test_integration.id}",
+            headers=member_headers,
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_test_slack_integration(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        test_integration: Integration,
+    ):
+        from unittest.mock import patch
+
+        with patch("src.api.routes.integrations.send_slack_message") as mock_send:
+            mock_send.return_value = {"success": True, "response": "ok"}
+            response = client.post(
+                "/api/v1/integrations/slack/test",
+                headers=member_headers,
+                json={"integration_id": test_integration.id},
+            )
+        assert response.status_code == 403
+        mock_send.assert_not_called()
+
+    def test_member_cannot_view_integration_logs(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        test_integration: Integration,
+    ):
+        response = client.get(
+            f"/api/v1/integrations/{test_integration.id}/logs",
+            headers=member_headers,
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_get_template_variables(
+        self, client: TestClient, member_headers: dict
+    ):
+        response = client.get(
+            "/api/v1/integrations/slack/template-variables",
+            headers=member_headers,
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_start_slack_oauth(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            "src.api.routes.integrations.SLACK_CLIENT_ID", "test-client-id"
+        )
+        response = client.get(
+            "/api/v1/integrations/slack/oauth/connect?name=Member+Attempt",
+            headers=member_headers,
+        )
+        assert response.status_code == 403
+
+    def test_member_cannot_start_intercom_oauth(
+        self,
+        client: TestClient,
+        member_headers: dict,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setattr(
+            "src.api.routes.integrations.INTERCOM_CLIENT_ID", "test-client-id"
+        )
+        response = client.get(
+            "/api/v1/integrations/intercom/oauth/connect?name=Member+Attempt",
+            headers=member_headers,
+        )
+        assert response.status_code == 403
+
+
+class TestTemplateVariablesAuth:
+    """GET /api/v1/integrations/slack/template-variables is no longer public.
+
+    Previously the route had no auth dependency at all (200 without a token).
+    It is an integration-management surface, so the RBAC fix puts it behind
+    JWT + admin/or-owner like the rest of the module.
+    """
+
+    def test_template_variables_requires_auth(self, client: TestClient):
+        response = client.get("/api/v1/integrations/slack/template-variables")
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Not authenticated"

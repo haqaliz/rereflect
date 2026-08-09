@@ -18,7 +18,7 @@ from pydantic import BaseModel, HttpUrl, field_validator
 from src.database.session import get_db
 from src.models.integration import Integration, SlackAlertLog
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org, require_feature
+from src.api.dependencies import get_current_org, require_admin_or_owner, require_feature
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +352,7 @@ def send_slack_message(webhook_url: str, blocks: list, text: str = "Rereflect Al
 # Endpoints
 # ============================================================================
 
-@router.get("/", response_model=IntegrationListResponse)
+@router.get("/", response_model=IntegrationListResponse, dependencies=[Depends(require_admin_or_owner)])
 def list_integrations(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
@@ -368,7 +368,7 @@ def list_integrations(
     )
 
 
-@router.post("/slack/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_feature("slack_integration"))])
+@router.post("/slack/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_or_owner), Depends(require_feature("slack_integration"))])
 def create_slack_webhook(
     data: SlackWebhookCreateRequest,
     current_org: Organization = Depends(get_current_org),
@@ -414,7 +414,7 @@ def create_slack_webhook(
     return integration_to_response(integration)
 
 
-@router.post("/discord/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/discord/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_or_owner)])
 def create_discord_webhook(
     data: DiscordWebhookCreateRequest,
     current_org: Organization = Depends(get_current_org),
@@ -462,7 +462,7 @@ def create_discord_webhook(
     return integration_to_response(integration)
 
 
-@router.post("/discord/test", response_model=SlackTestResponse)
+@router.post("/discord/test", response_model=SlackTestResponse, dependencies=[Depends(require_admin_or_owner)])
 def test_discord_integration(
     data: DiscordTestRequest,
     current_org: Organization = Depends(get_current_org),
@@ -524,7 +524,7 @@ def test_discord_integration(
     )
 
 
-@router.get("/{integration_id}", response_model=IntegrationResponse)
+@router.get("/{integration_id}", response_model=IntegrationResponse, dependencies=[Depends(require_admin_or_owner)])
 def get_integration(
     integration_id: int,
     current_org: Organization = Depends(get_current_org),
@@ -545,7 +545,7 @@ def get_integration(
     return integration_to_response(integration)
 
 
-@router.patch("/{integration_id}", response_model=IntegrationResponse)
+@router.patch("/{integration_id}", response_model=IntegrationResponse, dependencies=[Depends(require_admin_or_owner)])
 def update_integration(
     integration_id: int,
     data: IntegrationUpdateRequest,
@@ -602,7 +602,7 @@ def update_integration(
     return integration_to_response(integration)
 
 
-@router.delete("/{integration_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{integration_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin_or_owner)])
 def delete_integration(
     integration_id: int,
     current_org: Organization = Depends(get_current_org),
@@ -627,7 +627,7 @@ def delete_integration(
     return None
 
 
-@router.post("/slack/test", response_model=SlackTestResponse, dependencies=[Depends(require_feature("slack_integration"))])
+@router.post("/slack/test", response_model=SlackTestResponse, dependencies=[Depends(require_admin_or_owner), Depends(require_feature("slack_integration"))])
 def test_slack_integration(
     data: SlackTestRequest,
     current_org: Organization = Depends(get_current_org),
@@ -731,7 +731,7 @@ def test_slack_integration(
         )
 
 
-@router.get("/{integration_id}/logs", response_model=List[AlertLogResponse])
+@router.get("/{integration_id}/logs", response_model=List[AlertLogResponse], dependencies=[Depends(require_admin_or_owner)])
 def get_integration_logs(
     integration_id: int,
     limit: int = 50,
@@ -758,7 +758,7 @@ def get_integration_logs(
     return logs
 
 
-@router.get("/slack/template-variables", response_model=TemplateVariablesResponse)
+@router.get("/slack/template-variables", response_model=TemplateVariablesResponse, dependencies=[Depends(require_admin_or_owner)])
 def get_template_variables():
     """Get available template variables for Slack message customization."""
     return TemplateVariablesResponse(
@@ -786,7 +786,7 @@ class OAuthCallbackResponse(BaseModel):
     message: str
 
 
-@router.get("/slack/oauth/connect", response_model=OAuthConnectResponse, dependencies=[Depends(require_feature("slack_integration"))])
+@router.get("/slack/oauth/connect", response_model=OAuthConnectResponse, dependencies=[Depends(require_admin_or_owner), Depends(require_feature("slack_integration"))])
 def slack_oauth_connect(
     name: str = Query(..., description="Name for the integration"),
     current_org: Organization = Depends(get_current_org),
@@ -969,7 +969,7 @@ def send_slack_message_oauth(access_token: str, channel_id: str, blocks: list, t
 # Intercom OAuth Endpoints
 # ============================================================================
 
-@router.get("/intercom/oauth/connect", response_model=OAuthConnectResponse, dependencies=[Depends(require_feature("intercom_integration"))])
+@router.get("/intercom/oauth/connect", response_model=OAuthConnectResponse, dependencies=[Depends(require_admin_or_owner), Depends(require_feature("intercom_integration"))])
 def intercom_oauth_connect(
     name: str = Query(..., description="Name for the integration"),
     current_org: Organization = Depends(get_current_org),
