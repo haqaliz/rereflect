@@ -240,7 +240,7 @@ export const integrations: Integration[] = [
     faqs: SHARED_FAQS,
     setupSteps: [
       { step: 1, title: 'Go to Settings → Integrations', description: 'Navigate to your Rereflect dashboard and open the Integrations page.' },
-      { step: 2, title: 'Click "Connect Linear"', description: 'You\'ll be redirected to Linear to authorize Rereflect via OAuth. Approve the connection.' },
+      { step: 2, title: 'Click "Connect Linear"', description: 'You\'ll be redirected to Linear to authorize Rereflect via OAuth. Approve the connection — credentials and webhook secrets are encrypted at rest.' },
       { step: 3, title: 'Configure team mappings', description: 'Map your Linear teams to Rereflect categories so feedback is automatically organized.' },
       { step: 4, title: 'Set up a feedback source', description: 'Create a Linear feedback source and configure which labels or keywords to monitor.' },
       { step: 5, title: 'Start analyzing issues', description: 'Issue comments flow in automatically. View insights on your dashboard within minutes.' },
