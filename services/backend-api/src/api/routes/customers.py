@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, asc, desc, or_
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 import csv
 import io
 
@@ -148,6 +148,10 @@ class CustomerProfileResponse(BaseModel):
     # segment-actions: operator-managed tags + assigned CS owner
     tags: List[str] = []
     cs_owner: Optional[CustomerOwnerRef] = None
+    # customer-outreach-email-actions: per-customer outreach opt-out flag
+    # (internal profile field — the shared serializer feeds the public API,
+    # so this is injected at the route layer like tags/cs_owner).
+    outreach_opt_out: bool = False
 
 
 class HealthHistoryItem(BaseModel):
@@ -758,6 +762,51 @@ def bulk_assign_owner(
     return BulkActionSummary(matched=len(rows), updated=updated, skipped=skipped, errors=[])
 
 
+class OutreachOptOutUpdate(BaseModel):
+    """Per-customer outreach opt-out toggle (admin/owner only).
+
+    Accepts exactly `{"outreach_opt_out": bool}` — extra fields 422
+    (`extra="forbid"`, the customer-outreach-email-actions contract).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    outreach_opt_out: bool
+
+
+@router.patch(
+    "/{email}",
+    response_model=CustomerProfileResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def set_customer_outreach_opt_out(
+    email: str,
+    body: OutreachOptOutUpdate,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Set the outreach opt-out flag for one customer (admin/owner).
+
+    Org-scoped: an email with no health row in this org returns 404. Returns
+    the updated profile so the UI can re-render the toggle state.
+    """
+    record = db.query(CustomerHealth).filter(
+        CustomerHealth.organization_id == current_org.id,
+        CustomerHealth.customer_email == email,
+    ).first()
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No health record found for customer '{email}'",
+        )
+
+    record.outreach_opt_out = body.outreach_opt_out
+    db.commit()
+    db.refresh(record)
+
+    return _build_customer_profile_response(record, current_org, db)
+
+
 @router.get(
     "/{email}",
     response_model=CustomerProfileResponse,
@@ -781,6 +830,21 @@ def get_customer_profile(
             detail=f"No health record found for customer '{email}'",
         )
 
+    return _build_customer_profile_response(record, current_org, db)
+
+
+def _build_customer_profile_response(
+    record: CustomerHealth,
+    current_org: Organization,
+    db: Session,
+) -> CustomerProfileResponse:
+    """Serialize a CustomerHealth row into the full v1 profile response.
+
+    Shared by GET /{email} and PATCH /{email} (outreach opt-out toggle) so
+    the two can't drift. Internal-only fields (tags, cs_owner,
+    outreach_opt_out) are injected here, NOT in the shared serializer —
+    that serializer also feeds the public REST API.
+    """
     # Delegate core field mapping to the shared serializer (no drift vs. public API).
     from src.services.customer_profile_serializer import serialize_customer_profile
     profile_data = serialize_customer_profile(record, db)
@@ -813,6 +877,9 @@ def get_customer_profile(
         if owner:
             owner_ref = CustomerOwnerRef(id=owner.id, email=owner.email)
     profile_data["cs_owner"] = owner_ref
+
+    # customer-outreach-email-actions: per-customer outreach opt-out (internal).
+    profile_data["outreach_opt_out"] = bool(record.outreach_opt_out)
 
     return CustomerProfileResponse(
         **{k: v for k, v in profile_data.items() if k in CustomerProfileResponse.model_fields},
