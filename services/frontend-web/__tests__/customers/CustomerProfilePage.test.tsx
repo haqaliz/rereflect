@@ -20,23 +20,27 @@ vi.mock('next/link', () => ({
   ),
 }));
 
-// Mock AuthContext - Pro plan user
+// Mock AuthContext - mutable so role-specific tests (outreach opt-out toggle)
+// can switch between owner and member.
+const mockUseAuth = vi.fn();
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({
-    user: {
-      id: 1,
-      email: 'owner@test.com',
-      role: 'owner',
-      plan: 'pro',
-      organization_id: 1,
-      is_system_admin: false,
-    },
-    isLoading: false,
-    isAuthenticated: true,
-    login: vi.fn(),
-    logout: vi.fn(),
-  }),
+  useAuth: () => mockUseAuth(),
 }));
+
+mockUseAuth.mockReturnValue({
+  user: {
+    id: 1,
+    email: 'owner@test.com',
+    role: 'owner',
+    plan: 'pro',
+    organization_id: 1,
+    is_system_admin: false,
+  },
+  isLoading: false,
+  isAuthenticated: true,
+  login: vi.fn(),
+  logout: vi.fn(),
+});
 
 // Mock customers API
 vi.mock('@/lib/api/customers', () => ({
@@ -101,6 +105,7 @@ const mockProfile = {
   llm_analyzed_at: '2026-02-17T07:00:00Z',
   is_archived: false,
   created_at: '2025-12-01T10:00:00Z',
+  outreach_opt_out: true,
 };
 
 const mockHistory = {
@@ -486,6 +491,87 @@ describe('CustomerProfilePage - usage trend (Usage Activity card)', () => {
     });
     const el = screen.getByTestId('usage-trend-declining');
     expect(within(el).getByText('-45%')).toBeInTheDocument();
+  });
+});
+
+describe('CustomerProfilePage - outreach opt-out toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: vi.fn(() => 'mock-token'), setItem: vi.fn(), removeItem: vi.fn() },
+      writable: true,
+    });
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 1,
+        email: 'owner@test.com',
+        role: 'owner',
+        plan: 'pro',
+        organization_id: 1,
+        is_system_admin: false,
+      },
+      isLoading: false,
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(mockProfile);
+    (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
+    (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
+    (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getTimeline as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [], next_cursor: null });
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rollup: {
+        customer_email: 'john@acme.com',
+        usage_score: 50,
+        events_total: 0,
+        last_active_at: null,
+        first_seen_at: null,
+        login_count_7d: 0,
+        login_count_30d: 0,
+        active_days_7d: 0,
+        active_days_30d: 0,
+        distinct_features: null,
+        distinct_feature_count: 0,
+        updated_at: null,
+      },
+      time_series: [],
+      period_days: 30,
+    });
+  });
+
+  it('shows the "Send outreach emails" switch for the owner role, checked from the profile (AC10)', async () => {
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(
+        screen.getByRole('switch', { name: /send outreach emails/i })
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole('switch', { name: /send outreach emails/i })).toBeChecked();
+  });
+
+  it('hides the "Send outreach emails" switch for the member role (AC10)', async () => {
+    mockUseAuth.mockReturnValue({
+      user: {
+        id: 2,
+        email: 'member@test.com',
+        role: 'member',
+        plan: 'pro',
+        organization_id: 1,
+        is_system_admin: false,
+      },
+      isLoading: false,
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => {
+      expect(screen.getByText('John Doe')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('switch', { name: /send outreach emails/i })
+    ).not.toBeInTheDocument();
   });
 });
 
