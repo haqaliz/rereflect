@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { ListChecks, Zap, UserCheck, Bell, Bot, RefreshCcw } from 'lucide-react';
+import { ListChecks, Zap, UserCheck, Bell, Bot, RefreshCcw, Mail } from 'lucide-react';
 import { type Playbook, formatProbabilityRange, ACTION_TYPE_LABELS } from '@/lib/api/playbooks';
 
 // ─── ActionTypeBadge ──────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   change_status: <RefreshCcw className="w-3 h-3" />,
   send_notification: <Bell className="w-3 h-3" />,
   draft_response: <Bot className="w-3 h-3" />,
+  send_email: <Mail className="w-3 h-3" />,
 };
 
 export function ActionTypeBadge({ type }: { type: string }) {
