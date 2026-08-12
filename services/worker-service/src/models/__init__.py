@@ -453,6 +453,12 @@ class CustomerHealth(Base):
     is_archived = Column(Boolean, default=False, server_default="false")
     confidence_level = Column(String(20), default="low")
 
+    # customer-outreach-email-actions: per-customer outreach opt-out
+    # (outreach-core migration adds the same column to the backend model).
+    # Honored by every outreach send path — an opted-out customer is never
+    # emailed (loud skip, never silent).
+    outreach_opt_out = Column(Boolean, nullable=False, default=False, server_default="false")
+
     # segment-engine: catch-up mirror of backend-api's segment column (see
     # services/backend-api/src/models/customer_health.py). Rule-based
     # classification slug: at_risk, silent_churner, dormant, power_user,

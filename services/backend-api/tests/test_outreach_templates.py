@@ -2,7 +2,14 @@
 Tests for the outreach template registry + GET /api/v1/outreach/templates.
 
 Strict TDD: written FIRST (RED) before the registry/endpoint implementation.
+Also pins the additive `extra_headers`/`text` params on the backend
+`_send_email` copies (Phase 3, outreach-core) and the backend's cooldown
+prefix contract constant.
 """
+
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.playbook_seeder import SEED_TEMPLATES
 
@@ -138,3 +145,99 @@ class TestTemplatesEndpoint:
         # HTTPBearer returns 403 when no token is sent (repo convention,
         # documented in test_customers.py:137).
         assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Backend _send_email additive params (outreach-core Phase 3)
+# extra_headers/text must land in the Resend payload and default callers must
+# stay byte-compatible (no headers/text keys when not passed).
+# ---------------------------------------------------------------------------
+
+
+class TestBackendSendEmailPayloadParams:
+    @pytest.fixture(autouse=True)
+    def _restore_real_send_email(self):
+        """conftest's autouse `_disable_emails` fixture swaps `_send_email` for a
+        True-returning mock. These tests pin the Resend payload shape, so restore
+        the real implementation and mock the transport (`requests.post`) instead —
+        no real email can leave the process."""
+        import importlib
+
+        from src.services import email_service as es_mod
+
+        importlib.reload(es_mod)
+        yield
+
+    @patch("src.services.email_service.RESEND_API_KEY", "re_test_key")
+    @patch("src.services.email_service.requests.post")
+    def test_send_email_forwards_extra_headers_and_text(self, mock_post):
+        from src.services import email_service
+
+        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value.json.return_value = {"id": "em_1"}
+
+        ok = email_service._send_email(
+            "a@b.c",
+            "Subject",
+            "<p>hi</p>",
+            extra_headers={"List-Unsubscribe": "<https://app.example.com/u>"},
+            text="hi plain",
+        )
+        assert ok is True
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["headers"] == {"List-Unsubscribe": "<https://app.example.com/u>"}
+        assert payload["text"] == "hi plain"
+        assert payload["html"] == "<p>hi</p>"
+
+    @patch("src.services.email_service.RESEND_API_KEY", "re_test_key")
+    @patch("src.services.email_service.requests.post")
+    def test_send_email_default_payload_unchanged(self, mock_post):
+        from src.services import email_service
+
+        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value.json.return_value = {"id": "em_1"}
+
+        email_service._send_email("a@b.c", "Subject", "<p>hi</p>")
+        payload = mock_post.call_args.kwargs["json"]
+        assert "headers" not in payload
+        assert "text" not in payload
+
+    @patch("src.services.email_service.RESEND_API_KEY", "re_test_key")
+    @patch("src.services.email_service.requests.post")
+    def test_send_email_with_from_forwards_extra_headers_and_text(self, mock_post):
+        from src.services import email_service
+
+        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value.json.return_value = {"id": "em_1"}
+
+        ok = email_service._send_email_with_from(
+            "a@b.c",
+            "Subject",
+            "<p>hi</p>",
+            "alerts@example.com",
+            extra_headers={"List-Unsubscribe": "<https://app.example.com/u>"},
+            text="hi plain",
+        )
+        assert ok is True
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["from"] == "alerts@example.com"
+        assert payload["headers"] == {"List-Unsubscribe": "<https://app.example.com/u>"}
+        assert payload["text"] == "hi plain"
+
+
+# ---------------------------------------------------------------------------
+# Cooldown-prefix agreement pin (outreach-core Phase 3 step 6)
+# The backend contract constant must agree with the worker's
+# OUTREACH_COOLDOWN_PREFIX so both send paths write the same Redis key.
+# ---------------------------------------------------------------------------
+
+
+class TestBackendCooldownPrefixPin:
+    def test_outreach_cooldown_prefix_contract(self):
+        from src.services.outreach_sender_contract import OUTREACH_COOLDOWN_PREFIX
+
+        assert OUTREACH_COOLDOWN_PREFIX == "outreach_cooldown"
+        assert (
+            f"{OUTREACH_COOLDOWN_PREFIX}:7:alice@example.com"
+            == "outreach_cooldown:7:alice@example.com"
+        )
