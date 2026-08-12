@@ -157,6 +157,9 @@ export interface CustomerProfileData {
   // segment-actions: operator-managed tags + assigned CS owner
   tags?: string[];
   cs_owner?: CustomerOwnerRef | null;
+  // outreach-core: per-customer opt-out of outreach emails (absent on older
+  // backends → treat as false)
+  outreach_opt_out?: boolean;
 }
 
 export interface UsageRollup {
@@ -337,6 +340,19 @@ export const customersAPI = {
     const response = await apiClient.patch(
       `/api/v1/customers/${encodeURIComponent(email)}/actions/${actionId}`,
       { status }
+    );
+    return response.data;
+  },
+
+  /**
+   * Flip the customer's outreach opt-out flag (outreach-core AC9). Admin/owner
+   * only (backend-enforced; member → 403). The backend uses `extra="forbid"` —
+   * the body must be exactly `{"outreach_opt_out": bool}`.
+   */
+  updateOutreachOptOut: async (email: string, outreachOptOut: boolean): Promise<CustomerProfileData> => {
+    const response = await apiClient.patch(
+      `/api/v1/customers/${encodeURIComponent(email)}`,
+      { outreach_opt_out: outreachOptOut }
     );
     return response.data;
   },
