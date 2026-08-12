@@ -33,6 +33,11 @@ from src.config.plans import has_feature
 from src.schemas.cohort import Cohort, BulkActionSummary
 from src.services.cohort_service import resolve_cohort
 from src.services.segment_service import SEGMENT_SLUGS
+from src.services.outreach_drafter import (
+    LLMNotConfiguredError,
+    OutreachDraftError,
+    draft_outreach_content,
+)
 
 router = APIRouter(prefix="/api/v1/customers", tags=["customers"])
 
@@ -967,6 +972,86 @@ def bulk_outreach(
         skipped=skipped,
         errors=dispatch_errors,
     )
+
+
+class OutreachDraftRequest(BaseModel):
+    """Body of POST /customers/bulk/outreach/draft — {cohort?, tone?} only.
+
+    `cohort` is optional; when present it is validated by `Cohort`
+    (exactly one of emails/filter) and only its derived context (count +
+    dominant segment) reaches the LLM — never the raw emails or search text.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    cohort: Optional[Cohort] = None
+    tone: Optional[str] = None
+
+
+class OutreachDraftResponse(BaseModel):
+    subject: str
+    body: str
+
+
+@router.post(
+    "/bulk/outreach/draft",
+    response_model=OutreachDraftResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+async def create_outreach_draft(
+    body: OutreachDraftRequest,
+    current_org: Organization = Depends(get_current_org),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """AI-draft a {subject, body} outreach message for the bulk composer.
+
+    Admin/owner only. Optional `cohort` adds honest context to the prompt —
+    the resolved count + dominant segment, never raw emails or search text.
+    The draft NEVER sends: no campaign or recipient rows are created and
+    nothing is dispatched — the human clicks Send in the composer.
+    """
+    cohort_context = None
+    if body.cohort is not None:
+        rows, _ = resolve_cohort(db, current_org, body.cohort)
+        if rows:
+            segment_counts: dict = {}
+            for row in rows:
+                if row.segment:
+                    segment_counts[row.segment] = segment_counts.get(row.segment, 0) + 1
+            dominant_segment = (
+                max(segment_counts.items(), key=lambda kv: kv[1])[0]
+                if segment_counts
+                else None
+            )
+            cohort_context = {"count": len(rows), "dominant_segment": dominant_segment}
+
+    try:
+        draft = await draft_outreach_content(
+            current_org,
+            db,
+            cohort_context=cohort_context,
+            tone=body.tone,
+        )
+    except LLMNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc)
+            or "No AI model configured. Configure a provider in AI Settings or set a local LLM to use AI drafting.",
+        )
+    except OutreachDraftError as exc:
+        logger.warning("outreach draft: unusable model output: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The AI model returned an unusable draft. Try again.",
+        )
+    except Exception as exc:
+        logger.error("outreach draft: provider error: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI drafting failed due to an upstream error. Try again.",
+        )
+
+    return OutreachDraftResponse(subject=draft["subject"], body=draft["body"])
 
 
 class OutreachOptOutUpdate(BaseModel):
