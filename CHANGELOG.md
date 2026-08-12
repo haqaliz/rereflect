@@ -35,6 +35,17 @@ primitives; the send surfaces themselves land with their own changes):
 Resend-only, BYO-key: no SMTP, nothing phones home. See *Outbound email (Resend)* in
 `docs/SELF_HOSTING.md`.
 
+### Playbook `send_email` steps now execute (worker engine)
+
+The seeded playbooks' `send_email` steps ("At-Risk Outreach" → weekly digest to the CS
+assignee; "Silent-Churn Watch" → re-engagement email to the customer) actually send now
+instead of failing every run as `unsupported action type`. Recipients: `customer` (the
+execution's customer email) or `cs_assignee` (the customer's assigned CS owner — missing
+owner is a loud per-step failure, never silent). Rendered from the built-in registry via
+the worker mirror; every outcome (sent/skipped/failed) is recorded loudly in the playbook
+execution's `action_log`. Opt-out, cooldown, List-Unsubscribe and no-key handling remain
+the shared sender's (above) — no reimplementation here.
+
 ### Notifications — Discord now has its own per-type channel preference
 
 Settings → Notifications now shows a **Discord** channel switch for each alert type, default
