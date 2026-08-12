@@ -419,8 +419,84 @@ def test_send_email_unknown_recipient_is_loud_failure(db, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Seeded templates pinned green (playbook-send-email-step, PRD goal #1)
+# ---------------------------------------------------------------------------
+
+AT_RISK_OUTREACH_SEED = [
+    {"type": "send_email", "config": {"template": "weekly_digest_entry", "recipient": "cs_assignee"}},
+    {"type": "tag", "config": {"tag": "at-risk"}},
+    {"type": "send_notification", "config": {"recipients": "assignee", "channels": ["dashboard"], "message": "Customer flagged as at-risk."}},
+]
+
+SILENT_CHURN_WATCH_SEED = [
+    {"type": "send_email", "config": {"template": "re_engagement", "recipient": "customer"}},
+    {"type": "create_task", "config": {"description": "Follow-up: confirm engagement or mark silent churn", "due_in_days": 14, "priority": "medium"}},
+]
+
+
+# ---------------------------------------------------------------------------
 # send_email step — sender result mapping (spec table)
 # ---------------------------------------------------------------------------
+
+def test_seed_at_risk_outreach_send_email_step_runs_green(db, monkeypatch):
+    """AC8: 'At-Risk Outreach' seed runs through the real engine (sender mocked);
+    its send_email step (weekly_digest_entry → cs_assignee) logs ok=True and the
+    run finishes done with the seed's full step count."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    org = _make_org(db)
+    user = _make_user(db, org.id, email="cs-owner@example.com")
+    pb = _make_playbook(db, org.id, action_sequence=AT_RISK_OUTREACH_SEED)
+    health = _make_health(db, org.id)
+    health.cs_owner_user_id = user.id
+    db.commit()
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+
+    assert len(calls) == 1
+    assert calls[0]["customer_email"] == "cs-owner@example.com"
+    assert calls[0]["template_key"] == "weekly_digest_entry"
+    assert len(updated.action_log) == 3
+    email_entry = updated.action_log[0]
+    assert email_entry["type"] == "send_email"
+    assert email_entry["ok"] is True
+    assert email_entry["result"]["template"] == "weekly_digest_entry"
+    assert email_entry["result"]["status"] == "sent"
+    assert updated.status == "done"
+
+
+def test_seed_silent_churn_watch_send_email_step_runs_green(db, monkeypatch):
+    """AC8: 'Silent-Churn Watch' seed runs through the real engine (sender mocked);
+    its send_email step (re_engagement → customer) logs ok=True and the run
+    finishes done with the seed's full step count."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=SILENT_CHURN_WATCH_SEED)
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+
+    assert len(calls) == 1
+    assert calls[0]["customer_email"] == "customer@example.com"
+    assert calls[0]["template_key"] == "re_engagement"
+    assert len(updated.action_log) == 2
+    email_entry = updated.action_log[0]
+    assert email_entry["type"] == "send_email"
+    assert email_entry["ok"] is True
+    assert email_entry["result"]["template"] == "re_engagement"
+    assert email_entry["result"]["status"] == "sent"
+    assert updated.status == "done"
 
 @pytest.mark.parametrize(
     "sender_result, expected_ok",
