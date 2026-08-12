@@ -42,14 +42,21 @@ export function OutreachOptOutToggle({ email, initialValue = false }: OutreachOp
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground whitespace-nowrap">Send outreach emails</span>
-      <Switch
-        aria-label="Send outreach emails"
-        checked={optedOut}
-        onCheckedChange={handleToggle}
-        disabled={saving}
-      />
+    <div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          Opted out of outreach emails
+        </span>
+        <Switch
+          aria-label="Opted out of outreach emails"
+          checked={optedOut}
+          onCheckedChange={handleToggle}
+          disabled={saving}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        When on, this customer will not receive outreach emails from playbooks or campaigns.
+      </p>
     </div>
   );
 }

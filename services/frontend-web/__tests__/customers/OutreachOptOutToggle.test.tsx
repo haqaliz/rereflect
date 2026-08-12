@@ -43,7 +43,7 @@ describe('OutreachOptOutToggle', () => {
       <OutreachOptOutToggle email="john@acme.com" initialValue={false} />
     );
     expect(
-      screen.getByRole('switch', { name: /send outreach emails/i })
+      screen.getByRole('switch', { name: /opted out of outreach emails/i })
     ).not.toBeChecked();
   });
 
@@ -52,7 +52,7 @@ describe('OutreachOptOutToggle', () => {
       <OutreachOptOutToggle email="jane@acme.com" initialValue={true} />
     );
     expect(
-      screen.getByRole('switch', { name: /send outreach emails/i })
+      screen.getByRole('switch', { name: /opted out of outreach emails/i })
     ).toBeChecked();
   });
 
@@ -61,7 +61,7 @@ describe('OutreachOptOutToggle', () => {
     renderWithQueryClient(
       <OutreachOptOutToggle email="john@acme.com" initialValue={false} />
     );
-    const toggle = screen.getByRole('switch', { name: /send outreach emails/i });
+    const toggle = screen.getByRole('switch', { name: /opted out of outreach emails/i });
 
     fireEvent.click(toggle);
 
@@ -76,7 +76,7 @@ describe('OutreachOptOutToggle', () => {
     renderWithQueryClient(
       <OutreachOptOutToggle email="john@acme.com" initialValue={true} />
     );
-    const toggle = screen.getByRole('switch', { name: /send outreach emails/i });
+    const toggle = screen.getByRole('switch', { name: /opted out of outreach emails/i });
 
     fireEvent.click(toggle);
 
@@ -89,6 +89,17 @@ describe('OutreachOptOutToggle', () => {
     expect(toggle).toBeChecked();
   });
 
+  it('explains the opt-out consequence under the switch (AC9)', () => {
+    renderWithQueryClient(
+      <OutreachOptOutToggle email="john@acme.com" initialValue={true} />
+    );
+    expect(
+      screen.getByText(
+        /when on, this customer will not receive outreach emails from playbooks or campaigns/i
+      )
+    ).toBeInTheDocument();
+  });
+
   it('is absent for the member role (AC10)', () => {
     mockUseAuth.mockReturnValue({
       user: { id: 2, email: 'member@test.com', role: 'member', organization_id: 1 },
@@ -99,7 +110,7 @@ describe('OutreachOptOutToggle', () => {
       <OutreachOptOutToggle email="john@acme.com" initialValue={false} />
     );
     expect(
-      screen.queryByRole('switch', { name: /send outreach emails/i })
+      screen.queryByRole('switch', { name: /opted out of outreach emails/i })
     ).not.toBeInTheDocument();
   });
 });

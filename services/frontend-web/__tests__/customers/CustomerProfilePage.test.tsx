@@ -540,17 +540,17 @@ describe('CustomerProfilePage - outreach opt-out toggle', () => {
     });
   });
 
-  it('shows the "Send outreach emails" switch for the owner role, checked from the profile (AC10)', async () => {
+  it('shows the "Opted out of outreach emails" switch for the owner role, checked from the profile (AC10)', async () => {
     renderWithQueryClient(<CustomerProfilePage />);
     await waitFor(() => {
       expect(
-        screen.getByRole('switch', { name: /send outreach emails/i })
+        screen.getByRole('switch', { name: /opted out of outreach emails/i })
       ).toBeInTheDocument();
     });
-    expect(screen.getByRole('switch', { name: /send outreach emails/i })).toBeChecked();
+    expect(screen.getByRole('switch', { name: /opted out of outreach emails/i })).toBeChecked();
   });
 
-  it('hides the "Send outreach emails" switch for the member role (AC10)', async () => {
+  it('hides the "Opted out of outreach emails" switch for the member role (AC10)', async () => {
     mockUseAuth.mockReturnValue({
       user: {
         id: 2,
@@ -570,7 +570,7 @@ describe('CustomerProfilePage - outreach opt-out toggle', () => {
       expect(screen.getByText('John Doe')).toBeInTheDocument();
     });
     expect(
-      screen.queryByRole('switch', { name: /send outreach emails/i })
+      screen.queryByRole('switch', { name: /opted out of outreach emails/i })
     ).not.toBeInTheDocument();
   });
 });
