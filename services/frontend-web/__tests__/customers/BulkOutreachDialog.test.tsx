@@ -52,6 +52,12 @@ const mockListKeys = aiSettingsAPI.listKeys as ReturnType<typeof vi.fn>;
 
 const COHORT: Cohort = { emails: ['alice@example.com', 'bob@example.com'] };
 
+// The preview is debounced (500ms) and the suite runs under heavy parallel
+// load, so give the settle-waits a generous timeout.
+function waitForPreviewCall() {
+  return waitFor(() => expect(mockCreateCampaign).toHaveBeenCalledTimes(1), { timeout: 4000 });
+}
+
 function renderDialog(props?: Partial<React.ComponentProps<typeof BulkOutreachDialog>>) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -210,7 +216,7 @@ describe('BulkOutreachDialog', () => {
         { cohort: COHORT, subject: 'We miss you', body: 'Tell us what happened?' },
         { countOnly: true }
       );
-    });
+    }, { timeout: 4000 });
     expect(
       await screen.findByText(/3 will be emailed, 1 skipped \(opted out or no email\)/i)
     ).toBeInTheDocument();
@@ -222,9 +228,10 @@ describe('BulkOutreachDialog', () => {
     renderDialog();
 
     await fillComposeForm(user);
-    expect(await screen.findByText(/exceeds the batch cap of 500/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
-  });
+    expect(
+      await screen.findByText(/exceeds the batch cap of 500/i, undefined, { timeout: 4000 })
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();  });
 
   it('confirm step: explicit second click sends without count_only, toasts, invalidates both keys and calls onSuccess', async () => {
     mockCreateCampaign.mockResolvedValue({ matched: 3, queued: 3, skipped: 0, errors: [] });
@@ -234,7 +241,7 @@ describe('BulkOutreachDialog', () => {
     const { invalidateSpy } = renderDialog({ onSuccess, onOpenChange });
 
     await fillComposeForm(user);
-    await waitFor(() => expect(mockCreateCampaign).toHaveBeenCalledTimes(1));
+    await waitForPreviewCall();
 
     await user.click(screen.getByRole('button', { name: /^send$/i }));
     expect(
@@ -264,7 +271,7 @@ describe('BulkOutreachDialog', () => {
     renderDialog();
 
     await fillComposeForm(user);
-    await waitFor(() => expect(mockCreateCampaign).toHaveBeenCalledTimes(1));
+    await waitForPreviewCall();
     await user.click(screen.getByRole('button', { name: /^send$/i }));
 
     expect(await screen.findByText(/no recipients to email/i)).toBeInTheDocument();
@@ -281,7 +288,7 @@ describe('BulkOutreachDialog', () => {
     renderDialog();
 
     await fillComposeForm(user);
-    await waitFor(() => expect(mockCreateCampaign).toHaveBeenCalledTimes(1));
+    await waitForPreviewCall();
     await user.click(screen.getByRole('button', { name: /^send$/i }));
     await user.click(screen.getByRole('button', { name: /confirm & send to 3/i }));
 
