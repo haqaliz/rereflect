@@ -963,6 +963,19 @@ What ships with the outreach primitives:
   `OUTREACH_COOLDOWN_HOURS` (default `24`, env-configurable on both backend-api and
   worker-service; unparseable values fall back to 24). An in-cooldown send records
   `skipped: in cooldown`.
+- **Bulk "Trigger outreach campaign"** — `POST /api/v1/customers/bulk/outreach`
+  (admin/owner) resolves a cohort (`emails[]` list or the customers-list filter
+  vocabulary), writes one campaign + one per-recipient audit row
+  (`outreach_campaigns` / `outreach_campaign_recipients`), and enqueues one Celery task
+  per sendable recipient: `202 {matched, queued, skipped, errors}`. Queue-time skips
+  (invalid email, opted out, archived) are loud and recorded per recipient; the 500-cap
+  and empty-cohort guard are 422s on the real run. `?count_only=true` previews
+  `{matched, queued: 0, skipped, errors: []}` with zero mutation. `GET
+  /api/v1/outreach/campaigns` lists campaigns with per-status recipient counts;
+  `POST /api/v1/outreach/campaigns/{id}/retry` re-enqueues a dead campaign's `queued`
+  recipients (terminal rows are immutable). The AI draft endpoint
+  (`POST /api/v1/customers/bulk/outreach/draft`) never sends — it only fills the
+  composer's fields.
 
 The playbook `send_email` step and the bulk "Trigger outreach campaign" action consume these
 primitives; `APP_URL` must point at your frontend for the unsubscribe link in the

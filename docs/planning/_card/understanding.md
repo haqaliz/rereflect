@@ -1,81 +1,113 @@
-# Understanding — `linear-webhook-secret-plaintext`
+# Understanding — `customer-outreach-email-actions` (Phase 2 dig)
 
-**Opened:** 2026-08-09 · **Branch:** `bug/linear-webhook-secret-plaintext`
+Worktree dig on 2026-08-12, four parallel agents (email+drafting / automation+playbook
+engines / cohort bulk API / frontend). All claims verified against code; file:line cites
+are relative to this worktree.
 
-## What the issue is really asking
+## What the feature really is
 
-Store Linear's `webhook_secret` encrypted at rest, like every other integration's
-credential already is, and migrate existing plaintext rows. Nothing else: no UI, no
-behavior change to the webhook flow.
+The product's flagship loop (churn prediction with actionable reasons, `AI-TRACKING.md:5`)
+dead-ends inside the app: every playbook/automation action is internal-only. Two shipped
+plans deferred customer-facing email as a "separate slice" (`segment-actions/prd.md:170`,
+`churn-triggered-playbooks/prd.md:247-249`).
 
-## Verified facts (code, 2026-08-09)
-
-- **Only Linear stores a credential in plaintext.** `models/linear_integration.py:19`
-  `webhook_secret = Column(String(255), nullable=False)` — no encryption comment (unlike
-  `access_token` at :13, "Fernet-encrypted OAuth token"). Zendesk/Jira/Asana webhook
-  secrets and Slack/Intercom OAuth tokens all round-trip `encrypt_api_key`/`decrypt_api_key`.
-- **Write sites (all backend, `routes/linear_integration.py`):** generate at :394
-  (`secrets.token_urlsafe(32)`), sent plaintext to Linear's API at :402 (must stay
-  plaintext there), stored raw at :423 (reconnect/update) and :435 (create).
-- **Read site — exactly one, backend-only:** `routes/linear_webhook.py:68-69`
-  (`_find_integration_by_secret` feeds `integration.webhook_secret` straight into
-  `_verify_linear_signature` :33-54, HMAC-SHA256 hexdigest + `hmac.compare_digest`,
-  fail-closed on empty/None). **Worker-service has zero Linear code** — no worker decrypt
-  mirror needed (confirmed by grep).
-- **No rotate-secret endpoint;** re-running OAuth connect overwrites the secret. Disconnect
-  leaves the stale secret in the row (backfill will encrypt it too; harmless).
-- **Current alembic head is exactly `c7d8e9f0a1b2`** (the OAuth-token encryption backfill,
-  PR #10) — the new migration must chain from it; CI asserts single head.
-
-## The pattern to copy (established, not invented)
-
-- **Encrypt-on-write:** `jira_integration.py:651` — `encrypt_api_key` after the secret has
-  been handed to the provider; `ValueError` (missing `LLM_ENCRYPTION_KEY`) → HTTP **422**
-  with a clear message (mirror `integrations.py:909-915`).
-- **Decrypt-on-read:** `jira_webhook.py:84-106` — `_find_integration_by_secret` filters
-  `webhook_secret.isnot(None)`, decrypts **exactly once per candidate** inside try/except
-  (`InvalidToken`/`ValueError` → log + continue, never 500). Corrupt/undecryptable secret
-  is a no-match → 401.
-- **Backfill migration:** `c7d8e9f0a1b2` — fail-closed `RuntimeError` with
-  generate-a-key instructions when `LLM_ENCRYPTION_KEY` is missing; skips rows already
-  prefixed `gAAAAA` (idempotent, never double-encrypts); online-only raw SQL;
-  downgrade best-effort. Tested against in-memory SQLite via
-  `MigrationContext`/`Operations` (`tests/test_oauth_token_backfill_migration.py`).
-- **Sweep-guard:** `test_worker_import_sweep.py` already bans `src.utils` in the worker
-  (not needed here — backend-only); a new sweep-guard for "no integration stores
-  plaintext credentials" is in scope per the card.
-
-## Decisions / open questions to settle in the PRD
-
-1. **Column width:** Fernet ciphertext for a 32-char secret ≈ 140 chars — fits
-   `String(255)`; Zendesk/Jira/Asana use `Text`. Recommend **no schema change** (keep
-   `String(255)`): the data migration stays purely a row update. Alternative is widening
-   for consistency — flagged, not required.
-2. **Fixtures:** `test_linear_webhook.py:140`, `test_linear_oauth.py:67,460`,
-   `test_linear_integration_rbac.py:57` insert raw secrets. After the fix the DB always
-   holds ciphertext, so fixtures must store `encrypt_api_key(secret)` (golden contract:
-   what's in the DB is what verification reads). Verify whether the backend test conftest
-   already sets `LLM_ENCRYPTION_KEY` (the OAuth-token tests decrypt real Fernet, so
-   likely yes).
-3. **Missing key at verify time:** decrypt failure at `_find_integration_by_secret` = no
-   match (401), matching Jira. **Missing key at callback time:** 422 (matching
-   Slack/Intercom). Both already established; just applied here.
-4. **Disconnect path:** does not null `webhook_secret` today; keep that behavior
-   (out of scope to change), the backfill encrypts the stale value.
-
-## Contradictions flagged
-
-- None between the tracking entry and the code — DEV-TRACKING.md:427-429 describes exactly
-  what the code does. The only "paper-over" trap: fixtures asserting raw-secret behavior
-  would silently pass a plaintext-only verify path; the fix must make the **stored-value
-  contract** explicit (ciphertext in DB) rather than tolerant of both.
+**The dig sharpened this into a shipped-broken feature, not just a deferred one:**
+`playbook_seeder.py:109-113` ("At-Risk Outreach") and `:213-217` ("Silent-Churn Watch")
+ship `send_email` steps, and `playbook_engine.py:177-182` rejects every `send_email` with
+`{"ok": False, "error": "unsupported action type"}` — **those template steps always fail
+at runtime today** while the UI shows them as part of active playbooks (the same
+delivery-integrity trap class as the automations bare-`except` bug, per
+`docs/planning/automations-delivery-integrity/`). Also: 6 of 11 action types the seeder
+uses (`notify`, `send_email`, `tag`, `create_task`, `schedule_task`, `trigger_automation`)
+are unimplemented in the playbook engine.
 
 ## Affected areas
 
-- `services/backend-api/src/api/routes/linear_integration.py` (write, 422 handling)
-- `services/backend-api/src/api/routes/linear_webhook.py` (verify, decrypt-once)
-- `services/backend-api/alembic/versions/*.py` (new backfill, chain from `c7d8e9f0a1b2`)
-- `services/backend-api/tests/test_linear_webhook.py`, `test_linear_oauth.py`,
-  `test_linear_integration_rbac.py` (fixtures), new migration tests, new sweep-guard test
-- `DEV-TRACKING.md` (mark follow-up entry FIXED in the shipping commit)
-- No worker-service, no frontend changes.
+- **Backend-api**
+  - `src/services/email_service.py` — Resend-only (plain HTTP POST, no SDK), BYO-key
+    (`RESEND_API_KEY` = the enable switch), `_send_with_template` + `{{{VAR}}}` regex
+    rendering, **no HTML escaping**, no rate limiting, no SMTP path anywhere in the repo.
+    Skip semantics when key unset: `logger.warning` + return False — quiet.
+  - `src/services/response_sender.py:159-202` `send_via_email` — the one existing
+    **customer-facing** email path (plain text, from `org.support_email_display`, subject
+    `Re: {original}`) — precedent for customer addressing.
+  - `src/services/automation_engine.py` — action dispatch `_execute_actions` (407-438);
+    `_execute_notify` email branch (589-604) logs-only, never feeds `channel_errors`
+    (unlike Slack); `KNOWN_NOTIFY_CHANNELS = {dashboard, email, slack}`.
+  - `src/services/issue_drafter.py` — the AI-draft pattern to copy: `resolve_generation_llm`
+    (BYOK + local), `LLMNotConfiguredError` → 409, `<feedback>` injection delimiter +
+    "untrusted data" hardening, `LLMUsageLog(task_type="issue_draft")`, tone fallback.
+  - `src/api/routes/customers.py` — bulk endpoints (`/bulk/tags` 677, `/bulk/assign-owner`
+    720) with `require_admin_or_owner`, `Cohort` schema (`schemas/cohort.py:27-41`,
+    emails XOR filter), `resolve_cohort` (`services/cohort_service.py:18-65`, emails from
+    `customer_health_scores.customer_email`, skip-with-count), `BulkActionSummary`
+    `{matched, updated, skipped, errors[]}`; static `/bulk/*` must stay above `/{email}`
+    (449-452).
+  - `src/services/playbook_seeder.py` — `VALID_ACTION_TYPES` (24-36) already includes
+    `send_email`; seeded `send_email` config shape is `{template, recipient}` where
+    recipient ∈ `cs_assignee | customer` (111-113, 215-217).
+- **Worker-service** (cannot import backend-api — everything mirrored)
+  - `src/services/playbook_engine.py` — `_dispatch_action` (152-182) implements only
+    `assign / change_status / send_notification / draft_response`; 60-min (playbook,
+    customer) rate-limit → cancelled; requires a `CustomerHealth` row or the run fails.
+  - `src/services/automation_feedback_trigger.py` — actions `auto_assign/change_status/
+    send_notification/draft_response`; worker-local `_send_email_notification` (617-638)
+    via `src/email.py` sharing env var names with the backend.
+  - `src/services/automation_churn_trigger.py` + `automation_usage_trend_trigger.py` —
+    run_playbook-only, **silently `continue`** past other action types (224, 272-273) — a
+    new email action added only to the feedback mirror would be inert on the churn/usage
+    paths.
+  - Cooldowns: Redis DB 1, `automation_cooldown:{rule_id}:{customer_email}`, TTL
+    `cooldown_hours * 3600`, 4 copies, must not drift.
+- **Frontend**
+  - `settings/automations/new/page.tsx:342-364` + `[id]/page.tsx:428-451` — `ACTION_TYPES`
+    + inline per-type config branches (drift: new resets defaults, [id] preserves config).
+  - `components/playbooks/PlaybookEditor.tsx:23-69` — type-select-only step editor, **no
+    per-step config fields**.
+  - `app/(dashboard)/customers/page.tsx` — cohort state (`emails` | `filter`), Bulk
+    Actions dropdown (562-610), dialogs mounted at 832-865;
+    `components/customers/BulkRunPlaybookDialog.tsx` is the dialog pattern (count-only
+    preview, cap guard).
+  - `feedbacks/[id]/create-issue/page.tsx:465-499` — Draft-with-AI + overwrite-confirm;
+    `components/feedback/ResponseModal.tsx` — tone selector, template browser, variable
+    pills, editable textarea, edit-before-send.
+
+## Open questions (feed to the PRD)
+
+1. **Action type naming** — seeder reserves `send_email` with `{template, recipient}`
+   config; engines would need a `send_customer_email`-style type. Align with the seeded
+   `send_email` taxonomy or rename the seeds (and fix the other 5 unimplemented seeded
+   types — out of scope here; note only).
+2. **Auto-send vs draft** — product norm is human-confirmed (draft_response, response
+   suggestions, churn-label review queue). An automation `send_customer_email` action
+   firing automatically is a behavior change the PRD must bless, or the action must
+   produce a draft (e.g., a queued draft in a review surface) rather than a send.
+3. **Email channel** — Resend-only today; SMTP is greenfield. First slice: Resend BYO-key
+   (+ `response_sender`-style plain-text alternative?), SMTP explicitly v2.
+4. **Customer opt-out** — no unsubscribe/suppression state for `customer_email` exists;
+   automated customer-facing sends need at least an honest opt-out story (compliance +
+   the honest-OSS brand). Scope? (e.g., org-level "suppress outreach" list, or per-customer
+   flag + `List-Unsubscribe` header).
+5. **Which triggers get the action** — feedback mirror only, or also churn/usage mirrors
+   (which silently skip non-run_playbook actions today)? The seeded "Silent-Churn Watch"
+   and "At-Risk Outreach" are playbook steps → that path is `playbook_engine`, not the
+   automation triggers.
+6. **Loudness** — email failures currently log-only (never `channel_errors`); a
+   customer-facing send should be honest (loud result, `partial_failure` semantics).
+7. **No-key behavior** — `RESEND_API_KEY` unset ⇒ skip with warning; the action result
+   must say "skipped: no email key" loudly, not silently succeed.
+8. **Bulk endpoint shape** — `POST /customers/bulk/outreach` (Cohort + subject/body or
+   template), `BulkActionSummary`, `count_only` preview like run-batch, 500 cap,
+   blank/malformed emails → skipped-with-count, archived excluded.
+
+## Risks (do not paper over)
+
+- **Two-engine duplication**: any send helper must exist in backend `email_service.py`
+  and worker `src/email.py`; a bare `try/except` around a worker import = defect.
+- **Churn/usage mirrors silently skip unknown actions** — easy to ship an action that
+  "works" only on the feedback mirror while playbook/churn paths stay inert.
+- **No HTML escaping in `_render_template`** — LLM-drafted body via `{{{VAR}}}` is raw;
+  outreach templates need an escaping decision (or plain-text-only body).
+- **No rate limiting** beyond playbook 60-min window + automation cooldowns.
+- **Triggered-by string coupling** (`auto_probability`, `auto_usage_trend`) — keep exact.
+- **M5.3 / churn computation untouched** — hard scope guard.

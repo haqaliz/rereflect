@@ -1246,6 +1246,7 @@ was left by a branch that shipped the fix and did not update the row.
 - Churn Probability Display: Replaces risk_level as primary signal (risk_level still shown as color hint, derived from probability bands), percentage + CI tooltip across all surfaces
 - Churn Labeling: Structured reason codes (price, competitor, product_quality, no_longer_needed, silent_churn, other), manual + CSV import + auto-suggested sources, recovered_at winback tracking
 - Churn Playbooks: 7 pre-built templates with probability-range binding, rate-limited 60min per (playbook, customer), actions reuse existing Automations engine
+- Customer Outreach (2026-08-12, `feat/customer-outreach-email-actions`): opt-out flag honored on every send path, tokenized List-Unsubscribe, shared per-recipient cooldown (Redis DB 1), built-in template registry, bulk campaign API (`POST /customers/bulk/outreach` + `?count_only` preview, campaign + per-recipient audit rows, per-recipient Celery send task, campaign list + `queued` retry endpoint, AI draft endpoint that never sends) — see `docs/planning/customer-outreach-email-actions/`
 - Churn Plan Gating: Probability + timeline + cohorts + playbooks + accuracy = Business+. Existing risk_level + factor breakdown stays Pro+. Enterprise = unlimited playbooks + custom probability bands
 - Churn Data Model: 5 new tables, BigInteger PKs (per codebase convention, not UUID), unique constraint on (org_id, email, churned_at) for dedup
 

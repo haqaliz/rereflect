@@ -1,72 +1,78 @@
-# Card — `linear-webhook-secret-plaintext`
+# Card — `customer-outreach-email-actions`
 
-**Type:** bug (freeform — no GitHub issue)
-**Branch:** `bug/linear-webhook-secret-plaintext`
-**Worktree:** `.claude/worktrees/bug-linear-webhook-secret-plaintext`
-**Opened:** 2026-08-09
-**Traces to:** DEV-TRACKING.md:427-429 (follow-ups opened by `feat/integration-auth-tenancy-hardening`, all NOT STARTED)
-**Picked by:** `rereflect-next` — the designated follow-up of the just-merged
-`oauth-tokens-stored-plaintext` (PR #10, commit `737bbd5`): the last plaintext
-credential in the system.
+**Type:** feat (freeform — no GitHub issue)
+**Branch:** `feat/customer-outreach-email-actions`
+**Worktree:** `.claude/worktrees/feat-customer-outreach-email-actions`
+**Opened:** 2026-08-12
+**Picked by:** `rereflect-next` — the single highest-leverage next feature after
+`classifier-model-versioning-rollback` / the security-hardening wave (last commits
+08-09/08-10) and the Discord/automations delivery work (07-29..08-09).
 
 ## The problem
 
-`services/backend-api/src/models/linear_integration.py:19` stores `webhook_secret`
-as a plain `String(255)` column. `services/backend-api/src/api/routes/linear_integration.py`
-generates it with `secrets.token_urlsafe(32)` on webhook enable (lines ~394-435) and never
-round-trips it through `encrypt_api_key`/`decrypt_api_key` — zero call sites (verified by
-grep, 2026-08-09). Every other integration encrypts at rest: Zendesk, Jira, Asana, HubSpot,
-Salesforce (API tokens) and now Slack + Intercom (OAuth tokens, PR #10). **Linear is the
-only integration storing a credential in plaintext** (DEV-TRACKING.md:427-429).
+The flagship loop is churn prediction with **actionable** reasons (`AI-TRACKING.md:5`,
+"Killer Feature"), and churn-triggered playbooks now auto-run (`M4.1.5`,
+`AI-TRACKING.md:365-378`) — but **every** playbook/automation action is SMTP-free. The
+predict → act → retain chain dead-ends inside the app: the customer is never reachable.
 
-The secret is an operator-pasted value that Linear's dashboard uses to HMAC-sign inbound
-webhooks; whoever can read the `linear_integrations.webhook_secret` column can forge Linear
-webhook deliveries (issue events, feedback ingestion, status changes).
+Two shipped plans deferred exactly this as a deliberate "separate slice":
 
-## The fix (minimal slice)
+- `segment-actions/prd.md:170` — "Trigger outreach campaign" / outbound email *(depends
+  on operator SMTP/Resend config — separate slice)*.
+- `churn-triggered-playbooks/prd.md:247-249` — "Email/outreach-to-customer actions
+  (needs operator SMTP; the deferred segment-actions 'trigger outreach campaign'). All
+  actions here are SMTP-free."
 
-- Encrypt on write: route the webhook-enable / connect-rotation paths in
-  `linear_integration.py` through the existing Fernet `encrypt_api_key` helper (same
-  pattern as Zendesk/Jira/Asana/HubSpot/Salesforce).
-- Decrypt on read: exactly once, at the signature-verification call site. Verify whether the
-  verifier lives in backend-api only, or also in worker-service (worker cannot import
-  backend-api — needs a mirror like the OAuth-token decrypt mirrors from PR #10).
-- Alembic backfill migration encrypting existing plaintext rows in place; must fail loudly
-  (never silently leave rows plaintext) when the Fernet key is absent — follow the
-  `c7d8e9f0a1b2` precedent (`oauth-tokens-encryption-at-rest`), chained to current head,
-  single alembic head.
-- Sweep-guard test asserting no integration stores a plaintext credential (mirror of
-  `test_webhook_verifiers_fail_closed.py` / `test_worker_import_sweep.py` shape).
-- Pin with tests: stored value is ciphertext (not the raw secret), decrypt-on-verify
-  round-trips, existing plaintext rows migrate, single alembic head preserved.
+## What to build (initial scope hypothesis — pressure-test in PRD)
 
-## Scope guards (from DEV-TRACKING + the card, do not expand)
+1. **Automations/playbook email action** — a new action (e.g. `send_customer_email`)
+   on the automations engine **and** its worker mirrors, plus the churn-playbook
+   `action_sequence`, that sends a message to the feedback item's `customer_email`.
+2. **"Trigger outreach campaign"** — the deferred `segment-actions` bulk action on
+   `/customers` (row-selection or whole-filter cohort) sending a templated message to
+   the cohort.
+3. **Drafting** — reuse the `issue-draft` AI-drafting pattern (`AI-TRACKING.md:62`,
+   "AI-Drafted Issue/Task Content") and the org tone/brand voice: LLM-drafted subject +
+   body, editable before sending.
+4. **Honest delivery** — reuse `email_service.py` (Resend, BYO-key) + the template
+   system (`RESEND_TEMPLATE_*` ids, `templates/email/`). No `RESEND_API_KEY` ⇒ the
+   send is skipped loudly (logged), not silently swallowed.
 
-- **This is a security bug fix — no UI changes, no behavior changes** to the Linear
-  webhook flow itself (HMAC verification semantics unchanged; the operator still pastes/
-  copies the same secret from Linear's dashboard).
-- **Do not** bundle `slack-email-signature-enforcement` (DEV-TRACKING.md:423-426) into this
-  card; note it, keep the branch scoped.
-- **Do not** bundle `oauth-state-in-process-dict` (DEV-TRACKING.md:571-576) into this card;
-  note it, keep the branch scoped.
-- The migration must not depend on application code at upgrade time beyond what Alembic can
-  import safely (follow the repo's existing migration conventions — see the `c7d8e9f0a1b2`
-  backfill precedent).
-- Secret read sites must be audited so decrypting happens exactly once, at the call site,
-  with no double-decrypt and no plaintext left in the DB after migration.
-- Roadmap hygiene rule (DEV-TRACKING.md:497): "When closing work, correct the marker in the
-  same commit" — the DEV-TRACKING follow-up entry must be marked FIXED on the branch that
-  ships the fix.
+## Known caveats (from the dig in `rereflect-next`, verified in Phase 2)
+
+- **Email infra is Resend-only.** There is no SMTP path in the codebase. The first
+  slice should reuse Resend and either scope SMTP out (v2) or add it deliberately —
+  a PRD decision, not an accident.
+- **Draft, never auto-send.** Product norm (response suggestions copy-to-clipboard,
+  AI-drafted issues populate editable fields, churn-label suggestions confirm-in-
+  review): an outreach send must be human-confirmed before it goes out. Auto-send
+  automation actions are the open question — the PRD must decide.
+- **No user-ask grounding.** This is roadmap-grounded (named in two shipped plans),
+  not from the 7-comment user backlog (`DEV-TRACKING.md:36-45`, all handled).
+
+## Scope guards (do not expand)
+
+- **Do NOT touch** churn/health computation, `churn_probability`, isotonic
+  calibration, or M5.3 (data-gated, `AI-TRACKING.md:521-573`).
+- **Do NOT touch** the automation cooldown scheme (Redis DB 1,
+  `automation_cooldown:{rule_id}:{customer_email}`) — a new action reuses it, never
+  re-keys it.
+- **Do NOT add plan gates** — OSS, all unlocked (`CLAUDE.md`, "Plans & Feature
+  Gating").
+- Worker cannot import backend-api: any engine/action logic needed by the worker
+  mirrors is duplicated per the `automation_feedback_trigger.py` precedent — a bare
+  `try/except` around an import in worker-service is a defect on sight.
+- Keep the two automation engines + the worker mirrors in agreement (change both).
 
 ## Related context
 
-- Prior art — the encryption helpers: `encrypt_api_key`/`decrypt_api_key` (Fernet, key from
-  env `LLM_ENCRYPTION_KEY`) in the Zendesk/Jira/Asana/HubSpot/Salesforce routes.
-- Prior art — backfill migrations in this repo: `oauth-tokens-encryption-at-rest`
-  migration `c7d8e9f0a1b2` (encrypts existing plaintext OAuth rows in place, fail-closed on
-  missing key) and its tests; the `public_id` backfill (`n3o4p5q6r7s8`).
-- Prior art — worker decrypt mirrors: PR #10 (`bug/oauth-tokens-stored-plaintext`, commits
-  `2b94bc41`, `eafd308c`) — worker-local `_decrypt` mirrors because worker-service cannot
-  import backend-api; pinned by `test_worker_import_sweep.py`.
-- False-comment class: same as `models/integration.py:19` (corrected on PR #10) — if any
-  Linear model comment claims encryption, correct it in the same commit.
+- Prior art — AI drafting: `POST /api/v1/feedback/{id}/issue-draft`
+  (`AI-TRACKING.md:62`, `docs/planning/ai-drafted-issue-content/`).
+- Prior art — email: `src/services/email_service.py`, `templates/email/`,
+  `scripts/manage_resend_templates.py`, BYO-key + no-key-skips behavior.
+- Prior art — bulk cohort actions: `docs/planning/segment-actions/` (Cohort contract,
+  `count_only` preview, 500-cap).
+- Prior art — playbook actions: `models/churn_playbook.py:67` (action_sequence reuses
+  the automations action schema).
+- Prior art — delivery honesty: `automations-delivery-integrity/` (silent-drop bugs;
+  every send result must be loud).

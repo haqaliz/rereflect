@@ -46,6 +46,35 @@ the worker mirror; every outcome (sent/skipped/failed) is recorded loudly in the
 execution's `action_log`. Opt-out, cooldown, List-Unsubscribe and no-key handling remain
 the shared sender's (above) — no reimplementation here.
 
+### Bulk "Trigger outreach campaign" — send, preview, audit trail, retry
+
+The operator-facing bulk send path on `/customers` now exists (admin/owner):
+
+- **`POST /api/v1/customers/bulk/outreach`** — resolve a cohort (`emails[]` list or the
+  same filter vocabulary as the customers list), write one `outreach_campaigns` row + one
+  `outreach_campaign_recipients` row per customer, and enqueue one Celery task per
+  sendable recipient. Responds `202 {matched, queued, skipped, errors}` — the request
+  returns a summary, never a blocking send.
+- **Loud queue-time skips** — blank/non-email, opted-out (`outreach_opt_out`) and archived
+  customers land in `skipped` with a reason on their recipient row; filter-mode default
+  excludes archived from `matched` exactly like the customers list UI. Cooldown is not
+  checked at queue time — the worker sender re-checks at send time.
+- **`?count_only=true` preview** — `200 {matched, queued: 0, skipped, errors: []}` with
+  zero mutation, so the UI can show the true count before the 500-cap 422 on the real run.
+- **Campaign audit trail** — `GET /api/v1/outreach/campaigns` (page/page_size, newest
+  first) returns per-campaign recipient status counts (`queued/sent/skipped/failed`) from
+  one GROUP BY — no N+1.
+- **Dead-worker recovery** — `POST /api/v1/outreach/campaigns/{id}/retry` re-enqueues only
+  `queued` recipients (terminal rows are immutable); no-op 200 zeros when nothing is
+  queued; cross-org campaign id → 404.
+- **AI draft** — `POST /api/v1/customers/bulk/outreach/draft` LLM-drafts `{subject, body}`
+  from org context (product name, brand voice, tone) plus optional cohort context (count +
+  dominant segment only — raw emails/search never reach the model). 409 when no LLM is
+  configured. The draft never sends: no campaign rows, no dispatch.
+
+Task-name discipline: the worker task `tasks.outreach.send_outreach_email` is dispatched by
+name from both send endpoints — a single string, pinned by tests in both suites.
+
 ### Notifications — Discord now has its own per-type channel preference
 
 Settings → Notifications now shows a **Discord** channel switch for each alert type, default
