@@ -167,7 +167,11 @@ are emails, not indices — small shared-component change) and a checkbox column
 
 ## Out of Scope
 
-- "Trigger outreach campaign" / outbound email (depends on operator SMTP/Resend config — separate slice).
+- ~~"Trigger outreach campaign" / outbound email (depends on operator SMTP/Resend config — separate slice).~~
+  **SHIPPED** (2026-08-12, branch `feat/customer-outreach-email-actions`): the outreach
+  primitives (opt-out, unsubscribe, cooldown, template registry, campaign schema) land in
+  the `outreach-core` aspect; the bulk campaign send endpoint ships in the
+  `bulk-campaign-api` aspect. Resend-only, BYO-key.
 - Copilot `segment` scope + `@segment:` mention (separate fast-follow).
 - ML/clustering segmentation, editable segment rules, multi-segment membership, segment history/time-series
   (all out of scope per the segments PRD and unchanged here).

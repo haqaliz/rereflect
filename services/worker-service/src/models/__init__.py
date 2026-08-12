@@ -49,6 +49,11 @@ class Organization(Base):
     # Workflow
     auto_assignment_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
 
+    # customer-outreach-email-actions: product display name for outreach template
+    # rendering (mirror of backend-api organization.py — used by the playbook
+    # send_email step; fallback "Rereflect" when unset).
+    product_name_display = Column(String(200), nullable=True)
+
 
 class Subscription(Base):
     """Subscription model - mirrors backend-api model (lightweight, no FKs)."""
@@ -453,6 +458,12 @@ class CustomerHealth(Base):
     is_archived = Column(Boolean, default=False, server_default="false")
     confidence_level = Column(String(20), default="low")
 
+    # customer-outreach-email-actions: per-customer outreach opt-out
+    # (outreach-core migration adds the same column to the backend model).
+    # Honored by every outreach send path — an opted-out customer is never
+    # emailed (loud skip, never silent).
+    outreach_opt_out = Column(Boolean, nullable=False, default=False, server_default="false")
+
     # segment-engine: catch-up mirror of backend-api's segment column (see
     # services/backend-api/src/models/customer_health.py). Rule-based
     # classification slug: at_risk, silent_churner, dormant, power_user,
@@ -467,6 +478,11 @@ class CustomerHealth(Base):
     calibration_model_id = Column(Integer, nullable=True)              # FK to churn_calibration_models (no FK constraint — worker is read-only for that table)
     probability_computed_at = Column(DateTime, nullable=True)
     has_potential_winback = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # customer-outreach-email-actions: CS owner user id for the send_email
+    # cs_assignee recipient resolution (mirror of backend-api
+    # customer_health.py — plain Integer, no FK, worker mirror style).
+    cs_owner_user_id = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1415,3 +1431,38 @@ class FeedbackAsanaTask(Base):
         Index('ix_feedback_asana_tasks_org_id', 'organization_id'),
         Index('ix_feedback_asana_tasks_feedback_id', 'feedback_id'),
     )
+
+
+class OutreachCampaign(Base):
+    """Bulk outreach campaign audit row — no-FK mirror for the worker's
+    per-recipient send task (bulk-campaign-api aspect).
+
+    MINIMAL mirror of outreach-core's migration (f6a7b8c9d0e1); the worker
+    only reads subject/body/status/org and writes status transitions.
+    """
+    __tablename__ = "outreach_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    created_by_user_id = Column(Integer, nullable=True)
+    subject = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False)
+    recipient_count = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="queued", server_default="queued")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OutreachCampaignRecipient(Base):
+    """Per-recipient outreach campaign result row — no-FK mirror (bulk-campaign-api).
+
+    The worker task flips status queued→sent|skipped|failed and records the
+    error string. Tables already exist (outreach-core migration) — no migration.
+    """
+    __tablename__ = "outreach_campaign_recipients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, default="queued", server_default="queued")
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

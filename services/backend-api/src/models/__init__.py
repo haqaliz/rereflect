@@ -64,6 +64,7 @@ from .asana_integration import AsanaIntegration, FeedbackAsanaTask
 from .oidc_config import OidcConfig
 from .saml_config import SamlConfig
 from .saml_auth_request import SamlAuthRequest
+from .outreach_campaign import OutreachCampaign, OutreachCampaignRecipient
 
 __all__ = [
     "Base",
@@ -141,4 +142,6 @@ __all__ = [
     "OidcConfig",
     "SamlConfig",
     "SamlAuthRequest",
+    "OutreachCampaign",
+    "OutreachCampaignRecipient",
 ]

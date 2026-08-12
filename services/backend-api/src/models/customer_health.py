@@ -71,6 +71,12 @@ class CustomerHealth(Base):
     tags = Column(JSON, nullable=True, default=list)
     cs_owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # customer-outreach-email-actions: per-customer outreach opt-out (set via
+    # the public unsubscribe endpoint or the operator PATCH toggle). Honored by
+    # every outreach send path — an opted-out customer is never emailed (loud
+    # skip, never silent). The worker mirror model carries the same column.
+    outreach_opt_out = Column(Boolean, nullable=False, default=False, server_default="false")
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

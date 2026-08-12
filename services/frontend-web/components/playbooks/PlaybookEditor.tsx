@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,7 +9,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Plus, Trash2 } from 'lucide-react';
-import { type Playbook, type PlaybookAction, ACTION_TYPE_LABELS } from '@/lib/api/playbooks';
+import {
+  type Playbook,
+  type PlaybookAction,
+  ACTION_TYPE_LABELS,
+  SEND_EMAIL_RECIPIENTS,
+  SEND_EMAIL_RECIPIENT_LABELS,
+} from '@/lib/api/playbooks';
+import {
+  listOutreachTemplates,
+  BUILTIN_OUTREACH_TEMPLATES,
+  type OutreachTemplateSummary,
+} from '@/lib/api/outreach';
 
 // ─── ActionCard ───────────────────────────────────────────────────────────────
 
@@ -16,54 +28,142 @@ interface ActionCardProps {
   action: PlaybookAction;
   index: number;
   readOnly: boolean;
+  templateOptions: OutreachTemplateSummary[];
   onChange: (index: number, action: PlaybookAction) => void;
   onRemove: (index: number) => void;
 }
 
-function ActionCard({ action, index, readOnly, onChange, onRemove }: ActionCardProps) {
+function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemove }: ActionCardProps) {
   const actionTypes = Object.keys(ACTION_TYPE_LABELS);
+  const isSendEmail = action.type === 'send_email';
+  const config = (action.config ?? {}) as Record<string, unknown>;
+  const templateKey = isSendEmail && typeof config.template === 'string' ? config.template : '';
+  const recipient = isSendEmail && typeof config.recipient === 'string' ? config.recipient : '';
+  const templateKnown = templateOptions.some((t) => t.key === templateKey);
+  const templateLabel =
+    templateOptions.find((t) => t.key === templateKey)?.label ?? templateKey;
+  const recipientLabel = SEND_EMAIL_RECIPIENT_LABELS[recipient] ?? recipient;
 
   return (
     <div
       data-testid={`action-card-${index}`}
-      className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30"
+      className="p-3 rounded-lg border border-border bg-muted/30 space-y-2"
     >
-      <span className="text-xs text-muted-foreground w-5 text-center shrink-0">
-        {index + 1}
-      </span>
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-muted-foreground w-5 text-center shrink-0">
+          {index + 1}
+        </span>
 
-      {readOnly ? (
-        <span className="flex-1 text-sm">{ACTION_TYPE_LABELS[action.type] ?? action.type}</span>
-      ) : (
-        <Select
-          value={action.type}
-          onValueChange={(val) => onChange(index, { ...action, type: val })}
-          disabled={readOnly}
-        >
-          <SelectTrigger className="flex-1 h-8 text-xs">
-            <SelectValue placeholder="Select action type" />
-          </SelectTrigger>
-          <SelectContent>
-            {actionTypes.map((t) => (
-              <SelectItem key={t} value={t} className="text-xs">
-                {ACTION_TYPE_LABELS[t]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
+        {readOnly ? (
+          <span className="flex-1 text-sm">{ACTION_TYPE_LABELS[action.type] ?? action.type}</span>
+        ) : (
+          <Select
+            value={action.type}
+            onValueChange={(val) => {
+              if (val === 'send_email' && !action.config) {
+                const defaultTemplate =
+                  templateOptions[0]?.key ?? BUILTIN_OUTREACH_TEMPLATES[0].key;
+                onChange(index, {
+                  ...action,
+                  type: val,
+                  config: { template: defaultTemplate, recipient: 'customer' },
+                });
+              } else {
+                onChange(index, { ...action, type: val });
+              }
+            }}
+            disabled={readOnly}
+          >
+            <SelectTrigger aria-label="Action type" className="flex-1 h-8 text-xs">
+              <SelectValue placeholder="Select action type" />
+            </SelectTrigger>
+            <SelectContent>
+              {actionTypes.map((t) => (
+                <SelectItem key={t} value={t} className="text-xs">
+                  {ACTION_TYPE_LABELS[t]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-      {!readOnly && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-          onClick={() => onRemove(index)}
-          aria-label="Remove action"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </Button>
-      )}
+        {!readOnly && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+            onClick={() => onRemove(index)}
+            aria-label="Remove action"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        )}
+      </div>
+
+      {isSendEmail &&
+        (readOnly ? (
+          <p className="pl-8 text-xs text-muted-foreground">
+            Email template: {templateLabel} → {recipientLabel}
+            {!templateKnown && templateKey && ` (unknown template key "${templateKey}")`}
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-3 pl-8">
+              <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+                <span className="text-xs text-muted-foreground shrink-0">Template</span>
+                <Select
+                  value={templateKey}
+                  onValueChange={(val) =>
+                    onChange(index, { ...action, config: { ...config, template: val } })
+                  }
+                >
+                  <SelectTrigger aria-label="Email template" className="flex-1 h-8 text-xs">
+                    <SelectValue placeholder="Select template" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templateOptions.map((t) => (
+                      <SelectItem key={t.key} value={t.key} className="text-xs">
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                    {!templateKnown && templateKey && (
+                      <SelectItem value={templateKey} className="text-xs" disabled>
+                        {templateKey} (unknown)
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2 flex-1 min-w-[180px]">
+                <span className="text-xs text-muted-foreground shrink-0">Recipient</span>
+                <Select
+                  value={SEND_EMAIL_RECIPIENTS.includes(recipient as (typeof SEND_EMAIL_RECIPIENTS)[number]) ? recipient : ''}
+                  onValueChange={(val) =>
+                    onChange(index, { ...action, config: { ...config, recipient: val } })
+                  }
+                >
+                  <SelectTrigger aria-label="Email recipient" className="flex-1 h-8 text-xs">
+                    <SelectValue placeholder="Select recipient" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SEND_EMAIL_RECIPIENTS.map((r) => (
+                      <SelectItem key={r} value={r} className="text-xs">
+                        {SEND_EMAIL_RECIPIENT_LABELS[r]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {!templateKnown && templateKey && (
+              <p className="pl-8 text-xs text-[var(--chart-2)]" role="alert">
+                Template &quot;{templateKey}&quot; is not in the outreach template registry —
+                the raw key will be saved.
+              </p>
+            )}
+          </>
+        ))}
     </div>
   );
 }
@@ -82,9 +182,40 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
   const [description, setDescription] = useState(playbook?.description ?? '');
   const [probMin, setProbMin] = useState(String(playbook?.probability_min ?? 0.3));
   const [probMax, setProbMax] = useState(String(playbook?.probability_max ?? 0.7));
-  const [actions, setActions] = useState<PlaybookAction[]>(playbook?.action_sequence ?? []);
+  const [actions, setActions] = useState<PlaybookAction[]>(() =>
+    (playbook?.action_sequence ?? []).map((action) => {
+      if (action.type === 'send_email' && !action.config) {
+        return {
+          ...action,
+          config: { template: BUILTIN_OUTREACH_TEMPLATES[0].key, recipient: 'customer' },
+        };
+      }
+      return action;
+    })
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [outreachTemplates, setOutreachTemplates] = useState<OutreachTemplateSummary[] | null>(
+    null
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    listOutreachTemplates()
+      .then((templates) => {
+        if (!cancelled) setOutreachTemplates(templates);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOutreachTemplates(null);
+        toast.error('Could not load outreach templates — using built-in options.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const templateOptions = outreachTemplates ?? BUILTIN_OUTREACH_TEMPLATES;
 
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
@@ -215,6 +346,7 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
                 action={action}
                 index={i}
                 readOnly={readOnly}
+                templateOptions={templateOptions}
                 onChange={handleChangeAction}
                 onRemove={handleRemoveAction}
               />

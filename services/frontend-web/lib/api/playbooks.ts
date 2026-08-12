@@ -3,8 +3,19 @@ import type { Cohort } from './customers';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface SendEmailConfig {
+  template: string;
+  recipient: 'customer' | 'cs_assignee';
+}
+
 export interface PlaybookAction {
-  type: 'assign' | 'change_status' | 'send_notification' | 'draft_response' | string;
+  type:
+    | 'assign'
+    | 'change_status'
+    | 'send_notification'
+    | 'draft_response'
+    | 'send_email'
+    | string;
   [k: string]: unknown;
 }
 
@@ -162,4 +173,17 @@ export const ACTION_TYPE_LABELS: Record<string, string> = {
   change_status: 'Change Status',
   send_notification: 'Send Notification',
   draft_response: 'Draft AI Response',
+  send_email: 'Send Email',
+};
+
+/**
+ * Single source of truth for send_email recipients. The playbook editor and
+ * the future playbook-send-email-step validation must both read this so they
+ * cannot drift.
+ */
+export const SEND_EMAIL_RECIPIENTS = ['customer', 'cs_assignee'] as const;
+
+export const SEND_EMAIL_RECIPIENT_LABELS: Record<string, string> = {
+  customer: 'Customer',
+  cs_assignee: 'CS Assignee',
 };

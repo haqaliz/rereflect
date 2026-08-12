@@ -22,7 +22,21 @@ vi.mock('@/lib/api/playbooks', () => ({
     change_status: 'Change Status',
     send_notification: 'Send Notification',
     draft_response: 'Draft AI Response',
+    send_email: 'Send Email',
   },
+  SEND_EMAIL_RECIPIENTS: ['customer', 'cs_assignee'],
+  SEND_EMAIL_RECIPIENT_LABELS: { customer: 'Customer', cs_assignee: 'CS Assignee' },
+}));
+
+vi.mock('@/lib/api/outreach', () => ({
+  listOutreachTemplates: vi.fn().mockResolvedValue([
+    { key: 're_engagement', label: 'Re-engagement check-in', description: 'nudge' },
+    { key: 'weekly_digest_entry', label: 'Weekly digest entry', description: 'digest' },
+  ]),
+  BUILTIN_OUTREACH_TEMPLATES: [
+    { key: 're_engagement', label: 'Re-engagement check-in', description: 'nudge' },
+    { key: 'weekly_digest_entry', label: 'Weekly digest entry', description: 'digest' },
+  ],
 }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));

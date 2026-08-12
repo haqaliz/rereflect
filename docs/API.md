@@ -398,6 +398,61 @@ show "queued N of N" without a separate request.
 Unknown emails in the `emails` cohort are simply not matched (skipped, not an error) — same
 semantics as `resolve_cohort`.
 
+### Customer outreach (customer-outreach-email-actions)
+
+Sends customer-facing email through your own **Resend key** (`RESEND_API_KEY`; no key ⇒
+every send records a loud `failed: email not configured`). Opted-out customers and
+recipients inside the shared 24h cooldown (`OUTREACH_COOLDOWN_HOURS`) are skipped loudly.
+All mutations below are **admin/owner**.
+
+**Bulk campaign** — `POST /api/v1/customers/bulk/outreach` (admin/owner). Body
+`{ "cohort": {...}, "subject": "…", "body": "…" }` — the same [cohort contract](#customer-bulk-actions-segment-actions)
+as tag/assign; `subject` 1–200 chars, `body` 1–20,000. Resolved cohort must be ≤ 500
+(422 over cap) and non-empty (422). Blank/invalid emails, opted-out customers and archived
+customers are counted into `skipped` with reasons. Creates an `outreach_campaign` + one
+recipient row per email and enqueues a per-recipient Celery send:
+
+```
+POST /api/v1/customers/bulk/outreach
+Body: { "cohort": { "segment": "at_risk" }, "subject": "…", "body": "…" }
+
+202 { "matched": 12, "queued": 12, "skipped": 2, "errors": [] }
+```
+
+`?count_only=true` is a pure dry-run — resolves the cohort and returns the same shape with
+`queued: 0` and zero rows created (no cap/empty checks apply).
+
+**AI draft** — `POST /api/v1/customers/bulk/outreach/draft` (admin/owner). Body
+`{ "cohort"?: {...}, "tone"?: "professional"|"friendly"|"empathetic"|"concise"|"technical" }`.
+Drafts `{ "subject", "body" }` via the org's configured LLM (BYOK or local; `409` when no
+LLM is configured). **Never sends** — the draft populates editable fields and a human
+triggers the campaign.
+
+**Campaigns** — `GET /api/v1/outreach/campaigns` (admin/owner, `page`/`page_size` ≤ 100):
+
+```
+200 { "items": [ { "id": 1, "subject": "…", "status": "done",
+      "recipient_count": 3, "counts": { "queued": 0, "sent": 1, "skipped": 1, "failed": 1 },
+      "created_at": "…" } ], "total": 2, "page": 1, "page_size": 20 }
+```
+
+**Retry** — `POST /api/v1/outreach/campaigns/{id}/retry` (admin/owner) re-enqueues
+recipients still `queued` (terminal rows are never resent) and returns the same
+`{matched, queued, skipped, errors}` shape; unknown/cross-org id → 404.
+
+**Templates** — `GET /api/v1/outreach/templates` (any role) lists the built-in outreach
+templates (`re_engagement`, `weekly_digest_entry`) used by playbook `send_email` steps:
+`[{ "key", "label", "description", "subject", "body" }]`.
+
+**Unsubscribe** — `GET /api/v1/outreach/unsubscribe?token=…` (public). A stateless
+HMAC-signed token (minted per send, carried in the email's `List-Unsubscribe` header as
+`{APP_URL}/outreach/unsubscribe?token=…`) flips the customer's `outreach_opt_out` flag;
+invalid token → 400.
+
+**Opt-out** — `PATCH /api/v1/customers/{email}` (admin/owner) accepts
+`{ "outreach_opt_out": bool }` (extra fields 422) and returns the updated profile (which
+now includes the flag).
+
 ## Common gotchas
 
 - **Trailing slashes** — match the route exactly; a missing/extra `/` can return 422.

@@ -11,7 +11,7 @@ Action handlers are monkeypatched to isolate engine logic.
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -19,6 +19,7 @@ from src.models import (
     Base,
     CustomerHealth,
     Organization,
+    User,
     ChurnPlaybook,
     ChurnPlaybookExecution,
 )
@@ -119,11 +120,484 @@ def _make_health(db, org_id: int, email: str = "customer@example.com") -> Custom
     return health
 
 
+def _make_user(db, org_id: int, email: str = "owner@example.com") -> User:
+    user = User(
+        email=email,
+        organization_id=org_id,
+        role="owner",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Import module under test (after models are importable)
 # ---------------------------------------------------------------------------
 
 from src.services import playbook_engine  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Worker model mirror parity (playbook-send-email-step)
+# ---------------------------------------------------------------------------
+
+
+def test_worker_customer_health_mirrors_cs_owner_user_id_column():
+    """Mirror parity: backend CustomerHealth.cs_owner_user_id (Integer FK) has a
+    plain nullable Integer mirror column for the send_email cs_assignee recipient."""
+    cols = {c.name: c for c in CustomerHealth.__table__.columns}
+    assert "cs_owner_user_id" in cols
+    col = cols["cs_owner_user_id"]
+    assert col.nullable is True
+    assert isinstance(col.type, Integer)
+
+
+def test_worker_organization_mirrors_product_name_display_column():
+    """Mirror parity: backend Organization.product_name_display (String(200)) has a
+    nullable String(200) mirror column for send_email template rendering."""
+    cols = {c.name: c for c in Organization.__table__.columns}
+    assert "product_name_display" in cols
+    col = cols["product_name_display"]
+    assert col.nullable is True
+    assert isinstance(col.type, String)
+    assert col.type.length == 200
+
+
+# ---------------------------------------------------------------------------
+# send_email step — recipient resolution (playbook-send-email-step)
+# ---------------------------------------------------------------------------
+
+def _fake_sender(result_dict):
+    """Build a fake send_outreach_email that records its call args and returns
+    `result_dict` (spec table {ok, status, reason})."""
+    calls = []
+
+    def fake_send(db, org_id, customer_email, subject, body, *, product_name, template_key=None):
+        calls.append({
+            "org_id": org_id,
+            "customer_email": customer_email,
+            "subject": subject,
+            "body": body,
+            "product_name": product_name,
+            "template_key": template_key,
+        })
+        return result_dict
+
+    return fake_send, calls
+
+
+def _run_send_email_playbook(db, config, *, health_kwargs=None, product_name_display=None):
+    org = _make_org(db)
+    if product_name_display is not None:
+        org.product_name_display = product_name_display
+        db.commit()
+    pb = _make_playbook(
+        db, org.id,
+        action_sequence=[{"type": "send_email", "config": config}],
+    )
+    health = _make_health(db, org.id)
+    for k, v in (health_kwargs or {}).items():
+        setattr(health, k, v)
+    db.commit()
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    return db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first(), org, health
+
+
+def test_send_email_recipient_customer_uses_execution_customer_email(db, monkeypatch):
+    """AC1: recipient 'customer' → sender receives the execution's customer_email."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "re_engagement", "recipient": "customer"},
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["customer_email"] == "customer@example.com"
+    assert calls[0]["template_key"] == "re_engagement"
+    assert updated.status == "done"
+    entry = updated.action_log[0]
+    assert entry == {
+        "type": "send_email",
+        "ok": True,
+        "result": {
+            "status": "sent",
+            "reason": "",
+            "to": "customer@example.com",
+            "template": "re_engagement",
+        },
+        "error": None,
+    }
+
+
+def test_send_email_recipient_cs_assignee_resolves_owner_email(db, monkeypatch):
+    """AC2: recipient 'cs_assignee' → health.cs_owner_user_id → users.email."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    org = _make_org(db)
+    user = _make_user(db, org.id, email="cs-owner@example.com")
+    pb = _make_playbook(
+        db, org.id,
+        action_sequence=[{
+            "type": "send_email",
+            "config": {"template": "weekly_digest_entry", "recipient": "cs_assignee"},
+        }],
+    )
+    health = _make_health(db, org.id)
+    health.cs_owner_user_id = user.id
+    db.commit()
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+
+    assert len(calls) == 1
+    assert calls[0]["customer_email"] == "cs-owner@example.com"
+    assert updated.status == "done"
+    assert updated.action_log[0]["ok"] is True
+    assert updated.action_log[0]["result"]["to"] == "cs-owner@example.com"
+
+
+def test_send_email_cs_assignee_without_owner_is_loud_failure(db, monkeypatch):
+    """AC2: no cs_owner_user_id → ok=False, error mentions owner, sender NOT called."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "weekly_digest_entry", "recipient": "cs_assignee"},
+    )
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["result"] is None
+    assert entry["error"] == (
+        "cs_assignee recipient requested but customer has no assigned CS owner"
+    )
+    assert updated.status == "failed"
+
+
+def test_send_email_cs_assignee_missing_user_row_is_loud_failure(db, monkeypatch):
+    """Owner id set but no users row → ok=False (loud), sender NOT called."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "weekly_digest_entry", "recipient": "cs_assignee"},
+        health_kwargs={"cs_owner_user_id": 999999},
+    )
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["result"] is None
+    assert entry["error"] == "cs_assignee user 999999 not found"
+    assert updated.status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# send_email step — rendering via the real registry mirror
+# ---------------------------------------------------------------------------
+
+def test_send_email_renders_template_with_customer_and_product_names(db, monkeypatch):
+    """AC3: real registry mirror substitutes customer name + product_name_display."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    _run_send_email_playbook(
+        db, {"template": "weekly_digest_entry", "recipient": "customer"},
+        health_kwargs={"customer_name": "Jane Doe"},
+        product_name_display="Acme Analytics",
+    )
+
+    assert len(calls) == 1
+    assert "Jane Doe" in calls[0]["body"]
+    assert "Acme Analytics" in calls[0]["body"]
+    assert "Acme Analytics" in calls[0]["subject"]
+    assert calls[0]["product_name"] == "Acme Analytics"
+
+
+def test_send_email_renders_fallbacks_name_and_product(db, monkeypatch):
+    """AC3: customer_name null → email local-part; product_name_display unset → Rereflect."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    _run_send_email_playbook(
+        db, {"template": "re_engagement", "recipient": "customer"},
+    )
+
+    assert len(calls) == 1
+    assert "Hi customer," in calls[0]["body"]
+    assert "used Rereflect" in calls[0]["body"]
+    assert calls[0]["product_name"] == "Rereflect"
+
+
+def test_send_email_unknown_template_key_is_loud_failure(db, monkeypatch):
+    """AC4: unknown template key → ok=False, error contains the key, sender NOT called."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "no_such_template", "recipient": "customer"},
+    )
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["result"] is None
+    assert entry["error"] == "unknown outreach template: 'no_such_template'"
+
+
+# ---------------------------------------------------------------------------
+# send_email step — config validation
+# ---------------------------------------------------------------------------
+
+def test_send_email_missing_template_is_loud_failure(db, monkeypatch):
+    """AC5: missing 'template' → ok=False, sender NOT called."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(db, {"recipient": "customer"})
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["error"] == "send_email step missing 'template' in config"
+
+
+def test_send_email_missing_recipient_is_loud_failure(db, monkeypatch):
+    """AC5: missing 'recipient' → ok=False, sender NOT called."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(db, {"template": "re_engagement"})
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["error"] == "send_email step missing 'recipient' in config"
+
+
+def test_send_email_unknown_recipient_is_loud_failure(db, monkeypatch):
+    """AC5: unknown recipient value → ok=False, sender NOT called."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "re_engagement", "recipient": "boss"},
+    )
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["error"] == "unsupported send_email recipient: 'boss'"
+
+
+# ---------------------------------------------------------------------------
+# Seeded templates pinned green (playbook-send-email-step, PRD goal #1)
+# ---------------------------------------------------------------------------
+
+AT_RISK_OUTREACH_SEED = [
+    {"type": "send_email", "config": {"template": "weekly_digest_entry", "recipient": "cs_assignee"}},
+    {"type": "tag", "config": {"tag": "at-risk"}},
+    {"type": "send_notification", "config": {"recipients": "assignee", "channels": ["dashboard"], "message": "Customer flagged as at-risk."}},
+]
+
+SILENT_CHURN_WATCH_SEED = [
+    {"type": "send_email", "config": {"template": "re_engagement", "recipient": "customer"}},
+    {"type": "create_task", "config": {"description": "Follow-up: confirm engagement or mark silent churn", "due_in_days": 14, "priority": "medium"}},
+]
+
+
+# ---------------------------------------------------------------------------
+# send_email step — sender result mapping (spec table)
+# ---------------------------------------------------------------------------
+
+def test_seed_at_risk_outreach_send_email_step_runs_green(db, monkeypatch):
+    """AC8: 'At-Risk Outreach' seed runs through the real engine (sender mocked);
+    its send_email step (weekly_digest_entry → cs_assignee) logs ok=True and the
+    run finishes done with the seed's full step count."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    org = _make_org(db)
+    user = _make_user(db, org.id, email="cs-owner@example.com")
+    pb = _make_playbook(db, org.id, action_sequence=AT_RISK_OUTREACH_SEED)
+    health = _make_health(db, org.id)
+    health.cs_owner_user_id = user.id
+    db.commit()
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+
+    assert len(calls) == 1
+    assert calls[0]["customer_email"] == "cs-owner@example.com"
+    assert calls[0]["template_key"] == "weekly_digest_entry"
+    assert len(updated.action_log) == 3
+    email_entry = updated.action_log[0]
+    assert email_entry["type"] == "send_email"
+    assert email_entry["ok"] is True
+    assert email_entry["result"]["template"] == "weekly_digest_entry"
+    assert email_entry["result"]["status"] == "sent"
+    assert updated.status == "done"
+
+
+def test_seed_silent_churn_watch_send_email_step_runs_green(db, monkeypatch):
+    """AC8: 'Silent-Churn Watch' seed runs through the real engine (sender mocked);
+    its send_email step (re_engagement → customer) logs ok=True and the run
+    finishes done with the seed's full step count."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=SILENT_CHURN_WATCH_SEED)
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+
+    assert len(calls) == 1
+    assert calls[0]["customer_email"] == "customer@example.com"
+    assert calls[0]["template_key"] == "re_engagement"
+    assert len(updated.action_log) == 2
+    email_entry = updated.action_log[0]
+    assert email_entry["type"] == "send_email"
+    assert email_entry["ok"] is True
+    assert email_entry["result"]["template"] == "re_engagement"
+    assert email_entry["result"]["status"] == "sent"
+    assert updated.status == "done"
+
+@pytest.mark.parametrize(
+    "sender_result, expected_ok",
+    [
+        ({"ok": True, "status": "sent", "reason": ""}, True),
+        ({"ok": False, "status": "skipped", "reason": "opted out"}, False),
+        ({"ok": False, "status": "skipped", "reason": "in cooldown"}, False),
+        ({"ok": False, "status": "failed", "reason": "email not configured"}, False),
+    ],
+)
+def test_send_email_sender_result_mapping(
+    db, monkeypatch, sender_result, expected_ok
+):
+    """AC6: spec-table mapping — status/reason passthrough into the action_log entry."""
+    fake_send, calls = _fake_sender(sender_result)
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "re_engagement", "recipient": "customer"},
+    )
+
+    assert len(calls) == 1
+    entry = updated.action_log[0]
+    assert entry["ok"] is expected_ok
+    assert entry["error"] is None
+    assert entry["result"] == {
+        "status": sender_result["status"],
+        "reason": sender_result["reason"],
+        "to": "customer@example.com",
+        "template": "re_engagement",
+    }
+
+
+# ---------------------------------------------------------------------------
+# send_email step — run status consistency
+# ---------------------------------------------------------------------------
+
+def test_send_email_only_playbook_sent_is_done(db, monkeypatch):
+    """AC7: send_email-only playbook with a sent email → execution done."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "re_engagement", "recipient": "customer"},
+    )
+
+    assert updated.status == "done"
+    assert updated.action_log[0]["ok"] is True
+
+
+def test_send_email_only_playbook_skipped_is_failed(db, monkeypatch):
+    """AC7: send_email-only playbook with a skipped email → execution failed (no false success)."""
+    fake_send, calls = _fake_sender(
+        {"ok": False, "status": "skipped", "reason": "opted out"}
+    )
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    updated, _, _ = _run_send_email_playbook(
+        db, {"template": "re_engagement", "recipient": "customer"},
+    )
+
+    assert updated.status == "failed"
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["result"]["status"] == "skipped"
+    assert entry["result"]["reason"] == "opted out"
+
+
+def test_send_email_seed_shape_silent_churn_watch_is_done_with_loud_entry(db, monkeypatch):
+    """AC7: 'Silent-Churn Watch' seed shape (send_email + create_task) with the
+    sender mocked to sent → done; the send_email entry is recorded loudly."""
+    fake_send, calls = _fake_sender({"ok": True, "status": "sent", "reason": ""})
+    monkeypatch.setattr(
+        "src.services.outreach_sender.send_outreach_email", fake_send
+    )
+
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=[
+        {"type": "send_email", "config": {"template": "re_engagement", "recipient": "customer"}},
+        {"type": "create_task", "config": {"description": "Follow-up", "due_in_days": 14, "priority": "medium"}},
+    ])
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    playbook_engine.execute(exe.id, db)
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+
+    assert updated.status == "done"
+    assert len(updated.action_log) == 2
+    email_entry = updated.action_log[0]
+    assert email_entry["type"] == "send_email"
+    assert email_entry["ok"] is True
+    assert email_entry["result"]["status"] == "sent"
+    assert email_entry["result"]["template"] == "re_engagement"
+    assert "ok" in updated.action_log[1]
 
 
 # ---------------------------------------------------------------------------

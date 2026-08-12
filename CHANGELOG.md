@@ -7,6 +7,90 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Customer outreach — shared email primitives (opt-out, unsubscribe, cooldown)
+
+The foundation for reaching churn-risk customers by email, shared by the playbook
+`send_email` step and the bulk "Trigger outreach campaign" action (both consume these
+primitives; the send surfaces themselves land with their own changes):
+
+- **Opt-out, honored on every send path** — `customer_health_scores.outreach_opt_out`
+  (default false). Customers opt out via the tokenized **`List-Unsubscribe`** link every
+  outreach email carries (`GET /api/v1/outreach/unsubscribe?token=…` — public, stateless
+  HMAC token keyed by `LLM_ENCRYPTION_KEY`, no token table). Operators can also flip the
+  flag with `PATCH /api/v1/customers/{email}` (admin/owner, `{"outreach_opt_out": bool}` —
+  extra fields 422). An opted-out customer is never emailed; the skip is loud
+  (`skipped: opted out`), never silent.
+- **Per-recipient cooldown** — one outreach per customer per window per org (Redis DB 1,
+  `outreach_cooldown:{org_id}:{customer_email}`, window `OUTREACH_COOLDOWN_HOURS`, default
+  24, env-configurable). In-cooldown sends record `skipped: in cooldown`.
+- **Built-in template registry** — `GET /api/v1/outreach/templates` exposes the two seeded
+  template keys (`re_engagement`, `weekly_digest_entry`) with plain-text bodies; registry is
+  data, so content can iterate without code.
+- **Honest no-key failure** — with `RESEND_API_KEY` unset, every send attempt records
+  `failed: email not configured` instead of a false success.
+- **Audit trail schema** — `outreach_campaigns` + `outreach_campaign_recipients` tables
+  (per-campaign + per-recipient status/error rows) land with this change; the bulk send path
+  that writes them ships with its own aspect.
+
+Resend-only, BYO-key: no SMTP, nothing phones home. See *Outbound email (Resend)* in
+`docs/SELF_HOSTING.md`.
+
+### Playbook `send_email` steps now execute (worker engine)
+
+The seeded playbooks' `send_email` steps ("At-Risk Outreach" → weekly digest to the CS
+assignee; "Silent-Churn Watch" → re-engagement email to the customer) actually send now
+instead of failing every run as `unsupported action type`. Recipients: `customer` (the
+execution's customer email) or `cs_assignee` (the customer's assigned CS owner — missing
+owner is a loud per-step failure, never silent). Rendered from the built-in registry via
+the worker mirror; every outcome (sent/skipped/failed) is recorded loudly in the playbook
+execution's `action_log`. Opt-out, cooldown, List-Unsubscribe and no-key handling remain
+the shared sender's (above) — no reimplementation here.
+
+### Bulk "Trigger outreach campaign" — send, preview, audit trail, retry
+
+The operator-facing bulk send path on `/customers` now exists (admin/owner):
+
+- **`POST /api/v1/customers/bulk/outreach`** — resolve a cohort (`emails[]` list or the
+  same filter vocabulary as the customers list), write one `outreach_campaigns` row + one
+  `outreach_campaign_recipients` row per customer, and enqueue one Celery task per
+  sendable recipient. Responds `202 {matched, queued, skipped, errors}` — the request
+  returns a summary, never a blocking send.
+- **Loud queue-time skips** — blank/non-email, opted-out (`outreach_opt_out`) and archived
+  customers land in `skipped` with a reason on their recipient row; filter-mode default
+  excludes archived from `matched` exactly like the customers list UI. Cooldown is not
+  checked at queue time — the worker sender re-checks at send time.
+- **`?count_only=true` preview** — `200 {matched, queued: 0, skipped, errors: []}` with
+  zero mutation, so the UI can show the true count before the 500-cap 422 on the real run.
+- **Campaign audit trail** — `GET /api/v1/outreach/campaigns` (page/page_size, newest
+  first) returns per-campaign recipient status counts (`queued/sent/skipped/failed`) from
+  one GROUP BY — no N+1.
+- **Dead-worker recovery** — `POST /api/v1/outreach/campaigns/{id}/retry` re-enqueues only
+  `queued` recipients (terminal rows are immutable); no-op 200 zeros when nothing is
+  queued; cross-org campaign id → 404.
+- **AI draft** — `POST /api/v1/customers/bulk/outreach/draft` LLM-drafts `{subject, body}`
+  from org context (product name, brand voice, tone) plus optional cohort context (count +
+  dominant segment only — raw emails/search never reach the model). 409 when no LLM is
+  configured. The draft never sends: no campaign rows, no dispatch.
+
+Task-name discipline: the worker task `tasks.outreach.send_outreach_email` is dispatched by
+name from both send endpoints — a single string, pinned by tests in both suites.
+
+### Playbook editor: `send_email` steps are now editable, and the profile can opt a customer out
+
+The frontend half of the outreach send surfaces:
+
+- **Per-step config in the playbook editor** — a `send_email` step now shows **template**
+  and **recipient** selects (options from `GET /api/v1/outreach/templates`; the two
+  contract-pinned built-in keys `re_engagement` / `weekly_digest_entry` fall back if the
+  registry is unreachable, so editing never bricks). Cloning "At-Risk Outreach" or
+  "Silent-Churn Watch" pre-populates both selects and re-saves the exact seeder shape
+  `{type: "send_email", config: {template, recipient}}`. Unknown template keys from old
+  playbooks render with a warning and are preserved on save, never blanked. The template
+  card badge shows a Mail icon + "Send Email".
+- **Per-customer opt-out toggle** — the Customer 360 profile header now has a "Send
+  outreach emails" switch (admin/owner) that PATCHes `{"outreach_opt_out": bool}`; the
+  switch is hidden entirely for members.
+
 ### Notifications — Discord now has its own per-type channel preference
 
 Settings → Notifications now shows a **Discord** channel switch for each alert type, default

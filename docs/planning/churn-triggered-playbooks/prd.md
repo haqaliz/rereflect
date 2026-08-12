@@ -244,9 +244,14 @@ CLAUDE.md. (The manual `/run` route keeps its existing guard; the auto path adds
 
 ## Out of Scope
 
-- **Email/outreach-to-customer actions** (needs operator SMTP; the deferred
+- ~~**Email/outreach-to-customer actions** (needs operator SMTP; the deferred
   segment-actions "trigger outreach campaign", `AI-TRACKING.md:228`). All actions here
-  are SMTP-free.
+  are SMTP-free.~~
+  **SHIPPED** (2026-08-12, branch `feat/customer-outreach-email-actions`): outreach
+  primitives (opt-out, unsubscribe, cooldown, template registry) land in the
+  `outreach-core` aspect; the playbook `send_email` step (the seeded "At-Risk Outreach" +
+  "Silent-Churn Watch" steps) ships in the `playbook-send-email-step` aspect. Resend-only,
+  BYO-key.
 - **Auto-pick playbook by probability band** — a rule names one designated playbook.
 - **Recovery/downward triggers**, per-action allow-listing, auto-run analytics view
   (v2 candidates above).

@@ -62,4 +62,17 @@ describe('PlaybookTemplateCard', () => {
     fireEvent.click(toggle);
     expect(onToggleActive).toHaveBeenCalledWith(!orgPlaybook.is_active);
   });
+
+  it('shows a Send Email badge with the Mail icon for send_email steps (AC7)', () => {
+    const playbook: Playbook = {
+      ...basePlaybook,
+      action_sequence: [
+        { type: 'send_email', config: { template: 're_engagement', recipient: 'customer' } },
+      ],
+    };
+    const { container } = render(<PlaybookTemplateCard playbook={playbook} onUse={vi.fn()} />);
+    const badge = screen.getByText('Send Email').closest('span');
+    expect(badge).not.toBeNull();
+    expect(badge!.querySelector('svg.lucide-mail')).toBeInTheDocument();
+  });
 });

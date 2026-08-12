@@ -88,11 +88,32 @@ def _render_template(html: str, subject: str, variables: Dict[str, Any]) -> Tupl
     return rendered_html, rendered_subject
 
 
-def _send_email(to: str, subject: str, html: str) -> bool:
-    """Send email with rendered HTML content."""
+def _send_email(
+    to: str,
+    subject: str,
+    html: str,
+    extra_headers: Optional[Dict[str, str]] = None,
+    text: Optional[str] = None,
+) -> bool:
+    """Send email with rendered HTML content.
+
+    `extra_headers` (e.g. List-Unsubscribe) and `text` (plain-text part) are
+    additive: existing callers' payloads are unchanged when they are omitted.
+    """
     if not _is_email_enabled():
         logger.warning(f"Email not sent (RESEND_API_KEY not configured): {subject} to {to}")
         return False
+
+    payload: Dict[str, Any] = {
+        "from": f"{FROM_NAME} <{FROM_EMAIL}>",
+        "to": [to],
+        "subject": subject,
+        "html": html,
+    }
+    if extra_headers is not None:
+        payload["headers"] = extra_headers
+    if text is not None:
+        payload["text"] = text
 
     try:
         response = requests.post(
@@ -101,12 +122,7 @@ def _send_email(to: str, subject: str, html: str) -> bool:
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "from": f"{FROM_NAME} <{FROM_EMAIL}>",
-                "to": [to],
-                "subject": subject,
-                "html": html,
-            },
+            json=payload,
             timeout=30,
         )
 
@@ -123,11 +139,32 @@ def _send_email(to: str, subject: str, html: str) -> bool:
         return False
 
 
-def _send_email_with_from(to: str, subject: str, html: str, from_email: str) -> bool:
-    """Send email with rendered HTML content using a custom from address."""
+def _send_email_with_from(
+    to: str,
+    subject: str,
+    html: str,
+    from_email: str,
+    extra_headers: Optional[Dict[str, str]] = None,
+    text: Optional[str] = None,
+) -> bool:
+    """Send email with rendered HTML content using a custom from address.
+
+    `extra_headers`/`text` are additive — identical semantics to `_send_email`.
+    """
     if not _is_email_enabled():
         logger.warning(f"Email not sent (RESEND_API_KEY not configured): {subject} to {to}")
         return False
+
+    payload: Dict[str, Any] = {
+        "from": from_email,
+        "to": [to],
+        "subject": subject,
+        "html": html,
+    }
+    if extra_headers is not None:
+        payload["headers"] = extra_headers
+    if text is not None:
+        payload["text"] = text
 
     try:
         response = requests.post(
@@ -136,12 +173,7 @@ def _send_email_with_from(to: str, subject: str, html: str, from_email: str) -> 
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "from": from_email,
-                "to": [to],
-                "subject": subject,
-                "html": html,
-            },
+            json=payload,
             timeout=30,
         )
 

@@ -63,10 +63,27 @@ def _render_template(html: str, subject: str, variables: Dict[str, Any]) -> Tupl
     return rendered_html, rendered_subject
 
 
-def _send_email(to: str, subject: str, html: str) -> bool:
+def _send_email(
+    to: str,
+    subject: str,
+    html: str,
+    extra_headers: Optional[Dict[str, str]] = None,
+    text: Optional[str] = None,
+) -> bool:
     if not _is_email_enabled():
         logger.warning(f"Email not sent (RESEND_API_KEY not configured): {subject} to {to}")
         return False
+
+    payload: Dict[str, Any] = {
+        "from": f"{FROM_NAME} <{FROM_EMAIL}>",
+        "to": [to],
+        "subject": subject,
+        "html": html,
+    }
+    if extra_headers is not None:
+        payload["headers"] = extra_headers
+    if text is not None:
+        payload["text"] = text
 
     try:
         response = requests.post(
@@ -75,12 +92,7 @@ def _send_email(to: str, subject: str, html: str) -> bool:
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "from": f"{FROM_NAME} <{FROM_EMAIL}>",
-                "to": [to],
-                "subject": subject,
-                "html": html,
-            },
+            json=payload,
             timeout=30,
         )
 

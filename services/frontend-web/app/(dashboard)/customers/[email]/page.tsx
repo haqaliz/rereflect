@@ -13,6 +13,7 @@ import { aiCorrectionsAPI } from '@/lib/api/ai-corrections';
 import { MarkAsChurnedDialog } from '@/components/customers/MarkAsChurnedDialog';
 import { PotentialWinbackBanner } from '@/components/customers/PotentialWinbackBanner';
 import { RunPlaybookDropdown } from '@/components/customers/RunPlaybookDropdown';
+import { OutreachOptOutToggle } from '@/components/customers/OutreachOptOutToggle';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
 import { ChurnTimelineBadge } from '@/components/customers/ChurnTimelineBadge';
@@ -819,6 +820,10 @@ export default function CustomerProfilePage() {
               </div>
 
               <div className="flex items-center gap-2">
+                <OutreachOptOutToggle
+                  email={profile.customer_email}
+                  initialValue={profile.outreach_opt_out ?? false}
+                />
                 <RunPlaybookDropdown
                   customerEmail={profile.customer_email}
                   churnProbability={profile.churn_probability ?? null}
