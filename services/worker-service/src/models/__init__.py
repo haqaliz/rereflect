@@ -49,6 +49,11 @@ class Organization(Base):
     # Workflow
     auto_assignment_enabled = Column(Boolean, default=False, nullable=False, server_default="false")
 
+    # customer-outreach-email-actions: product display name for outreach template
+    # rendering (mirror of backend-api organization.py — used by the playbook
+    # send_email step; fallback "Rereflect" when unset).
+    product_name_display = Column(String(200), nullable=True)
+
 
 class Subscription(Base):
     """Subscription model - mirrors backend-api model (lightweight, no FKs)."""
@@ -473,6 +478,11 @@ class CustomerHealth(Base):
     calibration_model_id = Column(Integer, nullable=True)              # FK to churn_calibration_models (no FK constraint — worker is read-only for that table)
     probability_computed_at = Column(DateTime, nullable=True)
     has_potential_winback = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # customer-outreach-email-actions: CS owner user id for the send_email
+    # cs_assignee recipient resolution (mirror of backend-api
+    # customer_health.py — plain Integer, no FK, worker mirror style).
+    cs_owner_user_id = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

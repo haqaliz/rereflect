@@ -11,7 +11,7 @@ Action handlers are monkeypatched to isolate engine logic.
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -19,6 +19,7 @@ from src.models import (
     Base,
     CustomerHealth,
     Organization,
+    User,
     ChurnPlaybook,
     ChurnPlaybookExecution,
 )
@@ -119,11 +120,49 @@ def _make_health(db, org_id: int, email: str = "customer@example.com") -> Custom
     return health
 
 
+def _make_user(db, org_id: int, email: str = "owner@example.com") -> User:
+    user = User(
+        email=email,
+        organization_id=org_id,
+        role="owner",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 # ---------------------------------------------------------------------------
 # Import module under test (after models are importable)
 # ---------------------------------------------------------------------------
 
 from src.services import playbook_engine  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Worker model mirror parity (playbook-send-email-step)
+# ---------------------------------------------------------------------------
+
+
+def test_worker_customer_health_mirrors_cs_owner_user_id_column():
+    """Mirror parity: backend CustomerHealth.cs_owner_user_id (Integer FK) has a
+    plain nullable Integer mirror column for the send_email cs_assignee recipient."""
+    cols = {c.name: c for c in CustomerHealth.__table__.columns}
+    assert "cs_owner_user_id" in cols
+    col = cols["cs_owner_user_id"]
+    assert col.nullable is True
+    assert isinstance(col.type, Integer)
+
+
+def test_worker_organization_mirrors_product_name_display_column():
+    """Mirror parity: backend Organization.product_name_display (String(200)) has a
+    nullable String(200) mirror column for send_email template rendering."""
+    cols = {c.name: c for c in Organization.__table__.columns}
+    assert "product_name_display" in cols
+    col = cols["product_name_display"]
+    assert col.nullable is True
+    assert isinstance(col.type, String)
+    assert col.type.length == 200
 
 
 # ---------------------------------------------------------------------------
