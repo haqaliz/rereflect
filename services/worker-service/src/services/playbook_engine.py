@@ -163,7 +163,8 @@ def _dispatch_action(
     for the worker-service context — the backend-api AutomationEngine is not
     importable from the worker).
 
-    Supported types: assign, change_status, send_notification, draft_response.
+    Supported types: assign, change_status, send_notification, draft_response,
+    send_email.
     Unknown types return ok=False with an 'unsupported action type' error.
     """
     if action_type == "assign":
@@ -174,6 +175,8 @@ def _dispatch_action(
         return _handle_send_notification(action_config, customer_email, health, db)
     elif action_type == "draft_response":
         return _handle_draft_response(action_config, customer_email, health, db)
+    elif action_type == "send_email":
+        return _handle_send_email(action_config, customer_email, health, db)
     else:
         return {
             "ok": False,
@@ -374,6 +377,118 @@ def _handle_draft_response(
         logger.debug("draft_response: FeedbackResponse not available in worker context")
 
     return {"ok": True, "result": {"tone": tone, "length": len(draft_text)}}
+
+
+def _handle_send_email(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Send an outreach email from a built-in registry template.
+
+    recipients:
+      "customer"    → the playbook execution's customer_email
+      "cs_assignee" → the email of the customer's assigned CS owner
+
+    The actual send — opt-out check, cooldown, List-Unsubscribe, Resend call —
+    lives in `src.services.outreach_sender.send_outreach_email` (outreach-core);
+    this handler validates config, resolves the recipient, renders the registry
+    template (real worker mirror, never mocked) and maps the sender's result
+    loudly. Only `status == "sent"` contributes ok=True — a skip or failure is
+    recorded in the action_log, never a false success.
+    """
+    from src.models import Organization, User
+    from src.services.outreach_templates_mirror import (
+        OUTREACH_TEMPLATES,
+        render_outreach_template,
+    )
+    from src.services.outreach_sender import send_outreach_email
+
+    template = config.get("template")
+    if not template:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "send_email step missing 'template' in config",
+        }
+
+    recipient = config.get("recipient")
+    if not recipient:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "send_email step missing 'recipient' in config",
+        }
+
+    org_id = health.organization_id
+
+    if recipient == "customer":
+        to_email = customer_email
+    elif recipient == "cs_assignee":
+        owner_id = health.cs_owner_user_id
+        if owner_id is None:
+            return {
+                "ok": False,
+                "result": None,
+                "error": (
+                    "cs_assignee recipient requested but customer has no "
+                    "assigned CS owner"
+                ),
+            }
+        owner_email = db.query(User.email).filter(User.id == owner_id).first()
+        if not owner_email or not owner_email[0]:
+            return {
+                "ok": False,
+                "result": None,
+                "error": f"cs_assignee user {owner_id} not found",
+            }
+        to_email = owner_email[0]
+    else:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"unsupported send_email recipient: '{recipient}'",
+        }
+
+    org = db.query(Organization).filter_by(id=org_id).first()
+    product_name = (
+        org.product_name_display if org and org.product_name_display else "Rereflect"
+    )
+    customer_name = health.customer_name or customer_email.split("@")[0]
+
+    try:
+        tpl = OUTREACH_TEMPLATES[template]
+    except KeyError:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"unknown outreach template: '{template}'",
+        }
+    body = render_outreach_template(template, customer_name, product_name)
+    subject = (
+        tpl.subject
+        .replace("{{CUSTOMER_NAME}}", customer_name)
+        .replace("{{PRODUCT_NAME}}", product_name)
+    )
+
+    result = send_outreach_email(
+        db,
+        org_id,
+        to_email,
+        subject,
+        body,
+        product_name=product_name,
+        template_key=template,
+    )
+    return {
+        "ok": result.get("status") == "sent",
+        "result": {
+            "status": result.get("status"),
+            "reason": result.get("reason"),
+            "to": to_email,
+            "template": template,
+        },
+        "error": None,
+    }
 
 
 def _finalize_execution(
