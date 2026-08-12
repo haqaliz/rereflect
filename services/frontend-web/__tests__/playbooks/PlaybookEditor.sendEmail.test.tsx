@@ -242,6 +242,42 @@ describe('PlaybookEditor — send_email step config', () => {
     });
   });
 
+  it('editing preserves unknown config keys through load → save (AC3)', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const playbook: Playbook = {
+      ...basePlaybook,
+      action_sequence: [
+        {
+          type: 'send_email',
+          config: { template: 're_engagement', recipient: 'customer', priority: 'high' },
+        },
+      ],
+    };
+    render(<PlaybookEditor playbook={playbook} onSave={onSave} onCancel={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: /template/i })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('combobox', { name: /recipient/i }));
+    await user.click(await screen.findByRole('option', { name: 'CS Assignee' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action_sequence: [
+            {
+              type: 'send_email',
+              config: { template: 're_engagement', recipient: 'cs_assignee', priority: 'high' },
+            },
+          ],
+        })
+      );
+    });
+  });
+
   it('clone-flow round trip: At-Risk Outreach template renders pre-populated and re-saves unchanged (AC8)', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<PlaybookEditor playbook={atRiskSequence} onSave={onSave} onCancel={vi.fn()} />);
