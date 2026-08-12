@@ -23,6 +23,7 @@ import {
   Tag,
   UserCog,
   PlaySquare,
+  Send,
   ChevronDown,
   CheckSquare,
   Inbox,
@@ -46,6 +47,7 @@ import { ChurnCsvImportDialog } from '@/components/customers/ChurnCsvImportDialo
 import { BulkTagDialog } from '@/components/customers/BulkTagDialog';
 import { BulkAssignOwnerDialog } from '@/components/customers/BulkAssignOwnerDialog';
 import { BulkRunPlaybookDialog } from '@/components/customers/BulkRunPlaybookDialog';
+import { BulkOutreachDialog } from '@/components/customers/BulkOutreachDialog';
 import { StatCard } from '@/components/StatCard';
 import { RiskDistributionBar } from '@/components/customers/RiskDistributionBar';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
@@ -162,6 +164,7 @@ export default function CustomersPage() {
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [assignOwnerDialogOpen, setAssignOwnerDialogOpen] = useState(false);
   const [runPlaybookDialogOpen, setRunPlaybookDialogOpen] = useState(false);
+  const [outreachDialogOpen, setOutreachDialogOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   // Row-selection keys are customer emails (getRowId={r => r.customer_email}),
@@ -605,6 +608,15 @@ export default function CustomersPage() {
                       <PlaySquare className="w-3.5 h-3.5" />
                       Run playbook
                     </DropdownMenuItem>
+                    {isAdminOrOwner && (
+                      <DropdownMenuItem
+                        onClick={() => setOutreachDialogOpen(true)}
+                        className="flex items-center gap-2"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        Trigger outreach campaign
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
@@ -856,6 +868,14 @@ export default function CustomersPage() {
         open={runPlaybookDialogOpen}
         onOpenChange={setRunPlaybookDialogOpen}
         cohort={cohort}
+        onSuccess={clearSelection}
+      />
+
+      <BulkOutreachDialog
+        open={outreachDialogOpen}
+        onOpenChange={setOutreachDialogOpen}
+        cohort={cohort}
+        cohortCount={cohortCount}
         onSuccess={clearSelection}
       />
 
