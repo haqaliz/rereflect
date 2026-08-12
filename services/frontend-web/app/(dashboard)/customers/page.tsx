@@ -48,6 +48,7 @@ import { BulkTagDialog } from '@/components/customers/BulkTagDialog';
 import { BulkAssignOwnerDialog } from '@/components/customers/BulkAssignOwnerDialog';
 import { BulkRunPlaybookDialog } from '@/components/customers/BulkRunPlaybookDialog';
 import { BulkOutreachDialog } from '@/components/customers/BulkOutreachDialog';
+import { OutreachCampaignsCard } from '@/components/customers/OutreachCampaignsCard';
 import { StatCard } from '@/components/StatCard';
 import { RiskDistributionBar } from '@/components/customers/RiskDistributionBar';
 import { HealthScoreCircle } from '@/components/customers/HealthScoreCircle';
@@ -77,16 +78,7 @@ import {
 } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 
-function getRelativeTime(dateStr: string | null): string {
-  if (!dateStr) return 'Never';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
+import { getRelativeTime } from '@/lib/utils/relative-time';
 
 function getRiskBadgeStyle(riskLevel: string) {
   const map: Record<string, { label: string; color: string }> = {
@@ -839,6 +831,8 @@ export default function CustomersPage() {
             />
           </Card>
         )}
+
+        {isAdminOrOwner && <OutreachCampaignsCard />}
       </main>
 
       <BulkMarkChurnedDialog
