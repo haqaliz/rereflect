@@ -939,6 +939,35 @@ a bulk action against it:
 Tags and the assigned CS owner are visible as chips/badges on both the customer list and the
 Customer 360 profile page.
 
+## Outbound email (Resend)
+
+Customer-facing outreach email — the churn-loop send primitives — is **Resend-only and
+BYO-key**, like the rest of Rereflect's transactional email: set `RESEND_API_KEY` and nothing
+else. With no key configured, no outreach can be sent, and every send attempt records a loud
+`failed: email not configured` (never a silent success).
+
+What ships with the outreach primitives:
+
+- **Built-in template registry** — `GET /api/v1/outreach/templates` exposes the two built-in
+  templates (`re_engagement`, `weekly_digest_entry`) with plain-text bodies. Registry is data,
+  so content can iterate without code.
+- **Opt-out, honored on every send path** — `customer_health_scores.outreach_opt_out`
+  (default false). Customers can opt out themselves via the tokenized `List-Unsubscribe` link
+  every outreach email carries (`GET /api/v1/outreach/unsubscribe?token=…` — public, no auth,
+  stateless HMAC token keyed by `LLM_ENCRYPTION_KEY`, no token table, no expiry in v1). An
+  opted-out customer is never emailed; the skip is loud (`skipped: opted out`), never silent.
+  Operators can also flip the flag per customer with `PATCH /api/v1/customers/{email}`
+  (`{"outreach_opt_out": true}`, admin/owner only — the Customer 360 profile toggle).
+- **Per-recipient cooldown** — a customer can only be reached once per window per org
+  (Redis DB 1, key `outreach_cooldown:{org_id}:{customer_email}`). Window length is
+  `OUTREACH_COOLDOWN_HOURS` (default `24`, env-configurable on both backend-api and
+  worker-service; unparseable values fall back to 24). An in-cooldown send records
+  `skipped: in cooldown`.
+
+The playbook `send_email` step and the bulk "Trigger outreach campaign" action consume these
+primitives; `APP_URL` must point at your frontend for the unsubscribe link in the
+`List-Unsubscribe` header to resolve.
+
 ## Public API — bulk feedback writes & taxonomy CRUD
 
 Two additions to the `/api/public/v1` public API (see [docs/API.md](API.md) for the full public

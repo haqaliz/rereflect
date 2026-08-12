@@ -7,6 +7,34 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Customer outreach — shared email primitives (opt-out, unsubscribe, cooldown)
+
+The foundation for reaching churn-risk customers by email, shared by the playbook
+`send_email` step and the bulk "Trigger outreach campaign" action (both consume these
+primitives; the send surfaces themselves land with their own changes):
+
+- **Opt-out, honored on every send path** — `customer_health_scores.outreach_opt_out`
+  (default false). Customers opt out via the tokenized **`List-Unsubscribe`** link every
+  outreach email carries (`GET /api/v1/outreach/unsubscribe?token=…` — public, stateless
+  HMAC token keyed by `LLM_ENCRYPTION_KEY`, no token table). Operators can also flip the
+  flag with `PATCH /api/v1/customers/{email}` (admin/owner, `{"outreach_opt_out": bool}` —
+  extra fields 422). An opted-out customer is never emailed; the skip is loud
+  (`skipped: opted out`), never silent.
+- **Per-recipient cooldown** — one outreach per customer per window per org (Redis DB 1,
+  `outreach_cooldown:{org_id}:{customer_email}`, window `OUTREACH_COOLDOWN_HOURS`, default
+  24, env-configurable). In-cooldown sends record `skipped: in cooldown`.
+- **Built-in template registry** — `GET /api/v1/outreach/templates` exposes the two seeded
+  template keys (`re_engagement`, `weekly_digest_entry`) with plain-text bodies; registry is
+  data, so content can iterate without code.
+- **Honest no-key failure** — with `RESEND_API_KEY` unset, every send attempt records
+  `failed: email not configured` instead of a false success.
+- **Audit trail schema** — `outreach_campaigns` + `outreach_campaign_recipients` tables
+  (per-campaign + per-recipient status/error rows) land with this change; the bulk send path
+  that writes them ships with its own aspect.
+
+Resend-only, BYO-key: no SMTP, nothing phones home. See *Outbound email (Resend)* in
+`docs/SELF_HOSTING.md`.
+
 ### Notifications — Discord now has its own per-type channel preference
 
 Settings → Notifications now shows a **Discord** channel switch for each alert type, default
