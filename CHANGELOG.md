@@ -75,6 +75,22 @@ The operator-facing bulk send path on `/customers` now exists (admin/owner):
 Task-name discipline: the worker task `tasks.outreach.send_outreach_email` is dispatched by
 name from both send endpoints — a single string, pinned by tests in both suites.
 
+### Playbook editor: `send_email` steps are now editable, and the profile can opt a customer out
+
+The frontend half of the outreach send surfaces:
+
+- **Per-step config in the playbook editor** — a `send_email` step now shows **template**
+  and **recipient** selects (options from `GET /api/v1/outreach/templates`; the two
+  contract-pinned built-in keys `re_engagement` / `weekly_digest_entry` fall back if the
+  registry is unreachable, so editing never bricks). Cloning "At-Risk Outreach" or
+  "Silent-Churn Watch" pre-populates both selects and re-saves the exact seeder shape
+  `{type: "send_email", config: {template, recipient}}`. Unknown template keys from old
+  playbooks render with a warning and are preserved on save, never blanked. The template
+  card badge shows a Mail icon + "Send Email".
+- **Per-customer opt-out toggle** — the Customer 360 profile header now has a "Send
+  outreach emails" switch (admin/owner) that PATCHes `{"outreach_opt_out": bool}`; the
+  switch is hidden entirely for members.
+
 ### Notifications — Discord now has its own per-type channel preference
 
 Settings → Notifications now shows a **Discord** channel switch for each alert type, default
