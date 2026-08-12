@@ -1431,3 +1431,38 @@ class FeedbackAsanaTask(Base):
         Index('ix_feedback_asana_tasks_org_id', 'organization_id'),
         Index('ix_feedback_asana_tasks_feedback_id', 'feedback_id'),
     )
+
+
+class OutreachCampaign(Base):
+    """Bulk outreach campaign audit row — no-FK mirror for the worker's
+    per-recipient send task (bulk-campaign-api aspect).
+
+    MINIMAL mirror of outreach-core's migration (f6a7b8c9d0e1); the worker
+    only reads subject/body/status/org and writes status transitions.
+    """
+    __tablename__ = "outreach_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    created_by_user_id = Column(Integer, nullable=True)
+    subject = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False)
+    recipient_count = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="queued", server_default="queued")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OutreachCampaignRecipient(Base):
+    """Per-recipient outreach campaign result row — no-FK mirror (bulk-campaign-api).
+
+    The worker task flips status queued→sent|skipped|failed and records the
+    error string. Tables already exist (outreach-core migration) — no migration.
+    """
+    __tablename__ = "outreach_campaign_recipients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    status = Column(String(20), nullable=False, default="queued", server_default="queued")
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

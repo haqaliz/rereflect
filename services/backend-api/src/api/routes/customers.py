@@ -6,12 +6,15 @@ from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, asc, desc, or_
 from pydantic import BaseModel, ConfigDict, field_validator
 import csv
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 from src.database.session import get_db
 from src.models.customer_health import CustomerHealth
@@ -760,6 +763,210 @@ def bulk_assign_owner(
     db.commit()
 
     return BulkActionSummary(matched=len(rows), updated=updated, skipped=skipped, errors=[])
+
+
+# ---------------------------------------------------------------------------
+# Bulk outreach campaign  (customer-outreach-email-actions / bulk-campaign-api)
+# ---------------------------------------------------------------------------
+
+# Queue-safety cap for one outreach campaign (matches run-batch's cap).
+OUTREACH_BATCH_MAX_CUSTOMERS = 500
+_OUTREACH_SUBJECT_MAX = 200
+_OUTREACH_BODY_MAX = 20000
+
+
+class BulkOutreachRequest(BaseModel):
+    """Body of POST /customers/bulk/outreach — exactly {cohort, subject, body}.
+
+    `extra="forbid"` so a stray field (cc, template, ...) is a loud 422 rather
+    than silently ignored (feedback_issue_draft precedent).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    cohort: Cohort
+    subject: str
+    body: str
+
+    @field_validator("subject")
+    @classmethod
+    def _subject_length(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("subject is required")
+        if len(stripped) > _OUTREACH_SUBJECT_MAX:
+            raise ValueError(
+                f"subject exceeds the {_OUTREACH_SUBJECT_MAX}-character limit"
+            )
+        return stripped
+
+    @field_validator("body")
+    @classmethod
+    def _body_length(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("body is required")
+        if len(stripped) > _OUTREACH_BODY_MAX:
+            raise ValueError(
+                f"body exceeds the {_OUTREACH_BODY_MAX}-character limit"
+            )
+        return stripped
+
+
+class BulkOutreachResponse(BaseModel):
+    """Summary of a bulk outreach run — the exact contract bulk-campaign-ui
+    consumes.
+
+    - `matched`: resolved cohort rows (== recipient rows created; ==
+      campaign.recipient_count)
+    - `queued`: tasks dispatched (== matched - skipped on a real run; 0 on
+      count_only)
+    - `skipped`: queue-time skips (invalid email | opted out | archived)
+    - `errors`: per-recipient dispatch failures (response is still 202; the
+      retry endpoint recovers)
+    """
+    matched: int
+    queued: int
+    skipped: int
+    errors: List[str] = []
+
+
+def _classify_outreach_skip(row: CustomerHealth) -> Optional[str]:
+    """Queue-time skip classification for one resolved cohort row.
+
+    Returns the skip reason (invalid email | opted out | archived) or None
+    when the row is sendable. Shared by count_only and the real run so the
+    preview and the send can never drift. Cooldown is deliberately NOT
+    checked here — the worker sender re-checks at send time.
+    """
+    email = (row.customer_email or "").strip().lower()
+    if not email or "@" not in email:
+        return "invalid email"
+    if row.outreach_opt_out is True:
+        return "opted out"
+    if row.is_archived is True:
+        return "archived"
+    return None
+
+
+def _dispatch_outreach_tasks(
+    campaign_id: int,
+    queued_recipients: List["OutreachCampaignRecipient"],
+) -> List[str]:
+    """Dispatch one Celery task per queued recipient; collect loud failures.
+
+    Returns a list of error strings (empty on full success). Task name is
+    byte-identical to the worker's decorator + retry dispatch
+    (`tasks.outreach.send_outreach_email`).
+    """
+    from src.background.celery_client import get_celery_app
+
+    app = get_celery_app()
+    errors: List[str] = []
+    for recipient in queued_recipients:
+        try:
+            app.send_task(
+                "tasks.outreach.send_outreach_email",
+                args=[campaign_id, recipient.id],
+            )
+        except Exception as exc:
+            logger.warning(
+                "bulk outreach: dispatch failed campaign=%s recipient=%s: %s",
+                campaign_id, recipient.id, exc,
+            )
+            errors.append(f"{recipient.customer_email}: {exc}")
+    return errors
+
+
+@router.post(
+    "/bulk/outreach",
+    response_model=BulkOutreachResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def bulk_outreach(
+    body: BulkOutreachRequest,
+    response: Response,
+    count_only: bool = Query(False),
+    current_org: Organization = Depends(get_current_org),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger an outreach campaign across a resolved cohort of customers.
+
+    Admin/owner only. Resolves the cohort (loud queue-time skips: invalid
+    email / opted out / archived), writes one campaign + per-recipient audit
+    row, and enqueues one Celery task per sendable recipient — the request
+    returns a summary, never a blocking send. `?count_only=true` previews
+    `{matched, queued: 0, skipped, errors: []}` with zero mutation.
+
+    Cooldown and the send-time opt-out re-check live in the worker sender —
+    never here.
+    """
+    from src.models.outreach_campaign import (
+        OutreachCampaign,
+        OutreachCampaignRecipient,
+    )
+
+    rows, _ = resolve_cohort(db, current_org, body.cohort)
+
+    skip_reasons = [_classify_outreach_skip(row) for row in rows]
+    skipped = sum(1 for reason in skip_reasons if reason is not None)
+    matched = len(rows)
+
+    if count_only:
+        response.status_code = status.HTTP_200_OK
+        return BulkOutreachResponse(matched=matched, queued=0, skipped=skipped, errors=[])
+
+    if matched == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="cohort is empty",
+        )
+    if matched > OUTREACH_BATCH_MAX_CUSTOMERS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"cohort of {matched} exceeds batch cap of "
+                f"{OUTREACH_BATCH_MAX_CUSTOMERS}; narrow the filter"
+            ),
+        )
+
+    campaign = OutreachCampaign(
+        organization_id=current_org.id,
+        created_by_user_id=current_user.id,
+        subject=body.subject,
+        body=body.body,
+        recipient_count=matched,
+        status="queued",
+    )
+    db.add(campaign)
+    db.flush()
+
+    queued_recipients: List[OutreachCampaignRecipient] = []
+    for row, reason in zip(rows, skip_reasons):
+        recipient = OutreachCampaignRecipient(
+            campaign_id=campaign.id,
+            customer_email=(row.customer_email or "").strip().lower(),
+            status="skipped" if reason else "queued",
+            error=reason,
+        )
+        db.add(recipient)
+        if reason is None:
+            queued_recipients.append(recipient)
+
+    campaign.status = "in_progress" if queued_recipients else "done"
+    db.commit()
+
+    dispatch_errors = _dispatch_outreach_tasks(campaign.id, queued_recipients)
+
+    # `queued` counts tasks actually dispatched; failed dispatches stay loud
+    # in `errors` and are recovered by POST /outreach/campaigns/{id}/retry.
+    return BulkOutreachResponse(
+        matched=matched,
+        queued=len(queued_recipients) - len(dispatch_errors),
+        skipped=skipped,
+        errors=dispatch_errors,
+    )
 
 
 class OutreachOptOutUpdate(BaseModel):

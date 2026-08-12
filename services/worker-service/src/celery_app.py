@@ -66,6 +66,7 @@ celery_app = Celery(
         "src.tasks.jira_sync",
         "src.tasks.zendesk_status_sync",
         "src.tasks.asana_sync",
+        "src.tasks.outreach",
     ],
 )
 
