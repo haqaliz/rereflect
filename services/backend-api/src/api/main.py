@@ -38,6 +38,7 @@ from src.api.routes import playbooks as playbooks_router  # noqa: E402 — M4.1 
 from src.api.routes import usage_webhooks as usage_webhooks_router  # noqa: E402 — product-usage ingest receiver
 from src.api.routes import sentiment_accuracy as sentiment_accuracy_router  # noqa: E402 — eval-harness-and-card (M5.1 disclosure)
 from src.api.routes import embedding_accuracy as embedding_accuracy_router  # noqa: E402 — retrieval-eval-card (M5.4 disclosure)
+from src.api.routes import churn_label_gate as churn_label_gate_router  # noqa: E402 — churn-label-gate-study (M5.3 disclosure)
 from src.api.routes import classifier_accuracy as classifier_accuracy_router  # noqa: E402 — M5.2 settings-api-and-accuracy-card
 from src.api.routes import oidc_config as oidc_config_router  # noqa: E402 — oidc-sso: oidc-config aspect (M2/M3/M12)
 from src.api.routes import saml_config as saml_config_router  # noqa: E402 — saml-sso: config-model-and-crud aspect (M1/M6)
@@ -376,6 +377,8 @@ app.include_router(ai_readiness_router.router)
 app.include_router(sentiment_accuracy_router.router)
 # Embedding retrieval eval accuracy card (M5.4 disclosure — local vs baseline provider)
 app.include_router(embedding_accuracy_router.router)
+# Churn label-gate re-derivation study readout (M5.3 disclosure — verdict + honest limits)
+app.include_router(churn_label_gate_router.router)
 # Per-org corrections classifier accuracy card (M5.2 settings-api-and-accuracy-card)
 app.include_router(classifier_accuracy_router.router)
 app.include_router(customers.router)
