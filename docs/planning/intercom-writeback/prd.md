@@ -275,7 +275,7 @@ when they don't?
 
 ---
 
-## Decision Record (close-out, 2026-08-16)
+## Decision Record (close-out, 2026-08-15)
 
 - **P2 `intercom-writeback-orphaned` — decision executed: wire it.** The orphaned
   `intercom_service.py` is deleted; its behavior is ported into the worker's
@@ -289,7 +289,7 @@ when they don't?
 - **OQ3 — landing page: flagged, not shipped.** The stale OAuth-era Intercom entry
   (`services/landing-web/lib/integrations.ts:136-171`) is a follow-up chore
   (`landing-intercom-entry-refresh`), respecting "claim only what shipped".
-- **Aspects (all shipped 2026-08-16; merge pending):** `db-config-model`,
+- **Aspects (all shipped 2026-08-15; merge pending):** `db-config-model`,
   `config-api-routes`, `dispatch-seams`, `worker-write-client`,
   `worker-writeback-task`, `frontend-writeback-card`, `docs-tracking-changelog` —
   each with its spec and plan under `docs/planning/intercom-writeback/`.

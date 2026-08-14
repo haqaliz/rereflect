@@ -295,7 +295,7 @@ so setup instructions are the deliverable, not provisioning code.
   orphaned — verified zero production callers on 2026-07-30. It is outbound; this card is
   inbound. The P2 call to wire-or-delete it (`DEV-TRACKING.md:433`) stands separately, and
   **no "Two-Way Sync" copy may return** until it is wired.
-- ~~**Write-back to Intercom**~~ — **SHIPPED 2026-08-16**: the wire-or-delete P2
+- ~~**Write-back to Intercom**~~ — **SHIPPED 2026-08-15**: the wire-or-delete P2
   landed as **wire it** — opt-in note + close on resolve, off by default,
   resolved-only; `intercom_service.py` is deleted. See
   `docs/planning/intercom-writeback/`.

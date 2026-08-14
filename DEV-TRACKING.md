@@ -510,7 +510,7 @@ visible from the backlog. None block anything; the integration is fully operable
   of a conversation only. Replies and ratings arrive via the webhook path, so a pull-only
   install (no webhook wired) never sees them. Needs conversation-parts fetching.
 - ~~**`intercom-writeback`** — still no write-back; `intercom_service.py` remains
-  orphaned with zero production callers.~~ — **SHIPPED 2026-08-16** via
+  orphaned with zero production callers.~~ — **SHIPPED 2026-08-15** via
   `feat/intercom-writeback`: the wire-or-delete P2 landed as **wire it** — opt-in
   note + close on resolve, off by default, resolved-only. The "Two-Way Sync" rule
   now resolves: copy may return only in the form shipped. See the FIXED P2 above.
@@ -588,7 +588,7 @@ was left by a branch that shipped the fix and did not update the row.
 - [ ] Audit the other integration route modules for the same omission before assuming it is
       confined to this file.
 
-### P2 — `intercom-writeback-orphaned` — **FIXED**, merged (merge-sha pending) (PR # pending, 2026-08-16)
+### P2 — `intercom-writeback-orphaned` — **FIXED**, merged (merge-sha pending) (PR # pending, 2026-08-15)
 > Shipped: the wire-or-delete decision landed as **wire it**. `intercom_service.py`
 > deleted, its behavior ported into the worker's `IntercomClient`
 > (`add_note` / `close_conversation` / `fetch_admin_id`, 404 → `IntercomNotFoundError`,
@@ -603,7 +603,7 @@ was left by a branch that shipped the fix and did not update the row.
 > chained to `3cb9a0d1456b`; one alembic head). `PATCH
 > /api/v1/integrations/intercom/writeback` + extended `GET /status` +
 > `IntercomWritebackCard` on Settings → Integrations → Intercom. Merged as
-> (merge-sha pending) (PR # pending) on 2026-08-16. Backend 4927 passed (38 new
+> (merge-sha pending) (PR # pending) on 2026-08-15. Backend 4927 passed (38 new
 > vs 4889 baseline); worker 1732 passed (48 net new).
 > **Follow-up (chore, not started): `landing-intercom-entry-refresh`** — the
 > OAuth-era Intercom entry in `services/landing-web/lib/integrations.ts:136-171`

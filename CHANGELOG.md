@@ -371,7 +371,7 @@ The landing page also advertised Intercom **"Two-Way Sync"** — adding notes ba
 conversations and closing resolved tickets. That never worked. The code exists but nothing
 in the app has ever called it, so the claim is removed rather than softened.
 
-**Correction (2026-08-16):** that was true when written. The write-back now ships —
+**Correction (2026-08-15):** that was true when written. The write-back now ships —
 opt-in, off by default, note + close on resolve — and `intercom_service.py` is
 deleted; see the Added entry above. "Two-Way Sync" copy may return only in this
 shipped form.
