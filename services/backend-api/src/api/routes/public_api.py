@@ -606,6 +606,21 @@ async def public_bulk_update_feedback(
         except Exception:
             logger.warning("webhook dispatch failed on public bulk PATCH", exc_info=True)
 
+        try:
+            from src.services.workflow_service import dispatch_intercom_writeback
+
+            dispatch_intercom_writeback(
+                db,
+                auth.organization_id,
+                changed_pairs,
+                patch.resolution_note,
+            )
+        except Exception:
+            logger.warning(
+                "intercom writeback dispatch failed on public bulk PATCH",
+                exc_info=True,
+            )
+
     if changed_ids:
         try:
             from src.services.event_emitter import emit_event
@@ -738,6 +753,21 @@ async def public_update_feedback(
                 )
             except Exception:
                 logger.warning("webhook dispatch failed on public PATCH", exc_info=True)
+
+            try:
+                from src.services.workflow_service import dispatch_intercom_writeback
+
+                dispatch_intercom_writeback(
+                    db,
+                    auth.organization_id,
+                    changed,
+                    data.resolution_note,
+                )
+            except Exception:
+                logger.warning(
+                    "intercom writeback dispatch failed on public PATCH",
+                    exc_info=True,
+                )
 
             try:
                 from src.services.event_emitter import emit_event

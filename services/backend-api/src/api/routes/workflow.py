@@ -21,6 +21,7 @@ from src.services.workflow_service import (
     create_workflow_event,
     apply_status_change,
     dispatch_status_webhooks,
+    dispatch_intercom_writeback,
 )
 from src.services.event_emitter import emit_event
 
@@ -185,6 +186,14 @@ async def change_status(
         dispatch_status_webhooks(
             db, current_org.id, status_changes, data.new_status,
             changed_by_label=current_user.email,
+        )
+    except Exception:
+        pass
+
+    # Dispatch intercom writeback (fire-and-forget, never raises)
+    try:
+        dispatch_intercom_writeback(
+            db, current_org.id, status_changes, data.resolution_note,
         )
     except Exception:
         pass

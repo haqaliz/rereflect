@@ -294,6 +294,7 @@ class TestNeverRaises:
     def test_get_celery_app_import_error_does_not_raise(self, db, test_organization):
         fb = _make_feedback(db, test_organization, source="intercom", status="resolved")
 
+        from src.services.workflow_service import dispatch_intercom_writeback
         with patch(GET_CELERY_TARGET, side_effect=ImportError("no celery client here")):
             dispatch_intercom_writeback(
                 db, test_organization.id, [(fb, "new")], "note"
