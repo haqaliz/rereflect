@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Brain, Sparkles, Wand2, Tags, AlertTriangle } from 'lucide-react';
+import { Brain, Sparkles, Wand2, Tags, AlertTriangle, TrendingDown } from 'lucide-react';
 import { aiSettingsAPI, type AISettings, type SentimentStatus } from '@/lib/api/ai-settings';
 import { UsageChurnLabelsCard } from '@/components/settings/UsageChurnLabelsCard';
 
@@ -30,6 +30,8 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
   const [categoryClassifierError, setCategoryClassifierError] = useState<string | null>(null);
   const [urgencyClassifierSaving, setUrgencyClassifierSaving] = useState(false);
   const [urgencyClassifierError, setUrgencyClassifierError] = useState<string | null>(null);
+  const [churnClassifierSaving, setChurnClassifierSaving] = useState(false);
+  const [churnClassifierError, setChurnClassifierError] = useState<string | null>(null);
 
   useEffect(() => {
     aiSettingsAPI
@@ -111,6 +113,22 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
       );
     } finally {
       setUrgencyClassifierSaving(false);
+    }
+  };
+
+  const handleChurnClassifierMode = async (churn_classifier_mode: string) => {
+    if (churn_classifier_mode === (settings.churn_classifier_mode ?? 'off')) return;
+    setChurnClassifierSaving(true);
+    setChurnClassifierError(null);
+    try {
+      const updated = await aiSettingsAPI.update({ churn_classifier_mode });
+      onUpdate(updated);
+    } catch (err: any) {
+      setChurnClassifierError(
+        err?.response?.data?.detail || 'Failed to update churn classifier mode'
+      );
+    } finally {
+      setChurnClassifierSaving(false);
     }
   };
 
@@ -325,6 +343,53 @@ export function AISettingsGeneral({ settings, onUpdate }: AISettingsGeneralProps
           </div>
           {urgencyClassifierError && (
             <p className="text-xs text-destructive">{urgencyClassifierError}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Self-Improving Churn Model (per-org-churn-model aspect 6) */}
+      <Card>
+        <CardHeader className="border-b border-border">
+          <div className="flex items-center space-x-2">
+            <div className="p-2 bg-secondary rounded-lg">
+              <TrendingDown className="w-5 h-5 text-primary" />
+            </div>
+            <CardTitle>Self-Improving Churn Model</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-semibold text-foreground">Churn model</p>
+              <p className="text-sm text-muted-foreground">
+                Your model, trained on your data, promoted only when measurably better.{' '}
+                <strong>Off</strong> disables it. <strong>Shadow</strong> observes and scores
+                in the background without changing stored churn risk &mdash; recommended until
+                you have accumulated a substantial number of churn labels.{' '}
+                <strong>Auto</strong> lets the trained model override the calibrated heuristic
+                once it wins on your held-out data.
+              </p>
+            </div>
+            <Select
+              value={settings.churn_classifier_mode ?? 'off'}
+              onValueChange={handleChurnClassifierMode}
+              disabled={churnClassifierSaving}
+            >
+              <SelectTrigger aria-label="Churn classifier mode" className="w-32 shrink-0">
+                <SelectValue>
+                  {CLASSIFIER_MODE_LABELS[settings.churn_classifier_mode ?? 'off'] ??
+                    settings.churn_classifier_mode}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="off">Off</SelectItem>
+                <SelectItem value="shadow">Shadow</SelectItem>
+                <SelectItem value="auto">Auto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {churnClassifierError && (
+            <p className="text-xs text-destructive">{churnClassifierError}</p>
           )}
         </CardContent>
       </Card>

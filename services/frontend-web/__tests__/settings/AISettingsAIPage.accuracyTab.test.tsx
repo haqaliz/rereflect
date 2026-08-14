@@ -102,7 +102,7 @@ const mockSettings = {
   },
 };
 
-describe('AISettingsPage — Accuracy tab renders both classifier accuracy cards', () => {
+describe('AISettingsPage — Accuracy tab renders the four classifier accuracy cards', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(window, 'localStorage', {
@@ -128,17 +128,18 @@ describe('AISettingsPage — Accuracy tab renders both classifier accuracy cards
     });
   });
 
-  it('renders exactly three ClassifierAccuracyCards, sentiment then category then urgency', async () => {
+  it('renders exactly four ClassifierAccuracyCards, sentiment then category then urgency then churn', async () => {
     render(<AISettingsPage />);
 
     await waitFor(() => {
-      expect(screen.getAllByTestId('classifier-card')).toHaveLength(3);
+      expect(screen.getAllByTestId('classifier-card')).toHaveLength(4);
     });
 
     const cards = screen.getAllByTestId('classifier-card');
     expect(cards[0]).toHaveAttribute('data-type', 'sentiment');
     expect(cards[1]).toHaveAttribute('data-type', 'category');
     expect(cards[2]).toHaveAttribute('data-type', 'urgency');
+    expect(cards[3]).toHaveAttribute('data-type', 'churn');
   });
 
   it('mounts the churn label-gate card on the accuracy tab', async () => {

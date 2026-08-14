@@ -499,6 +499,9 @@ function AISettingsContent() {
             <div className="mt-6">
               <ClassifierAccuracyCard classifierType="urgency" isAdminOrOwner={isAdminOrOwner} />
             </div>
+            <div className="mt-6">
+              <ClassifierAccuracyCard classifierType="churn" isAdminOrOwner={isAdminOrOwner} />
+            </div>
           </TabsContent>
           {/* Readiness Tab */}
           <TabsContent value="readiness" className="mt-6">

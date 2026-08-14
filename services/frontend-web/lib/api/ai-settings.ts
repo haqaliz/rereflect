@@ -18,6 +18,7 @@ export interface AISettings {
   classifier_mode: string;
   category_classifier_mode: string;
   urgency_classifier_mode: string;
+  churn_classifier_mode: string;
   usage_churn_labels_mode: string;
   usage_churn_label_config?: { sustain_days?: number } | null;
   models: AIModels;
@@ -33,6 +34,7 @@ export interface AISettingsUpdate {
   classifier_mode?: string | null;
   category_classifier_mode?: string | null;
   urgency_classifier_mode?: string | null;
+  churn_classifier_mode?: string | null;
   usage_churn_labels_mode?: string | null;
   usage_churn_label_config?: { sustain_days?: number } | null;
   model_categorization?: string;

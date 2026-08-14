@@ -44,6 +44,15 @@ describe('classifier-accuracy API client — classifierType threading', () => {
     );
   });
 
+  it("getClassifierAccuracy('churn') sends classifier_type=churn", async () => {
+    mockGet.mockResolvedValue({ data: {} });
+    await getClassifierAccuracy('churn');
+
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/accuracy?classifier_type=churn'
+    );
+  });
+
   it('rollbackClassifier() with no arg defaults to classifier_type=sentiment', async () => {
     mockPost.mockResolvedValue({ data: {} });
     await rollbackClassifier();
@@ -59,6 +68,15 @@ describe('classifier-accuracy API client — classifierType threading', () => {
 
     expect(mockPost).toHaveBeenCalledWith(
       '/api/v1/settings/ai/classifier/rollback?classifier_type=category'
+    );
+  });
+
+  it("rollbackClassifier('churn') sends classifier_type=churn", async () => {
+    mockPost.mockResolvedValue({ data: {} });
+    await rollbackClassifier('churn');
+
+    expect(mockPost).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/rollback?classifier_type=churn'
     );
   });
 
@@ -98,6 +116,15 @@ describe('classifier-accuracy API client — classifierType threading', () => {
     );
   });
 
+  it("getClassifierVersions('churn') sends classifier_type=churn", async () => {
+    mockGet.mockResolvedValue({ data: {} });
+    await getClassifierVersions('churn');
+
+    expect(mockGet).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/versions?classifier_type=churn'
+    );
+  });
+
   it('resumeClassifier() with no arg defaults to classifier_type=sentiment', async () => {
     mockPost.mockResolvedValue({ data: {} });
     await resumeClassifier();
@@ -113,6 +140,15 @@ describe('classifier-accuracy API client — classifierType threading', () => {
 
     expect(mockPost).toHaveBeenCalledWith(
       '/api/v1/settings/ai/classifier/resume?classifier_type=category'
+    );
+  });
+
+  it("resumeClassifier('churn') sends classifier_type=churn", async () => {
+    mockPost.mockResolvedValue({ data: {} });
+    await resumeClassifier('churn');
+
+    expect(mockPost).toHaveBeenCalledWith(
+      '/api/v1/settings/ai/classifier/resume?classifier_type=churn'
     );
   });
 });

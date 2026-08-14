@@ -1,0 +1,144 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import React from 'react';
+
+// Mock AuthContext
+const mockUseAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}));
+
+// Mock AI settings API
+vi.mock('@/lib/api/ai-settings', () => ({
+  aiSettingsAPI: {
+    get: vi.fn(),
+    update: vi.fn(),
+    getSentimentStatus: vi.fn(),
+  },
+}));
+
+// AISettingsGeneral mounts UsageChurnLabelsCard, which calls this for its
+// precision read-out — mock it so this file's tests don't issue real HTTP
+// requests.
+vi.mock('@/lib/api/churn-suggestions', () => ({
+  listChurnSuggestions: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 1 }),
+}));
+
+import { aiSettingsAPI } from '@/lib/api/ai-settings';
+import { AISettingsGeneral } from '@/components/settings/AISettingsGeneral';
+
+const adminUser = {
+  id: 1,
+  email: 'admin@test.com',
+  role: 'admin',
+  plan: 'pro',
+  organization_id: 1,
+  is_system_admin: false,
+};
+
+const mockSettings = {
+  ai_analysis_enabled: true,
+  has_custom_key: false,
+  default_provider: 'openai',
+  base_url: null,
+  model_embeddings: null,
+  sentiment_provider: 'vader',
+  classifier_mode: 'off',
+  category_classifier_mode: 'off',
+  urgency_classifier_mode: 'off',
+  churn_classifier_mode: 'off',
+  usage_churn_labels_mode: 'off',
+  models: {
+    categorization: 'gpt-4o-mini',
+    analysis: 'gpt-4o-mini',
+    insights: 'gpt-4o-mini',
+  },
+};
+
+describe('AISettingsGeneral — churn classifier mode toggle (per-org churn model)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({
+      user: adminUser,
+      isLoading: false,
+      isAuthenticated: true,
+    });
+    vi.mocked(aiSettingsAPI.getSentimentStatus).mockResolvedValue({
+      provider: 'vader',
+      available: true,
+      model: null,
+    });
+  });
+
+  it('renders a control distinguishable by "Churn classifier mode" aria-label, current mode selected', () => {
+    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
+    expect(screen.getByText(/self-improving churn model/i)).toBeInTheDocument();
+    const trigger = screen.getByLabelText(/churn classifier mode/i);
+    expect(trigger).toHaveTextContent('Off');
+  });
+
+  it('the churn control and urgency control are distinct elements', () => {
+    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
+    const urgencyTrigger = screen.getByLabelText('Urgency classifier mode');
+    const churnTrigger = screen.getByLabelText('Churn classifier mode');
+    expect(urgencyTrigger).not.toBe(churnTrigger);
+  });
+
+  it('selecting "Shadow" on the churn control calls update with ONLY churn_classifier_mode', async () => {
+    const user = userEvent.setup();
+    const onUpdate = vi.fn();
+    const updated = { ...mockSettings, churn_classifier_mode: 'shadow' };
+    vi.mocked(aiSettingsAPI.update).mockResolvedValue(updated);
+
+    render(<AISettingsGeneral settings={mockSettings} onUpdate={onUpdate} />);
+
+    const trigger = screen.getByLabelText(/churn classifier mode/i);
+    await user.click(trigger);
+    const shadowOption = await screen.findByRole('option', { name: 'Shadow' });
+    await user.click(shadowOption);
+
+    await waitFor(() => {
+      expect(aiSettingsAPI.update).toHaveBeenCalledWith({ churn_classifier_mode: 'shadow' });
+      expect(onUpdate).toHaveBeenCalledWith(updated);
+    });
+    // Exact single-key payload — no other classifier field may be present.
+    const callArgs = vi.mocked(aiSettingsAPI.update).mock.calls[0][0];
+    expect(callArgs).not.toHaveProperty('classifier_mode');
+    expect(callArgs).not.toHaveProperty('category_classifier_mode');
+    expect(callArgs).not.toHaveProperty('urgency_classifier_mode');
+  });
+
+  it('surfaces a 422 error under the churn control specifically', async () => {
+    const user = userEvent.setup();
+    vi.mocked(aiSettingsAPI.update).mockRejectedValue({
+      response: { data: { detail: "churn_classifier_mode 'auto' requires scikit-learn to be installed." } },
+    });
+
+    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
+
+    const trigger = screen.getByLabelText(/churn classifier mode/i);
+    await user.click(trigger);
+    const autoOption = await screen.findByRole('option', { name: 'Auto' });
+    await user.click(autoOption);
+
+    await waitFor(() => {
+      expect(screen.getByText(/requires scikit-learn/i)).toBeInTheDocument();
+    });
+  });
+
+  it('guards against a missing churn_classifier_mode from a stale/un-migrated backend mock (defaults to off)', () => {
+    const staleSettings = { ...mockSettings } as any;
+    delete staleSettings.churn_classifier_mode;
+
+    render(<AISettingsGeneral settings={staleSettings} onUpdate={vi.fn()} />);
+
+    const trigger = screen.getByLabelText(/churn classifier mode/i);
+    expect(trigger).toHaveTextContent('Off');
+  });
+
+  it('shows the honest churn copy: "promoted only when measurably better"', () => {
+    render(<AISettingsGeneral settings={mockSettings} onUpdate={vi.fn()} />);
+    expect(screen.getByText(/promoted only when measurably better/i)).toBeInTheDocument();
+  });
+});

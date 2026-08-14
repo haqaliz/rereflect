@@ -68,6 +68,13 @@ const TYPE_COPY: Record<string, { label: string; trainedOn: string; note?: strin
       'In auto mode this model is add-only: it can escalate a feedback item from ' +
       'not-urgent to urgent, but it never de-escalates an already-urgent item.',
   },
+  churn: {
+    label: 'Churn model',
+    trainedOn:
+      "your org's churn labels; promoted only when measurably better than the " +
+      'calibrated heuristic on your held-out data',
+    note: 'Incumbent: calibrated heuristic.',
+  },
 };
 
 /** Version-history table caps visible rows so the settings card stays compact. */
