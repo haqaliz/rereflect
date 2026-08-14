@@ -1,0 +1,169 @@
+{
+  "artifact_version": "1",
+  "generated_at": "2026-08-13T23:49:33.710564+00:00",
+  "verdict": "keep_500",
+  "target": 500,
+  "method": "simulated learning curves: per-org logistic challenger (sklearn, standardized, L2) vs calibrated-heuristic incumbent (isotonic calibration of churn_risk_component fit per-org, identity fallback); leakage-free stratified 30% holdout; macro-F1 delta pooled over 50 simulations x 3 scenario families per volume with empirical 95% CI and M5.2 promotion rate (delta >= +0.02); labels follow the 180-day observation-window semantics; R3 fidelity dimension re-runs the challenger with 25% of rows reconstructed via documented defaults.",
+  "n_simulations": 50,
+  "crossover_label_volume": 200,
+  "fidelity_sensitivity": {
+    "missing_fraction": 0.25,
+    "crossover_label_volume": 200,
+    "curves": [
+      {
+        "label_volume": 20,
+        "challenger_macro_f1": 0.5281,
+        "incumbent_macro_f1": 0.5338,
+        "macro_f1_delta": -0.0057,
+        "delta_ci_low": -0.5455,
+        "delta_ci_high": 0.5455,
+        "promotion_rate": 0.2133
+      },
+      {
+        "label_volume": 50,
+        "challenger_macro_f1": 0.5242,
+        "incumbent_macro_f1": 0.5146,
+        "macro_f1_delta": 0.0095,
+        "delta_ci_low": -0.2916,
+        "delta_ci_high": 0.273,
+        "promotion_rate": 0.28
+      },
+      {
+        "label_volume": 100,
+        "challenger_macro_f1": 0.5563,
+        "incumbent_macro_f1": 0.5094,
+        "macro_f1_delta": 0.0469,
+        "delta_ci_low": -0.1933,
+        "delta_ci_high": 0.279,
+        "promotion_rate": 0.42
+      },
+      {
+        "label_volume": 200,
+        "challenger_macro_f1": 0.5473,
+        "incumbent_macro_f1": 0.4976,
+        "macro_f1_delta": 0.0498,
+        "delta_ci_low": -0.1219,
+        "delta_ci_high": 0.2146,
+        "promotion_rate": 0.5133
+      },
+      {
+        "label_volume": 300,
+        "challenger_macro_f1": 0.5601,
+        "incumbent_macro_f1": 0.4942,
+        "macro_f1_delta": 0.0659,
+        "delta_ci_low": -0.0682,
+        "delta_ci_high": 0.2532,
+        "promotion_rate": 0.6067
+      },
+      {
+        "label_volume": 500,
+        "challenger_macro_f1": 0.5549,
+        "incumbent_macro_f1": 0.4939,
+        "macro_f1_delta": 0.061,
+        "delta_ci_low": -0.0665,
+        "delta_ci_high": 0.2065,
+        "promotion_rate": 0.6867
+      },
+      {
+        "label_volume": 800,
+        "challenger_macro_f1": 0.543,
+        "incumbent_macro_f1": 0.4879,
+        "macro_f1_delta": 0.0551,
+        "delta_ci_low": -0.0508,
+        "delta_ci_high": 0.2012,
+        "promotion_rate": 0.66
+      },
+      {
+        "label_volume": 1200,
+        "challenger_macro_f1": 0.5463,
+        "incumbent_macro_f1": 0.4859,
+        "macro_f1_delta": 0.0604,
+        "delta_ci_low": -0.0379,
+        "delta_ci_high": 0.1858,
+        "promotion_rate": 0.7267
+      }
+    ]
+  },
+  "honest_limits": [
+    "Simulation is a bound, not a measurement: no real org is at label volume, so these learning curves are synthetic; the gate is re-derived from the simulated crossover, not from live data (PRD R2).",
+    "The incumbent stand-in is isotonic calibration of churn_risk_component fit per-org on the same leakage-free train split (the post-fix calibrated-heuristic family, PRD R5) \u2014 the delta here is what the spine's A/B would measure, modulo stand-in modeling detail.",
+    "The curve pools three scenario families (balanced-clean, balanced-noisy, imbalanced, churn 10-20% per the 180-day label window); the target must hold for the weakest plausible org, not just the cleanest.",
+    "At the crossover volume of 200 labels, 57% of pooled simulated orgs cleared the +0.02 macro-F1 promotion bar on a single run \u2014 below 80%, so a consecutive-runs promotion rule rather than M5.2's single run is suggested (PRD OQ2).",
+    "Feature-reconstruction fidelity (PRD R3): with 25% of rows missing snapshots and reconstructed via documented defaults, the crossover moves from 200 to 200 labels \u2014 the gate clears the harder reading.",
+    "50 simulations x 3 scenario families per volume; fixed seeds; rerun `python scripts/eval_churn_label_gate.py` to reproduce."
+  ],
+  "curves": [
+    {
+      "label_volume": 20,
+      "challenger_macro_f1": 0.5464,
+      "incumbent_macro_f1": 0.5505,
+      "macro_f1_delta": -0.0041,
+      "delta_ci_low": -0.5455,
+      "delta_ci_high": 0.5455,
+      "promotion_rate": 0.26
+    },
+    {
+      "label_volume": 50,
+      "challenger_macro_f1": 0.534,
+      "incumbent_macro_f1": 0.5104,
+      "macro_f1_delta": 0.0236,
+      "delta_ci_low": -0.2341,
+      "delta_ci_high": 0.3481,
+      "promotion_rate": 0.3
+    },
+    {
+      "label_volume": 100,
+      "challenger_macro_f1": 0.5775,
+      "incumbent_macro_f1": 0.5279,
+      "macro_f1_delta": 0.0497,
+      "delta_ci_low": -0.2197,
+      "delta_ci_high": 0.3318,
+      "promotion_rate": 0.4267
+    },
+    {
+      "label_volume": 200,
+      "challenger_macro_f1": 0.5665,
+      "incumbent_macro_f1": 0.5013,
+      "macro_f1_delta": 0.0653,
+      "delta_ci_low": -0.1051,
+      "delta_ci_high": 0.2512,
+      "promotion_rate": 0.5667
+    },
+    {
+      "label_volume": 300,
+      "challenger_macro_f1": 0.5799,
+      "incumbent_macro_f1": 0.4965,
+      "macro_f1_delta": 0.0834,
+      "delta_ci_low": -0.0735,
+      "delta_ci_high": 0.2665,
+      "promotion_rate": 0.6933
+    },
+    {
+      "label_volume": 500,
+      "challenger_macro_f1": 0.5715,
+      "incumbent_macro_f1": 0.5045,
+      "macro_f1_delta": 0.067,
+      "delta_ci_low": -0.0515,
+      "delta_ci_high": 0.2656,
+      "promotion_rate": 0.64
+    },
+    {
+      "label_volume": 800,
+      "challenger_macro_f1": 0.5548,
+      "incumbent_macro_f1": 0.494,
+      "macro_f1_delta": 0.0608,
+      "delta_ci_low": -0.0644,
+      "delta_ci_high": 0.2168,
+      "promotion_rate": 0.6667
+    },
+    {
+      "label_volume": 1200,
+      "challenger_macro_f1": 0.563,
+      "incumbent_macro_f1": 0.4921,
+      "macro_f1_delta": 0.0708,
+      "delta_ci_low": -0.0434,
+      "delta_ci_high": 0.2319,
+      "promotion_rate": 0.7267
+    }
+  ]
+}
