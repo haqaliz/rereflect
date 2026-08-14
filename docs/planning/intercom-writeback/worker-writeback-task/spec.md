@@ -47,9 +47,9 @@ must reuse the worker's own models/client (worker cannot import backend-api).
 - Timeline visibility (R5): add a fetcher to
   `services/worker-service` — note: the timeline service lives in **backend-api**
   (`src/services/customer_timeline_service.py`); add `_fetch_intercom_writeback`
-  mirroring `_fetch_status_changed` (backend aspect `dispatch-seams` or a small
-  addition here — decide in plan: the fetcher is backend code, group it with the
-  backend dispatcher work).
+  mirroring `_fetch_status_changed`. **RESOLVED (plan D6):** the fetcher is
+  backend code and is owned by the `dispatch-seams` aspect; this aspect
+  supplies the exact event contract it consumes (plan D7).
 
 ## Out of scope
 
@@ -82,6 +82,8 @@ must reuse the worker's own models/client (worker cannot import backend-api).
 
 - Default note text "Marked resolved in Rereflect." — confirmed in PRD; no config in v1.
 - Whether `last_writeback_*` update uses the token-paste row only (OAuth row has no
-  writeback columns) — v1: record on the credential source that has the columns; if the
-  connection is the legacy OAuth row, record status in the task log + timeline event
-  only (flag in plan).
+  writeback columns) — **RESOLVED (plan D4):** v1 records on the credential source
+  that has the columns; for the legacy OAuth `Integration(type="intercom")` row the
+  outcome is recorded in the task log + timeline event only (no column write).
+  OAuth rows are grandfathered eligible for writeback when `is_active` (the
+  `writeback_enabled` gate applies to the token-paste row only).
