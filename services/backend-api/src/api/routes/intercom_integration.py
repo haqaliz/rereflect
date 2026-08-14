@@ -18,7 +18,7 @@ See docs/planning/intercom-selfhost-ingestion/token-paste-connect/.
 """
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -156,6 +156,20 @@ class IntercomStatusResponse(BaseModel):
 
 class IntercomDisconnectResponse(BaseModel):
     disconnected: bool
+
+
+class IntercomWritebackRequest(BaseModel):
+    enabled: bool
+    action: Optional[Literal["note_only", "note_and_close"]] = None
+    model_config = {"extra": "forbid"}
+
+
+class IntercomWritebackResponse(BaseModel):
+    writeback_enabled: bool
+    writeback_action: str
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
 
 
 # ──────────────────────── Helpers ────────────────────────────────────────────
@@ -442,3 +456,61 @@ def intercom_disconnect(
         db.commit()
         logger.info("Intercom disconnected for org %s", current_org.id)
     return IntercomDisconnectResponse(disconnected=True)
+
+
+@router.patch(
+    "/writeback",
+    response_model=IntercomWritebackResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def intercom_configure_writeback(
+    payload: IntercomWritebackRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Per-org write-back opt-in.
+
+    Pure config write: enabling/disabling never calls Intercom, never
+    enqueues a task, and never touches already-resolved items (no
+    backfill-on-enable, prd.md OQ2). Writes only the token-paste
+    IntercomIntegration row — the legacy OAuth row has no writeback
+    columns, so an OAuth-only org gets a 409 rather than a silent
+    write-nowhere.
+    """
+    row = _get_active_integration(db, current_org.id)
+    if not row:
+        if _has_active_oauth_connection(db, current_org.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This organization's Intercom connection uses the "
+                    "legacy OAuth path, which cannot store write-back "
+                    "configuration. Connect with an access token to "
+                    "enable write-back."
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Intercom integration found.",
+        )
+
+    if payload.action is not None:
+        row.writeback_action = payload.action
+    row.writeback_enabled = payload.enabled
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "Intercom write-back %s for org %s (action=%s)",
+        "enabled" if payload.enabled else "disabled",
+        current_org.id,
+        row.writeback_action,
+    )
+    return IntercomWritebackResponse(
+        writeback_enabled=row.writeback_enabled,
+        writeback_action=row.writeback_action,
+        last_writeback_at=row.last_writeback_at,
+        last_writeback_status=row.last_writeback_status,
+        last_writeback_error=row.last_writeback_error,
+    )
