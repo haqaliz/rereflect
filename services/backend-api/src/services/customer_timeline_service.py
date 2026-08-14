@@ -278,6 +278,59 @@ def _fetch_status_changed(
     ]
 
 
+def _fetch_intercom_writeback(
+    db: Session,
+    org_id: int,
+    email: str,
+    limit: int,
+    cursor_ts: Optional[datetime],
+    cursor_type: Optional[str] = None,
+    cursor_source_id: Optional[int] = None,
+) -> List[TimelineEvent]:
+    """Fetch intercom_writeback FeedbackWorkflowEvent rows written by the
+    write-back task (intercom-writeback R5). Mirrors _fetch_status_changed —
+    same table, same customer-scoping subquery, same cursor semantics.
+    """
+    from src.models.feedback import FeedbackItem as FeedbackModel
+    from src.models.feedback_workflow_event import FeedbackWorkflowEvent
+
+    # Subquery: IDs of all feedbacks for this customer in this org
+    fb_ids_subq = db.query(FeedbackModel.id).filter(
+        FeedbackModel.organization_id == org_id,
+        FeedbackModel.customer_email == email,
+    )
+
+    q = db.query(FeedbackWorkflowEvent).filter(
+        FeedbackWorkflowEvent.organization_id == org_id,
+        FeedbackWorkflowEvent.feedback_id.in_(fb_ids_subq),
+        FeedbackWorkflowEvent.event_type == "intercom_writeback",
+    )
+    if cursor_ts is not None:
+        q = q.filter(_sql_cursor_filter(
+            FeedbackWorkflowEvent.created_at, FeedbackWorkflowEvent.id,
+            "intercom_writeback", cursor_ts, cursor_type, cursor_source_id,
+        ))
+    rows = q.order_by(desc(FeedbackWorkflowEvent.created_at), asc(FeedbackWorkflowEvent.id)).limit(limit).all()
+
+    events: List[TimelineEvent] = []
+    for row in rows:
+        meta = row.metadata_ or {}
+        description = (
+            "Intercom conversation updated and closed"
+            if meta.get("closed")
+            else "Intercom conversation updated with note"
+        )
+        events.append(TimelineEvent(
+            type="intercom_writeback",
+            timestamp=_to_naive_utc(row.created_at),
+            description=description,
+            source="feedback_workflow_events",
+            source_id=row.id,
+            feedback_id=row.feedback_id,
+        ))
+    return events
+
+
 def _fetch_health_score_changed(
     db: Session,
     org_id: int,
@@ -796,6 +849,9 @@ def build_timeline(
     )
     all_events.extend(
         _fetch_status_changed(db, org_id, email, fetch_limit, cursor_ts, cursor_type, cursor_source_id)
+    )
+    all_events.extend(
+        _fetch_intercom_writeback(db, org_id, email, fetch_limit, cursor_ts, cursor_type, cursor_source_id)
     )
     all_events.extend(
         _fetch_health_score_changed(db, org_id, email, fetch_limit, cursor_ts, cursor_type, cursor_source_id)
