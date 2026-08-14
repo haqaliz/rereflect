@@ -498,6 +498,70 @@ item — it can set the pain-point *or* the feature-request field, not both
 independently on the same item. Separate per-kind heads (pain-point vs
 feature-request vs urgency) and multi-label items are the v3 follow-on.
 
+## Per-Org Churn Model (M5.3, off by default)
+
+> ### ⚠️ Upgrading? Two new AI settings, both inert until you touch them
+>
+> Settings → AI gains **`churn_classifier_mode`** (off/shadow/auto, default **off**) and
+> **`churn_autopromote_hold`** (set automatically when you roll back the churn model —
+> the same per-type hold as the M5.2 classifiers). With the mode off — the default —
+> your churn numbers are byte-identical to before the upgrade. Nothing trains and
+> nothing changes until you flip the mode.
+
+Rereflect can train a per-organization **churn classifier** that upgrades
+`churn_probability` on top of the calibrated-heuristic incumbent — and only where it is
+measurably better, with the heuristic kept as the automatic fallback everywhere else.
+
+### What it is
+
+A small **logistic-regression model** trained per org on your own labeled churn events
+(manual, CSV, confirmed CRM / usage-decline suggestions) against a **28-feature customer
+vector**: health components, usage history, feedback aggregates, segment, and renewal
+proximity, with documented defaults when history snapshots are missing. The artifact is
+**JSON only** (coefficients + intercept, no pickle), and prediction is a **pure-stdlib
+sigmoid** — sklearn is needed to train, never to predict.
+
+**Air-gapped installs:** unlike the M5.1 transformer and M5.4 embedding models, this one
+makes **no Hugging Face downloads and has nothing to bake into an image**. The model is
+your org's own coefficients — a few KB of JSON stored in the database. If you can run the
+worker, you can run this.
+
+### Three modes
+
+Go to **Settings → AI**:
+
+| Mode | Behavior | Use case |
+|------|----------|----------|
+| **off** (default) | Calibrated heuristic unchanged, byte-identical. Nothing trains. | Safe default. |
+| **shadow** | Trains weekly and logs the incumbent-vs-challenger delta; **never changes stored probabilities**. | Watch the model on your data without risk. |
+| **auto** | On a qualifying org, the ML probability replaces the heuristic when the challenger wins the A/B. You see the delta and can roll back. | Opt in to ML churn prediction. |
+
+In `auto`, `churn_probability` is the ML point estimate and the confidence-interval
+columns are left **NULL rather than fabricated** — the bootstrap CI belongs to the
+calibrated path, and a made-up interval would be worse than none. Below the label gate,
+or with no active model, the calibrated heuristic applies as today.
+
+### The readiness gate: 500 labels (re-derived, kept)
+
+The churn head only trains once an org holds **500 trainable churn labels**. That number
+was originally copied from the pre-pivot hosted PRD; it has since been **re-derived** by a
+committed simulation study (`scripts/eval_churn_label_gate.py` +
+`eval_results/churn_label_gate.json`, read out on the **Churn Label Gate** card on
+Settings → AI): the simulated crossover — where the logistic challenger clears the +0.02
+bar against the calibrated heuristic — lands at **200 labels**, and the gate clears with
+margin at 500, so **500 stands**. State the caveat yourself when quoting the number: the
+curves are **synthetic** — a simulation is a bound, not a measurement, and no real org is
+at label volume.
+
+### Promotion & rollback
+
+The refit runs weekly (Mondays 06:00 UTC). Because a single-run +0.02 win is
+high-variance at the crossover volume, promotion requires **two consecutive weekly runs**
+clearing the +0.02 macro-F1 bar. Rollback works like the M5.2 classifiers: roll back to
+any prior version from the Accuracy tab (the fourth card is the churn one), which sets
+the per-type **auto-promotion hold** (`churn_autopromote_hold`) — the weekly refit still
+trains and records the delta but does not change the live model until you resume.
+
 ## Adding your own LLM key (BYOK)
 
 To use a hosted frontier model for analysis and the AI Copilot instead of (or alongside)

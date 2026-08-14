@@ -7,6 +7,93 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Fixed — Five Celery beat jobs had never run, in any release
+
+Four of them were in the beat schedule without being **real** Celery tasks: the
+functions existed, the schedule named them, and dispatch raised `NotRegistered` every
+time, so none had ever executed in production:
+
+- `churn_calibration.refit_all_orgs` — the weekly per-org isotonic calibration refit
+  (Mondays 07:45 UTC);
+- `churn_calibration.refit_global_calibration` — the daily global refit (03:00 UTC);
+- `churn_calibration.purge_old_calibration_models` — the stale-model purge;
+- `classifier_training.retrain_all_orgs` — the weekly M5.2 per-org classifier refit
+  (Mondays 06:30 UTC).
+
+All four were plain functions with **no Celery decorator**, while `celery_app.py`
+dispatched them by dotted name. The existing schedule-integrity test only checked that a
+beat's name resolved to an attribute on its module — which an undecorated function
+passes — so the suite was green the whole time. The practical consequence: **churn
+probabilities always came from the identity fallback** (`p = score/100`), because the
+calibrated model that fallback is supposed to replace was never refit.
+
+The fifth entry is a different failure of the same family: the 90-day
+playbook-execution purge (`churn_playbooks.purge_old_executions`) *was* decorated, but
+its explicit `@shared_task name=` lacked the `src.` prefix its beat entry carries. The
+"weekly cleanup job" fix earlier in this release repaired only the beat side, so
+dispatch still raised `NotRegistered` — see the correction on that entry below.
+
+All five are now registered under exactly the name their beat entries dispatch,
+registration-only with no task-body change. `test_beat_schedule_integrity.py` is
+hardened to assert each scheduled task is a **real registered Celery task** whose
+registered name equals the beat string, so this class cannot pass a green suite again.
+Waking up never-run paths is real work, so first production runs may surface latent
+bugs.
+
+### Added — The churn-label gate is re-derived, not assumed (verdict: keep 500)
+
+`CHURN_LABEL_TARGET = 500` was copied verbatim from the pre-pivot hosted PRD, and the
+AI readiness docs said nobody had re-derived what a per-org churn model actually needs
+single-tenant. That measurement now exists and is committed: a reproducible harness
+(`services/backend-api/scripts/eval_churn_label_gate.py`) simulates per-org learning
+curves for the planned logistic challenger against the calibrated-heuristic incumbent
+across label volumes, and its verdict is **keep 500** — no threshold change. The
+simulated crossover, where the challenger clears the +0.02 macro-F1 promotion bar,
+lands at **200 labels** — at full fidelity and again when 25% of feature snapshots are
+reconstructed from documented defaults. At 500 the gate clears with margin.
+
+Honest about what this is: a simulation is a **bound, not a measurement** — no real org
+is at label volume, so the curves are synthetic, and the honest limits are stated on the
+card (`GET /api/v1/settings/ai/churn/label-gate`, rendered as the **Churn Label Gate**
+card on Settings → AI). The same study answered the promotion-cadence question: at the
+crossover volume only 57% of pooled simulated orgs cleared the bar on a single run, so
+the churn head promotes on **consecutive runs**, not M5.2's single-run rule.
+
+### Added — Per-org churn ML model (M5.3)
+
+A per-organization churn classifier that can replace the calibrated heuristic where it
+is measurably better — the heuristic stays the automatic fallback everywhere else.
+
+- **A real feature vector and a small local model.** New analysis-engine core
+  (`analyzer/churn_classifier/`): a 28-feature customer vector (health components,
+  usage history, feedback aggregates, segment, renewal proximity — with documented
+  defaults for missing snapshots), a logistic-regression trainer that serializes to a
+  **JSON-only artifact** (no pickle), and a **pure-stdlib predictor** — sklearn is
+  needed to train, never to predict. **No Hugging Face downloads and nothing to bake
+  into an image** — this model is your org's own coefficients, a few KB of JSON,
+  which matters for air-gapped installs.
+- **Honest A/B, now against the real incumbent.** The challenger is scored against the
+  calibrated-heuristic incumbent on a leakage-free held-out set — and that incumbent
+  only became real with the beat-registration fix above; before it, "beats the
+  heuristic" would have meant "beats a function that never ran."
+- **Three modes, off by default** (`OrgAIConfig.churn_classifier_mode`, Settings → AI):
+  `off` (byte-identical to today), `shadow` (trains and logs the delta, changes
+  nothing), and `auto` (the ML probability replaces the heuristic on qualifying orgs).
+  In `auto`, `churn_probability` is the ML point estimate and the confidence interval
+  columns are left **NULL rather than fabricated** — the bootstrap CI belongs to the
+  calibrated path, not to an ML prediction.
+- **Consecutive-runs promotion.** Weekly refit Mondays 06:00 UTC. Because the gate
+  study showed single-run +0.02 promotion is high-variance at the crossover volume, a
+  challenger must clear the +0.02 macro-F1 bar on **two consecutive weekly runs** to
+  promote. Rollback pauses auto-promotion (`churn_autopromote_hold`), rollback/resume
+  work per the M5.2 conventions, and the accuracy tab shows a fourth
+  incumbent-vs-challenger card with version history.
+- **Honest limits:** the readiness gate is **500 labels** — re-derived and kept by the
+  study above, but the study is a simulation bound, not a measurement. **No real org is
+  at label volume**, so the M5.3 exit ("for a qualifying org, ML beats the heuristic")
+  is **unvalidated**; the spine ships dormant below the gate with shadow-only
+  evaluation until an org qualifies.
+
 ### Customer outreach — shared email primitives (opt-out, unsubscribe, cooldown)
 
 The foundation for reaching churn-risk customers by email, shared by the playbook
@@ -238,6 +325,12 @@ envelope bug above, caught by a guard rather than by a user.
 Fixing it activates a delete, so the timing matters: churn playbooks shipped 2026-07-19, so
 no execution is 90 days old yet and the first run removes nothing. Left unfixed for another
 three months, the first successful run would have purged a real backlog with no warning.
+
+**Correction (2026-08-14):** that fix repaired only the beat side of the mismatch. The
+task's own `@shared_task name=` still lacked the `src.` prefix, so dispatch still raised
+`NotRegistered` — the purge had *still* never run. The task-name side landed on
+`feat/per-org-churn-model` with a name-consistency test; see "Five Celery beat jobs had
+never run" above.
 
 ### Fixed — We were telling people shipped integrations didn't exist
 
