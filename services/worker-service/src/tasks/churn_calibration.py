@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Optional
 
+from celery import shared_task
 from sqlalchemy.orm import Session
 
 from src.database import get_db_session
@@ -64,6 +65,7 @@ def _all_org_ids(db: Session) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+@shared_task(name="src.tasks.churn_calibration.refit_all_orgs")
 def refit_all_orgs() -> dict:
     """For each org with >= 20 non-auto-suggested labels, refit its calibration model.
 
@@ -105,6 +107,7 @@ def refit_all_orgs() -> dict:
     return {"refit_count": refit_count, "skipped": skipped}
 
 
+@shared_task(name="src.tasks.churn_calibration.refit_global_calibration")
 def refit_global_calibration() -> dict:
     """Pool all orgs' non-auto-suggested labels into one global isotonic model.
 
@@ -201,6 +204,7 @@ def refit_global_calibration() -> dict:
     return {"global_model_id": new_global.id, "label_count": label_count}
 
 
+@shared_task(name="src.tasks.churn_calibration.purge_old_calibration_models")
 def purge_old_calibration_models() -> dict:
     """Delete ChurnCalibrationModel rows where is_active=False AND fit_at < now()-90d.
 

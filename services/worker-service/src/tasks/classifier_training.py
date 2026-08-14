@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 import redis
+from celery import shared_task
 from sqlalchemy.orm import Session
 
 from src.config import get_redis_url
@@ -421,6 +422,7 @@ def retrain_org(org_id: int, db: Session, classifier_type: str = _DEFAULT_CLASSI
             pass
 
 
+@shared_task(name="src.tasks.classifier_training.retrain_all_orgs")
 def retrain_all_orgs() -> dict:
     """Weekly driver: retrain every org's classifier for BOTH types (sentiment, category),
     then purge old inactive artifacts once (folded — no separate beat slot, not type-scoped).

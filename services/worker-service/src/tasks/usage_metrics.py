@@ -479,10 +479,6 @@ def process_usage_event(
 
 
 # Same @shared_task pattern as process_usage_event above.
-# NOTE: churn_calibration.py beat tasks (refit_all_orgs, refit_global_calibration,
-# purge_old_calibration_models) appear to be plain functions without @shared_task
-# decorators — they are likely silently unregistered.  See TRACKING.md follow-up.
-# Do NOT edit churn_calibration.py here; address in a separate audit pass.
 @shared_task(name="src.tasks.usage_metrics.recompute_usage_scores")
 def recompute_usage_scores() -> Dict[str, int]:
     """
