@@ -30,6 +30,21 @@ sys.modules.setdefault("src.database", _mock_database)
 # mocks above (same path used when a registration test file runs in isolation).
 import src.celery_app  # noqa: E402,F401
 
+# Keep the task modules imported for the whole session. test_churn_calibration_tasks.py
+# and test_classifier_training_tasks.py run their tasks under an autouse
+# `patch.dict(sys.modules, ...)` fixture (numpy/sklearn stubs), and
+# unittest.mock._patch_dict._unpatch_dict restores by CLEARING sys.modules and
+# re-updating from the entry-time snapshot -- so any module first imported during
+# those tests is evicted. A later re-import creates a fresh module whose
+# @shared_task proxy then resolves to the task cached in the app registry from the
+# evicted import, whose run() reads globals from the dead module: per-test patches
+# land on the new module and are invisible. Importing here (before any such
+# snapshot) keeps the modules resident, so the registry task and the patched
+# module are always the same object. Same import-order-roulette class as
+# src.celery_app above.
+import src.tasks.churn_calibration  # noqa: E402,F401
+import src.tasks.classifier_training  # noqa: E402,F401
+
 import pytest
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
