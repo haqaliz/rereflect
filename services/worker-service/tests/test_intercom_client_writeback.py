@@ -2,7 +2,7 @@
 
 IntercomClient gains `add_note`, `close_conversation` and `fetch_admin_id` so
 the write-back task can annotate and close conversations from worker-service,
-with the error taxonomy the old backend intercom_service.py lacked: 401/403 ->
+with the error taxonomy the old backend write-back module lacked: 401/403 ->
 IntercomAuthError, 429/5xx/network -> IntercomTransientError, and a distinct
 404 -> IntercomNotFoundError so "already closed / not found" is a noop, not a
 confusing auth error.
