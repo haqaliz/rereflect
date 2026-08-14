@@ -95,6 +95,21 @@ class LoadedClassifier:
         label, _proba = _predict(self.artifact, text)
         return label
 
+    def predict_churn(self, feature_vector: list) -> float:
+        """Predict P(churned) (float in [0, 1]) for a frozen churn feature
+        vector via the churn_classifier core's pure-stdlib predict.
+
+        Same lazy import pattern as predict()/predict_label_only(): the
+        analyzer.churn_classifier package (and its stdlib-only predict) is
+        only imported when actually predicting. The artifact must be a
+        churn_logreg JSON artifact (trainer.py shape); a coef/vector length
+        mismatch raises ValueError (frozen-vector contract violation) rather
+        than silently mispredicting.
+        """
+        from analyzer.churn_classifier.predict import predict as _churn_predict
+
+        return float(_churn_predict(self.artifact, feature_vector))
+
 
 def _deserialize(db_row) -> Optional[LoadedClassifier]:
     """Deserialize an OrgClassifierModel row's model_json into a LoadedClassifier.
@@ -107,24 +122,38 @@ def _deserialize(db_row) -> Optional[LoadedClassifier]:
         if not isinstance(mj, dict):
             raise ValueError("model_json is not a dict")
 
-        vectorizer = mj.get("vectorizer")
-        logreg = mj.get("logreg")
-        classes = mj.get("classes")
+        if mj.get("model_type") == "churn_logreg":
+            # Per-org CHURN artifact (analysis-engine churn_classifier
+            # trainer.py shape): flat coef row + scalar intercept + the
+            # frozen feature-name list — JSON-only, no vectorizer/logreg.
+            coef = mj.get("coef")
+            intercept = mj.get("intercept")
+            features = mj.get("features")
+            if not isinstance(coef, list) or not coef:
+                raise ValueError("empty churn coef")
+            if not isinstance(intercept, (int, float)):
+                raise ValueError("missing churn intercept")
+            if not isinstance(features, list) or not features:
+                raise ValueError("empty churn features")
+        else:
+            vectorizer = mj.get("vectorizer")
+            logreg = mj.get("logreg")
+            classes = mj.get("classes")
 
-        if not isinstance(vectorizer, dict) or not isinstance(logreg, dict) or not isinstance(classes, list):
-            raise ValueError("model_json missing vectorizer/logreg/classes")
+            if not isinstance(vectorizer, dict) or not isinstance(logreg, dict) or not isinstance(classes, list):
+                raise ValueError("model_json missing vectorizer/logreg/classes")
 
-        vocabulary = vectorizer.get("vocabulary")
-        if not vocabulary:
-            raise ValueError("empty vocabulary")
+            vocabulary = vectorizer.get("vocabulary")
+            if not vocabulary:
+                raise ValueError("empty vocabulary")
 
-        coef = logreg.get("coef")
-        intercept = logreg.get("intercept")
-        if not coef or not intercept:
-            raise ValueError("empty coef/intercept")
+            coef = logreg.get("coef")
+            intercept = logreg.get("intercept")
+            if not coef or not intercept:
+                raise ValueError("empty coef/intercept")
 
-        if len(coef) != len(intercept):
-            raise ValueError("coef/intercept shape mismatch")
+            if len(coef) != len(intercept):
+                raise ValueError("coef/intercept shape mismatch")
 
         return LoadedClassifier(model_id=db_row.id, fit_at=db_row.fit_at, artifact=mj)
     except Exception as exc:

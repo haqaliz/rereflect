@@ -26,6 +26,11 @@ from src.models import ChurnCalibrationModel, CustomerHealth, CustomerHealthHist
 
 logger = logging.getLogger(__name__)
 
+# Dedicated structured logger for shadow-mode churn ML predictions (same
+# logger name as classifier_predict.py's shadow_logger — the convention is
+# the name). caplog-testable by name.
+shadow_logger = logging.getLogger("rereflect.classifier.shadow")
+
 # Minimum point-delta that triggers a recompute.
 _HYSTERESIS_THRESHOLD = 2
 
@@ -76,9 +81,40 @@ def update(org_id: int, customer_email: str, db: Session) -> None:
     sentiment_trend = _compute_sentiment_trend(health, db)
     bucket = _derive_timeline_bucket(p, sentiment_trend)
 
+    # per-org-churn-model seam (aspect 5): a configured churn ML head upgrades
+    # the calibrated value. off / no active model / corrupt artifact ->
+    # byte-identical calibrated path below (fallback preserved).
+    mode, ml_p, loaded = _churn_ml_challenger(org_id, health, db)
+    if ml_p is not None:
+        shadow_logger.info(
+            "churn probability shadow prediction",
+            extra={
+                "org_id": org_id,
+                "customer_email": customer_email,
+                "classifier_type": "churn",
+                "mode": mode,
+                "incumbent_probability": p,
+                "ml_probability": ml_p,
+                "model_id": loaded.model_id,
+                "fit_at": loaded.fit_at.isoformat() if loaded.fit_at else None,
+            },
+        )
+        if mode == "auto":
+            # ML point estimate REPLACES the calibrated value. The bootstrap CI
+            # (low/high) is computed from calibration breakpoints and does NOT
+            # apply to an ML point estimate -> NULL rather than fabricate an
+            # interval (consumers tolerate NULL: customer_profile_serializer
+            # _float_or_none, frontend `?? undefined`, column nullable=True).
+            # calibration_model_id is intentionally left as the calibrated path
+            # set it: the ML-active state is visible via the active
+            # org_classifier_models row (classifier_type='churn').
+            p = ml_p
+            low = high = None
+            bucket = _derive_timeline_bucket(p, sentiment_trend)
+
     health.churn_probability = round(p, 4)
-    health.churn_probability_low = round(low, 4)
-    health.churn_probability_high = round(high, 4)
+    health.churn_probability_low = None if low is None else round(low, 4)
+    health.churn_probability_high = None if high is None else round(high, 4)
     health.time_to_churn_bucket = bucket
     health.calibration_model_id = model.db_id
     health.probability_computed_at = datetime.utcnow()
@@ -139,6 +175,69 @@ def _should_skip(health: CustomerHealth, db: Session) -> bool:
     current_component = health.churn_risk_component or 0
     delta = abs(current_component - prev_component)
     return delta < _HYSTERESIS_THRESHOLD
+
+
+def _churn_feature_row(health: CustomerHealth) -> dict:
+    """Feature-row keys the churn ML head reads off the CustomerHealth row the
+    existing path already loads.
+
+    Mirrors dataset.py's health-side fetch columns (components, health_score,
+    risk_level, segment); every other frozen feature (usage fields, feedback
+    aggregates, renewal proximity) takes the core's documented missing-snapshot
+    defaults — build_feature_vector never raises on missing fields.
+    """
+    return {
+        "churn_risk_component": health.churn_risk_component,
+        "sentiment_component": health.sentiment_component,
+        "resolution_component": health.resolution_component,
+        "frequency_component": health.frequency_component,
+        "usage_component": health.usage_component,
+        "crm_component": health.crm_component,
+        "health_score": health.health_score,
+        "risk_level": health.risk_level,
+        "segment": health.segment,
+    }
+
+
+def _churn_ml_challenger(org_id: int, health: CustomerHealth, db: Session) -> tuple:
+    """Compute the churn ML probability when the seam is on.
+
+    Returns (mode, ml_p, loaded):
+      (None, None, None)  — seam off ('off'/unconfigured), no active churn
+                            model, or the ML computation failed (calibrated
+                            path preserved, failure logged — NEVER silent).
+      ('shadow'|'auto', ml_p, loaded) — challenger prediction ready.
+
+    Lazy-imports the analysis-engine churn core so this module stays
+    importable in ML-wheel-less environments (the pure-stdlib predict is the
+    only part used here). Never raises to the caller.
+    """
+    try:
+        from src.services.classifier_resolver import resolve_classifier
+        from src.services.classifier_predict import load_active_classifier
+
+        resolved = resolve_classifier(org_id, "churn", db)
+        if resolved is None:
+            return (None, None, None)  # off / unconfigured — byte-identical path.
+
+        loaded = load_active_classifier(org_id, "churn", db)
+        if loaded is None:
+            # No active churn model / corrupt artifact (loader logged the
+            # corruption) — incumbent calibrated path retained, no shadow
+            # line (there is no challenger prediction to disclose).
+            return (None, None, None)
+
+        from analyzer.churn_classifier.features import build_feature_vector
+
+        ml_p = loaded.predict_churn(build_feature_vector(_churn_feature_row(health)))
+        return (resolved.mode, float(ml_p), loaded)
+
+    except Exception as exc:
+        logger.warning(
+            "churn ML challenger failed for org=%s customer=%s: %s",
+            org_id, getattr(health, "customer_email", "?"), exc, exc_info=True,
+        )
+        return (None, None, None)
 
 
 def _load_active_model(org_id: int, db: Session) -> _Model:
