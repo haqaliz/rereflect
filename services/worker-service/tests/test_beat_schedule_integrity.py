@@ -69,6 +69,32 @@ def test_beat_entry_resolves_to_a_real_task(name, task_path):
     )
 
 
+@pytest.mark.parametrize("name,task_path", _beat_entries())
+def test_beat_entry_registered_task_name_matches_beat_string(name, task_path):
+    """The registered task's own `name` must equal the beat entry's task string.
+
+    Catches the churn_playbooks failure class: `purge_old_executions` was
+    decorated, but its explicit `name=` lacked the `src.` prefix the beat
+    entry carries, so dispatch raised NotRegistered despite a decorated
+    function. Importing the module first keeps the registry lookup
+    order-independent (see the module docstring).
+    """
+    module_path, _, _ = task_path.rpartition(".")
+    importlib.import_module(module_path)
+
+    assert task_path in celery_app.tasks, (
+        f"Beat entry '{name}' schedules '{task_path}', but no task is "
+        "registered under that name (see test_beat_entry_resolves_to_a_real_task)."
+    )
+
+    assert celery_app.tasks[task_path].name == task_path, (
+        f"Beat entry '{name}' schedules '{task_path}', but the registered task "
+        f"carries name={celery_app.tasks[task_path].name!r}. The schedule and "
+        "the task registration disagree, so dispatch raises NotRegistered -- a "
+        "job the operator believes is running and which is not."
+    )
+
+
 def test_beat_entry_modules_are_in_the_include_list():
     """A task module missing from `include` is never imported by the worker, so
     its beat entry silently never fires."""

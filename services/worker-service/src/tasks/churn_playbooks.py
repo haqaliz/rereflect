@@ -62,7 +62,7 @@ def run_playbook(self, execution_id: int) -> dict:
             return {"status": "error", "error": str(exc)}
 
 
-@shared_task(name="tasks.churn_playbooks.purge_old_executions")
+@shared_task(name="src.tasks.churn_playbooks.purge_old_executions")
 def purge_old_executions() -> dict:
     """
     Delete ChurnPlaybookExecution rows older than 90 days.
