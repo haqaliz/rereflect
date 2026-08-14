@@ -29,6 +29,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from src.clients.intercom import IntercomTransientError
 from src.models import (
     Base,
     FeedbackItem,
@@ -761,3 +762,301 @@ class TestLegacyOAuthPath:
         assert len(events) == 1
         assert events[0].metadata_["note_sent"] is True
         assert events[0].metadata_["closed"] is True
+
+
+# ---------------------------------------------------------------------------
+# TestSoftPauseScopeError (AC3 403 — soft-pause, is_active NEVER touched)
+# ---------------------------------------------------------------------------
+
+
+class TestSoftPauseScopeError:
+    def test_403_records_missing_write_scope_and_never_flips_is_active(self, db):
+        from src.clients.intercom import IntercomAuthError
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        mock_client = _make_mock_client()
+        mock_client.add_note.side_effect = IntercomAuthError(
+            "missing conversation:write scope"
+        )
+
+        result, _, _ = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": None}], mock_client=mock_client
+        )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "error", "reason": "missing_write_scope"}
+        ]
+
+        db.expire_all()
+        row = db.query(IntercomIntegration).filter_by(id=integ.id).first()
+        assert row.last_writeback_status == "error: missing_write_scope"
+        assert row.last_writeback_error == "missing conversation:write scope"
+        assert row.last_writeback_at is not None
+        assert row.is_active is True  # never touched by writeback
+
+        # Marker NOT set — the operator fixing the scope can retry without a
+        # second dispatch.
+        db.expire_all()
+        assert (
+            db.query(FeedbackItem).filter_by(id=item.id).first().intercom_writeback_at
+            is None
+        )
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["reason"] == "missing_write_scope"
+        assert events[0].metadata_["note_sent"] is False
+        assert events[0].metadata_["closed"] is False
+
+
+# ---------------------------------------------------------------------------
+# TestAlreadyClosed (AC3 404 — idempotent-by-404, marker set, re-run skips)
+# ---------------------------------------------------------------------------
+
+
+class TestAlreadyClosed:
+    def test_404_note_is_noop_already_closed_and_sets_marker(self, db):
+        from src.clients.intercom import IntercomNotFoundError
+
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        mock_client = _make_mock_client()
+        mock_client.add_note.side_effect = IntercomNotFoundError(
+            "conversation not found"
+        )
+
+        result, _, _ = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": None}], mock_client=mock_client
+        )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "noop", "reason": "already_closed"}
+        ]
+
+        # Marker set (404 is a terminal, idempotent outcome) — committed per
+        # item, visible on a fresh session.
+        with _fake_db_session() as fresh:
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=item.id).first().intercom_writeback_at
+                is not None
+            )
+
+        db.expire_all()
+        row = db.query(IntercomIntegration).filter_by(organization_id=org.id).first()
+        assert row.last_writeback_status == "noop: already_closed"
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["note_sent"] is True  # 404-idempotent
+        assert events[0].metadata_["closed"] is True  # already closed
+        assert events[0].metadata_["reason"] == "already_closed"
+
+        # Re-run skips via guard 3 — zero calls.
+        rerun, _, mc2 = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": None}]
+        )
+        assert rerun["results"] == [
+            {"id": item.id, "status": "noop", "reason": "already_written"}
+        ]
+        mc2.add_note.assert_not_called()
+        mc2.close_conversation.assert_not_called()
+
+    def test_close_404_after_note_is_already_closed(self, db):
+        from src.clients.intercom import IntercomNotFoundError
+
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        mock_client = _make_mock_client()
+        mock_client.close_conversation.side_effect = IntercomNotFoundError(
+            "already closed"
+        )
+
+        result, _, _ = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": None}], mock_client=mock_client
+        )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "noop", "reason": "already_closed"}
+        ]
+        mock_client.add_note.assert_called_once()
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["note_sent"] is True
+        assert events[0].metadata_["closed"] is True
+        assert events[0].metadata_["reason"] == "already_closed"
+
+        with _fake_db_session() as fresh:
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=item.id).first().intercom_writeback_at
+                is not None
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestTransientRetry (AC3 429/5xx — whole-payload retry, no eager mode)
+# ---------------------------------------------------------------------------
+
+
+class TestTransientRetry:
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            IntercomTransientError("rate limited (429)"),
+            IntercomTransientError("intercom returned 500"),
+        ],
+    )
+    def test_transient_error_triggers_retry(self, db, exc):
+        from celery.exceptions import Retry
+        from src.clients.intercom import IntercomTransientError
+
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        mock_client = _make_mock_client()
+        mock_client.add_note.side_effect = exc
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = Retry()
+
+        # The body never swallows Retry — it propagates out of the run
+        # (whole-payload abort-and-retry semantics).
+        with pytest.raises(Retry):
+            _run_push(
+                db, org.id, [{"id": item.id, "resolution_note": None}],
+                mock_client=mock_client, task_self=task_self,
+            )
+
+        task_self.retry.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestReResolve (AC4 — marker makes a re-resolve after reopen a noop)
+# ---------------------------------------------------------------------------
+
+
+class TestReResolve:
+    def test_reresolve_after_reopen_is_noop(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id, intercom_writeback_at=datetime.utcnow())
+
+        result, _, mock_client = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": None}]
+        )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "noop", "reason": "already_written"}
+        ]
+        _assert_zero_client_calls(mock_client)
+
+
+# ---------------------------------------------------------------------------
+# TestBatchIsolation (AC5 — one bad item never aborts the batch)
+# ---------------------------------------------------------------------------
+
+
+class TestBatchIsolation:
+    def test_one_bad_item_does_not_abort_the_batch(self, db):
+        from src.clients.intercom import IntercomAuthError
+
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        ok_1 = _make_feedback(db, org.id, source_metadata={"conversation_id": "conv-1"})
+        bad = _make_feedback(db, org.id, source_metadata={"conversation_id": "conv-2"})
+        ok_2 = _make_feedback(db, org.id, source_metadata={"conversation_id": "conv-3"})
+
+        mock_client = _make_mock_client()
+        mock_client.add_note.side_effect = [
+            None,
+            IntercomAuthError("no write scope"),
+            None,
+        ]
+
+        result, _, _ = _run_push(
+            db,
+            org.id,
+            [
+                {"id": ok_1.id, "resolution_note": None},
+                {"id": bad.id, "resolution_note": None},
+                {"id": ok_2.id, "resolution_note": None},
+            ],
+            mock_client=mock_client,
+        )
+
+        assert result["processed"] == 3
+        assert [r["status"] for r in result["results"]] == ["ok", "error", "ok"]
+        assert result["results"][1]["reason"] == "missing_write_scope"
+
+        # Both good items have their markers committed; the failed item does
+        # not (stays re-runnable).
+        with _fake_db_session() as fresh:
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=ok_1.id).first().intercom_writeback_at
+                is not None
+            )
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=ok_2.id).first().intercom_writeback_at
+                is not None
+            )
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=bad.id).first().intercom_writeback_at
+                is None
+            )
+
+    def test_prior_items_markers_survive_mid_batch_retry(self, db):
+        """Per-item commit proof: [ok, 429, ok] aborts at the 429; the first
+        item's marker is already committed, so the retry run (guard 3) can
+        never duplicate its note."""
+        from celery.exceptions import Retry
+        from src.clients.intercom import IntercomTransientError
+
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        ok_1 = _make_feedback(db, org.id, source_metadata={"conversation_id": "conv-1"})
+        bad = _make_feedback(db, org.id, source_metadata={"conversation_id": "conv-2"})
+        ok_2 = _make_feedback(db, org.id, source_metadata={"conversation_id": "conv-3"})
+
+        mock_client = _make_mock_client()
+        mock_client.add_note.side_effect = [
+            None,
+            IntercomTransientError("rate limited"),
+            None,
+        ]
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = Retry()
+
+        with pytest.raises(Retry):
+            _run_push(
+                db,
+                org.id,
+                [
+                    {"id": ok_1.id, "resolution_note": None},
+                    {"id": bad.id, "resolution_note": None},
+                    {"id": ok_2.id, "resolution_note": None},
+                ],
+                mock_client=mock_client, task_self=task_self,
+            )
+
+        task_self.retry.assert_called_once()
+        # The abort never got to item 3.
+        mock_client.add_note.assert_called_once()
+
+        with _fake_db_session() as fresh:
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=ok_1.id).first().intercom_writeback_at
+                is not None
+            )
+            assert (
+                fresh.query(FeedbackItem).filter_by(id=bad.id).first().intercom_writeback_at
+                is None
+            )
