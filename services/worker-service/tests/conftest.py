@@ -43,6 +43,7 @@ import src.celery_app  # noqa: E402,F401
 # module are always the same object. Same import-order-roulette class as
 # src.celery_app above.
 import src.tasks.churn_calibration  # noqa: E402,F401
+import src.tasks.churn_classifier_training  # noqa: E402,F401
 import src.tasks.classifier_training  # noqa: E402,F401
 
 import pytest

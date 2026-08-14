@@ -2,6 +2,9 @@
 Celery tasks for weekly per-org churn classifier retraining — worker-churn-
 trainer-and-schedule aspect (M5.3 per-org-churn-model).
 
+Beat schedule (registered in celery_app.py):
+- retrain_all_orgs → Mondays 06:00 UTC (before retrain-classifier-weekly 06:30).
+
 Schedule intent: the ML challenger's incumbent is the org's active calibrated
 heuristic. The incumbent's weekly per-org refit (refit-churn-calibration-weekly)
 runs Mondays 07:45 UTC — AFTER this task — and the global incumbent refits
@@ -56,6 +59,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 import redis
+from celery import shared_task
 from sqlalchemy.orm import Session
 
 from src.config import get_redis_url
@@ -71,15 +75,19 @@ from src.models import (
     OrgAIConfig,
     OrgClassifierEvalRun,
     OrgClassifierModel,
+    Organization,
 )
 
 logger = logging.getLogger(__name__)
 
 _CHURN_CLASSIFIER_TYPE = "churn"
 
-# Parity with calibration_refit._MIN_LABELS: the label window that defines a
-# churn label (used by _label0_rows).
+# Parity with calibration_refit._MIN_LABELS / churn_calibration._ORG_LABEL_THRESHOLD
+# (the sweep gate: at least this many qualifying events before the org is worth
+# a retrain call). The in-window dataset gate is the core's MIN_LABELS.
+_ORG_LABEL_THRESHOLD = 20
 _LABEL_WINDOW_DAYS = 180
+_PURGE_AFTER_DAYS = 90
 _LOCK_TIMEOUT_SECONDS = 600
 
 # Redis client for per-org advisory locking — mirrors tasks/classifier_training.py.
@@ -92,6 +100,25 @@ def _get_redis():
     if _redis_client is None:
         _redis_client = redis.from_url(get_redis_url(0))
     return _redis_client
+
+
+def _all_org_ids(db: Session) -> list[int]:
+    """Return all distinct organization IDs (mirrors churn_calibration._all_org_ids)."""
+    rows = db.query(Organization.id).all()
+    return [r[0] for r in rows]
+
+
+def _count_org_labels(org_id: int, db: Session) -> int:
+    """Count of non-auto-suggested churn events for the org (all time) —
+    mirrors churn_calibration._count_org_labels (calibrator label semantics)."""
+    return (
+        db.query(CustomerChurnEvent)
+        .filter(
+            CustomerChurnEvent.organization_id == org_id,
+            CustomerChurnEvent.source != "auto_suggested",
+        )
+        .count()
+    )
 
 
 def _round_or_none(value: Optional[float]) -> Optional[float]:
@@ -662,3 +689,112 @@ def _promote_train_fn(dataset: dict) -> dict:
     from analyzer.churn_classifier.trainer import train_churn_classifier
 
     return train_churn_classifier(dataset)
+
+
+# ---------------------------------------------------------------------------
+# retrain_all_orgs + purge
+# ---------------------------------------------------------------------------
+
+
+@shared_task(name="src.tasks.churn_classifier_training.retrain_all_orgs")
+def retrain_all_orgs() -> dict:
+    """Weekly driver: retrain the churn classifier for every org with a
+    trainable label count, then purge old inactive churn artifacts once
+    (folded — no separate beat slot).
+
+    Per-org try/except isolation: one org's exception is logged and the shared
+    session rolled back, it never aborts the rest of the batch.
+
+    Beat: Mondays 06:00 UTC (before the corrections-classifier batch at 06:30;
+    the challenger evaluates against the incumbent refit of the previous week —
+    see the module docstring). Returns tallies:
+    {"trained", "promoted", "candidates", "skipped", "held", "locked"}.
+    """
+    trained = 0
+    promoted = 0
+    candidates = 0
+    skipped = 0
+    held = 0
+    locked = 0
+
+    with get_db_session() as db:
+        org_ids = _all_org_ids(db)
+        for org_id in org_ids:
+            if _count_org_labels(org_id, db) < _ORG_LABEL_THRESHOLD:
+                skipped += 1
+                logger.info(
+                    "retrain_all_orgs: org=%s skipped (labels < %s)",
+                    org_id, _ORG_LABEL_THRESHOLD,
+                )
+                continue
+
+            try:
+                result = retrain_org(org_id, db)
+            except Exception:
+                logger.error(
+                    "retrain_all_orgs: org=%s FAILED", org_id,
+                    exc_info=True,
+                )
+                # This db session is shared across every org in the batch. A
+                # failed flush/commit leaves the session needing a rollback;
+                # without it, the NEXT iteration's first DB operation raises
+                # sqlalchemy.exc.PendingRollbackError and the batch cascades.
+                db.rollback()
+                continue
+
+            if result.get("reason") == "locked":
+                locked += 1
+            elif result.get("skipped"):
+                skipped += 1
+            else:
+                trained += 1
+                if result.get("promoted"):
+                    promoted += 1
+                elif result.get("promoted_candidate"):
+                    candidates += 1
+                elif result.get("held"):
+                    held += 1
+
+    purge_result = purge_old_churn_classifier_models()
+    logger.info(
+        "retrain_all_orgs: done trained=%s promoted=%s candidates=%s "
+        "skipped=%s held=%s locked=%s purged=%s",
+        trained, promoted, candidates, skipped, held, locked,
+        purge_result.get("deleted"),
+    )
+    return {
+        "trained": trained,
+        "promoted": promoted,
+        "candidates": candidates,
+        "skipped": skipped,
+        "held": held,
+        "locked": locked,
+    }
+
+
+def purge_old_churn_classifier_models() -> dict:
+    """Delete OrgClassifierModel rows where classifier_type='churn' AND
+    is_active=False AND fit_at < now()-90d.
+
+    Folded into retrain_all_orgs (no separate beat slot). Type-scoped so this
+    never touches sentiment/category/urgency rows (the M5.2 purge owns those).
+    Mirrors churn_calibration.purge_old_calibration_models. Returns {"deleted": N}.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=_PURGE_AFTER_DAYS)
+
+    with get_db_session() as db:
+        old_rows = (
+            db.query(OrgClassifierModel)
+            .filter(
+                OrgClassifierModel.classifier_type == _CHURN_CLASSIFIER_TYPE,
+                OrgClassifierModel.is_active == False,  # noqa: E712
+                OrgClassifierModel.fit_at < cutoff,
+            )
+            .all()
+        )
+        for row in old_rows:
+            db.delete(row)
+        db.commit()
+
+    logger.info("purge_old_churn_classifier_models: deleted=%s", len(old_rows))
+    return {"deleted": len(old_rows)}

@@ -51,6 +51,7 @@ from src.models import (
 
 from tests.test_classifier_training_tasks import (
     _fake_redis_lock_acquired,
+    _fake_redis_lock_denied,
     _make_org,
 )
 
@@ -276,7 +277,9 @@ def _patch_churn_core(decision: str = "retained", *, n: int = 25,
 
 def test_task_module_importable():
     tasks = _get_tasks()
+    assert hasattr(tasks, "retrain_all_orgs")
     assert hasattr(tasks, "retrain_org")
+    assert hasattr(tasks, "purge_old_churn_classifier_models")
 
 
 def test_no_module_level_sklearn_import():
@@ -292,6 +295,32 @@ def test_no_module_level_sklearn_import():
         assert not re.match(r"^\s*import\s+numpy\b", line), line
         assert not re.match(r"^\s*from\s+sklearn\b", line), line
         assert not re.match(r"^\s*from\s+numpy\b", line), line
+
+
+def test_task_module_in_include():
+    """src.tasks.churn_classifier_training is registered in celery_app's include=[...]."""
+    import src.celery_app as celery_app
+
+    assert "src.tasks.churn_classifier_training" in celery_app.celery_app.conf.include
+
+
+def test_beat_entry_registered_and_ordered():
+    """celery_app.conf.beat_schedule has retrain-churn-classifier-weekly at
+    Mon 06:00 UTC, strictly before retrain-classifier-weekly (06:30)."""
+    from celery.schedules import crontab
+
+    import src.celery_app as celery_app
+
+    entries = celery_app.celery_app.conf.beat_schedule
+    churn_entry = entries.get("retrain-churn-classifier-weekly")
+    assert churn_entry is not None
+    assert churn_entry["task"] == "src.tasks.churn_classifier_training.retrain_all_orgs"
+    assert churn_entry["schedule"] == crontab(hour=6, minute=0, day_of_week=1)
+
+    sentiment_entry = entries.get("retrain-classifier-weekly")
+    assert sentiment_entry is not None
+    from tests.test_beat_schedule_integrity import _crontab_key
+    assert _crontab_key(churn_entry["schedule"]) < _crontab_key(sentiment_entry["schedule"])
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +615,53 @@ def test_retrain_org_wires_build_incumbent_predict_with_org_loader(db):
     calibrated = captured_loader["loader"]()
     assert calibrated is not None
     assert calibrated(50) == pytest.approx(0.5, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — lock behavior
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_org_acquires_per_org_churn_lock(db):
+    org = _make_org(db)
+    fake_r, fake_lock = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.churn_classifier_training._get_redis", return_value=fake_r), \
+         _patch_churn_core("retained", n=25):
+        tasks = _get_tasks()
+        tasks.retrain_org(org.id, db)
+
+    fake_r.lock.assert_called_once_with(
+        f"lock:classifier_refit:churn:{org.id}", timeout=600, blocking=False,
+    )
+    fake_lock.acquire.assert_called_once_with(blocking=False)
+
+
+def test_retrain_org_lock_not_acquired_skips_without_writes(db):
+    org = _make_org(db)
+    fake_r, _ = _fake_redis_lock_denied()
+
+    with patch("src.tasks.churn_classifier_training._get_redis", return_value=fake_r):
+        tasks = _get_tasks()
+        result = tasks.retrain_org(org.id, db)
+
+    assert result == {"decision": "skipped", "skipped": True, "reason": "locked"}
+    assert db.query(OrgClassifierEvalRun).count() == 0
+    assert db.query(OrgClassifierModel).count() == 0
+
+
+def test_retrain_org_releases_lock_in_finally(db):
+    org = _make_org(db)
+    fake_r, fake_lock = _fake_redis_lock_acquired()
+
+    with patch("src.tasks.churn_classifier_training._get_redis", return_value=fake_r), \
+         patch("analyzer.churn_classifier.dataset.fetch_churn_rows",
+               side_effect=RuntimeError("boom")):
+        tasks = _get_tasks()
+        with pytest.raises(RuntimeError):
+            tasks.retrain_org(org.id, db)
+
+    fake_lock.release.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -889,3 +965,204 @@ def test_active_invariant_holds_across_repeated_promotions(db):
         )
         assert active_count == 1, f"cycle {i}: expected exactly 1 active churn row"
 
+
+# ---------------------------------------------------------------------------
+# Phase 8 — purge (inactive + >90d, churn-type-scoped)
+# ---------------------------------------------------------------------------
+
+
+def test_purge_deletes_inactive_churn_older_than_90d(db):
+    org = _make_org(db)
+    old_inactive = OrgClassifierModel(
+        organization_id=org.id,
+        classifier_type="churn",
+        model_json={"model_type": "churn_logreg"},
+        label_count=20,
+        fit_at=datetime.utcnow() - timedelta(days=91),
+        is_active=False,
+    )
+    db.add(old_inactive)
+    db.commit()
+
+    with patch("src.tasks.churn_classifier_training.get_db_session") as mock_db_ctx:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        tasks = _get_tasks()
+        tasks.purge_old_churn_classifier_models()
+
+    assert db.query(OrgClassifierModel).filter_by(id=old_inactive.id).first() is None
+
+
+def test_purge_keeps_recent_inactive_and_active_and_other_types(db):
+    org = _make_org(db)
+    recent_inactive = OrgClassifierModel(
+        organization_id=org.id,
+        classifier_type="churn",
+        model_json={"model_type": "churn_logreg"},
+        label_count=20,
+        fit_at=datetime.utcnow() - timedelta(days=89),
+        is_active=False,
+    )
+    old_active = OrgClassifierModel(
+        organization_id=org.id,
+        classifier_type="churn",
+        model_json={"model_type": "churn_logreg"},
+        label_count=20,
+        fit_at=datetime.utcnow() - timedelta(days=200),
+        is_active=True,
+    )
+    old_sentiment_inactive = OrgClassifierModel(
+        organization_id=org.id,
+        classifier_type="sentiment",
+        model_json={"model_type": "tfidf_logreg"},
+        label_count=20,
+        fit_at=datetime.utcnow() - timedelta(days=200),
+        is_active=False,
+    )
+    db.add_all([recent_inactive, old_active, old_sentiment_inactive])
+    db.commit()
+
+    with patch("src.tasks.churn_classifier_training.get_db_session") as mock_db_ctx:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+
+        tasks = _get_tasks()
+        result = tasks.purge_old_churn_classifier_models()
+
+    assert result == {"deleted": 0}
+    assert db.query(OrgClassifierModel).filter_by(id=recent_inactive.id).first() is not None
+    assert db.query(OrgClassifierModel).filter_by(id=old_active.id).first() is not None
+    # type-scoped: an old inactive SENTIMENT row is not this purge's business
+    assert db.query(OrgClassifierModel).filter_by(id=old_sentiment_inactive.id).first() is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 — retrain_all_orgs orchestration + per-org isolation + folded purge
+# ---------------------------------------------------------------------------
+
+
+def test_retrain_all_orgs_only_processes_orgs_with_trainable_labels(db):
+    org_eligible = _make_org(db, "Eligible")
+    org_below = _make_org(db, "Below")
+    for i in range(25):
+        _make_churn_event(db, org_eligible.id, f"c{i}@x.com")
+    for i in range(5):
+        _make_churn_event(db, org_below.id, f"b{i}@x.com")
+
+    with patch("src.tasks.churn_classifier_training.retrain_org") as mock_retrain, \
+         patch("src.tasks.churn_classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.churn_classifier_training.purge_old_churn_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_retrain.return_value = {"decision": "retained", "retained": True, "n": 25}
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()
+
+    mock_retrain.assert_called_once_with(org_eligible.id, db)
+    assert result == {"trained": 1, "promoted": 0, "candidates": 0,
+                      "skipped": 1, "held": 0, "locked": 0}
+
+
+def test_retrain_all_orgs_tallies_all_decisions(db):
+    orgs = [_make_org(db, f"Org{i}") for i in range(6)]
+    for org in orgs:
+        for i in range(25):
+            _make_churn_event(db, org.id, f"c{i}@x.com")
+
+    results_by_org = {
+        orgs[0].id: {"decision": "promoted", "promoted": True, "n": 25},
+        orgs[1].id: {"decision": "promoted_candidate", "promoted_candidate": True, "n": 25},
+        orgs[2].id: {"decision": "retained", "retained": True, "n": 25},
+        orgs[3].id: {"decision": "held", "held": True, "n": 25},
+        orgs[4].id: {"decision": "skipped", "skipped": True, "reason": "below_min_labels", "n": 5},
+        orgs[5].id: {"skipped": True, "reason": "locked"},
+    }
+
+    def side_effect(org_id, session):
+        return results_by_org[org_id]
+
+    with patch("src.tasks.churn_classifier_training.retrain_org", side_effect=side_effect), \
+         patch("src.tasks.churn_classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.churn_classifier_training.purge_old_churn_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_purge.return_value = {"deleted": 2}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()
+
+    assert result == {"trained": 4, "promoted": 1, "candidates": 1,
+                      "skipped": 1, "held": 1, "locked": 1}
+
+
+def test_retrain_all_orgs_isolates_per_org_exception(db):
+    """org2's failure must leave the SHARED session usable for org1/org3's
+    iterations (rollback discipline)."""
+    org1 = _make_org(db, "Org1")
+    org2 = _make_org(db, "Org2")
+    org3 = _make_org(db, "Org3")
+    for org in (org1, org2, org3):
+        for i in range(25):
+            _make_churn_event(db, org.id, f"c{i}@x.com")
+
+    processed = []
+
+    def side_effect(org_id, session):
+        processed.append(org_id)
+        if org_id == org2.id:
+            bad_run = OrgClassifierEvalRun(
+                organization_id=org2.id,
+                classifier_type=None,  # NOT NULL violation
+                decision=None,  # NOT NULL violation
+                n=1,
+            )
+            session.add(bad_run)
+            session.flush()  # raises IntegrityError
+            return {"decision": "retained", "retained": True, "n": 25}  # unreachable
+        good_run = OrgClassifierEvalRun(
+            organization_id=org_id,
+            classifier_type="churn",
+            decision="retained",
+            n=25,
+        )
+        session.add(good_run)
+        session.commit()
+        return {"decision": "retained", "retained": True, "n": 25}
+
+    with patch("src.tasks.churn_classifier_training.retrain_org", side_effect=side_effect), \
+         patch("src.tasks.churn_classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.churn_classifier_training.purge_old_churn_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_purge.return_value = {"deleted": 0}
+
+        tasks = _get_tasks()
+        result = tasks.retrain_all_orgs()  # must not raise
+
+    assert set(processed) == {org1.id, org2.id, org3.id}
+    assert result["trained"] == 2  # org1 + org3; org2 isolated-failed
+
+    org3_runs = db.query(OrgClassifierEvalRun).filter_by(organization_id=org3.id).all()
+    assert len(org3_runs) == 1
+
+
+def test_retrain_all_orgs_runs_purge_once(db):
+    org = _make_org(db)
+    for i in range(25):
+        _make_churn_event(db, org.id, f"c{i}@x.com")
+
+    with patch("src.tasks.churn_classifier_training.retrain_org") as mock_retrain, \
+         patch("src.tasks.churn_classifier_training.get_db_session") as mock_db_ctx, \
+         patch("src.tasks.churn_classifier_training.purge_old_churn_classifier_models") as mock_purge:
+        mock_db_ctx.return_value.__enter__ = MagicMock(return_value=db)
+        mock_db_ctx.return_value.__exit__ = MagicMock(return_value=False)
+        mock_retrain.return_value = {"decision": "retained", "retained": True, "n": 25}
+        mock_purge.return_value = {"deleted": 3}
+
+        tasks = _get_tasks()
+        tasks.retrain_all_orgs()
+
+    mock_purge.assert_called_once()

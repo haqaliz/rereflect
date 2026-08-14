@@ -53,6 +53,7 @@ celery_app = Celery(
         "src.tasks.automation",
         "src.tasks.churn_playbooks",
         "src.tasks.churn_calibration",
+        "src.tasks.churn_classifier_training",
         "src.tasks.classifier_training",
         "src.tasks.usage_metrics",
         "src.tasks.segments",
@@ -212,6 +213,19 @@ celery_app.conf.beat_schedule = {
     "refit-churn-calibration-weekly": {
         "task": "src.tasks.churn_calibration.refit_all_orgs",
         "schedule": crontab(hour=7, minute=45, day_of_week=1),
+    },
+    # Retrain per-org CHURN classifier — Mondays 06:00 UTC (before the 06:30
+    # corrections-classifier batch, in the same free Monday window). Ordering
+    # intent: the churn challenger evaluates against the org's active
+    # CALIBRATED heuristic as its incumbent; that incumbent is refit by
+    # refit-global-calibration-daily (03:00) and refit-churn-calibration-weekly
+    # (Mon 07:45 — AFTER this slot), so the challenger at week N+1 always
+    # scores against the incumbent as refit in week N. Consecutive-runs
+    # promotion: two weekly clears (+0.02 macro-F1) before the model swap.
+    # Folds in purge_old_churn_classifier_models after the loop.
+    "retrain-churn-classifier-weekly": {
+        "task": "src.tasks.churn_classifier_training.retrain_all_orgs",
+        "schedule": crontab(hour=6, minute=0, day_of_week=1),
     },
     # Retrain per-org sentiment corrections classifier — Mondays 06:30 UTC
     # (uncrowded slot: before generate-churn-insights at 07:00. Folds in
