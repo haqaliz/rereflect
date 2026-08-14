@@ -70,6 +70,16 @@ class IntercomIntegration(Base):
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
 
+    # Intercom write-back (intercom-writeback aspect): per-org opt-in, off by
+    # default, + status readout. Mirrors the CRM writeback column set
+    # (hubspot_integration.py). writeback_action is validated at the Pydantic
+    # layer (note_only | note_and_close) — no DB CHECK.
+    writeback_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    writeback_action = Column(String(32), nullable=False, default="note_and_close", server_default="note_and_close")
+    last_writeback_at = Column(DateTime(timezone=True), nullable=True)
+    last_writeback_status = Column(String(64), nullable=True)
+    last_writeback_error = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

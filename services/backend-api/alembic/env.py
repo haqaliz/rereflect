@@ -26,6 +26,7 @@ from src.models.base import Base
 from src.models.organization import Organization
 from src.models.user import User
 from src.models.feedback import FeedbackItem
+from src.models.intercom_integration import IntercomIntegration
 
 target_metadata = Base.metadata
 
