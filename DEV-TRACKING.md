@@ -501,7 +501,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   that pass is this one. Registration-only, no task-body change. See
   `docs/planning/per-org-churn-model/calibration-beat-fix/`.
 
-### Deferred v2 — Intercom (opened 2026-08-01, all NOT STARTED)
+### Deferred v2 — Intercom (opened 2026-08-01; 1 SHIPPED, 3 NOT STARTED)
 
 Recorded here rather than only in `docs/planning/intercom-selfhost-ingestion/` so they are
 visible from the backlog. None block anything; the integration is fully operable without them.
@@ -509,9 +509,11 @@ visible from the backlog. None block anything; the integration is fully operable
 - **`intercom-pull-replies-and-ratings`** — the 15-minute pull ingests the **first message**
   of a conversation only. Replies and ratings arrive via the webhook path, so a pull-only
   install (no webhook wired) never sees them. Needs conversation-parts fetching.
-- **`intercom-writeback`** — still no write-back; `intercom_service.py` remains orphaned with
-  zero production callers. Existing P2 below covers the wire-or-delete decision. **No
-  "Two-Way Sync" copy may return until it is wired.**
+- ~~**`intercom-writeback`** — still no write-back; `intercom_service.py` remains
+  orphaned with zero production callers.~~ — **SHIPPED 2026-08-16** via
+  `feat/intercom-writeback`: the wire-or-delete P2 landed as **wire it** — opt-in
+  note + close on resolve, off by default, resolved-only. The "Two-Way Sync" rule
+  now resolves: copy may return only in the form shipped. See the FIXED P2 above.
 - **`intercom-backlog-drain-visibility`** — a large backlog drains over several 20-page runs
   with no operator-visible progress; the settings page shows a count but not "N remaining".
 - **`intercom-oauth-path-retirement`** — two credential paths now coexist (D4). If nobody is
@@ -586,20 +588,31 @@ was left by a branch that shipped the fix and did not update the row.
 - [ ] Audit the other integration route modules for the same omission before assuming it is
       confined to this file.
 
-### P2 — `intercom-writeback-orphaned` (bug/cleanup, NOT STARTED)
-- [ ] `services/backend-api/src/services/intercom_service.py`
-      (`add_note_to_conversation`, `close_conversation`, `get_admin_id`) has **no production
-      caller anywhere in the repo** — `grep` across `services/` returns only
-      `tests/test_intercom.py`. No route, task, workflow hook or automation engine imports it.
-- [ ] The landing page sold this as **"Two-Way Sync"**; that claim is being removed on
-      `chore/intercom-zendesk-docs`. Either wire the module into the feedback status-change
-      path or delete it — but the copy must not return until it is wired.
-- [ ] **Detection lesson, worth generalising:** the module has thorough unit tests against
-      mocked `httpx`, and they all pass. Tests that mock the boundary prove the function
-      works in isolation and say nothing about whether anything calls it. This is the same
-      family as the P0/P0b dead-import bugs: **green tests over code that never executes in
-      production.** A "is this reachable from an entrypoint?" sweep would have caught all
-      three.
+### P2 — `intercom-writeback-orphaned` — **FIXED**, merged (merge-sha pending) (PR # pending, 2026-08-16)
+> Shipped: the wire-or-delete decision landed as **wire it**. `intercom_service.py`
+> deleted, its behavior ported into the worker's `IntercomClient`
+> (`add_note` / `close_conversation` / `fetch_admin_id`, 404 → `IntercomNotFoundError`,
+> 401/403 → `missing_write_scope` / `auth_error`, 429/5xx → retry ≤3 × 30s).
+> New worker task `src.tasks.intercom_writeback` registered under exactly the name
+> its dispatchers use (backend `send_task` dotted name + worker `delay()`), pinned
+> by a name-consistency test so the "green tests over code that never executes"
+> class cannot recur. Dispatch at all five status-change writers (workflow
+> `change_status`, public-api bulk + single, playbook engine, feedback automation)
+> with per-site seam tests. Durable `feedback_items.intercom_writeback_at` marker +
+> five `IntercomIntegration` writeback columns (migration `e4f5a6b7c8d9`,
+> chained to `3cb9a0d1456b`; one alembic head). `PATCH
+> /api/v1/integrations/intercom/writeback` + extended `GET /status` +
+> `IntercomWritebackCard` on Settings → Integrations → Intercom. Merged as
+> (merge-sha pending) (PR # pending) on 2026-08-16. Backend 4927 passed (38 new
+> vs 4889 baseline); worker 1732 passed (48 net new).
+> **Follow-up (chore, not started): `landing-intercom-entry-refresh`** — the
+> OAuth-era Intercom entry in `services/landing-web/lib/integrations.ts:136-171`
+> still claims OAuth-only setup and webhook-only ingestion; refresh it to match
+> token-paste + pull + the write-back card, respecting the "claim only what shipped"
+> rule (prd OQ3).
+> The false "stored in PLAINTEXT" comment at `models/integration.py:19-25` is
+> corrected to encrypted-at-rest (P1, merged `737bbd5`) — see the comment fix in
+> this change.
 
 ### P3 — `oauth-state-in-process-dict` (bug, NOT STARTED)
 - [ ] `oauth_states` (`services/backend-api/src/api/routes/integrations.py:39`) is a
