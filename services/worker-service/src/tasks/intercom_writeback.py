@@ -110,6 +110,73 @@ def _resolve_connection(db, org_id):
     return None, None
 
 
+def _resolved_action(connection, connection_kind) -> str:
+    """The writeback action for the resolved connection.
+
+    Token-paste: the writeback_action column; an unknown/blank value falls
+    back to note_and_close with a warning. Legacy OAuth rows have no column —
+    the v1 grandfathered default is note_and_close (plan D4).
+    """
+    if connection_kind == "oauth":
+        return "note_and_close"
+    action = connection.writeback_action
+    if action not in ("note_only", "note_and_close"):
+        logger.warning(
+            "intercom_writeback: unknown writeback_action %r on the org's "
+            "IntercomIntegration row — falling back to note_and_close",
+            action,
+        )
+        return "note_and_close"
+    return action
+
+
+def _record_row_outcome(connection, connection_kind, status, error, at=None):
+    """Record a writeback outcome on the resolved credential source's row.
+
+    Token-paste rows only: the legacy OAuth Integration row has no writeback
+    columns, so for OAuth connections the task log + timeline event are the
+    durable record (plan D4/D8). is_active is NEVER touched — that flag is
+    owned exclusively by the read-sync task (intercom_sync.py).
+    """
+    if connection_kind != "token_paste":
+        return
+    connection.last_writeback_status = status
+    connection.last_writeback_error = error
+    if at is not None:
+        connection.last_writeback_at = at
+
+
+def _write_writeback_event(db, feedback_id, org_id, action, note_sent, closed, reason=None):
+    """One intercom_writeback FeedbackWorkflowEvent per acted item (plan D7).
+
+    metadata_ keys are a cross-aspect contract consumed by dispatch-seams'
+    timeline fetcher — do not rename (source/action/note_sent/closed/reason).
+    """
+    from src.models import FeedbackWorkflowEvent
+
+    metadata = {
+        "source": "intercom",
+        "action": action,
+        "note_sent": bool(note_sent),
+        "closed": bool(closed),
+    }
+    if reason is not None:
+        metadata["reason"] = reason
+
+    event = FeedbackWorkflowEvent(
+        feedback_id=feedback_id,
+        organization_id=org_id,
+        actor_id=None,  # system-driven, status_writer precedent
+        event_type="intercom_writeback",
+        old_value=None,
+        new_value=None,
+        metadata_=metadata,
+        created_at=datetime.utcnow(),
+    )
+    db.add(event)
+    db.flush()
+
+
 # ---------------------------------------------------------------------------
 # Task implementation body (extracted so it can be called directly in tests;
 # db is injected — the wrapper owns get_db_session())
@@ -175,7 +242,74 @@ def _push_resolved_writeback_body(task_self, db, org_id: int, items: list) -> di
             results.append({"id": feedback_id, "status": "noop", "reason": "writeback_disabled"})
             continue
 
-        # Guard 6 (decrypt) + guard 7 (admin id) + act — see later phases.
+        now = datetime.utcnow()
+        action = _resolved_action(connection, connection_kind)
+
+        # Guard 6 — decrypt the token. Missing LLM_ENCRYPTION_KEY (ValueError)
+        # and a key change (InvalidToken) are permanent operator-config errors:
+        # recorded on the row, NO retry (R6 contract).
+        token_column = (
+            connection.access_token
+            if connection_kind == "token_paste"
+            else connection.oauth_access_token
+        )
+        try:
+            token = _decrypt(token_column)
+        except ValueError:
+            logger.error(
+                "intercom_writeback: LLM_ENCRYPTION_KEY unset for org=%s — "
+                "cannot decrypt token; skipping feedback_id=%s",
+                org_id, feedback_id,
+            )
+            _record_row_outcome(connection, connection_kind, "error", "missing_encryption_key")
+            _write_writeback_event(
+                db, feedback_id, org_id, action, False, False,
+                reason="missing_encryption_key",
+            )
+            results.append({"id": feedback_id, "status": "error", "reason": "missing_encryption_key"})
+            continue
+        except InvalidToken:
+            logger.error(
+                "intercom_writeback: token decrypt failed for org=%s (key "
+                "changed?) — skipping feedback_id=%s",
+                org_id, feedback_id,
+            )
+            _record_row_outcome(connection, connection_kind, "error", "token_decrypt_failed")
+            _write_writeback_event(
+                db, feedback_id, org_id, action, False, False,
+                reason="token_decrypt_failed",
+            )
+            results.append({"id": feedback_id, "status": "error", "reason": "token_decrypt_failed"})
+            continue
+
+        # Guard 7 — admin id: stored first, fetch_admin_id (GET /me) fallback.
+        # Any fetch failure — including a transient one — is a recorded
+        # terminal error/no_admin with no retry: a missing admin is an
+        # operator-config problem, not an upstream blip (plan §10 decision 5).
+        admin_id = (
+            connection.admin_id
+            if connection_kind == "token_paste"
+            else (connection.config or {}).get("admin_id")
+        )
+        if not admin_id:
+            try:
+                with IntercomClient(token) as client:
+                    admin_id = client.fetch_admin_id()
+            except IntercomError as exc:
+                logger.warning(
+                    "intercom_writeback: no admin id for org=%s feedback_id=%s: %s",
+                    org_id, feedback_id, exc,
+                )
+                _record_row_outcome(
+                    connection, connection_kind, "error: no_admin", str(exc)[:500], at=now
+                )
+                _write_writeback_event(
+                    db, feedback_id, org_id, action, False, False, reason="no_admin"
+                )
+                results.append({"id": feedback_id, "status": "error", "reason": "no_admin"})
+                continue
+
+        # Act stage — Phase 3.
         results.append(
             {
                 "id": feedback_id,
