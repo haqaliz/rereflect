@@ -84,6 +84,7 @@ class AISettingsResponse(BaseModel):
     classifier_mode: str = "off"
     category_classifier_mode: str = "off"
     urgency_classifier_mode: str = "off"
+    churn_classifier_mode: str = "off"
     usage_churn_labels_mode: str = "off"
     usage_churn_label_config: Optional[dict] = None
     models: ModelConfig
@@ -98,6 +99,7 @@ class AISettingsUpdate(BaseModel):
     classifier_mode: Optional[str] = None
     category_classifier_mode: Optional[str] = None
     urgency_classifier_mode: Optional[str] = None
+    churn_classifier_mode: Optional[str] = None
     usage_churn_labels_mode: Optional[str] = None
     usage_churn_label_config: Optional[dict] = None
     model_categorization: Optional[str] = None
@@ -252,6 +254,7 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
     classifier_mode = getattr(config, "classifier_mode", None) or "off" if config else "off"
     category_classifier_mode = getattr(config, "category_classifier_mode", None) or "off" if config else "off"
     urgency_classifier_mode = getattr(config, "urgency_classifier_mode", None) or "off" if config else "off"
+    churn_classifier_mode = getattr(config, "churn_classifier_mode", None) or "off" if config else "off"
     usage_churn_labels_mode = getattr(config, "usage_churn_labels_mode", None) or "off" if config else "off"
     usage_churn_label_config = getattr(config, "usage_churn_label_config", None) if config else None
 
@@ -264,6 +267,7 @@ def _build_settings_response(org: Organization, config: Optional[OrgAIConfig]) -
         classifier_mode=classifier_mode,
         category_classifier_mode=category_classifier_mode,
         urgency_classifier_mode=urgency_classifier_mode,
+        churn_classifier_mode=churn_classifier_mode,
         usage_churn_labels_mode=usage_churn_labels_mode,
         usage_churn_label_config=usage_churn_label_config,
         models=model_config,
@@ -652,6 +656,33 @@ def update_ai_settings(
             )
         if hasattr(config, "urgency_classifier_mode"):
             config.urgency_classifier_mode = data.urgency_classifier_mode
+
+    # ── Churn classifier mode validation ─────────────────────────────────────
+    # Reuses VALID_CLASSIFIER_MODES + _classifier_deps_available (same three
+    # values, same sklearn dependency as the sentiment classifier_mode block
+    # above) — independent column, independent persistence, no shared state.
+    if "churn_classifier_mode" in data.model_fields_set:
+        if (
+            data.churn_classifier_mode is not None
+            and data.churn_classifier_mode not in VALID_CLASSIFIER_MODES
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Invalid churn_classifier_mode. Must be one of: "
+                    f"{', '.join(sorted(VALID_CLASSIFIER_MODES))}"
+                ),
+            )
+        if data.churn_classifier_mode in ("shadow", "auto") and not _classifier_deps_available():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"churn_classifier_mode '{data.churn_classifier_mode}' requires "
+                    "scikit-learn to be installed. See docs/SELF_HOSTING.md for the local model setup."
+                ),
+            )
+        if hasattr(config, "churn_classifier_mode"):
+            config.churn_classifier_mode = data.churn_classifier_mode
 
     # ── Usage-decline churn-label mode validation ─────────────────────────────
     # Uses VALID_USAGE_CHURN_LABEL_MODES (off|shadow|active) — NOT
