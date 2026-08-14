@@ -177,6 +177,57 @@ def _write_writeback_event(db, feedback_id, org_id, action, note_sent, closed, r
     db.flush()
 
 
+def _act_on_item(
+    task_self,
+    db,
+    org_id,
+    feedback,
+    conversation_id,
+    connection,
+    connection_kind,
+    action,
+    admin_id,
+    token,
+    resolution_note,
+    now,
+) -> dict:
+    """Note first, then close (per writeback_action); set the marker; update
+    the token-paste row; commit per item; write the timeline event.
+
+    Commits PER ITEM — the deliberate departure from the hubspot flush-only
+    idiom. With batch-retry semantics the whole payload is re-executed after a
+    transient failure; the per-item commit is what makes guard 3 (marker
+    already set) stop an already-completed item from receiving a duplicate
+    note on the retry run.
+
+    Returns the per-item outcome dict. The only exception that escapes is
+    task_self.retry(...) (transient — aborts the whole payload run).
+    """
+    note_text = (resolution_note or "").strip() or _DEFAULT_NOTE_TEXT
+
+    with IntercomClient(token) as client:
+        client.add_note(conversation_id, admin_id, note_text)
+        if action == "note_and_close":
+            client.close_conversation(conversation_id, admin_id)
+
+    feedback.intercom_writeback_at = now
+    _record_row_outcome(connection, connection_kind, "ok", None, at=now)
+    _write_writeback_event(
+        db,
+        feedback.id,
+        org_id,
+        action,
+        note_sent=True,
+        closed=(action == "note_and_close"),
+    )
+    logger.info(
+        "intercom_writeback: wrote %s for feedback_id=%s org=%s conversation=%s",
+        action, feedback.id, org_id, conversation_id,
+    )
+    db.commit()
+    return {"id": feedback.id, "status": "ok", "reason": None}
+
+
 # ---------------------------------------------------------------------------
 # Task implementation body (extracted so it can be called directly in tests;
 # db is injected — the wrapper owns get_db_session())
@@ -309,14 +360,13 @@ def _push_resolved_writeback_body(task_self, db, org_id: int, items: list) -> di
                 results.append({"id": feedback_id, "status": "error", "reason": "no_admin"})
                 continue
 
-        # Act stage — Phase 3.
-        results.append(
-            {
-                "id": feedback_id,
-                "status": "error",
-                "reason": "not_implemented",
-            }
+        # Act — note first, then close (per writeback_action); marker + row +
+        # timeline event inside _act_on_item, committed per item.
+        outcome = _act_on_item(
+            task_self, db, org_id, feedback, conversation_id, connection,
+            connection_kind, action, admin_id, token, resolution_note, now,
         )
+        results.append(outcome)
 
     return {"status": "ok", "processed": len(results), "results": results}
 
