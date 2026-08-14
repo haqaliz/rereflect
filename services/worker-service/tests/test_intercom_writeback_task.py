@@ -1061,3 +1061,47 @@ class TestBatchIsolation:
                 fresh.query(FeedbackItem).filter_by(id=bad.id).first().intercom_writeback_at
                 is None
             )
+
+
+# ---------------------------------------------------------------------------
+# TestCeleryTaskRegistration (AC6 — dispatch name pinned, registry + include)
+# ---------------------------------------------------------------------------
+
+
+class TestCeleryTaskRegistration:
+    def test_task_registered_with_exact_name(self):
+        """The task name is the anchor for every dispatch seam.
+
+        dispatch-seams adds the cross-site assertion (all 5 dispatch strings
+        equal this name) in its aspect; the pin here is the registry + include
+        check. The module is imported first because Celery's include list is
+        lazy — a task only appears in celery_app.tasks once its module has
+        been imported (beat-integrity discipline, test_beat_schedule_integrity
+        docstring). D1: this task is NOT beat-scheduled.
+        """
+        import importlib
+        import types
+
+        importlib.import_module("src.tasks.intercom_writeback")
+        from src.celery_app import celery_app
+
+        name = "src.tasks.intercom_writeback.push_resolved_writeback"
+
+        assert name in celery_app.tasks
+        # Catches the churn_playbooks failure class: a name= that lacks the
+        # src. prefix registers under a different string than dispatchers use.
+        assert celery_app.tasks[name].name == name
+        # A task module missing from `include` is never imported by the
+        # worker, so send_task raises NotRegistered in production.
+        assert "src.tasks.intercom_writeback" in (celery_app.conf.include or ())
+
+        mod = importlib.import_module("src.tasks.intercom_writeback")
+        assert hasattr(mod, "push_resolved_writeback")
+        # An undecorated function imports cleanly yet raises NotRegistered at
+        # dispatch time; the registry checks above already exclude that, and
+        # this pins the module attribute is a Task-decorated callable, not a
+        # plain function.
+        assert not isinstance(mod.push_resolved_writeback, types.FunctionType)
+
+        scheduled = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
+        assert name not in scheduled  # D1 — dispatched only via send_task/delay
