@@ -49,6 +49,11 @@ vi.mock('@/components/settings/SentimentAccuracyCard', () => ({
   SentimentAccuracyCard: () => <div data-testid="sentiment-accuracy-card" />,
 }));
 
+// Stub ChurnLabelGateCard — same reason; it is asserted by its own test file.
+vi.mock('@/components/settings/ChurnLabelGateCard', () => ({
+  ChurnLabelGateCard: () => <div data-testid="churn-label-gate-card" />,
+}));
+
 // Stub AISettingsGeneral/Providers/Usage/HealthWeightsEditor/AIReadinessCard — not under test
 // here and would otherwise trigger unrelated fetch noise for other tabs.
 vi.mock('@/components/settings/AISettingsGeneral', () => ({
@@ -134,5 +139,13 @@ describe('AISettingsPage — Accuracy tab renders both classifier accuracy cards
     expect(cards[0]).toHaveAttribute('data-type', 'sentiment');
     expect(cards[1]).toHaveAttribute('data-type', 'category');
     expect(cards[2]).toHaveAttribute('data-type', 'urgency');
+  });
+
+  it('mounts the churn label-gate card on the accuracy tab', async () => {
+    render(<AISettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('churn-label-gate-card')).toBeInTheDocument();
+    });
   });
 });
