@@ -1749,8 +1749,43 @@ unchanged; an organization uses one path or the other, never both.
   author is a customer, so Intercom feedback feeds Customer 360, health scores
   and churn. A reply written by one of your own admins does not overwrite the
   customer on the item.
-- **No write-back.** Rereflect does not add notes to or close Intercom
-  conversations.
+- **Write-back on resolve — opt-in, off by default.** See [Write-back (opt-in)](#write-back-opt-in) below.
+
+### Write-back (opt-in)
+
+When you mark an Intercom-sourced feedback item **resolved**, Rereflect can post a
+note to the linked Intercom conversation and close it, so your support team sees
+the outcome where they work.
+
+- **Off by default, per organization.** Enable it on **Settings → Integrations →
+  Intercom** (the Write-back card). Choose **note + close** (default) or **note
+  only** — `note_only` leaves closing to your support team.
+- **What ships on resolve:** a note containing the resolution note you wrote on the
+  feedback item (or the default *"Marked resolved in Rereflect."*), posted as your
+  Intercom app's admin; then the conversation is closed (unless `note_only`).
+- **Scope requirement.** Your Intercom app must grant **`conversation:write`**.
+  If the token lacks it, every resolve records `missing_write_scope` on the
+  settings page and nothing is sent — the integration stays connected. Rereflect
+  reports the absence; it cannot grant the scope.
+- **Transitions after enable only.** Conversations already resolved before you
+  enable the write-back are never touched — there is no backfill.
+- **`resolved` is the only trigger.** Re-resolving an item after reopening it is a
+  no-op: Rereflect tracks each item it has already written back, so no second note
+  is appended to a closed conversation.
+
+> ### Honest limits
+>
+> - The write-back fires only on transitions to `resolved` **after enable** — a
+>   backfill is deliberately not offered, because closing a conversation is one-shot
+>   and mass-closing would surprise a support team.
+> - `resolved` is the only trigger in v1; there is no configurable target status.
+> - The dispatch is fire-and-forget: the note lands when the background worker picks
+>   the task up — no response-time claim.
+> - A crash in the seconds between Intercom accepting the note and Rereflect
+>   recording it can duplicate a note on retry (the close itself stays a no-op).
+>   Cosmetic and bounded; no action needed.
+> - Scope (`conversation:write`) is a property of your Intercom app. Rereflect
+>   reports its absence; it cannot grant it.
 
 ---
 
