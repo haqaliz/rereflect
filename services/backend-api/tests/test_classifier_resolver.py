@@ -32,11 +32,12 @@ from src.services.classifier_resolver import (
 )
 
 
-def _make_config(classifier_mode=None, category_classifier_mode=None, urgency_classifier_mode=None) -> MagicMock:
+def _make_config(classifier_mode=None, category_classifier_mode=None, urgency_classifier_mode=None, churn_classifier_mode=None) -> MagicMock:
     cfg = MagicMock()
     cfg.classifier_mode = classifier_mode
     cfg.category_classifier_mode = category_classifier_mode
     cfg.urgency_classifier_mode = urgency_classifier_mode
+    cfg.churn_classifier_mode = churn_classifier_mode
     return cfg
 
 
@@ -216,6 +217,7 @@ class TestPerTypeModeColumn:
             "sentiment": "classifier_mode",
             "category": "category_classifier_mode",
             "urgency": "urgency_classifier_mode",
+            "churn": "churn_classifier_mode",
         }
 
     def test_cross_type_isolation_same_org(self, db: Session):
@@ -314,3 +316,89 @@ class TestUrgencyModeColumn:
         assert sentiment_result is None
         assert category_result is None
         assert urgency_result is not None and urgency_result.mode == "auto"
+
+
+class TestChurnModeColumn:
+    """Field-substituted mirror of TestUrgencyModeColumn's cases
+    (urgency -> churn; churn-predict-seam-resolver)."""
+
+    def test_churn_reads_churn_column_independent_of_sentiment_category_urgency(self):
+        config = _make_config(
+            classifier_mode="shadow",
+            category_classifier_mode="shadow",
+            urgency_classifier_mode="shadow",
+            churn_classifier_mode="auto",
+        )
+        db = _make_db_with_config(config)
+
+        result = resolve_classifier(org_id=1, classifier_type="churn", db=db)
+
+        assert result is not None
+        assert result.mode == "auto"
+
+    def test_churn_off_returns_none(self):
+        config = _make_config(churn_classifier_mode="off")
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="churn", db=db) is None
+
+    def test_churn_unset_column_returns_none(self):
+        config = _make_config()  # all None
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="churn", db=db) is None
+
+    def test_churn_unrecognized_value_returns_none(self):
+        config = _make_config(churn_classifier_mode="nonsense")
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="churn", db=db) is None
+
+    def test_missing_churn_classifier_mode_column_returns_none(self):
+        """Un-migrated-DB case: ORM row has no churn_classifier_mode attribute
+        at all (getattr default fires, never raises)."""
+        config = MagicMock(spec=[])
+        db = _make_db_with_config(config)
+
+        assert resolve_classifier(org_id=1, classifier_type="churn", db=db) is None
+
+    def test_mode_column_by_classifier_type_includes_churn(self):
+        from src.services.classifier_resolver import MODE_COLUMN_BY_CLASSIFIER_TYPE
+
+        assert MODE_COLUMN_BY_CLASSIFIER_TYPE == {
+            "sentiment": "classifier_mode",
+            "category": "category_classifier_mode",
+            "urgency": "urgency_classifier_mode",
+            "churn": "churn_classifier_mode",
+        }
+
+    def test_cross_type_isolation_churn_vs_sentiment_category_urgency(self, db: Session):
+        """Same org, churn=auto + the others off -> only churn resolves."""
+        org = Organization(name="Org E", plan="pro")
+        db.add(org)
+        db.commit()
+        db.refresh(org)
+
+        config = OrgAIConfig(
+            organization_id=org.id,
+            default_provider="openai",
+            model_categorization="gpt-4o-mini",
+            model_analysis="gpt-4o-mini",
+            model_insights="gpt-4o-mini",
+            classifier_mode="off",
+            category_classifier_mode="off",
+            urgency_classifier_mode="off",
+            churn_classifier_mode="auto",
+        )
+        db.add(config)
+        db.commit()
+
+        sentiment_result = resolve_classifier(org_id=org.id, classifier_type="sentiment", db=db)
+        category_result = resolve_classifier(org_id=org.id, classifier_type="category", db=db)
+        urgency_result = resolve_classifier(org_id=org.id, classifier_type="urgency", db=db)
+        churn_result = resolve_classifier(org_id=org.id, classifier_type="churn", db=db)
+
+        assert sentiment_result is None
+        assert category_result is None
+        assert urgency_result is None
+        assert churn_result is not None and churn_result.mode == "auto"
