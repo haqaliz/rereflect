@@ -214,6 +214,15 @@ def _assert_zero_client_calls(mock_client):
     mock_client.fetch_admin_id.assert_not_called()
 
 
+def _get_events(db) -> list:
+    return (
+        db.query(FeedbackWorkflowEvent)
+        .filter_by(event_type="intercom_writeback")
+        .order_by(FeedbackWorkflowEvent.id)
+        .all()
+    )
+
+
 # ---------------------------------------------------------------------------
 # TestNoOpGuards (AC1 guards 1-5)
 # ---------------------------------------------------------------------------
@@ -323,3 +332,192 @@ class TestNoOpGuards:
         assert result["results"][1]["reason"] == "invalid_payload"
         assert result["results"][2]["reason"] == "not_intercom"
         _assert_zero_client_calls(mock_client)
+
+
+# ---------------------------------------------------------------------------
+# TestCredentialResolution (plan D4 — token-paste wins, flag authoritative)
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialResolution:
+    def test_token_paste_wins_when_both_exist(self, db):
+        """A disabled token-paste row beats an active OAuth row: the
+        token-paste row's writeback_enabled flag is authoritative."""
+        org = _make_org(db)
+        _make_integration(db, org.id, writeback_enabled=False)
+        _make_oauth_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        assert result["results"] == [
+            {"id": item.id, "status": "noop", "reason": "writeback_disabled"}
+        ]
+        _assert_zero_client_calls(mock_client)
+
+
+# ---------------------------------------------------------------------------
+# TestMissingEncryptionKey (AC1 guard 6 — R6: no retry, recorded on the row)
+# ---------------------------------------------------------------------------
+
+
+class TestMissingEncryptionKey:
+    def test_missing_key_returns_error_dict_without_retry(self, db, monkeypatch):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        iw = _reload_task_module()
+        task_self = MagicMock()
+        mock_client = _make_mock_client()
+        monkeypatch.delenv("LLM_ENCRYPTION_KEY", raising=False)
+        with patch.object(iw, "IntercomClient", return_value=mock_client):
+            result = iw._push_resolved_writeback_body(
+                task_self, db, org.id, [{"id": item.id, "resolution_note": None}]
+            )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "error", "reason": "missing_encryption_key"}
+        ]
+        task_self.retry.assert_not_called()
+        _assert_zero_client_calls(mock_client)
+
+        db.expire_all()
+        integ = db.query(IntercomIntegration).filter_by(organization_id=org.id).first()
+        assert integ.last_writeback_status == "error"
+        assert integ.last_writeback_error == "missing_encryption_key"
+        assert integ.last_writeback_at is None
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_ == {
+            "source": "intercom",
+            "action": "note_and_close",
+            "note_sent": False,
+            "closed": False,
+            "reason": "missing_encryption_key",
+        }
+
+    def test_invalid_token_records_token_decrypt_failed(self, db, monkeypatch):
+        """A token encrypted under a different key is a real Fernet
+        InvalidToken — recorded token_decrypt_failed, no retry (plan §7.7)."""
+        from cryptography.fernet import Fernet
+
+        other_key = Fernet.generate_key()
+        org = _make_org(db)
+        _make_integration(
+            db, org.id, access_token=Fernet(other_key).encrypt(b"plain-token").decode()
+        )
+        item = _make_feedback(db, org.id)
+
+        iw = _reload_task_module()
+        task_self = MagicMock()
+        mock_client = _make_mock_client()
+        with patch.object(iw, "IntercomClient", return_value=mock_client):
+            with patch.dict(os.environ, {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}):
+                result = iw._push_resolved_writeback_body(
+                    task_self, db, org.id, [{"id": item.id, "resolution_note": None}]
+                )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "error", "reason": "token_decrypt_failed"}
+        ]
+        task_self.retry.assert_not_called()
+        _assert_zero_client_calls(mock_client)
+
+        db.expire_all()
+        integ = db.query(IntercomIntegration).filter_by(organization_id=org.id).first()
+        assert integ.last_writeback_status == "error"
+        assert integ.last_writeback_error == "token_decrypt_failed"
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["reason"] == "token_decrypt_failed"
+
+
+# ---------------------------------------------------------------------------
+# TestAdminResolution (AC1 guard 7 — recorded error/no_admin, no retry)
+# ---------------------------------------------------------------------------
+
+
+class TestAdminResolution:
+    def test_no_admin_recorded_without_retry(self, db):
+        """Stored admin id absent AND fetch_admin_id fails -> error/no_admin,
+        no retry, never reaching add_note/close. Pinned with a TRANSIENT
+        /me failure: even 429/5xx on the admin fetch is a recorded terminal
+        outcome, not a retry (plan §10 decision 5)."""
+        from src.clients.intercom import IntercomTransientError
+
+        org = _make_org(db)
+        _make_integration(db, org.id, admin_id=None)
+        item = _make_feedback(db, org.id)
+
+        mock_client = _make_mock_client()
+        mock_client.fetch_admin_id.side_effect = IntercomTransientError("rate limited on /me")
+
+        result, _, _ = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}],
+                                 mock_client=mock_client)
+
+        assert result["results"] == [{"id": item.id, "status": "error", "reason": "no_admin"}]
+        mock_client.fetch_admin_id.assert_called_once()
+        mock_client.add_note.assert_not_called()
+        mock_client.close_conversation.assert_not_called()
+
+        db.expire_all()
+        integ = db.query(IntercomIntegration).filter_by(organization_id=org.id).first()
+        assert integ.last_writeback_status == "error: no_admin"
+        assert integ.last_writeback_error == "rate limited on /me"
+        assert integ.last_writeback_at is not None
+        assert integ.is_active is True  # never touched
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["reason"] == "no_admin"
+        assert events[0].metadata_["note_sent"] is False
+        assert events[0].metadata_["closed"] is False
+
+
+# ---------------------------------------------------------------------------
+# TestLegacyOAuthPath (plan D4 — OAuth outcomes recorded in event only)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyOAuthPath:
+    def test_oauth_missing_key_records_in_event_only(self, db, monkeypatch):
+        """OAuth-only org with a missing key: outcome + event written; the
+        legacy Integration row has no writeback columns to touch."""
+        org = _make_org(db)
+        _make_oauth_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        iw = _reload_task_module()
+        task_self = MagicMock()
+        mock_client = _make_mock_client()
+        monkeypatch.delenv("LLM_ENCRYPTION_KEY", raising=False)
+        with patch.object(iw, "IntercomClient", return_value=mock_client):
+            result = iw._push_resolved_writeback_body(
+                task_self, db, org.id, [{"id": item.id, "resolution_note": None}]
+            )
+
+        assert result["results"] == [
+            {"id": item.id, "status": "error", "reason": "missing_encryption_key"}
+        ]
+        task_self.retry.assert_not_called()
+        _assert_zero_client_calls(mock_client)
+
+        db.expire_all()
+        oauth = db.query(Integration).filter_by(
+            organization_id=org.id, type="intercom"
+        ).first()
+        assert oauth.is_active is True
+        assert not hasattr(oauth, "last_writeback_status")
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_ == {
+            "source": "intercom",
+            "action": "note_and_close",
+            "note_sent": False,
+            "closed": False,
+            "reason": "missing_encryption_key",
+        }
