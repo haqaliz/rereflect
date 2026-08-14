@@ -205,10 +205,63 @@ def _act_on_item(
     """
     note_text = (resolution_note or "").strip() or _DEFAULT_NOTE_TEXT
 
-    with IntercomClient(token) as client:
-        client.add_note(conversation_id, admin_id, note_text)
-        if action == "note_and_close":
-            client.close_conversation(conversation_id, admin_id)
+    try:
+        with IntercomClient(token) as client:
+            client.add_note(conversation_id, admin_id, note_text)
+            if action == "note_and_close":
+                client.close_conversation(conversation_id, admin_id)
+    except IntercomAuthError as exc:
+        # Soft-pause: never touch is_active — that's the read-sync's flag.
+        # Marker stays unset so the operator's scope fix can be retried
+        # without a second dispatch.
+        logger.warning(
+            "intercom_writeback: write scope error for org=%s feedback_id=%s: %s",
+            org_id, feedback.id, exc,
+        )
+        _record_row_outcome(
+            connection, connection_kind, "error: missing_write_scope",
+            str(exc)[:500], at=now,
+        )
+        _write_writeback_event(
+            db, feedback.id, org_id, action, False, False,
+            reason="missing_write_scope",
+        )
+        return {"id": feedback.id, "status": "error", "reason": "missing_write_scope"}
+
+    except IntercomNotFoundError as exc:
+        # Conversation missing / already closed — close is idempotent-by-404
+        # and the note is 404-idempotent too, so this is a terminal noop: the
+        # marker is set so re-runs and re-resolves skip via guard 3.
+        logger.warning(
+            "intercom_writeback: conversation already closed for org=%s "
+            "feedback_id=%s: %s",
+            org_id, feedback.id, exc,
+        )
+        feedback.intercom_writeback_at = now
+        _record_row_outcome(
+            connection, connection_kind, "noop: already_closed",
+            str(exc)[:500], at=now,
+        )
+        _write_writeback_event(
+            db, feedback.id, org_id, action, True, True, reason="already_closed",
+        )
+        db.commit()
+        return {"id": feedback.id, "status": "noop", "reason": "already_closed"}
+
+    except IntercomTransientError as exc:
+        # Whole-payload abort-and-retry: the Retry exception propagates out of
+        # the body (nothing catches it), the session rolls back, and the full
+        # payload is re-executed. Per-item commits + guard 3 make the retry
+        # idempotent for items already completed.
+        logger.warning(
+            "intercom_writeback: transient error for org=%s feedback_id=%s: %s",
+            org_id, feedback.id, exc,
+        )
+        _record_row_outcome(
+            connection, connection_kind, "retrying", str(exc)[:500],
+        )
+        db.flush()
+        raise task_self.retry(exc=exc)
 
     feedback.intercom_writeback_at = now
     _record_row_outcome(connection, connection_kind, "ok", None, at=now)

@@ -1048,8 +1048,9 @@ class TestBatchIsolation:
             )
 
         task_self.retry.assert_called_once()
-        # The abort never got to item 3.
-        mock_client.add_note.assert_called_once()
+        # The abort happened at item 2's note; only item 1 reached the close
+        # step and item 3 was never processed.
+        mock_client.close_conversation.assert_called_once()
 
         with _fake_db_session() as fresh:
             assert (
