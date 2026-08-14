@@ -272,3 +272,29 @@ No landing-page copy change (OQ3).
 note depends on the resolution note being present — how often does anyone actually fill
 the resolution note in Rereflect today, and is "Marked resolved in Rereflect." enough
 when they don't?
+
+---
+
+## Decision Record (close-out, 2026-08-16)
+
+- **P2 `intercom-writeback-orphaned` — decision executed: wire it.** The orphaned
+  `intercom_service.py` is deleted; its behavior is ported into the worker's
+  `IntercomClient` (`add_note`, `close_conversation`, `fetch_admin_id`, 404 →
+  `IntercomNotFoundError`). See the FIXED P2 in DEV-TRACKING.md (merge
+  (merge-sha pending), PR # pending).
+- **OQ1 — target status fixed to `resolved`: shipped.** `closed` stays a manual
+  terminal; configurable target status remains N1.
+- **OQ2 — no backfill-on-enable: shipped.** Only transitions after enable fire;
+  stated in the card copy, SELF_HOSTING.md and the CHANGELOG entry.
+- **OQ3 — landing page: flagged, not shipped.** The stale OAuth-era Intercom entry
+  (`services/landing-web/lib/integrations.ts:136-171`) is a follow-up chore
+  (`landing-intercom-entry-refresh`), respecting "claim only what shipped".
+- **Aspects (all shipped 2026-08-16; merge pending):** `db-config-model`,
+  `config-api-routes`, `dispatch-seams`, `worker-write-client`,
+  `worker-writeback-task`, `frontend-writeback-card`, `docs-tracking-changelog` —
+  each with its spec and plan under `docs/planning/intercom-writeback/`.
+- **Honest limits as shipped:** transitions after enable only; `resolved` the only
+  trigger; fire-and-forget dispatch (no response-time claim); a crash between the
+  Intercom call and the marker write can duplicate a note on retry (close stays a
+  no-op); `conversation:write` is the operator's to grant — Rereflect reports its
+  absence and never auto-disables the integration.
