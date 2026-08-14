@@ -1,4 +1,4 @@
-"""Intercom REST client for the conversation-pull path.
+"""Intercom REST client for the conversation-pull and write-back paths.
 
 Mirrors src/clients/zendesk.py in error taxonomy and lifecycle. Lives in
 worker-service because worker-service cannot import backend-api; the backend
@@ -42,6 +42,14 @@ class IntercomTransientError(IntercomError):
     """Upstream 5xx, 429 or a network failure. Retrying is appropriate."""
 
 
+class IntercomNotFoundError(IntercomError):
+    """Upstream 404 (conversation missing or already closed).
+
+    Non-retryable and not an auth problem: the caller maps it to a noop
+    (close is idempotent-by-404).
+    """
+
+
 class IntercomClient:
     def __init__(self, access_token: str, transport: Optional[Any] = None) -> None:
         self._access_token = access_token
@@ -82,6 +90,13 @@ class IntercomClient:
             )
         if resp.status_code >= 500:
             raise IntercomTransientError(f"Intercom returned {resp.status_code}")
+        if resp.status_code == 404:
+            raise IntercomNotFoundError(
+                f"Intercom resource not found ({resp.status_code})"
+            )
+        # 404 must never reach this fallback: it is a first-class, distinct
+        # error (see IntercomNotFoundError), not an auth problem. This branch
+        # therefore only sees non-404 4xx.
         if resp.status_code >= 400:
             raise IntercomAuthError(f"Unexpected Intercom response {resp.status_code}")
         return resp
@@ -139,6 +154,89 @@ class IntercomClient:
         ).get("starting_after")
 
         return conversations, next_cursor
+
+    def add_note(
+        self, conversation_id: str, admin_id: str, body: str
+    ) -> None:
+        """Append an admin note to a conversation (write-back path).
+
+        POST /conversations/{id}/reply with message_type=note. Returns None
+        on success; the caller distinguishes success from failure purely by
+        "no exception" -- 401/403 raise IntercomAuthError, 404 raises
+        IntercomNotFoundError, 429/5xx/network raise IntercomTransientError.
+        """
+        try:
+            resp = self._client.post(
+                f"{INTERCOM_API_BASE}/conversations/{conversation_id}/reply",
+                json={
+                    "message_type": "note",
+                    "type": "admin",
+                    "admin_id": admin_id,
+                    "body": body,
+                },
+                headers={
+                    "Authorization": f"Bearer {self._access_token}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise IntercomTransientError(str(exc)) from exc
+
+        self._handle(resp)
+
+    def close_conversation(self, conversation_id: str, admin_id: str) -> None:
+        """Close a conversation (write-back path).
+
+        POST /conversations/{id}/parts with message_type=close. Returns None
+        on success; same error contract as add_note. Closing an already-closed
+        conversation surfaces as a 404 -> IntercomNotFoundError, which the
+        caller treats as an idempotent noop.
+        """
+        try:
+            resp = self._client.post(
+                f"{INTERCOM_API_BASE}/conversations/{conversation_id}/parts",
+                json={
+                    "message_type": "close",
+                    "type": "admin",
+                    "admin_id": admin_id,
+                },
+                headers={
+                    "Authorization": f"Bearer {self._access_token}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise IntercomTransientError(str(exc)) from exc
+
+        self._handle(resp)
+
+    def fetch_admin_id(self) -> str:
+        """Resolve the authenticated admin's id from GET /me.
+
+        Fallback when no admin_id is stored on the integration row. A 200
+        whose payload lacks `id` raises base IntercomError: a malformed
+        payload is neither retryable nor operator-scope, so the task records
+        it as a failure without retrying.
+        """
+        try:
+            resp = self._client.get(
+                f"{INTERCOM_API_BASE}/me",
+                headers={
+                    "Authorization": f"Bearer {self._access_token}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise IntercomTransientError(str(exc)) from exc
+
+        payload = self._handle(resp).json()
+        admin_id = payload.get("id")
+        if not admin_id:
+            raise IntercomError("Intercom /me response missing id")
+        return admin_id
 
     @staticmethod
     def _normalize(conversation: Dict[str, Any]) -> Dict[str, Any]:
