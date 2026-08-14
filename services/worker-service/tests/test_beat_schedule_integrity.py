@@ -12,14 +12,18 @@ at the other, and no test spans the join. This one does, for the beat schedule:
 a scheduled task that cannot resolve is a job the operator believes is running
 and which is not.
 
-NOTE ON HOW THIS IS CHECKED. It deliberately does NOT read
-`celery_app.tasks`. Celery's `include` list is lazy -- a task only appears in
-that registry once its module has been imported, so in a pytest process the
+NOTE ON HOW THIS IS CHECKED. It reads `celery_app.tasks` only AFTER importing the
+entry's own module (below). Celery's `include` list is lazy -- a task only appears
+in that registry once its module has been imported, so in a pytest process the
 registry reflects whichever test modules happened to import what, in whatever
 order. (conftest.py names the same hazard "import-order roulette" for a related
-reason.) A first draft of this test used that registry and reported a dozen
-false positives, including tasks that demonstrably run in production. Resolving
-the module and attribute directly is order-independent and means what it says.
+reason.) A first draft of this test used that registry without the explicit
+import and reported a dozen false positives, including tasks that demonstrably
+run in production. Importing the module first makes the registry lookup
+order-independent, and the registry check itself means what it says: a beat
+entry must resolve to a task that is actually registered, not merely to a module
+attribute -- an undecorated function imports cleanly yet raises `NotRegistered`
+at dispatch time, exactly the operator-believes-it-runs failure above.
 
 See docs/planning/intercom-selfhost-ingestion/cleanup-and-docs/.
 """
@@ -55,6 +59,13 @@ def test_beat_entry_resolves_to_a_real_task(name, task_path):
         f"Beat entry '{name}' schedules '{task_path}', but {module_path!r} "
         f"defines no {attr!r}. A scheduled task that cannot resolve is a job "
         "the operator believes is running and which is not."
+    )
+
+    assert task_path in celery_app.tasks, (
+        f"Beat entry '{name}' schedules '{task_path}', but it is not a "
+        "registered Celery task. An undecorated function imports fine yet "
+        "never lands in the task registry, so Celery raises NotRegistered at "
+        "dispatch time -- a job the operator believes is running and which is not."
     )
 
 
