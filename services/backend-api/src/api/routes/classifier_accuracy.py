@@ -43,13 +43,14 @@ DEFAULT_CLASSIFIER_TYPE = "sentiment"
 _HISTORY_LIMIT = 4
 
 # M8: whitelist of valid classifier_type values, shared by versions/rollback/resume.
-VALID_CLASSIFIER_TYPES = {"sentiment", "category", "urgency"}
+VALID_CLASSIFIER_TYPES = {"sentiment", "category", "urgency", "churn"}
 
 # classifier_type -> OrgAIConfig autopromote-hold column name.
 _HOLD_COLUMN_BY_TYPE = {
     "sentiment": "sentiment_autopromote_hold",
     "category": "category_autopromote_hold",
     "urgency": "urgency_autopromote_hold",
+    "churn": "churn_autopromote_hold",
 }
 
 
