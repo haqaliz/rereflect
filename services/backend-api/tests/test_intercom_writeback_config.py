@@ -218,6 +218,19 @@ class TestWritebackPatch:
         assert row.writeback_enabled is True
         assert row.writeback_action == "note_only"
 
+        # Round-trip: GET /status must report the persisted config.
+        status = client.get(
+            "/api/v1/integrations/intercom/status", headers=owner_headers
+        )
+        assert status.status_code == 200, status.text
+        status_body = status.json()
+        assert status_body["connected"] is True
+        assert status_body["writeback_enabled"] is True
+        assert status_body["writeback_action"] == "note_only"
+        assert status_body["last_writeback_at"] is None
+        assert status_body["last_writeback_status"] is None
+        assert status_body["last_writeback_error"] is None
+
     def test_writeback_disable_keeps_last_writeback_history(
         self, client: TestClient, db: Session, owner_headers: dict, test_organization
     ):
@@ -246,6 +259,90 @@ class TestWritebackPatch:
         assert body["last_writeback_at"] == "2026-08-01T12:00:00"
         assert body["last_writeback_status"] == "success"
         assert body["last_writeback_error"] == "a recorded error"
+
+
+# ─────────────────── AC3: GET /status writeback extension ────────────────────
+
+
+class TestWritebackStatusExtension:
+    def test_status_disconnected_includes_writeback_defaults(
+        self, client: TestClient, owner_headers: dict
+    ):
+        """A disconnected org must still expose the writeback fields, so the
+        frontend can read them unconditionally."""
+        response = client.get(
+            "/api/v1/integrations/intercom/status", headers=owner_headers
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["connected"] is False
+        assert body["writeback_enabled"] is False
+        assert body["writeback_action"] == "note_and_close"
+        assert body["last_writeback_at"] is None
+        assert body["last_writeback_status"] is None
+        assert body["last_writeback_error"] is None
+
+    def test_status_existing_fields_byte_identical(
+        self, client: TestClient, db: Session, owner_headers: dict, test_organization
+    ):
+        """Characterization: every pre-existing status key keeps its exact
+        value; the five writeback keys are additive."""
+        from src.models.feedback import FeedbackItem
+        from src.models.intercom_integration import IntercomIntegration
+
+        _connected(client, owner_headers)
+
+        row = (
+            db.query(IntercomIntegration)
+            .filter(IntercomIntegration.organization_id == test_organization.id)
+            .first()
+        )
+        row.last_synced_at = datetime(2026, 7, 15, 9, 30, 0)
+        row.last_sync_status = "ok"
+        row.last_error = "no errors"
+        row.writeback_enabled = True
+        row.writeback_action = "note_and_close"
+        row.last_writeback_at = datetime(2026, 7, 20, 14, 5, 0)
+        row.last_writeback_status = "success"
+        row.last_writeback_error = None
+        db.commit()
+        db.add(
+            FeedbackItem(
+                organization_id=test_organization.id,
+                text="from intercom",
+                source="intercom",
+            )
+        )
+        db.commit()
+
+        response = client.get(
+            "/api/v1/integrations/intercom/status", headers=owner_headers
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        expected_existing = {
+            "connected": True,
+            "workspace_id": WORKSPACE_ID,
+            "workspace_name": WORKSPACE_NAME,
+            "token_hint": f"...{ACCESS_TOKEN[-4:]}",
+            "admin_id": ADMIN_ID,
+            "has_client_secret": True,
+            "has_feedback_source": True,
+            "last_synced_at": "2026-07-15T09:30:00",
+            "last_sync_status": "ok",
+            "last_error": "no errors",
+            "feedback_items_ingested": 1,
+        }
+        for key, value in expected_existing.items():
+            assert body[key] == value, f"pre-existing key {key} changed"
+
+        assert body["writeback_enabled"] is True
+        assert body["writeback_action"] == "note_and_close"
+        assert body["last_writeback_at"] == "2026-07-20T14:05:00"
+        assert body["last_writeback_status"] == "success"
+        assert body["last_writeback_error"] is None
 
 
 # ─────────── AC2: enabling sends nothing (no HTTP, no dispatch) ───────────────

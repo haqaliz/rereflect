@@ -152,6 +152,12 @@ class IntercomStatusResponse(BaseModel):
     # usage-decline-churn-labels. A connected integration sitting at 0 is the
     # single most useful thing an operator can know about it.
     feedback_items_ingested: int = 0
+    # Write-back config/status (config-api-routes aspect)
+    writeback_enabled: bool = False
+    writeback_action: str = "note_and_close"
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
 
 
 class IntercomDisconnectResponse(BaseModel):
@@ -277,6 +283,11 @@ def _build_status_response(
         last_sync_status=row.last_sync_status,
         last_error=row.last_error,
         feedback_items_ingested=_count_ingested_items(db, org_id),
+        writeback_enabled=row.writeback_enabled,
+        writeback_action=row.writeback_action,
+        last_writeback_at=row.last_writeback_at,
+        last_writeback_status=row.last_writeback_status,
+        last_writeback_error=row.last_writeback_error,
     )
 
 
