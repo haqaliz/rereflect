@@ -86,3 +86,12 @@ class TestModelsAndMigration:
             f"  Worker only:  {worker_cols - backend_cols}\n"
             f"  Backend only: {backend_cols - worker_cols}"
         )
+
+    def test_worker_org_ai_config_has_churn_columns(self):
+        """churn-predict-seam-resolver: the worker mirror must carry the churn
+        classifier mode + autopromote-hold columns the resolver reads."""
+        from src.models import OrgAIConfig
+
+        worker_cols = {c.name for c in OrgAIConfig.__table__.columns}
+        assert "churn_classifier_mode" in worker_cols
+        assert "churn_autopromote_hold" in worker_cols

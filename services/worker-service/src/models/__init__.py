@@ -636,6 +636,10 @@ class OrgAIConfig(Base):
     # backend-api; urgency-classifier-head). 'off' | 'shadow' | 'auto'.
     # Independent of classifier_mode (sentiment) and category_classifier_mode.
     urgency_classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
+    # Per-org CHURN-classifier mode (mirrors backend-api;
+    # per-org-churn-model, churn-predict-seam-resolver). 'off' | 'shadow' |
+    # 'auto'. Independent of the sentiment/category/urgency mode columns.
+    churn_classifier_mode = Column(String(20), nullable=True, server_default='off', default='off')
     # Per-type "pause auto-promotion" hold (mirrors backend-api;
     # classifier-model-versioning-rollback, M1). When True, retrain_org trains +
     # logs a "held" eval run but never flips is_active (durable manual rollback).
@@ -643,6 +647,7 @@ class OrgAIConfig(Base):
     sentiment_autopromote_hold = Column(Boolean, nullable=True, server_default='false', default=False)
     category_autopromote_hold = Column(Boolean, nullable=True, server_default='false', default=False)
     urgency_autopromote_hold = Column(Boolean, nullable=True, server_default='false', default=False)
+    churn_autopromote_hold = Column(Boolean, nullable=True, server_default='false', default=False)
     # Per-org usage-decline churn-label suggestions (usage-decline-churn-labels, M2).
     # 'off' | 'shadow' | 'active' — NOT the classifier off/shadow/auto triple:
     # this gates writing rows into the churn-suggestion review queue, so it
