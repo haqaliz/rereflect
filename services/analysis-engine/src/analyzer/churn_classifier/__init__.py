@@ -20,6 +20,7 @@ from __future__ import annotations
 from .labels import LABEL_WINDOW_DAYS, MARGIN, MIN_LABELS, RANDOM_STATE
 from .metrics import binary_macro_f1, compute_binary_metrics
 from .features import FEATURE_NAMES, build_feature_vector, missing_snapshot_defaults
+from .predict import predict
 
 __all__ = [
     "MIN_LABELS",
@@ -31,4 +32,5 @@ __all__ = [
     "FEATURE_NAMES",
     "build_feature_vector",
     "missing_snapshot_defaults",
+    "predict",
 ]
