@@ -261,6 +261,234 @@ class TestWritebackPatch:
         assert body["last_writeback_error"] == "a recorded error"
 
 
+# ─────────────────── AC4: POST /writeback/test probe ─────────────────────────
+
+
+class TestWritebackTestProbe:
+    def _probe(self, client: TestClient, headers: dict):
+        return client.post(
+            "/api/v1/integrations/intercom/writeback/test", headers=headers
+        )
+
+    def test_writeback_test_ok_with_valid_credential(
+        self, client: TestClient, owner_headers: dict
+    ):
+        _connected(client, owner_headers)
+
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=intercom_client_ok(),
+        ):
+            response = self._probe(client, owner_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"ok": True, "reason": None}
+
+    def test_writeback_test_auth_error_reason(
+        self, client: TestClient, owner_headers: dict
+    ):
+        _connected(client, owner_headers)
+
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=intercom_client_auth_fail(),
+        ):
+            response = self._probe(client, owner_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": False, "reason": "auth_error"}
+
+    def test_writeback_test_no_admin_reason(
+        self, client: TestClient, owner_headers: dict
+    ):
+        """A valid token whose /me carries no admin id cannot write back."""
+        _connected(client, owner_headers)
+
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=intercom_client_ok(admin_id=None),
+        ):
+            response = self._probe(client, owner_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": False, "reason": "no_admin"}
+
+    def test_writeback_test_missing_write_scope_from_recorded_evidence(
+        self, client: TestClient, db: Session, owner_headers: dict, test_organization
+    ):
+        """Intercom /me does not report scopes; the only honest live scope
+        check would mutate. So missing_write_scope comes from recorded
+        evidence only — a prior real write-back that failed with that status —
+        and no live check (or even client construction) happens."""
+        from src.models.intercom_integration import IntercomIntegration
+
+        _connected(client, owner_headers)
+        row = (
+            db.query(IntercomIntegration)
+            .filter(IntercomIntegration.organization_id == test_organization.id)
+            .first()
+        )
+        row.last_writeback_status = "missing_write_scope"
+        db.commit()
+
+        with patch(
+            "src.api.routes.intercom_integration.IntercomClient"
+        ) as mock_client:
+            response = self._probe(client, owner_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": False, "reason": "missing_write_scope"}
+        mock_client.assert_not_called()
+
+    def test_writeback_test_transient_error_reason(
+        self, client: TestClient, owner_headers: dict
+    ):
+        """Upstream 5xx/network is not an auth problem — honest taxonomy."""
+        _connected(client, owner_headers)
+
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=intercom_client_transient_fail(),
+        ):
+            response = self._probe(client, owner_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": False, "reason": "transient_error"}
+
+    def test_writeback_test_zero_mutation(
+        self, client: TestClient, db: Session, owner_headers: dict, test_organization
+    ):
+        """A probe must not pollute the status grid: no row writes, no
+        note/close calls, no raw httpx client."""
+        from src.models.intercom_integration import IntercomIntegration
+
+        _connected(client, owner_headers)
+
+        instance = MagicMock()
+        instance.validate.return_value = {
+            "workspace_id": WORKSPACE_ID,
+            "workspace_name": WORKSPACE_NAME,
+            "admin_id": ADMIN_ID,
+        }
+
+        row = (
+            db.query(IntercomIntegration)
+            .filter(IntercomIntegration.organization_id == test_organization.id)
+            .first()
+        )
+        snapshot = {
+            "writeback_enabled": row.writeback_enabled,
+            "writeback_action": row.writeback_action,
+            "last_writeback_at": row.last_writeback_at,
+            "last_writeback_status": row.last_writeback_status,
+            "last_writeback_error": row.last_writeback_error,
+        }
+
+        with patch.dict("os.environ", {"LLM_ENCRYPTION_KEY": TEST_FERNET_KEY}), patch(
+            "src.api.routes.intercom_integration.IntercomClient",
+            return_value=instance,
+        ) as mock_client, patch(
+            "src.api.routes.intercom_integration.httpx.Client"
+        ) as mock_httpx_client:
+            response = self._probe(client, owner_headers)
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "reason": None}
+
+        assert instance.validate.called
+        assert instance.close.called
+        called_names = {c[0] for c in instance.method_calls}
+        assert called_names == {"validate", "close"}, (
+            "probe must never call note/close endpoints on the client"
+        )
+        mock_client.assert_called_once()
+        mock_httpx_client.assert_not_called()
+
+        db.expire_all()
+        row = (
+            db.query(IntercomIntegration)
+            .filter(IntercomIntegration.organization_id == test_organization.id)
+            .first()
+        )
+        after = {
+            "writeback_enabled": row.writeback_enabled,
+            "writeback_action": row.writeback_action,
+            "last_writeback_at": row.last_writeback_at,
+            "last_writeback_status": row.last_writeback_status,
+            "last_writeback_error": row.last_writeback_error,
+        }
+        assert after == snapshot, "probe must not write to the integration row"
+
+    def test_writeback_test_404_when_no_connection(
+        self, client: TestClient, owner_headers: dict
+    ):
+        response = self._probe(client, owner_headers)
+
+        assert response.status_code == 404
+        assert "No active Intercom integration" in response.json()["detail"]
+
+    def test_writeback_test_409_when_legacy_oauth_only(
+        self, client: TestClient, db: Session, owner_headers: dict, test_organization
+    ):
+        """Probing a legacy OAuth credential is not actionable in v1 (the
+        worker task only acts on token-paste rows) — same honest 409 as PATCH."""
+        db.add(
+            Integration(
+                organization_id=test_organization.id,
+                type="intercom",
+                name="Legacy OAuth",
+                is_active=True,
+                config={"workspace_id": WORKSPACE_ID},
+            )
+        )
+        db.commit()
+
+        response = self._probe(client, owner_headers)
+
+        assert response.status_code == 409
+        assert "legacy OAuth" in response.json()["detail"]
+
+
+# ─────────────────────────── RBAC: members are barred ─────────────────────────
+
+
+class TestWritebackConfigRBAC:
+    def test_member_cannot_configure_writeback(
+        self, client: TestClient, member_headers: dict
+    ):
+        with patch(
+            "src.api.routes.intercom_integration.IntercomClient"
+        ) as mock_client:
+            response = _patch_writeback(
+                client, member_headers, {"enabled": True}
+            )
+
+        assert response.status_code == 403
+        mock_client.assert_not_called()
+
+    def test_member_cannot_run_writeback_probe(
+        self, client: TestClient, member_headers: dict
+    ):
+        with patch(
+            "src.api.routes.intercom_integration.IntercomClient"
+        ) as mock_client:
+            response = client.post(
+                "/api/v1/integrations/intercom/writeback/test",
+                headers=member_headers,
+            )
+
+        assert response.status_code == 403
+        mock_client.assert_not_called()
+
+    def test_member_cannot_read_writeback_status(
+        self, client: TestClient, member_headers: dict
+    ):
+        response = client.get(
+            "/api/v1/integrations/intercom/status", headers=member_headers
+        )
+        assert response.status_code == 403
+
+
 # ─────────────────── AC3: GET /status writeback extension ────────────────────
 
 

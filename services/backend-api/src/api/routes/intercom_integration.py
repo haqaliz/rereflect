@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Dict, Literal, Optional
 
 import httpx
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -36,7 +37,7 @@ from src.models.integration import Integration
 from src.models.intercom_integration import IntercomIntegration
 from src.models.organization import Organization
 from src.models.user import User
-from src.utils.encryption import encrypt_api_key, get_key_hint
+from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,11 @@ class IntercomWritebackResponse(BaseModel):
     last_writeback_at: Optional[datetime] = None
     last_writeback_status: Optional[str] = None
     last_writeback_error: Optional[str] = None
+
+
+class IntercomWritebackTestResponse(BaseModel):
+    ok: bool
+    reason: Optional[str] = None
 
 
 # ──────────────────────── Helpers ────────────────────────────────────────────
@@ -525,3 +531,72 @@ def intercom_configure_writeback(
         last_writeback_status=row.last_writeback_status,
         last_writeback_error=row.last_writeback_error,
     )
+
+
+@router.post(
+    "/writeback/test",
+    response_model=IntercomWritebackTestResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def intercom_writeback_test(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Live credential probe for the write-back path (S1).
+
+    Checks exactly two things: the stored token still validates
+    (GET /me) and an admin id resolves. It does NOT claim write scope:
+    Intercom's /me does not report scopes, and the only honest live
+    scope check would mutate, so `missing_write_scope` is reported only
+    from recorded evidence on the row (a prior real write-back that
+    failed with that status). A 200 {ok: true} therefore means "credible
+    credential", not "scope confirmed". Never mutates anything and never
+    dispatches a task.
+    """
+    row = _get_active_integration(db, current_org.id)
+    if not row:
+        if _has_active_oauth_connection(db, current_org.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This organization's Intercom connection uses the "
+                    "legacy OAuth path, which cannot store write-back "
+                    "configuration. Connect with an access token to "
+                    "enable write-back."
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Intercom integration found.",
+        )
+
+    if row.last_writeback_status == "missing_write_scope":
+        return IntercomWritebackTestResponse(
+            ok=False, reason="missing_write_scope"
+        )
+
+    try:
+        plain_token = decrypt_api_key(row.access_token)
+    except (ValueError, InvalidToken) as exc:
+        logger.warning(
+            "Intercom writeback probe: token decrypt failed for org %s: %s",
+            current_org.id, exc,
+        )
+        return IntercomWritebackTestResponse(ok=False, reason="auth_error")
+
+    client = IntercomClient(plain_token)
+    try:
+        try:
+            info = client.validate()
+        except IntercomAuthError:
+            return IntercomWritebackTestResponse(ok=False, reason="auth_error")
+        except IntercomTransientError:
+            return IntercomWritebackTestResponse(
+                ok=False, reason="transient_error"
+            )
+    finally:
+        _close_client(client)
+
+    if not info.get("admin_id"):
+        return IntercomWritebackTestResponse(ok=False, reason="no_admin")
+    return IntercomWritebackTestResponse(ok=True, reason=None)
