@@ -30,6 +30,7 @@ See docs/planning/intercom-selfhost-ingestion/cleanup-and-docs/.
 import importlib
 
 import pytest
+from celery.schedules import crontab
 
 from src.celery_app import celery_app
 
@@ -119,3 +120,60 @@ def test_the_dead_connector_beat_entry_is_gone():
     """
     scheduled = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
     assert "src.tasks.integrations.sync_all_integrations" not in scheduled
+
+
+def _crontab_key(schedule):
+    """Comparable (hour, minute, day_of_week) key for a single-time crontab.
+
+    Celery normalizes crontab fields into sets; a set is not orderable in a
+    meaningful way, so extract the single scheduled value from each field.
+    """
+    parts = []
+    for field in (schedule.hour, schedule.minute, schedule.day_of_week):
+        if isinstance(field, (set, list, tuple)):
+            parts.append(sorted(field)[0])
+        else:
+            parts.append(field)
+    return tuple(parts)
+
+
+def test_churn_classifier_beat_entry_registered_and_ordered():
+    """Per-org churn classifier retrain must be scheduled Mondays 06:00 UTC.
+
+    The churn retrain folds in the sentiment-corrections retrain (Mondays
+    06:30 UTC), so it must run strictly earlier within the same window --
+    before the corrections batch the classifier will train on.
+    """
+    beat = celery_app.conf.beat_schedule
+
+    churn_entry = beat.get("retrain-churn-classifier-weekly")
+    assert churn_entry is not None, (
+        "Beat schedule has no 'retrain-churn-classifier-weekly' entry."
+    )
+    assert churn_entry["task"] == (
+        "src.tasks.churn_classifier_training.retrain_all_orgs"
+    ), (
+        "'retrain-churn-classifier-weekly' must dispatch "
+        "src.tasks.churn_classifier_training.retrain_all_orgs"
+    )
+    assert churn_entry["schedule"] == crontab(hour=6, minute=0, day_of_week=1), (
+        "'retrain-churn-classifier-weekly' must run Mondays 06:00 UTC"
+    )
+
+    sentiment_entry = beat.get("retrain-classifier-weekly")
+    assert sentiment_entry is not None, (
+        "Beat schedule has no 'retrain-classifier-weekly' entry to order against."
+    )
+    churn_key = _crontab_key(churn_entry["schedule"])
+    sentiment_key = _crontab_key(sentiment_entry["schedule"])
+    assert churn_key < sentiment_key, (
+        "'retrain-churn-classifier-weekly' at {churn_key} must run strictly "
+        "before 'retrain-classifier-weekly' at {sentiment_key}".format(
+            churn_key=churn_key, sentiment_key=sentiment_key
+        )
+    )
+
+    assert "src.tasks.churn_classifier_training" in (celery_app.conf.include or ()), (
+        "'src.tasks.churn_classifier_training' is missing from celery_app's "
+        "include list, so the beat entry would silently never fire."
+    )
