@@ -403,7 +403,7 @@ export default function Home() {
                   'All features unlocked',
                   'Unlimited feedback & team members',
                   'Sentiment, pain points & feature requests',
-                  '30-day churn prediction & health scores',
+                  '30-day churn prediction & per-org churn models',
                   'AI Copilot — ask your feedback anything',
                   'Integrations: Slack, Intercom, Zendesk, Jira, Linear & more…',
                   'Bring your own LLM key — or run free on VADER',
