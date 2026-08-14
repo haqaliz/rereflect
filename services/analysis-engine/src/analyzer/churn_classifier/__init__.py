@@ -21,6 +21,9 @@ from .labels import LABEL_WINDOW_DAYS, MARGIN, MIN_LABELS, RANDOM_STATE
 from .metrics import binary_macro_f1, compute_binary_metrics
 from .features import FEATURE_NAMES, build_feature_vector, missing_snapshot_defaults
 from .predict import predict
+from .trainer import train_churn_classifier
+from .dataset import fetch_churn_rows, rows_to_dataset
+from .evaluate import EvalResult, build_incumbent_predict, evaluate_churn
 
 __all__ = [
     "MIN_LABELS",
@@ -33,4 +36,10 @@ __all__ = [
     "build_feature_vector",
     "missing_snapshot_defaults",
     "predict",
+    "train_churn_classifier",
+    "fetch_churn_rows",
+    "rows_to_dataset",
+    "evaluate_churn",
+    "EvalResult",
+    "build_incumbent_predict",
 ]
