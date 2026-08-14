@@ -521,3 +521,243 @@ class TestLegacyOAuthPath:
             "closed": False,
             "reason": "missing_encryption_key",
         }
+
+
+# ---------------------------------------------------------------------------
+# TestSuccessPath (AC2 — note first, then close; marker; row; event)
+# ---------------------------------------------------------------------------
+
+
+class TestSuccessPath:
+    def test_note_then_close_called_with_correct_args(self, db):
+        from unittest.mock import call
+
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": "Thanks — shipped in v2.3."}]
+        )
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        assert mock_client.method_calls == [
+            call.add_note("conv-1", "admin-1", "Thanks — shipped in v2.3."),
+            call.close_conversation("conv-1", "admin-1"),
+        ]
+
+    def test_default_note_text_when_no_resolution_note(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        mock_client.add_note.assert_called_once_with(
+            "conv-1", "admin-1", "Marked resolved in Rereflect."
+        )
+        mock_client.close_conversation.assert_called_once_with("conv-1", "admin-1")
+
+    def test_resolution_note_used(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": "Fixed in 2.3.0"}]
+        )
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        mock_client.add_note.assert_called_once_with(
+            "conv-1", "admin-1", "Fixed in 2.3.0"
+        )
+
+    def test_whitespace_resolution_note_falls_back_to_default(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": "   "}]
+        )
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        mock_client.add_note.assert_called_once_with(
+            "conv-1", "admin-1", "Marked resolved in Rereflect."
+        )
+
+    def test_note_only_skips_close(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id, writeback_action="note_only")
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        mock_client.add_note.assert_called_once()
+        mock_client.close_conversation.assert_not_called()
+
+    def test_unknown_action_falls_back_to_note_and_close(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id, writeback_action="delete-everything")
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        mock_client.close_conversation.assert_called_once()
+
+    def test_stored_admin_id_used_no_fetch(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id, admin_id="stored-admin-9")
+        item = _make_feedback(db, org.id)
+
+        _, _, mock_client = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        mock_client.add_note.assert_called_once()
+        assert mock_client.add_note.call_args.args[1] == "stored-admin-9"
+        mock_client.fetch_admin_id.assert_not_called()
+
+    def test_fetch_admin_id_fallback_value_used(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id, admin_id=None)
+        item = _make_feedback(db, org.id)
+
+        mock_client = _make_mock_client(admin_id="fetched-admin-7")
+        _, _, _ = _run_push(db, org.id, [{"id": item.id, "resolution_note": None}],
+                            mock_client=mock_client)
+
+        mock_client.fetch_admin_id.assert_called_once()
+        assert mock_client.add_note.call_args.args[1] == "fetched-admin-7"
+
+
+# ---------------------------------------------------------------------------
+# TestMarkerSemantics (plan D3 — marker set on success, per-item committed)
+# ---------------------------------------------------------------------------
+
+
+class TestMarkerSemantics:
+    def test_marker_set_on_feedback_item(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        # Fresh session re-query proves the per-item commit, not a same-session
+        # flush.
+        with _fake_db_session() as fresh:
+            marker = (
+                fresh.query(FeedbackItem)
+                .filter_by(id=item.id)
+                .first()
+            )
+            assert marker.intercom_writeback_at is not None
+
+    def test_marker_not_set_on_decrypt_failure(self, db, monkeypatch):
+        """D3: config failures stay re-runnable — the marker must NOT be set
+        so the operator's fix can be retried without a second dispatch."""
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        iw = _reload_task_module()
+        task_self = MagicMock()
+        mock_client = _make_mock_client()
+        monkeypatch.delenv("LLM_ENCRYPTION_KEY", raising=False)
+        with patch.object(iw, "IntercomClient", return_value=mock_client):
+            iw._push_resolved_writeback_body(
+                task_self, db, org.id, [{"id": item.id, "resolution_note": None}]
+            )
+
+        db.expire_all()
+        assert db.query(FeedbackItem).filter_by(id=item.id).first().intercom_writeback_at is None
+
+
+# ---------------------------------------------------------------------------
+# TestTimelineEvent (AC2 / plan D7 — one event, exact metadata contract)
+# ---------------------------------------------------------------------------
+
+
+class TestTimelineEvent:
+    def test_exactly_one_intercom_writeback_event(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        events = _get_events(db)
+        assert len(events) == 1
+        event = events[0]
+        assert event.feedback_id == item.id
+        assert event.organization_id == org.id
+        assert event.actor_id is None
+        assert event.event_type == "intercom_writeback"
+        assert event.old_value is None
+        assert event.new_value is None
+        assert event.metadata_ == {
+            "source": "intercom",
+            "action": "note_and_close",
+            "note_sent": True,
+            "closed": True,
+        }
+
+    def test_note_only_event_records_closed_false(self, db):
+        org = _make_org(db)
+        _make_integration(db, org.id, writeback_action="note_only")
+        item = _make_feedback(db, org.id)
+
+        _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["action"] == "note_only"
+        assert events[0].metadata_["closed"] is False
+        assert events[0].metadata_["note_sent"] is True
+
+    def test_guard_noops_write_no_timeline_event(self, db):
+        """D7: guards 1-5 are pure returns — no timeline noise."""
+        org = _make_org(db)
+        _make_integration(db, org.id, writeback_enabled=False)
+        item = _make_feedback(db, org.id)
+
+        _run_push(db, org.id, [{"id": item.id, "resolution_note": None}])
+
+        assert _get_events(db) == []
+
+
+# ---------------------------------------------------------------------------
+# TestLegacyOAuthPath (cont. — plan D4: OAuth success, event-only recording)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyOAuthPath:
+    def test_oauth_fallback_writes_no_columns_but_emits_event(self, db):
+        org = _make_org(db)
+        oauth = _make_oauth_integration(db, org.id)
+        item = _make_feedback(db, org.id)
+
+        result, _, mock_client = _run_push(
+            db, org.id, [{"id": item.id, "resolution_note": "OAuth-resolved note"}]
+        )
+
+        assert result["results"] == [{"id": item.id, "status": "ok", "reason": None}]
+        # Token decrypted from oauth_access_token; admin from config["admin_id"].
+        mock_client.add_note.assert_called_once_with(
+            "conv-1", "oauth-admin-1", "OAuth-resolved note"
+        )
+        mock_client.close_conversation.assert_called_once_with("conv-1", "oauth-admin-1")
+
+        # OAuth row has no writeback columns — nothing to update (the model
+        # carries none; the timeline event is the durable record).
+        db.expire_all()
+        row = db.query(Integration).filter_by(id=oauth.id).first()
+        assert row.is_active is True
+        assert not hasattr(row, "last_writeback_status")
+
+        events = _get_events(db)
+        assert len(events) == 1
+        assert events[0].metadata_["note_sent"] is True
+        assert events[0].metadata_["closed"] is True
