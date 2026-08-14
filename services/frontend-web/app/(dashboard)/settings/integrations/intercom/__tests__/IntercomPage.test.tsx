@@ -35,12 +35,16 @@ vi.mock('@/contexts/AuthContext', () => ({
 const mockConnect = vi.fn();
 const mockGetStatus = vi.fn();
 const mockDisconnect = vi.fn();
+const mockUpdateWriteback = vi.fn();
+const mockTestWriteback = vi.fn();
 
 vi.mock('@/lib/api/intercom', () => ({
   intercomAPI: {
     connect: (...args: unknown[]) => mockConnect(...args),
     getStatus: () => mockGetStatus(),
     disconnect: () => mockDisconnect(),
+    updateWriteback: (...args: unknown[]) => mockUpdateWriteback(...args),
+    testWriteback: (...args: unknown[]) => mockTestWriteback(...args),
   },
 }));
 
@@ -59,6 +63,11 @@ const DISCONNECTED = {
   last_sync_status: null,
   last_error: null,
   feedback_items_ingested: 0,
+  writeback_enabled: false,
+  writeback_action: null,
+  last_writeback_at: null,
+  last_writeback_status: null,
+  last_writeback_error: null,
 };
 
 const CONNECTED = {
@@ -73,6 +82,11 @@ const CONNECTED = {
   last_sync_status: 'ok',
   last_error: null,
   feedback_items_ingested: 42,
+  writeback_enabled: false,
+  writeback_action: 'note_and_close',
+  last_writeback_at: null,
+  last_writeback_status: null,
+  last_writeback_error: null,
 };
 
 function asAdmin() {
@@ -240,5 +254,21 @@ describe('IntercomSettingsPage', () => {
     );
 
     await waitFor(() => expect(mockDisconnect).toHaveBeenCalled());
+  });
+
+  it('renders the write-back card when connected', async () => {
+    mockGetStatus.mockResolvedValue(CONNECTED);
+
+    render(<IntercomSettingsPage />);
+
+    expect(await screen.findByText('Resolve Write-Back')).toBeInTheDocument();
+    expect(screen.getByRole('switch')).toBeInTheDocument();
+  });
+
+  it('does not render the write-back card when disconnected', async () => {
+    render(<IntercomSettingsPage />);
+
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled());
+    expect(screen.queryByText('Resolve Write-Back')).not.toBeInTheDocument();
   });
 });
