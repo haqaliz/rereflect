@@ -6,7 +6,7 @@
 
 > Added: 2026-06-28 (aspect 3 fix wave 1)
 
-### (a) PRE-EXISTING: churn_calibration.py beat tasks appear undecorated/unregistered
+### (a) PRE-EXISTING: churn_calibration.py beat tasks appear undecorated/unregistered — FIXED on `feat/per-org-churn-model` (2026-08-14)
 
 `services/worker-service/src/tasks/churn_calibration.py` defines `refit_all_orgs`,
 `refit_global_calibration`, and `purge_old_calibration_models` as plain Python
@@ -19,6 +19,16 @@ Action: audit all beat-scheduled tasks against a live worker startup log
 undecorated function, and add a registration assertion test for each.
 This is a pre-existing issue unrelated to the product-usage-enrichment feature;
 handle in a dedicated fix pass to avoid scope creep.
+
+**Close-out (2026-08-14):** the dedicated fix pass landed as aspect 1 of
+`feat/per-org-churn-model` (`calibration-beat-fix`). The three functions are now
+`@shared_task(name="src.tasks.churn_calibration.<name>")` — registration-only, no body
+change — and the sweep also caught `classifier_training.retrain_all_orgs` (same defect
+class, M5.2 weekly refit) plus the `churn_playbooks.purge_old_executions` task-name
+mismatch (its `@shared_task name=` lacked the `src.` prefix; the earlier fix had only
+repaired the beat side). `test_beat_schedule_integrity.py` now asserts real Celery
+registration and name-consistency for every beat entry, and the stale
+`usage_metrics.py` NOTE ("address in a separate audit pass") is deleted.
 
 ### (b) usage_score_service.py is duplicated across backend-api and worker-service
 

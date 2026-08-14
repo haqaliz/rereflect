@@ -437,7 +437,7 @@
 
 ---
 
-## M5 — Local Model Layer (self-improving, on-device) — IN PROGRESS (M5.0 + M5.1 shipped 2026-07-10; M5.2 sentiment + category heads shipped 2026-07-11, urgency head shipped 2026-07-14; M5.4 shipped 2026-07-25; M5.3 planned)
+## M5 — Local Model Layer (self-improving, on-device) — COMPLETE (M5.0 + M5.1 shipped 2026-07-10; M5.2 sentiment + category heads shipped 2026-07-11, urgency head shipped 2026-07-14; M5.4 shipped 2026-07-25; M5.3 shipped 2026-08-14)
 
 > **Strategic framing.** For an OSS / self-hosted / BYOK product the moat is **not** a trained
 > foundation model, a central cross-tenant dataset (dead single-tenant — the reason M4.3 benchmarks
@@ -518,10 +518,19 @@
       separate per-kind category heads (pain-point vs feature-request) and multi-label per item.
 - *Serves:* the self-improving data moat (flagship goal), accuracy, offline. **Exit:** spine proven on synthetic corrections (sentiment + category); real-org exit is deferred.
 
-#### M5.3 — Per-org churn ML model (Track C — data-gated)
-- [ ] Upgrade from isotonic calibration to a gradient-boosted / logistic churn classifier per org on
+#### M5.3 — Per-org churn ML model (Track C — data-gated) — COMPLETE (spine shipped 2026-08-14 as `per-org-churn-model`; exit unvalidated — no real org at label volume)
+- [x] Upgrade from isotonic calibration to a gradient-boosted / logistic churn classifier per org on
       labeled churn events + features; **activates at ~500 labels** (from M5.0); calibrated heuristic
       remains the fallback below the gate. Reuse the existing precision/recall/F1/AUC churn dashboard.
+      **Shipped 2026-08-14** — new analysis-engine core `analyzer/churn_classifier/` (28-feature
+      customer vector, JSON-only logistic artifact, pure-stdlib predict, leakage-free A/B vs the
+      calibrated-heuristic incumbent — made real by the beat-registration fix); worker task
+      `churn_classifier_training.py` (weekly Mondays 06:00 UTC, **consecutive-runs** +0.02
+      promotion, autopromote hold, rollback/resume); `OrgAIConfig.churn_classifier_mode`
+      (off/shadow/auto, default off) — in `auto` the ML probability replaces the heuristic and
+      `churn_probability_low/high` stay NULL (no fabricated CI); gate re-derived and **kept at
+      500** (`churn-label-gate-study`, verdict `keep_500`); 4th accuracy card + mode toggle on
+      Settings → AI. See `docs/planning/per-org-churn-model/`.
 - *Serves:* churn credibility. **Exit:** for a qualifying org, ML beats the heuristic on backtest with
       the auto-fallback preserved.
 
@@ -551,6 +560,24 @@
 > **Recommended follow-up:** an M5.3-scoped re-derivation of the gate from single-tenant data before
 > anyone builds against the number. This does not block: more human-confirmed labels help under any
 > threshold.
+>
+> **Update 2026-08-14 — re-derived, verdict `keep_500` (`churn-label-gate-study`).** The
+> recommended follow-up landed: a committed, reproducible harness
+> (`services/backend-api/scripts/eval_churn_label_gate.py` + `eval_results/churn_label_gate.json`)
+> simulates per-org learning curves for the planned logistic challenger vs the
+> calibrated-heuristic incumbent (50 simulations x 3 scenario families per volume,
+> leakage-free holdout; pooled macro-F1 delta + empirical 95% CI + promotion rate). The
+> simulated crossover — where the challenger clears the +0.02 bar — is **200 labels**, at
+> full fidelity and again at 25% missing-snapshot fidelity; at 500 the challenger clears
+> with margin, so **the gate stays 500** (no threshold change; `CHURN_LABEL_TARGET`
+> untouched). Honest limits, stated on the card: the curves are **synthetic** — a
+> simulation is a bound, not a measurement, and no real org is at label volume (PRD R2);
+> the incumbent stand-in is the post-fix calibrated-heuristic family (PRD R5); the target
+> must hold for the weakest plausible org, not the cleanest. **OQ2 answered:** at the
+> crossover only 57% of pooled simulated orgs cleared +0.02 on a single run → the churn
+> head uses **consecutive-runs promotion** (two consecutive weekly clears) rather than
+> M5.2's single-run rule. Readout: `GET /api/v1/settings/ai/churn/label-gate` +
+> ChurnLabelGateCard on Settings → AI.
 >
 > **Not viable as label source:** **Stripe** (dead post-OSS-pivot). ~~**Segment/product-usage
 > drop** (blocked — `customer_usage` keeps no history to detect a drop against).~~ **Update

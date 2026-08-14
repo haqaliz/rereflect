@@ -458,12 +458,19 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 
 ### Found while doing the Intercom work (2026-08-01)
 
-- **`purge-playbook-executions` had never run — FIXED.** The beat entry referenced
+- **`purge-playbook-executions` had never run — FIXED (two halves; second half 2026-08-14).**
+  The beat entry referenced
   `tasks.churn_playbooks.purge_old_executions`, missing the `src.` prefix every other
-  entry carries, so it resolved to nothing and the 90-day purge never fired. Fixed on
-  `feat/intercom-selfhost-ingestion`, and safe to fix *now* specifically: churn playbooks
+  entry carries, so it resolved to nothing and the 90-day purge never fired. The beat
+  side was fixed on
+  `feat/intercom-selfhost-ingestion`, and safe to fix *then* specifically: churn playbooks
   shipped 2026-07-19, so nothing is 90 days old yet and the first run deletes nothing.
   In three months the first successful run would have purged a real backlog unannounced.
+  **Correction (2026-08-14, `feat/per-org-churn-model`):** that fix repaired only the
+  beat side — the task's own `@shared_task name="tasks.churn_playbooks.purge_old_executions"`
+  still lacked the `src.` prefix, so dispatch **still raised `NotRegistered`** and the
+  purge had *still* never run. The task-name side landed with a name-consistency test
+  (one string; see `test_beat_schedule_integrity.py::test_beat_entry_registered_task_name_matches_beat_string`).
   A new `tests/test_beat_schedule_integrity.py` resolves every scheduled task name to a
   real function so this class cannot recur — it is the same "wired at one end, dead at the
   other" shape as the P0/P0b import bugs and the orphaned write-back module.
@@ -474,6 +481,25 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   on the Intercom branch because it was actively misleading, but **the mechanism itself is
   vestigial and should probably be deleted** — deliberately left standing rather than
   removing a UI surface outside that card's scope.
+
+### Found while doing the churn-model work (2026-08-14)
+
+- **`churn-calibration-beat-notregistered` — FIXED** on `feat/per-org-churn-model`
+  (aspect 1 of `per-org-churn-model`; closes `TRACKING.md` item (a)). Four beat
+  entries dispatched tasks that were never registered: `refit_all_orgs`,
+  `refit_global_calibration`, `purge_old_calibration_models` in `churn_calibration.py`
+  and `classifier_training.retrain_all_orgs` were **plain functions with no Celery
+  decorator**, so every dispatch raised `NotRegistered` and none of them had ever run in
+  production — the weekly per-org and daily global isotonic refits, the old-model purge,
+  and the M5.2 weekly classifier refit. Consequences: `probability_updater` always fell
+  through to the **identity fallback** (`p = score/100`), and any M5.3 A/B against "the
+  calibrated heuristic" would have measured against an incumbent that never ran. The
+  existing guard (`test_beat_schedule_integrity.py`) only asserted `hasattr(module, attr)`,
+  which an undecorated function passes — it is now hardened to assert **real Celery
+  registration** plus name-consistency, and `tasks/usage_metrics.py:482-485`'s NOTE
+  ("Do NOT edit churn_calibration.py here; address in a separate audit pass") is deleted —
+  that pass is this one. Registration-only, no task-body change. See
+  `docs/planning/per-org-churn-model/calibration-beat-fix/`.
 
 ### Deferred v2 — Intercom (opened 2026-08-01, all NOT STARTED)
 
