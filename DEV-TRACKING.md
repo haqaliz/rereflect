@@ -510,7 +510,7 @@ visible from the backlog. None block anything; the integration is fully operable
   message** of a conversation only. Replies and ratings arrive via the webhook path,
   so a pull-only install (no webhook wired) never sees them. Needs conversation-parts
   fetching.~~ — **SHIPPED 2026-08-15** via `feat/intercom-pull-replies-and-ratings`
-  (merged <merge-sha>, PR <# pending>): the pull now enriches replies + the
+  (merged `873a9c1`, PR #16): the pull now enriches replies + the
   satisfaction rating via conversation-parts — new replies merged into the item text
   (one item per conversation, idempotent by part id), rating/remark in
   `source_metadata`, changed items re-analyzed, unchanged untouched. No backfill:
