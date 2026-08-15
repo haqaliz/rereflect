@@ -62,7 +62,10 @@ customer's health and churn signals.
 
 ## Honest limits
 
-Up to 15 minutes of latency. Only the first message of a conversation is ingested (replies
-are a webhook-only path today). The 20-page cap means a very large backlog drains over
-several runs rather than one. No claim is made about analysis quality — this changes whether
+Up to 15 minutes of latency. ~~Only the first message of a conversation is ingested
+(replies are a webhook-only path today).~~ — **SUPERSEDED 2026-08-15** by
+`intercom-pull-replies-and-ratings`: the pull now enriches replies and the
+satisfaction rating via conversation-parts for conversations it re-sees (no
+backfill). The 20-page cap means a very large backlog drains over several runs
+rather than one. No claim is made about analysis quality — this changes whether
 feedback arrives, nothing else.

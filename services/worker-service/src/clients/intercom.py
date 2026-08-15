@@ -155,6 +155,28 @@ class IntercomClient:
 
         return conversations, next_cursor
 
+    def get_conversation(self, conversation_id: str) -> Dict[str, Any]:
+        """Fetch one conversation's full detail payload.
+
+        Returns the raw response object: `conversation_parts.conversation_parts[]`
+        holds the reply parts and `rating` the satisfaction rating, parsed by the
+        adapter, not here. 404 -> IntercomNotFoundError (caller: idempotent noop);
+        401/403 -> IntercomAuthError; 429/5xx/network -> IntercomTransientError.
+        """
+        try:
+            resp = self._client.get(
+                f"{INTERCOM_API_BASE}/conversations/{conversation_id}",
+                headers={
+                    "Authorization": f"Bearer {self._access_token}",
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise IntercomTransientError(str(exc)) from exc
+
+        return self._handle(resp).json()
+
     def add_note(
         self, conversation_id: str, admin_id: str, body: str
     ) -> None:

@@ -72,6 +72,12 @@ logger = logging.getLogger(__name__)
 # advances, so the remainder is picked up on the next tick rather than lost.
 MAX_PAGES_PER_RUN = 20
 
+# R1b per-run cap on conversation-detail fetches. Search pages are <=150
+# conversations x 20 pages = <=3000/run; 500 bounds the detail fan-out while
+# the cursor resumes (R5). Dropped conversations are counted and logged, never
+# silent — the same house rule as usage_decline_label_detector's cap.
+MAX_DETAIL_FETCHES_PER_RUN = 500
+
 
 def _decrypt(token: str) -> str:
     """Mirrors zendesk_sync._decrypt / hubspot_sync._decrypt."""
@@ -108,6 +114,51 @@ def _persist_terminal_status(integration_id: int, status: str, error: str) -> No
             db.commit()
 
 
+def _enrich_conversation_replies(db, item, reply_parts, rating) -> bool:
+    """Merge NEW reply parts into item.text and item.source_metadata.
+
+    Diff is by part_id membership against source_metadata["replies"].
+    Returns True iff item.text actually changed (new replies merged);
+    a rating-only update returns False (metadata changed, no re-analysis).
+
+    Never touches customer_email (admin/bot rule — adapter contract).
+    """
+    from src.adapters.intercom_parts import format_reply_merge, new_reply_parts
+
+    metadata = dict(item.source_metadata or {})
+
+    # Collapse duplicate part_ids within one payload: a part is merged once.
+    seen: set = set()
+    unique_parts = []
+    for part in reply_parts:
+        if part["part_id"] not in seen:
+            seen.add(part["part_id"])
+            unique_parts.append(part)
+
+    merged_part_ids = [r["part_id"] for r in metadata.get("replies", [])]
+    new_parts = new_reply_parts(unique_parts, merged_part_ids)
+
+    text_changed = False
+    if new_parts:
+        blocks = "".join(format_reply_merge(p) for p in new_parts)
+        item.text = (item.text or "") + blocks
+        metadata["replies"] = list(metadata.get("replies", [])) + new_parts
+        text_changed = True
+
+    if rating is not None:
+        # Metadata mirrors the adapter's "keys omitted when absent" contract.
+        for key in ("rating", "remark", "rated_at"):
+            if key in rating:
+                metadata[key] = rating[key]
+            else:
+                metadata.pop(key, None)
+
+    if metadata != (item.source_metadata or {}):
+        item.source_metadata = metadata
+
+    return text_changed
+
+
 def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     """Pull conversations for one org since the stored cursor.
 
@@ -124,6 +175,8 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     dict: conversations_seen, conversations_ingested, no_source_match, cursor
     """
     from src.adapters import get_adapter
+    from src.adapters.intercom_parts import extract_rating, extract_reply_parts
+    from src.models import FeedbackItem
     from src.tasks.source_events import _find_matching_sources, _process_event_for_source
 
     # D1 — never epoch/None.
@@ -139,6 +192,9 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
 
     conversations_seen = 0
     conversations_ingested = 0
+    changed_feedback_ids: list = []
+    detail_fetches = 0
+    dropped_by_cap = 0
     max_updated_at: Optional[int] = None
     starting_after: Optional[str] = None
     pages = 0
@@ -180,6 +236,42 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
                 if result.get("status") == "feedback_created":
                     conversations_ingested += 1
 
+            # ── Enrichment pass (pull-enrichment) ──────────────────────────
+            # Merge new reply parts + the rating into the item the event loop
+            # just created (or already existed from a previous run). R1b: the
+            # search object carries no parts, so fetch the detail — bounded by
+            # the per-run cap. If the search object does carry parts (a live
+            # shape some deployments return), use them and skip the fetch.
+            parts = extract_reply_parts(conversation)
+            rating = extract_rating(conversation)
+            if not parts and not rating:
+                if detail_fetches >= MAX_DETAIL_FETCHES_PER_RUN:
+                    # Dropped, not lost: the cursor already advanced for this
+                    # conversation on the search side, so it is re-seen when
+                    # it next updates. No silent caps — counted and logged.
+                    dropped_by_cap += 1
+                    continue
+                detail = client.get_conversation(conversation_id)
+                detail_fetches += 1
+                parts = extract_reply_parts(detail)
+                rating = extract_rating(detail)
+            if not parts and not rating:
+                continue
+            # ix_feedback_items_org_source_external serves this exact shape.
+            item = (
+                db.query(FeedbackItem)
+                .filter(
+                    FeedbackItem.organization_id == org_id,
+                    FeedbackItem.source == "intercom",
+                    FeedbackItem.source_external_id == conversation_id,
+                )
+                .first()
+            )
+            if item is None:
+                continue
+            if _enrich_conversation_replies(db, item, parts, rating):
+                changed_feedback_ids.append(item.id)
+
         if not next_cursor:
             break
         starting_after = next_cursor
@@ -189,6 +281,16 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
             "the remainder resumes on the next run",
             MAX_PAGES_PER_RUN,
             integ.id,
+        )
+
+    if dropped_by_cap:
+        # House rule: no silent caps (usage_decline_label_detector precedent).
+        logger.warning(
+            "Intercom pull: detail-fetch per-run cap reached integration=%s "
+            "cap=%s dropped_by_cap=%s",
+            integ.id,
+            MAX_DETAIL_FETCHES_PER_RUN,
+            dropped_by_cap,
         )
 
     # The cursor only ever moves FORWARD. An empty page leaves it alone rather
@@ -209,6 +311,8 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     return {
         "conversations_seen": conversations_seen,
         "conversations_ingested": conversations_ingested,
+        "changed_feedback_ids": changed_feedback_ids,
+        "dropped_by_cap": dropped_by_cap,
         "no_source_match": not sources,
         "cursor": max_updated_at,
     }
@@ -263,6 +367,24 @@ def _sync_intercom_org_body(task_self, integration_id: int) -> Dict[str, Any]:
             integ.last_error = None
             integ.updated_at = datetime.utcnow()
             db.commit()
+
+            # Re-analysis dispatch — AFTER the commit, never before, never
+            # inside _sync_org: the batch task opens a fresh session and reads
+            # the item's text, so a pre-commit dispatch would analyze stale
+            # content (pinned ordering, plan §1.3). Guarded so a failed seam
+            # call can never break the sync — the seam's own task retries.
+            from src.tasks.analysis import reanalyze_feedback
+
+            for feedback_id in result.get("changed_feedback_ids", []):
+                try:
+                    reanalyze_feedback(db, feedback_id)
+                except Exception:
+                    logger.exception(
+                        "Intercom pull: re-analysis dispatch failed for feedback "
+                        "%s (integration %s)",
+                        feedback_id,
+                        integration_id,
+                    )
 
             from src.cache import cache_invalidate
 

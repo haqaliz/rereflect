@@ -1721,17 +1721,22 @@ Customer 360 enrichment are available to every organization running the app.
 
 ## Connecting Intercom
 
-Intercom is an **inbound feedback source**: new conversations, replies, and ratings
-become feedback items, analyzed like any other source.
+Intercom is an **inbound feedback source**: new conversations — including replies and
+the satisfaction rating — become feedback items, analyzed like any other source.
 
 **There are two ways to connect. Use the access token.**
 
 | | Access token (recommended) | OAuth |
 |---|---|---|
 | Setup | Paste a token from your own Intercom app | Register an OAuth app, set 3 env vars |
-| Pull sync | Yes — every 15 minutes | Yes |
+| Pull sync | Yes — every 15 minutes | No — access-token only |
 | Real-time webhook | Yes, verified against **your** workspace | Yes, verified against a global secret |
 | Suits | Self-hosting | Multi-workspace / legacy installs |
+
+Pull sync runs for access-token connections only: the sync job iterates
+`IntercomIntegration` rows, which the token-paste path provisions. OAuth
+connections have **no pull** — for those, the webhook is the only ingestion
+path (step 5 below).
 
 The access-token path is Intercom's own recommendation for this case: *"An Access
 Token is for if you're using the API to access data in your own Intercom
@@ -1928,13 +1933,21 @@ request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
 >
 > - The pull runs every 15 minutes, so without a webhook a conversation can take
 >   that long to appear.
-> - The pull ingests the **first message** of a conversation. Replies and ratings
->   arrive through the webhook only.
+> - The pull ingests the **full conversation** for anything it re-sees: the first
+>   message plus every new reply, merged into the item's text, and the satisfaction
+>   rating stored on the item. The webhook is optional — for near-instant delivery
+>   of new conversations — and no longer the only way replies or ratings reach an
+>   item.
+> - Enrichment applies to conversations the pull **re-sees after this ships** —
+>   older conversations stay first-message-only until they get new activity. There
+>   is no backfill.
 > - A very large backlog drains over several runs rather than one — each run
 >   fetches up to 20 pages and the cursor resumes where it stopped.
-> - No claim is made about analysis quality. This determines whether feedback
->   arrives and whether it links to a customer; sentiment and categorization
->   behave exactly as they do for every other source.
+> - The webhook's `replied` / `rating.added` events are still dedup-inert today
+>   (flagged follow-up, not fixed) — the pull is what delivers replies and ratings.
+> - No claim is made about analysis quality beyond: the full thread is now scored
+>   instead of the first message. Sentiment, categorization and churn behave
+>   exactly as they do for every other source.
 
 - New Intercom conversations appear as feedback items, analyzed for sentiment,
   within a minute or two — or in the pending-review queue if `auto_import` is off.
