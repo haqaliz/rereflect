@@ -1,63 +1,56 @@
-# Card — feat/intercom-pull-replies-and-ratings (freeform, no GitHub issue)
+# Card — feat/intercom-backlog-drain-visibility (freeform, no GitHub issue)
 
-Source: DEV-TRACKING.md "Deferred v2 — Intercom" entry `intercom-pull-replies-and-ratings`
-(line ~509), plus the `intercom-selfhost-ingestion` planning docs. Branch
-`feat/intercom-pull-replies-and-ratings`, worktree `.claude/worktrees/feat-intercom-pull-replies`.
+Source: DEV-TRACKING.md "Deferred v2 — Intercom" entry `intercom-backlog-drain-visibility`
+(line ~517-518). Branch `feat/intercom-backlog-drain-visibility`, worktree
+`.claude/worktrees/feat-intercom-backlog-drain`.
 
 ## Brief
 
-The Intercom **15-minute pull ingests the first message of a conversation only**.
-Replies and ratings arrive **via the webhook path only**, so a pull-only install (no
-webhook wired — the common self-host case, since webhook subscription is
-Developer-Hub-only and cannot be provisioned via API) **never sees replies or
-ratings**. The AI pipeline (sentiment, categories, churn) then analyzes first messages
-only for those orgs. This card adds **conversation-parts fetching** to the pull path
-so replies and ratings are ingested without a webhook.
+A large Intercom backlog drains over **several 20-page runs** (first connect with a big
+history), with **no operator-visible progress**: the Intercom settings page shows a
+count (ingested/workspace/last-sync state) but not **"N remaining"**. This card adds an
+honest remaining-backlog estimate to the sync status the operator can read on
+Settings → Integrations → Intercom.
+
+## Facts (from prior digs, verified 2026-08-15)
+
+- The pull (`worker-service/src/tasks/intercom_sync.py`) runs `POST /conversations/search`
+  with `updated_at >= cursor`, `starting_after` pagination, `MAX_PAGES_PER_RUN = 20`,
+  cursor advances to max `updated_at` per run. The search response carries
+  `total_count` (Intercom's documented response field) — the client currently drops it.
+- The Intercom settings page Connection card (`frontend-web/.../settings/integrations/intercom/page.tsx:167-235`)
+  shows workspace, token hint, last-synced, last-error, and an **ingested count** —
+  the count referenced by the deferred entry. `lib/api/intercom.ts` status type drives it.
+- `GET /api/v1/integrations/intercom/status` (`backend-api/src/api/routes/intercom_integration.py:407-420`)
+  returns workspace/admin metadata + sync state.
+- `IntercomIntegration` (backend + worker mirror) has sync-status columns; model parity
+  is CI-asserted. Alembic head on master: `e4f5a6b7c8d9`.
 
 ## Caveats (carried into the PRD, must not be papered over)
 
-- **One-feedback-item-per-conversation semantics.** The ingestion core dedups by
-  `external_message_id` (source_events.py:312-319) so exactly one FeedbackItem per
-  conversation exists (intercom_sync.py D3). Replies/ratings must slot into the
-  existing per-conversation item semantics — either as updates to the conversation's
-  item or as separate items — without breaking the dedup, analysis, or Customer 360
-  behavior the webhook path already establishes.
-- **Pull capacity is bounded** (20 pages/run, no historical backfill, cursor never
-  epoch). Fetching parts per conversation adds a second API call per conversation —
-  rate limits (429/Retry-After) and the 20-page/run cap must be respected, and the
-  per-run work must stay bounded.
-- **What "rating" means in the API**: `conversation.rating.added` carries the rating
-  object; the pull's `/conversations/search` summaries may or may not include it —
-  verify the actual payload shape before assuming parity with the webhook adapter.
-- **No claim about analysis quality** (house rule — the ingestion PRD makes the same
-  disclaimer). This changes label *supply* (more complete conversations), not the
-  model.
-
-## Roadmap facts (from DEV-TRACKING.md, cited)
-
-- Deferred v2 entry (`DEV-TRACKING.md:509-511`): "the 15-minute pull ingests the
-  **first message** of a conversation only. Replies and ratings arrive via the webhook
-  path, so a pull-only install (no webhook wired) never sees them. Needs
-  conversation-parts fetching."
-- The pull itself (`AI-TRACKING.md:66`): 15-min beat, `POST /conversations/search`,
-  `updated_at >=` cursor, `starting_after` pagination, 20-page/run cap, routed through
-  the shared `_find_matching_sources` / `_process_event_for_source` core.
-- The webhook path already handles the three topics
-  (`conversation.user.created/replied/rating.added`) — the reply/rating adapters are
-  the parity target for the pull path.
+- **It is an estimate, not a count.** `total_count` reflects the window at the moment
+  of the query (`updated_at >= cursor-at-run-start`); conversations updated during the
+  drain shift the window, and the boundary re-fetch re-counts one conversation. The UI
+  must label it an estimate (e.g. "≈ N remaining").
+- **Token-paste only.** The pull iterates `IntercomIntegration` rows only — OAuth orgs
+  have no pull, so no backlog number exists for them (already a documented truth fix
+  from `intercom-pull-replies-and-ratings`). The card must not show a backlog for OAuth
+  connections.
+- **First-run semantics.** On connect, `last_synced_at` is absent → cursor = `connected_at`;
+  the first run's `total_count` IS the full backlog. Absent sync history or empty
+  window → no backlog line (or "0" only when a run has actually completed).
 
 ## Deliverables (proposed, refine in PRD)
 
-1. Pull path fetches conversation parts (replies) and ratings for conversations it
-   ingests, producing the same feedback items the webhook path would.
-2. Bounded: respects 429/Retry-After, per-run caps, no unbounded fan-out.
-3. Dedup semantics unchanged (one item per conversation, or a documented deliberate
-   change with tests).
-4. Docs + CHANGELOG + DEV-TRACKING marker (deferred-v2 entry → SHIPPED).
+1. Sync computes and persists an honest remaining estimate after each run (new
+   `backlog_remaining` column on `IntercomIntegration` + worker mirror + parity).
+2. `GET /status` exposes it; the settings page Connection card renders "≈ N remaining"
+   (with honest copy; hidden for OAuth/unconnected/never-synced states).
+3. Docs: SELF_HOSTING + CHANGELOG + DEV-TRACKING deferred-v2 entry → SHIPPED.
 
 ## Out of scope (guardrails)
 
-- Not building `intercom-backlog-drain-visibility`, `intercom-writeback` (shipped),
-  or `intercom-oauth-path-retirement` (gated on evidence of use) — separate slices.
-- No plan gates (`SELF_HOSTED=true`); no new vendor dependency; no claims beyond what
-  the pull actually delivers.
+- Not changing the drain mechanics (page cap, cursor) — this is visibility only.
+- Not building `intercom-oauth-path-retirement` (gated on evidence of use) or the
+  latent webhook reply/rating defect (already flagged as a follow-up).
+- No plan gates (`SELF_HOSTED=true`); no new vendor dependency.
