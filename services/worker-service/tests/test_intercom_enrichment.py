@@ -23,6 +23,7 @@ ONLY for changed ids, AFTER the sync transaction commits.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -362,3 +363,77 @@ class TestSyncOrgDispatch:
         assert result["status"] == "ok"
         assert result["no_source_match"] is True
         seam.assert_not_called()
+
+
+class TestDetailFetchCap:
+    """Phase 4 — R1b detail-fetch per-run cap (spec AC4 / PRD R5): the
+    fan-out is bounded, drops are logged (never silent — the
+    usage_decline_label_detector precedent), and transient detail failures
+    flow through the body's existing retry without advancing the cursor.
+    """
+
+    def test_cap_drops_remainder_and_logs(self, db, _no_op_side_effects, monkeypatch, caplog):
+        import logging
+
+        import src.tasks.intercom_sync as mod
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+        monkeypatch.setattr(mod, "MAX_DETAIL_FETCHES_PER_RUN", 1)
+
+        convs = [_conversation(f"c{i}", f"body {i}") for i in range(3)]
+        details = {f"c{i}": _conversation_detail(f"c{i}", [_part("p1", "reply")]) for i in range(3)}
+        client = _fake_client_with_parts([(convs, None)], details)
+
+        with caplog.at_level(logging.WARNING):
+            result = _sync_org(org.id, db, client, integ)
+
+        assert client.get_conversation.call_count == 1
+        assert result["dropped_by_cap"] == 2
+        assert result["changed_feedback_ids"]
+
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "expected a WARNING log for the per-run cap"
+        message = warnings[-1].getMessage()
+        assert "cap=1" in message
+        assert "dropped_by_cap=2" in message
+
+    def test_transient_detail_fetch_retries_and_does_not_advance_cursor(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from celery.exceptions import Retry
+
+        from src.clients.intercom import IntercomTransientError
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        last_synced = datetime(2026, 7, 20, 8, 0, 0)
+        integ = _make_integration(
+            db, org.id, access_token=_encrypt("tok"), last_synced_at=last_synced
+        )
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+
+        import src.tasks.intercom_sync as mod
+
+        client = _fake_client_with_parts(
+            [([_conversation("c1", "Billing is broken")], None)], {}
+        )
+        client.get_conversation.side_effect = IntercomTransientError("rate limited")
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = Retry()
+
+        with pytest.raises(Retry):
+            _sync_intercom_org_body(task_self, integ.id)
+
+        task_self.retry.assert_called_once()
+        db.refresh(integ)
+        assert integ.last_sync_status == "transient_error"
+        assert integ.last_synced_at == last_synced, (
+            "the cursor must not advance when the run never committed"
+        )
