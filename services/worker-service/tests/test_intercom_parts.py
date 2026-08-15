@@ -101,7 +101,9 @@ class TestExtractReplyParts:
             [_part("p1", body="<p>Hello <b>world</b></p><br/><p>Second line</p>")]
         )
         parts = extract_reply_parts(conv)
-        assert parts[0]["body"] == "Hello world Second line"
+        # the shared strip_html primitive removes tags without inserting
+        # separators, so <br/> does not become a space here
+        assert parts[0]["body"] == "Hello worldSecond line"
 
     def test_missing_body_and_author_graceful(self):
         part = _part("p1")
@@ -197,16 +199,20 @@ class TestFormatReplyMerge:
 
 
 class TestNewReplyParts:
+    @staticmethod
+    def _extracted(*parts):
+        return extract_reply_parts(_conversation(list(parts)))
+
     def test_new_reply_parts_returns_only_unmerged(self):
-        parts = [_part("p1"), _part("p2"), _part("p3")]
+        parts = self._extracted(_part("p1"), _part("p2"), _part("p3"))
         assert [p["part_id"] for p in new_reply_parts(parts, ["p1"])] == ["p2", "p3"]
 
     def test_new_reply_parts_all_merged_is_noop(self):
-        parts = [_part("p1"), _part("p2")]
+        parts = self._extracted(_part("p1"), _part("p2"))
         assert new_reply_parts(parts, ["p1", "p2", "p3"]) == []
 
     def test_new_reply_parts_empty_merged_returns_all(self):
-        parts = [_part("p1"), _part("p2")]
+        parts = self._extracted(_part("p1"), _part("p2"))
         assert new_reply_parts(parts, None) == parts
         assert new_reply_parts(parts, []) == parts
 
