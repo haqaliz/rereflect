@@ -606,7 +606,7 @@ was left by a branch that shipped the fix and did not update the row.
 > `aa09cbdc` (#14) on 2026-08-15. Backend 4927 passed (38 new
 > vs 4889 baseline); worker 1732 passed (48 net new).
 > **Follow-up `landing-intercom-entry-refresh` — DONE** (chore, merged
-> `(merge-sha pending)` (#15, 2026-08-15)). The OAuth-era Intercom entry in
+> `073dfb2a` (#15, 2026-08-15)). The OAuth-era Intercom entry in
 > `services/landing-web/lib/integrations.ts` claimed OAuth-only setup and webhook-only
 > ingestion ("there is no polling fallback"); it now describes token-paste connect,
 > the 15-minute pull with the optional real-time webhook, and the opt-in write-back —
