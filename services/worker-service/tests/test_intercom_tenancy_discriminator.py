@@ -321,23 +321,24 @@ class TestTokenPasteEndToEnd:
 # ──────────────────────── Model parity ────────────────────────────────────────
 
 
+WRITEBACK_INTEGRATION_COLUMNS = (
+    "writeback_enabled",
+    "writeback_action",
+    "last_writeback_at",
+    "last_writeback_status",
+    "last_writeback_error",
+)
+WRITEBACK_FEEDBACK_COLUMNS = ("intercom_writeback_at",)
+
+
 class TestModelParity:
-    def test_worker_and_backend_intercom_integration_columns_match(self):
-        """The worker's no-FK mirror must match the backend model exactly.
-
-        worker-service cannot import backend-api, so the model is duplicated.
-        A drift here is silent: the worker would query a column the table has
-        under a different name, or miss one entirely, and resolution would fail
-        at runtime rather than in a test.
-
-        Same sys.path/sys.modules swap technique as
-        test_zendesk_adapter.py::TestModelsAndMigration.
+    def _import_backend_models(self):
+        """Import backend IntercomIntegration + FeedbackItem via the sys.path
+        swap. worker-service cannot import backend-api in production; the
+        parity harness imports it for the test process only, then restores
+        the module state.
         """
         import os
-
-        from src.models import IntercomIntegration as WorkerModel
-
-        worker_cols = {c.name for c in WorkerModel.__table__.columns}
 
         worktree = os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -352,11 +353,12 @@ class TestModelParity:
 
         sys.path.insert(0, backend_src)
         try:
+            from src.models.feedback import FeedbackItem as BackendFeedbackItem
             from src.models.intercom_integration import (
-                IntercomIntegration as BackendModel,
+                IntercomIntegration as BackendIntercomIntegration,
             )
 
-            backend_cols = {c.name for c in BackendModel.__table__.columns}
+            return BackendIntercomIntegration, BackendFeedbackItem
         finally:
             sys.path.remove(backend_src)
             for k in list(sys.modules.keys()):
@@ -364,8 +366,87 @@ class TestModelParity:
                     del sys.modules[k]
             sys.modules.update(saved_mods)
 
+    def test_worker_and_backend_intercom_integration_columns_match(self):
+        """The worker's no-FK mirror must match the backend model exactly.
+
+        worker-service cannot import backend-api, so the model is duplicated.
+        A drift here is silent: the worker would query a column the table has
+        under a different name, or miss one entirely, and resolution would fail
+        at runtime rather than in a test.
+
+        Same sys.path/sys.modules swap technique as
+        test_zendesk_adapter.py::TestModelsAndMigration.
+        """
+        from src.models import IntercomIntegration as WorkerModel
+
+        worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+        BackendModel, _ = self._import_backend_models()
+        backend_cols = {c.name for c in BackendModel.__table__.columns}
+
         assert worker_cols == backend_cols, (
             f"Column mismatch!\n"
             f"  Worker only:  {worker_cols - backend_cols}\n"
             f"  Backend only: {backend_cols - worker_cols}"
         )
+
+    def test_worker_and_backend_feedback_item_columns_match(self):
+        """The worker's no-FK FeedbackItem mirror must match the backend
+        model exactly — same drift risk as the IntercomIntegration mirror."""
+        from src.models import FeedbackItem as WorkerModel
+
+        worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+        _, BackendFeedbackItem = self._import_backend_models()
+        backend_cols = {c.name for c in BackendFeedbackItem.__table__.columns}
+
+        assert worker_cols == backend_cols, (
+            f"Column mismatch!\n"
+            f"  Worker only:  {worker_cols - backend_cols}\n"
+            f"  Backend only: {backend_cols - worker_cols}"
+        )
+
+    def test_writeback_column_types_match(self):
+        """The worker mirror must match the backend column TYPES, not just
+        names (spec AC4 "including types").
+
+        Catches DateTime(timezone=True) drift (timestamptz vs naive) and
+        String(64) vs String(50) slips — both silent at runtime: the worker
+        would write/read the columns with the wrong type and resolution
+        would misbehave on real data.
+        """
+        from src.models import FeedbackItem as WorkerFeedbackItem
+        from src.models import IntercomIntegration as WorkerIntercomIntegration
+
+        BackendIntercomIntegration, BackendFeedbackItem = self._import_backend_models()
+
+        worker_models = {
+            "intercom_integrations": WorkerIntercomIntegration,
+            "feedback_items": WorkerFeedbackItem,
+        }
+        backend_models = {
+            "intercom_integrations": BackendIntercomIntegration,
+            "feedback_items": BackendFeedbackItem,
+        }
+        shared_columns = {
+            "intercom_integrations": WRITEBACK_INTEGRATION_COLUMNS,
+            "feedback_items": WRITEBACK_FEEDBACK_COLUMNS,
+        }
+
+        for table, names in shared_columns.items():
+            worker_table = worker_models[table].__table__
+            backend_table = backend_models[table].__table__
+            for name in names:
+                worker_type = worker_table.columns[name].type
+                backend_type = backend_table.columns[name].type
+                # TypeEngine.__eq__ is identity-based in SQLAlchemy 2.0.32,
+                # so compare _static_cache_key — the structural identity
+                # SQLAlchemy itself uses for type comparison (class + params,
+                # so String(64) vs String(50) and DateTime(timezone=True) vs
+                # naive DateTime drift are both caught).
+                assert (
+                    worker_type._static_cache_key == backend_type._static_cache_key
+                ), (
+                    f"Type mismatch on {table}.{name}: "
+                    f"worker {worker_type!r} != backend {backend_type!r}"
+                )

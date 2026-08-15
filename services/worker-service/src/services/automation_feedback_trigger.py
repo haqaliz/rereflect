@@ -58,6 +58,7 @@ from src.models import FeedbackItem, Integration, Notification, User
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
 from src.tasks.alerts import send_slack_message_webhook
+from src.tasks.intercom_writeback import push_resolved_writeback
 
 logger = logging.getLogger(__name__)
 
@@ -606,6 +607,15 @@ def _execute_change_status(config: dict, feedback: Optional[FeedbackItem]) -> Di
     new_status: str = config.get("status", "in_review")
     old_status = feedback.workflow_status
     feedback.workflow_status = new_status
+    if (
+        new_status == "resolved"
+        and old_status != new_status
+        and feedback.source == "intercom"
+    ):
+        push_resolved_writeback.delay(
+            feedback.organization_id,
+            [{"id": feedback.id, "resolution_note": None}],
+        )
 
     return {
         "type": "change_status",

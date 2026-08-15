@@ -7,6 +7,28 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Intercom write-back: note + close on resolve (opt-in)
+
+- **Opt-in, off by default.** Per-org toggle on **Settings → Integrations →
+  Intercom**; `note_and_close` (default) or `note_only`. Enabling does **not**
+  backfill — only transitions to `resolved` after enable fire.
+- **What happens on resolve:** an Intercom-sourced feedback item transitioning to
+  `resolved` posts a note to the linked conversation (the resolution note, or the
+  default "Marked resolved in Rereflect.") and, with `note_and_close`, closes it.
+  Re-resolve after reopen is a no-op (per-item durable marker).
+- **Config API:** `PATCH /api/v1/integrations/intercom/writeback` (admin/owner) and
+  the five writeback fields on `GET /api/v1/integrations/intercom/status`.
+- **The orphan is gone.** `intercom_service.py` — the "Two-Way Sync" code the 1.0.0
+  notes said "nothing in the app has ever called" — is **deleted**, and its behavior
+  is ported into the worker's `IntercomClient` (`add_note`, `close_conversation`,
+  `fetch_admin_id`) with the worker error taxonomy (missing scope recorded, never a
+  silent `False`). The new task is **registered under exactly the name its
+  dispatchers use**, pinned by a name-consistency test, so the "green tests over
+  code that never executes" class cannot recur.
+- *Honest limits:* resolved-only trigger; no backfill-on-enable; the worker task
+  is fire-and-forget (no response-time claim); a crash between the Intercom call and
+  the marker write can duplicate a note on retry (close remains a no-op).
+
 ### Fixed — Five Celery beat jobs had never run, in any release
 
 Four of them were in the beat schedule without being **real** Celery tasks: the
@@ -348,6 +370,11 @@ undercuts the zero-telemetry claim it exists to support).
 The landing page also advertised Intercom **"Two-Way Sync"** — adding notes back to
 conversations and closing resolved tickets. That never worked. The code exists but nothing
 in the app has ever called it, so the claim is removed rather than softened.
+
+**Correction (2026-08-15):** that was true when written. The write-back now ships —
+opt-in, off by default, note + close on resolve — and `intercom_service.py` is
+deleted; see the Added entry above. "Two-Way Sync" copy may return only in this
+shipped form.
 
 ### Added — Intercom self-hosting guide
 

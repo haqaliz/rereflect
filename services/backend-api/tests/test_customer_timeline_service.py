@@ -1516,3 +1516,83 @@ class TestTimelinePhase7:
         assert all(e.type != "usage_trend_change" for e in events), (
             "usage_trend_change from org B leaked into org A's timeline"
         )
+
+
+# ---------------------------------------------------------------------------
+# intercom write-back timeline events (dispatch-seams aspect, R5)
+# ---------------------------------------------------------------------------
+
+
+class TestTimelineIntercomWriteback:
+    """AC3 — an `intercom_writeback` FeedbackWorkflowEvent renders on the
+    customer timeline with the type/source/source_id contract, and
+    `status_changed` behavior is unchanged (characterization)."""
+
+    def _intercom_writeback_event(self, db, org, fb_id, closed=True, ts=None):
+        ts = ts or datetime.utcnow()
+        ev = FeedbackWorkflowEvent(
+            feedback_id=fb_id,
+            organization_id=org.id,
+            event_type="intercom_writeback",
+            metadata_={
+                "source": "intercom",
+                "action": "note_and_close",
+                "note_sent": True,
+                "closed": closed,
+            },
+            created_at=ts,
+        )
+        db.add(ev)
+        db.commit()
+        db.refresh(ev)
+        return ev
+
+    def test_intercom_writeback_appears(self, db: Session):
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        fb = _feedback(db, org, "iw@acme.com", ts=datetime.utcnow() - timedelta(hours=3))
+        ev = self._intercom_writeback_event(
+            db, org, fb.id, ts=datetime.utcnow() - timedelta(hours=2)
+        )
+
+        events, _ = build_timeline(db, org.id, "iw@acme.com")
+        types = [e.type for e in events]
+        assert "intercom_writeback" in types
+
+        iw = next(e for e in events if e.type == "intercom_writeback")
+        assert iw.source == "feedback_workflow_events"
+        assert iw.source_id == ev.id
+        assert iw.feedback_id == fb.id
+        assert iw.description == "Intercom conversation updated and closed"
+
+    def test_intercom_writeback_not_closed_description(self, db: Session):
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        fb = _feedback(db, org, "iw2@acme.com", ts=datetime.utcnow() - timedelta(hours=3))
+        self._intercom_writeback_event(
+            db, org, fb.id, closed=False, ts=datetime.utcnow() - timedelta(hours=2)
+        )
+
+        events, _ = build_timeline(db, org.id, "iw2@acme.com")
+        iw = next(e for e in events if e.type == "intercom_writeback")
+        assert iw.description == "Intercom conversation updated with note"
+
+    def test_coexists_with_status_changed(self, db: Session):
+        """Characterization: a customer with both event types gets both on
+        the timeline — the intercom fetcher must not disturb status_changed."""
+        from src.services.customer_timeline_service import build_timeline
+        org = _org(db)
+        fb = _feedback(db, org, "iw3@acme.com", ts=datetime.utcnow() - timedelta(hours=4))
+        _workflow(db, org, fb.id, ts=datetime.utcnow() - timedelta(hours=3))
+        self._intercom_writeback_event(
+            db, org, fb.id, ts=datetime.utcnow() - timedelta(hours=2)
+        )
+
+        events, _ = build_timeline(db, org.id, "iw3@acme.com")
+        types = [e.type for e in events]
+        assert "intercom_writeback" in types
+        assert "status_changed" in types
+        sc = next(e for e in events if e.type == "status_changed")
+        assert sc.source == "feedback_workflow_events"
+        assert sc.source_id is not None
+        assert sc.description == f"Feedback #{fb.id} moved to resolved"

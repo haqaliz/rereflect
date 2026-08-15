@@ -18,9 +18,10 @@ See docs/planning/intercom-selfhost-ingestion/token-paste-connect/.
 """
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import httpx
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -36,7 +37,7 @@ from src.models.integration import Integration
 from src.models.intercom_integration import IntercomIntegration
 from src.models.organization import Organization
 from src.models.user import User
-from src.utils.encryption import encrypt_api_key, get_key_hint
+from src.utils.encryption import decrypt_api_key, encrypt_api_key, get_key_hint
 
 logger = logging.getLogger(__name__)
 
@@ -152,10 +153,35 @@ class IntercomStatusResponse(BaseModel):
     # usage-decline-churn-labels. A connected integration sitting at 0 is the
     # single most useful thing an operator can know about it.
     feedback_items_ingested: int = 0
+    # Write-back config/status (config-api-routes aspect)
+    writeback_enabled: bool = False
+    writeback_action: str = "note_and_close"
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
 
 
 class IntercomDisconnectResponse(BaseModel):
     disconnected: bool
+
+
+class IntercomWritebackRequest(BaseModel):
+    enabled: bool
+    action: Optional[Literal["note_only", "note_and_close"]] = None
+    model_config = {"extra": "forbid"}
+
+
+class IntercomWritebackResponse(BaseModel):
+    writeback_enabled: bool
+    writeback_action: str
+    last_writeback_at: Optional[datetime] = None
+    last_writeback_status: Optional[str] = None
+    last_writeback_error: Optional[str] = None
+
+
+class IntercomWritebackTestResponse(BaseModel):
+    ok: bool
+    reason: Optional[str] = None
 
 
 # ──────────────────────── Helpers ────────────────────────────────────────────
@@ -263,6 +289,11 @@ def _build_status_response(
         last_sync_status=row.last_sync_status,
         last_error=row.last_error,
         feedback_items_ingested=_count_ingested_items(db, org_id),
+        writeback_enabled=row.writeback_enabled,
+        writeback_action=row.writeback_action,
+        last_writeback_at=row.last_writeback_at,
+        last_writeback_status=row.last_writeback_status,
+        last_writeback_error=row.last_writeback_error,
     )
 
 
@@ -442,3 +473,130 @@ def intercom_disconnect(
         db.commit()
         logger.info("Intercom disconnected for org %s", current_org.id)
     return IntercomDisconnectResponse(disconnected=True)
+
+
+@router.patch(
+    "/writeback",
+    response_model=IntercomWritebackResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def intercom_configure_writeback(
+    payload: IntercomWritebackRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Per-org write-back opt-in.
+
+    Pure config write: enabling/disabling never calls Intercom, never
+    enqueues a task, and never touches already-resolved items (no
+    backfill-on-enable, prd.md OQ2). Writes only the token-paste
+    IntercomIntegration row — the legacy OAuth row has no writeback
+    columns, so an OAuth-only org gets a 409 rather than a silent
+    write-nowhere.
+    """
+    row = _get_active_integration(db, current_org.id)
+    if not row:
+        if _has_active_oauth_connection(db, current_org.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This organization's Intercom connection uses the "
+                    "legacy OAuth path, which cannot store write-back "
+                    "configuration. Connect with an access token to "
+                    "enable write-back."
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Intercom integration found.",
+        )
+
+    if payload.action is not None:
+        row.writeback_action = payload.action
+    row.writeback_enabled = payload.enabled
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+
+    logger.info(
+        "Intercom write-back %s for org %s (action=%s)",
+        "enabled" if payload.enabled else "disabled",
+        current_org.id,
+        row.writeback_action,
+    )
+    return IntercomWritebackResponse(
+        writeback_enabled=row.writeback_enabled,
+        writeback_action=row.writeback_action,
+        last_writeback_at=row.last_writeback_at,
+        last_writeback_status=row.last_writeback_status,
+        last_writeback_error=row.last_writeback_error,
+    )
+
+
+@router.post(
+    "/writeback/test",
+    response_model=IntercomWritebackTestResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def intercom_writeback_test(
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Live credential probe for the write-back path (S1).
+
+    Checks exactly two things: the stored token still validates
+    (GET /me) and an admin id resolves. It does NOT claim write scope:
+    Intercom's /me does not report scopes, and the only honest live
+    scope check would mutate, so `missing_write_scope` is reported only
+    from recorded evidence on the row (a prior real write-back that
+    failed with that status). A 200 {ok: true} therefore means "credible
+    credential", not "scope confirmed". Never mutates anything and never
+    dispatches a task.
+    """
+    row = _get_active_integration(db, current_org.id)
+    if not row:
+        if _has_active_oauth_connection(db, current_org.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This organization's Intercom connection uses the "
+                    "legacy OAuth path, which cannot store write-back "
+                    "configuration. Connect with an access token to "
+                    "enable write-back."
+                ),
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active Intercom integration found.",
+        )
+
+    if row.last_writeback_status == "missing_write_scope":
+        return IntercomWritebackTestResponse(
+            ok=False, reason="missing_write_scope"
+        )
+
+    try:
+        plain_token = decrypt_api_key(row.access_token)
+    except (ValueError, InvalidToken) as exc:
+        logger.warning(
+            "Intercom writeback probe: token decrypt failed for org %s: %s",
+            current_org.id, exc,
+        )
+        return IntercomWritebackTestResponse(ok=False, reason="auth_error")
+
+    client = IntercomClient(plain_token)
+    try:
+        try:
+            info = client.validate()
+        except IntercomAuthError:
+            return IntercomWritebackTestResponse(ok=False, reason="auth_error")
+        except IntercomTransientError:
+            return IntercomWritebackTestResponse(
+                ok=False, reason="transient_error"
+            )
+    finally:
+        _close_client(client)
+
+    if not info.get("admin_id"):
+        return IntercomWritebackTestResponse(ok=False, reason="no_admin")
+    return IntercomWritebackTestResponse(ok=True, reason=None)

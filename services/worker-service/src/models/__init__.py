@@ -140,6 +140,12 @@ class FeedbackItem(Base):
     workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
     assigned_to = Column(Integer, nullable=True)
 
+    # Intercom write-back marker (intercom-writeback aspect R4): durable
+    # per-feedback idempotency anchor; set after the writeback action completes.
+    # Mirrors backend src/models/feedback.py — no server_default (worker mirror
+    # convention; parity tests check names/types).
+    intercom_writeback_at = Column(DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         Index('ix_feedback_org_date', 'organization_id', 'created_at'),
         Index('ix_feedback_org_status', 'organization_id', 'workflow_status'),
@@ -1276,6 +1282,16 @@ class IntercomIntegration(Base):
     last_synced_at = Column(DateTime, nullable=True)
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
+
+    # Intercom write-back (intercom-writeback aspect): mirrors backend
+    # src/models/intercom_integration.py. No server_default (worker mirror
+    # convention; parity tests check names/types).
+    writeback_enabled = Column(Boolean, nullable=False, default=False)
+    writeback_action = Column(String(32), nullable=False, default="note_and_close")
+    last_writeback_at = Column(DateTime(timezone=True), nullable=True)
+    last_writeback_status = Column(String(64), nullable=True)
+    last_writeback_error = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

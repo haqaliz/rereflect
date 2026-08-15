@@ -16,13 +16,12 @@ class Integration(Base):
     # Connection details (stored as JSON for flexibility)
     config = Column(JSON, default=dict)  # {webhook_url, channel_id, channel_name}
 
-    # OAuth tokens — stored in PLAINTEXT. The previous comment here claimed they were
-    # "encrypted at application level before storage"; that was never true. The Slack and
-    # Intercom OAuth paths in routes/integrations.py do not call encrypt_api_key/
-    # decrypt_api_key, unlike every newer BYOK integration (Zendesk, Jira, Asana, HubSpot,
-    # Salesforce), which do. Encrypting these needs a backfill migration for existing rows
-    # and is tracked as `oauth-tokens-stored-plaintext` in DEV-TRACKING.md.
-    # Do not restore the old comment without doing the encryption.
+    # OAuth tokens — encrypted at rest with Fernet (P1 `oauth-tokens-stored-plaintext`,
+    # merged 737bbd5). Encrypt-on-write at both OAuth callbacks (missing
+    # LLM_ENCRYPTION_KEY → 422); decrypt at all 8 read sites (3 backend, 5 worker) with
+    # the same never-500 contract; worker-local `_decrypt` mirrors (worker-service
+    # cannot import backend-api). Do not restore the old "plaintext" text without the
+    # encryption.
     oauth_access_token = Column(Text, nullable=True)
     oauth_refresh_token = Column(Text, nullable=True)
     oauth_expires_at = Column(DateTime, nullable=True)

@@ -63,6 +63,7 @@ celery_app = Celery(
         "src.tasks.salesforce_writeback",
         "src.tasks.churn_backfill_task",
         "src.tasks.intercom_sync",
+        "src.tasks.intercom_writeback",
         "src.tasks.zendesk_sync",
         "src.tasks.jira_sync",
         "src.tasks.zendesk_status_sync",

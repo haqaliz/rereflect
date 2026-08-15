@@ -65,6 +65,10 @@ class FeedbackItem(Base):
     workflow_status = Column(String(50), nullable=False, default="new", server_default="new")
     assigned_to = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+    # Intercom write-back marker (intercom-writeback aspect R4): durable
+    # per-feedback idempotency anchor; set after the writeback action completes.
+    intercom_writeback_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships for eager loading
     feedback_source = relationship("FeedbackSource", backref="feedback_items", lazy="select")
     assigned_user = relationship("User", foreign_keys=[assigned_to], backref="assigned_feedback_items", lazy="select")

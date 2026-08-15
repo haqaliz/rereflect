@@ -38,6 +38,7 @@ import {
 import { intercomAPI, IntercomConnectionStatus } from '@/lib/api/intercom';
 import { useAuth } from '@/contexts/AuthContext';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
+import { IntercomWritebackCard } from '@/components/settings/IntercomWritebackCard';
 
 // The webhook is served by the BACKEND, not the Next.js app — same pattern as
 // the Zendesk page and settings/api-keys.
@@ -233,6 +234,10 @@ export default function IntercomSettingsPage() {
               )}
             </CardContent>
           </Card>
+
+          {status?.connected && isAdminOrOwner && (
+            <IntercomWritebackCard status={status} onStatusChange={setStatus} />
+          )}
 
           <Card>
             <CardHeader>
