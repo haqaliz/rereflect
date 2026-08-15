@@ -306,8 +306,12 @@ so setup instructions are the deliverable, not provisioning code.
 - **`jwt-secret-default`** (`DEV-TRACKING.md:399`) — flagged at interview as plausibly
   more urgent than this feature ("far larger blast radius"); the user chose this card with
   that on the table. Recorded here so the trade is visible, not forgotten.
-- Per-conversation-part ingestion, Intercom Articles/Tickets objects, status-sync back to
-  Intercom, multiple Intercom workspaces per org, IdP-style app marketplace listing.
+- ~~Per-conversation-part ingestion~~ — **SHIPPED 2026-08-15**
+  (`intercom-pull-replies-and-ratings`): the pull enriches replies + the rating via
+  conversation-parts, one item per conversation. See
+  `docs/planning/intercom-pull-replies-and-ratings/`.
+- Intercom Articles/Tickets objects, status-sync back to Intercom, multiple Intercom
+  workspaces per org, IdP-style app marketplace listing.
 - Any claim of improved analysis or churn accuracy.
 
 ---
