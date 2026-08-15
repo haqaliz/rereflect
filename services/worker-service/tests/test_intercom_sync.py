@@ -107,6 +107,52 @@ def _conversation(conv_id, body, email="dana@example.com", updated_at=1785400000
     }
 
 
+def _part(part_id, body, author=None, created_at=1785400000):
+    """One reply part in the detail-GET shape (adapter-reply-rating-extraction
+    fixture parity: `conversation_parts.conversation_parts[]`, part_type
+    "comment", HTML body)."""
+    return {
+        "type": "conversation_part",
+        "id": part_id,
+        "part_type": "comment",
+        "body": f"<p>{body}</p>",
+        "author": author
+        or {
+            "type": "user",
+            "id": "user_1",
+            "name": "Dana Okafor",
+            "email": "dana@example.com",
+        },
+        "created_at": created_at,
+    }
+
+
+def _conversation_detail(conv_id, replies, rating=None, email="dana@example.com"):
+    """A conversation as GET /conversations/{id} returns it (R1b — the search
+    object carries no parts; the detail payload does). Rating object is
+    `conversation_rating`, matching Intercom's detail schema and the adapter's
+    extract_rating reader."""
+    return {
+        "type": "conversation",
+        "id": conv_id,
+        "created_at": 1785390000,
+        "updated_at": 1785400000,
+        "conversation_message": {
+            "type": "conversation",
+            "id": f"msg_{conv_id}",
+            "body": "<p>Billing is broken</p>",
+            "author": {
+                "type": "user",
+                "id": f"contact_{conv_id}",
+                "name": "Dana Okafor",
+                "email": email,
+            },
+        },
+        "conversation_parts": {"conversation_parts": replies},
+        "conversation_rating": rating,
+    }
+
+
 def _patch_db_session(monkeypatch, db):
     import src.tasks.intercom_sync as mod
 
@@ -142,6 +188,21 @@ def _fake_client(pages):
         for convs, cursor in pages
     ]
     client.close = MagicMock()
+    return client
+
+
+def _fake_client_with_parts(pages, detail_by_id=None):
+    """`_fake_client` plus a `get_conversation` fed by a conversation-id →
+    detail-payload map (R1b: parts ride on the detail GET, not the search
+    object). Conversations absent from the map return {} — no parts, no
+    rating, the same shape a 404/empty detail yields."""
+    client = _fake_client(pages)
+    detail_by_id = detail_by_id or {}
+
+    def _get_conversation(conversation_id):
+        return detail_by_id.get(conversation_id, {})
+
+    client.get_conversation.side_effect = _get_conversation
     return client
 
 
@@ -419,6 +480,246 @@ class TestSyncOrg:
 
         assert result["no_source_match"] is True
         assert db.query(FeedbackItem).count() == 0
+
+
+class TestSyncOrgEnrichment:
+    """The pull-enrichment pass inside `_sync_org` (R1b path).
+
+    Pinned via the shared core like the rest of TestSyncOrg: one item per
+    conversation, created by the event loop; the enrichment pass then merges
+    new reply parts + the rating into that SAME item. `changed_feedback_ids`
+    is additive — it never inflates `conversations_ingested` (which counts
+    items created this run).
+    """
+
+    def test_enriches_conversation_with_replies_and_rating(
+        self, db, _no_op_side_effects
+    ):
+        """AC1 — one conversation, two replies + a rating → exactly ONE item
+        whose text carries the merge blocks and whose metadata has replies +
+        rating; the created item is the one reported as changed."""
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        detail = _conversation_detail(
+            "c1",
+            [_part("p1", "I fixed it"), _part("p2", "All good now")],
+            rating={"type": "conversation_rating", "rating": 5, "remark": "Great support!"},
+        )
+        client = _fake_client_with_parts(
+            [([_conversation("c1", "Billing is broken")], None)],
+            {"c1": detail},
+        )
+        result = _sync_org(org.id, db, client, integ)
+        db.commit()
+
+        items = db.query(FeedbackItem).all()
+        assert len(items) == 1
+        item = items[0]
+        assert item.text == (
+            "Billing is broken"
+            "\n\n--- Reply by Dana Okafor (1785400000) ---\nI fixed it"
+            "\n\n--- Reply by Dana Okafor (1785400000) ---\nAll good now"
+        )
+        assert [r["part_id"] for r in item.source_metadata["replies"]] == ["p1", "p2"]
+        assert item.source_metadata["rating"] == 5
+        assert item.source_metadata["remark"] == "Great support!"
+        assert result["conversations_ingested"] == 1
+        assert result["changed_feedback_ids"] == [item.id]
+
+    def test_redelivery_is_idempotent_for_parts(self, db, _no_op_side_effects):
+        """AC2 — same conversation+parts across runs: the second run creates
+        no item (dedup), changes no text, and reports no changed ids."""
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        conv = _conversation("c1", "Billing is broken")
+        detail = _conversation_detail("c1", [_part("p1", "I fixed it")])
+        client = _fake_client_with_parts([([conv], None), ([conv], None)], {"c1": detail})
+
+        first = _sync_org(org.id, db, client, integ)
+        db.commit()
+        text_after_first = db.query(FeedbackItem).first().text
+        metadata_after_first = dict(db.query(FeedbackItem).first().source_metadata)
+
+        second = _sync_org(org.id, db, client, integ)
+        db.commit()
+
+        assert db.query(FeedbackItem).count() == 1
+        assert second["conversations_ingested"] == 0
+        item = db.query(FeedbackItem).first()
+        assert item.text == text_after_first
+        assert item.source_metadata == metadata_after_first
+        assert first["changed_feedback_ids"] == [item.id]
+        assert second["changed_feedback_ids"] == []
+
+    def test_admin_reply_merged_but_never_attributed(self, db, _no_op_side_effects):
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        conv = _conversation("c1", "Billing is broken", email="dana@customer.com")
+        admin = {"type": "admin", "id": "admin_1", "name": "Agent Ada"}
+        detail = _conversation_detail("c1", [_part("p1", "Teammate reply", author=admin)])
+        client = _fake_client_with_parts([([conv], None)], {"c1": detail})
+
+        _sync_org(org.id, db, client, integ)
+        db.commit()
+
+        item = db.query(FeedbackItem).first()
+        assert "Teammate reply" in item.text
+        assert item.customer_email == "dana@customer.com"
+
+    def test_enrichment_does_not_inflate_conversations_ingested(
+        self, db, _no_op_side_effects
+    ):
+        """A pre-existing item that gains a reply on a later run dispatches
+        re-analysis (changed_feedback_ids) without counting a new ingestion."""
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        conv = _conversation("c1", "Billing is broken")
+        first = _sync_org(
+            org.id, db, _fake_client_with_parts([([conv], None)], {}), integ
+        )
+        db.commit()
+        assert first["conversations_ingested"] == 1
+        item = db.query(FeedbackItem).first()
+        assert "I fixed it" not in item.text
+
+        detail = _conversation_detail("c1", [_part("p1", "I fixed it")])
+        second = _sync_org(
+            org.id, db, _fake_client_with_parts([([conv], None)], {"c1": detail}), integ
+        )
+        db.commit()
+
+        assert second["conversations_ingested"] == 0
+        assert second["changed_feedback_ids"] == [item.id]
+        assert "I fixed it" in db.query(FeedbackItem).first().text
+
+    def test_conversation_without_parts_is_a_noop(self, db, _no_op_side_effects):
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        conv = _conversation("c1", "Billing is broken")
+        client = _fake_client_with_parts([([conv], None)], {"c1": {}})
+        result = _sync_org(org.id, db, client, integ)
+        db.commit()
+
+        assert result["changed_feedback_ids"] == []
+        assert client.get_conversation.call_count == 1
+        item = db.query(FeedbackItem).first()
+        assert item.text == "Billing is broken"
+
+    def test_parts_without_an_item_are_a_noop(self, db, _no_op_side_effects):
+        """A conversation the event loop did not turn into an item (empty
+        text) is skipped by enrichment — the lookup finds nothing."""
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        conv = _conversation("c1", "a")  # < 3 chars → empty_text, no item
+        detail = _conversation_detail("c1", [_part("p1", "I fixed it")])
+        client = _fake_client_with_parts([([conv], None)], {"c1": detail})
+        result = _sync_org(org.id, db, client, integ)
+
+        assert db.query(FeedbackItem).count() == 0
+        assert result["changed_feedback_ids"] == []
+
+    def test_rating_only_change_updates_metadata_without_dispatch(
+        self, db, _no_op_side_effects
+    ):
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        conv = _conversation("c1", "Billing is broken")
+        no_rating = _conversation_detail("c1", [_part("p1", "I fixed it")])
+        with_rating = _conversation_detail(
+            "c1",
+            [_part("p1", "I fixed it")],
+            rating={"type": "conversation_rating", "rating": 4},
+        )
+        client = _fake_client_with_parts(
+            [([conv], None), ([conv], None)], {"c1": no_rating}
+        )
+        first = _sync_org(org.id, db, client, integ)
+        db.commit()
+
+        client = _fake_client_with_parts(
+            [([conv], None), ([conv], None)], {"c1": with_rating}
+        )
+        second = _sync_org(org.id, db, client, integ)
+        db.commit()
+
+        item = db.query(FeedbackItem).first()
+        assert first["changed_feedback_ids"] == [item.id]
+        assert second["changed_feedback_ids"] == []
+        assert item.source_metadata["rating"] == 4
+        assert item.text.count("I fixed it") == 1
+
+    def test_enrichment_is_org_scoped(self, db, _no_op_side_effects):
+        """Same conversation id under two orgs sharing a workspace: the
+        enrichment lookup is org-scoped, so a run for org A never touches
+        org B's item."""
+        from src.models import FeedbackItem
+        from src.tasks.intercom_sync import _sync_org
+
+        org_a = _make_org(db, "Org A")
+        org_b = _make_org(db, "Org B")
+        integ_a = _make_integration(db, org_a.id)
+        integ_b = _make_integration(db, org_b.id)
+        _make_source(db, org_a.id)
+        _make_source(db, org_b.id)
+
+        conv = _conversation("c1", "Billing is broken")
+        detail = _conversation_detail("c1", [_part("p1", "I fixed it")])
+
+        # A's run creates items under BOTH orgs (both sources match the
+        # workspace) but enriches only org A's item.
+        _sync_org(org_a.id, db, _fake_client_with_parts([([conv], None)], {"c1": detail}), integ_a)
+        db.commit()
+
+        items = db.query(FeedbackItem).order_by(FeedbackItem.organization_id).all()
+        assert [i.organization_id for i in items] == sorted([org_a.id, org_b.id])
+        item_a = next(i for i in items if i.organization_id == org_a.id)
+        item_b = next(i for i in items if i.organization_id == org_b.id)
+        assert "I fixed it" in item_a.text
+        assert "I fixed it" not in item_b.text
+
+        # B's run enriches only org B's item.
+        _sync_org(org_b.id, db, _fake_client_with_parts([([conv], None)], {"c1": detail}), integ_b)
+        db.commit()
+
+        db.refresh(item_a)
+        db.refresh(item_b)
+        assert "I fixed it" in item_b.text
+        assert item_a.text.count("I fixed it") == 1
 
 
 class TestAuthFailureHandling:

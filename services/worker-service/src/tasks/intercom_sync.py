@@ -72,6 +72,12 @@ logger = logging.getLogger(__name__)
 # advances, so the remainder is picked up on the next tick rather than lost.
 MAX_PAGES_PER_RUN = 20
 
+# R1b per-run cap on conversation-detail fetches. Search pages are <=150
+# conversations x 20 pages = <=3000/run; 500 bounds the detail fan-out while
+# the cursor resumes (R5). Dropped conversations are counted and logged, never
+# silent — the same house rule as usage_decline_label_detector's cap.
+MAX_DETAIL_FETCHES_PER_RUN = 500
+
 
 def _decrypt(token: str) -> str:
     """Mirrors zendesk_sync._decrypt / hubspot_sync._decrypt."""
@@ -169,6 +175,8 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     dict: conversations_seen, conversations_ingested, no_source_match, cursor
     """
     from src.adapters import get_adapter
+    from src.adapters.intercom_parts import extract_rating, extract_reply_parts
+    from src.models import FeedbackItem
     from src.tasks.source_events import _find_matching_sources, _process_event_for_source
 
     # D1 — never epoch/None.
@@ -184,6 +192,9 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
 
     conversations_seen = 0
     conversations_ingested = 0
+    changed_feedback_ids: list = []
+    detail_fetches = 0
+    dropped_by_cap = 0
     max_updated_at: Optional[int] = None
     starting_after: Optional[str] = None
     pages = 0
@@ -225,6 +236,42 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
                 if result.get("status") == "feedback_created":
                     conversations_ingested += 1
 
+            # ── Enrichment pass (pull-enrichment) ──────────────────────────
+            # Merge new reply parts + the rating into the item the event loop
+            # just created (or already existed from a previous run). R1b: the
+            # search object carries no parts, so fetch the detail — bounded by
+            # the per-run cap. If the search object does carry parts (a live
+            # shape some deployments return), use them and skip the fetch.
+            parts = extract_reply_parts(conversation)
+            rating = extract_rating(conversation)
+            if not parts and not rating:
+                if detail_fetches >= MAX_DETAIL_FETCHES_PER_RUN:
+                    # Dropped, not lost: the cursor already advanced for this
+                    # conversation on the search side, so it is re-seen when
+                    # it next updates. No silent caps — counted and logged.
+                    dropped_by_cap += 1
+                    continue
+                detail = client.get_conversation(conversation_id)
+                detail_fetches += 1
+                parts = extract_reply_parts(detail)
+                rating = extract_rating(detail)
+            if not parts and not rating:
+                continue
+            # ix_feedback_items_org_source_external serves this exact shape.
+            item = (
+                db.query(FeedbackItem)
+                .filter(
+                    FeedbackItem.organization_id == org_id,
+                    FeedbackItem.source == "intercom",
+                    FeedbackItem.source_external_id == conversation_id,
+                )
+                .first()
+            )
+            if item is None:
+                continue
+            if _enrich_conversation_replies(db, item, parts, rating):
+                changed_feedback_ids.append(item.id)
+
         if not next_cursor:
             break
         starting_after = next_cursor
@@ -234,6 +281,16 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
             "the remainder resumes on the next run",
             MAX_PAGES_PER_RUN,
             integ.id,
+        )
+
+    if dropped_by_cap:
+        # House rule: no silent caps (usage_decline_label_detector precedent).
+        logger.warning(
+            "Intercom pull: detail-fetch per-run cap reached integration=%s "
+            "cap=%s dropped_by_cap=%s",
+            integ.id,
+            MAX_DETAIL_FETCHES_PER_RUN,
+            dropped_by_cap,
         )
 
     # The cursor only ever moves FORWARD. An empty page leaves it alone rather
@@ -254,6 +311,8 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     return {
         "conversations_seen": conversations_seen,
         "conversations_ingested": conversations_ingested,
+        "changed_feedback_ids": changed_feedback_ids,
+        "dropped_by_cap": dropped_by_cap,
         "no_source_match": not sources,
         "cursor": max_updated_at,
     }
