@@ -281,7 +281,7 @@ when they don't?
   `intercom_service.py` is deleted; its behavior is ported into the worker's
   `IntercomClient` (`add_note`, `close_conversation`, `fetch_admin_id`, 404 →
   `IntercomNotFoundError`). See the FIXED P2 in DEV-TRACKING.md (merge
-  (merge-sha pending), PR # pending).
+  `aa09cbdc`, PR #14).
 - **OQ1 — target status fixed to `resolved`: shipped.** `closed` stays a manual
   terminal; configurable target status remains N1.
 - **OQ2 — no backfill-on-enable: shipped.** Only transitions after enable fire;
@@ -289,7 +289,7 @@ when they don't?
 - **OQ3 — landing page: flagged, not shipped.** The stale OAuth-era Intercom entry
   (`services/landing-web/lib/integrations.ts:136-171`) is a follow-up chore
   (`landing-intercom-entry-refresh`), respecting "claim only what shipped".
-- **Aspects (all shipped 2026-08-15; merge pending):** `db-config-model`,
+- **Aspects (all shipped 2026-08-15; merged `aa09cbdc`, PR #14):** `db-config-model`,
   `config-api-routes`, `dispatch-seams`, `worker-write-client`,
   `worker-writeback-task`, `frontend-writeback-card`, `docs-tracking-changelog` —
   each with its spec and plan under `docs/planning/intercom-writeback/`.

@@ -588,7 +588,7 @@ was left by a branch that shipped the fix and did not update the row.
 - [ ] Audit the other integration route modules for the same omission before assuming it is
       confined to this file.
 
-### P2 — `intercom-writeback-orphaned` — **FIXED**, merged (merge-sha pending) (PR # pending, 2026-08-15)
+### P2 — `intercom-writeback-orphaned` — **FIXED**, merged `aa09cbdc` (#14, 2026-08-15)
 > Shipped: the wire-or-delete decision landed as **wire it**. `intercom_service.py`
 > deleted, its behavior ported into the worker's `IntercomClient`
 > (`add_note` / `close_conversation` / `fetch_admin_id`, 404 → `IntercomNotFoundError`,
@@ -603,7 +603,7 @@ was left by a branch that shipped the fix and did not update the row.
 > chained to `3cb9a0d1456b`; one alembic head). `PATCH
 > /api/v1/integrations/intercom/writeback` + extended `GET /status` +
 > `IntercomWritebackCard` on Settings → Integrations → Intercom. Merged as
-> (merge-sha pending) (PR # pending) on 2026-08-15. Backend 4927 passed (38 new
+> `aa09cbdc` (#14) on 2026-08-15. Backend 4927 passed (38 new
 > vs 4889 baseline); worker 1732 passed (48 net new).
 > **Follow-up (chore, not started): `landing-intercom-entry-refresh`** — the
 > OAuth-era Intercom entry in `services/landing-web/lib/integrations.ts:136-171`
