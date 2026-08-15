@@ -501,14 +501,25 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   that pass is this one. Registration-only, no task-body change. See
   `docs/planning/per-org-churn-model/calibration-beat-fix/`.
 
-### Deferred v2 — Intercom (opened 2026-08-01; 1 SHIPPED, 3 NOT STARTED)
+### Deferred v2 — Intercom (opened 2026-08-01; 2 SHIPPED, 2 NOT STARTED)
 
 Recorded here rather than only in `docs/planning/intercom-selfhost-ingestion/` so they are
 visible from the backlog. None block anything; the integration is fully operable without them.
 
-- **`intercom-pull-replies-and-ratings`** — the 15-minute pull ingests the **first message**
-  of a conversation only. Replies and ratings arrive via the webhook path, so a pull-only
-  install (no webhook wired) never sees them. Needs conversation-parts fetching.
+- ~~**`intercom-pull-replies-and-ratings`** — the 15-minute pull ingests the **first
+  message** of a conversation only. Replies and ratings arrive via the webhook path,
+  so a pull-only install (no webhook wired) never sees them. Needs conversation-parts
+  fetching.~~ — **SHIPPED 2026-08-15** via `feat/intercom-pull-replies-and-ratings`
+  (merged <merge-sha>, PR <# pending>): the pull now enriches replies + the
+  satisfaction rating via conversation-parts — new replies merged into the item text
+  (one item per conversation, idempotent by part id), rating/remark in
+  `source_metadata`, changed items re-analyzed, unchanged untouched. No backfill:
+  older conversations stay first-message-only until the pull re-sees them.
+  **Follow-up (defect, not fixed):** the webhook reply/rating path is still inert —
+  the dedup key (`external_message_id` = conversation id for all three event types)
+  and the `new_conversations`-only seed trigger make `conversation.user.replied` /
+  `conversation.rating.added` events dedup into nothing; the pull covers the content
+  today. See `docs/planning/intercom-pull-replies-and-ratings/`.
 - ~~**`intercom-writeback`** — still no write-back; `intercom_service.py` remains
   orphaned with zero production callers.~~ — **SHIPPED 2026-08-15** via
   `feat/intercom-writeback`: the wire-or-delete P2 landed as **wire it** — opt-in
