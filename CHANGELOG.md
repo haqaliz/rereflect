@@ -29,6 +29,14 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
   is fire-and-forget (no response-time claim); a crash between the Intercom call and
   the marker write can duplicate a note on retry (close remains a no-op).
 
+### Docs — Landing page: Intercom entry reflects the shipped integration
+
+The Intercom page claimed OAuth-only setup ("set INTERCOM_CLIENT_ID…") and
+webhook-only ingestion ("there is no polling fallback") — both stale since
+token-paste connect and the 15-minute pull shipped. It now describes connecting with
+an access token, the pull with an optional real-time webhook, and the opt-in
+write-back (note + close on resolve). No new claims — only what ships.
+
 ### Fixed — Five Celery beat jobs had never run, in any release
 
 Four of them were in the beat schedule without being **real** Celery tasks: the

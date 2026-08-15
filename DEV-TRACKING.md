@@ -605,11 +605,12 @@ was left by a branch that shipped the fix and did not update the row.
 > `IntercomWritebackCard` on Settings → Integrations → Intercom. Merged as
 > `aa09cbdc` (#14) on 2026-08-15. Backend 4927 passed (38 new
 > vs 4889 baseline); worker 1732 passed (48 net new).
-> **Follow-up (chore, not started): `landing-intercom-entry-refresh`** — the
-> OAuth-era Intercom entry in `services/landing-web/lib/integrations.ts:136-171`
-> still claims OAuth-only setup and webhook-only ingestion; refresh it to match
-> token-paste + pull + the write-back card, respecting the "claim only what shipped"
-> rule (prd OQ3).
+> **Follow-up `landing-intercom-entry-refresh` — DONE** (chore, merged
+> `(merge-sha pending)` (#15, 2026-08-15)). The OAuth-era Intercom entry in
+> `services/landing-web/lib/integrations.ts` claimed OAuth-only setup and webhook-only
+> ingestion ("there is no polling fallback"); it now describes token-paste connect,
+> the 15-minute pull with the optional real-time webhook, and the opt-in write-back —
+> respecting the "claim only what shipped" rule (prd OQ3).
 > The false "stored in PLAINTEXT" comment at `models/integration.py:19-25` is
 > corrected to encrypted-at-rest (P1, merged `737bbd5`) — see the comment fix in
 > this change.
