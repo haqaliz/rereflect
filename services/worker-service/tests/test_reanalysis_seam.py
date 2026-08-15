@@ -328,6 +328,11 @@ class TestForceRefresh:
         stale_label = item.sentiment_label
         stale_score = item.sentiment_score
 
+        # The conversation gained new content (this is what the pull's merge
+        # produces); the stored analysis is still the OLD text's.
+        item.text = "This is terrible, I want a refund now. The app is broken."
+        db.commit()
+
         patches = [
             patch.object(analysis, "categorize_feedback", return_value=None),
         ]

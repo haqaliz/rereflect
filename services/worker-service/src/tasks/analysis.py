@@ -277,6 +277,30 @@ def analyze_feedback_batch(self, org_id: int, feedback_ids: List[int]) -> dict:
         }
 
 
+def reanalyze_feedback(db, feedback_id: int) -> bool:
+    """Force re-analysis of one feedback item — the pull-facing half of the
+    UI "Re-analyze" seam (POST /api/v1/analyze, force=true; see
+    backend-api/src/api/routes/analyze.py:64-76, which worker-service cannot
+    import). Exactly mirrors that route: clear the two sentinel fields
+    analyze_feedback_batch filters on, COMMIT so the queued task's new
+    session sees them, then dispatch the same batch task with the same args.
+
+    Must NOT use analyze_single_feedback: its skip gate (sentiment_label set
+    -> already_analyzed) makes it a silent no-op for analyzed items. Returns
+    False (no dispatch) when the item does not exist.
+    """
+    from src.models import FeedbackItem
+
+    feedback = db.query(FeedbackItem).filter(FeedbackItem.id == feedback_id).first()
+    if not feedback:
+        return False
+    feedback.sentiment_label = None
+    feedback.churn_risk_factors = None
+    db.commit()
+    analyze_feedback_batch.delay(feedback.organization_id, [feedback_id])
+    return True
+
+
 def _analyze_single_by_id(feedback_id: int) -> dict:
     """
     Analyze a single feedback item by ID in its own DB session.
