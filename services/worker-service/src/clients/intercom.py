@@ -106,11 +106,13 @@ class IntercomClient:
         updated_since: int,
         starting_after: Optional[str] = None,
         per_page: int = DEFAULT_PER_PAGE,
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    ) -> Tuple[List[Dict[str, Any]], Optional[str], Optional[int]]:
         """One page of conversations updated at or after `updated_since`.
 
-        Returns (conversations, next_cursor). `next_cursor` is None on the last
-        page.
+        Returns (conversations, next_cursor, total_count). `next_cursor` is None
+        on the last page. `total_count` is Intercom's per-query total for the
+        search window -- identical on every page -- and `None` when the payload
+        omits it (defensive; the caller then skips any estimate for the run).
 
         The operator is `>=`, not `>`, on purpose. Unlike Zendesk's incremental
         endpoint there is no authoritative `end_time` watermark here, so the
@@ -152,8 +154,9 @@ class IntercomClient:
         next_cursor = (
             (payload.get("pages") or {}).get("next", {}) or {}
         ).get("starting_after")
+        total_count = payload.get("total_count")
 
-        return conversations, next_cursor
+        return conversations, next_cursor, total_count
 
     def get_conversation(self, conversation_id: str) -> Dict[str, Any]:
         """Fetch one conversation's full detail payload.

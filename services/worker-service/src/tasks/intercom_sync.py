@@ -200,7 +200,7 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     pages = 0
 
     while pages < MAX_PAGES_PER_RUN:
-        conversations, next_cursor = client.search_conversations(
+        conversations, next_cursor, _total_count = client.search_conversations(
             updated_since=updated_since, starting_after=starting_after
         )
         pages += 1

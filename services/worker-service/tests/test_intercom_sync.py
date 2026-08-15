@@ -175,16 +175,18 @@ def _no_op_side_effects(monkeypatch):
 def _fake_client(pages):
     """A client whose search_conversations walks the given pages.
 
-    Each page is (conversations, next_cursor), where the conversations are in
-    the RAW search-API shape. The real client's `_normalize` is applied here so
-    the fake returns exactly what the real one returns -- otherwise the sync
-    tests would silently pass against a shape production never produces.
+    Each page is (conversations, next_cursor, total_count), where the
+    conversations are in the RAW search-API shape and `total_count` defaults
+    to None (absent) -- concrete values ride in when the sync-estimate aspect
+    needs them. The real client's `_normalize` is applied here so the fake
+    returns exactly what the real one returns -- otherwise the sync tests
+    would silently pass against a shape production never produces.
     """
     from src.clients.intercom import IntercomClient
 
     client = MagicMock()
     client.search_conversations.side_effect = [
-        ([IntercomClient._normalize(c) for c in convs], cursor)
+        ([IntercomClient._normalize(c) for c in convs], cursor, None)
         for convs, cursor in pages
     ]
     client.close = MagicMock()
@@ -254,9 +256,10 @@ class TestIntercomClientSearch:
             )
 
         client = IntercomClient("tok", transport=httpx.MockTransport(handler))
-        conversations, cursor = client.search_conversations(updated_since=0)
+        conversations, cursor, total_count = client.search_conversations(updated_since=0)
 
         assert cursor is None
+        assert total_count is None
         assert "conversation_message" in conversations[0]
         assert conversations[0]["conversation_message"]["author"]["email"] == (
             "dana@example.com"
@@ -298,6 +301,48 @@ class TestIntercomClientSearch:
         client = IntercomClient("tok", transport=httpx.MockTransport(handler))
         with pytest.raises(IntercomTransientError):
             client.search_conversations(updated_since=0)
+
+    def test_returns_total_count_when_present(self):
+        """R1 — Intercom's per-query total_count rides the 3-tuple."""
+        import httpx
+
+        from src.clients.intercom import IntercomClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "conversations": [_conversation("c1", "Billing is broken")],
+                    "pages": {"next": {"starting_after": "abc123"}},
+                    "total_count": 42,
+                },
+            )
+
+        client = IntercomClient("tok", transport=httpx.MockTransport(handler))
+        conversations, cursor, total_count = client.search_conversations(
+            updated_since=0
+        )
+
+        assert total_count == 42
+        assert cursor == "abc123"
+        assert len(conversations) == 1
+
+    def test_returns_none_when_total_count_absent(self):
+        """Defensive — an envelope without total_count yields None, never a
+        crash and never a fabricated number."""
+        import httpx
+
+        from src.clients.intercom import IntercomClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, json={"conversations": [], "pages": {}}
+            )
+
+        client = IntercomClient("tok", transport=httpx.MockTransport(handler))
+        _, _, total_count = client.search_conversations(updated_since=0)
+
+        assert total_count is None
 
 
 # ──────────────────────────── Sync core ───────────────────────────────────────
