@@ -368,6 +368,24 @@ def _sync_intercom_org_body(task_self, integration_id: int) -> Dict[str, Any]:
             integ.updated_at = datetime.utcnow()
             db.commit()
 
+            # Re-analysis dispatch — AFTER the commit, never before, never
+            # inside _sync_org: the batch task opens a fresh session and reads
+            # the item's text, so a pre-commit dispatch would analyze stale
+            # content (pinned ordering, plan §1.3). Guarded so a failed seam
+            # call can never break the sync — the seam's own task retries.
+            from src.tasks.analysis import reanalyze_feedback
+
+            for feedback_id in result.get("changed_feedback_ids", []):
+                try:
+                    reanalyze_feedback(db, feedback_id)
+                except Exception:
+                    logger.exception(
+                        "Intercom pull: re-analysis dispatch failed for feedback "
+                        "%s (integration %s)",
+                        feedback_id,
+                        integration_id,
+                    )
+
             from src.cache import cache_invalidate
 
             cache_invalidate(f"dashboard:{org_id}:*")
