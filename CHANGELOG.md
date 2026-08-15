@@ -7,6 +7,27 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Intercom pull now ingests replies and ratings
+
+- **Replies are merged into the item.** The 15-minute pull used to ingest the first
+  message of each conversation only. It now enriches conversations it re-sees with
+  their conversation parts: each new reply is appended to the item's text
+  (HTML-stripped, with an author-attribution line) — one feedback item per
+  conversation, as before, and merging is idempotent (re-running on the same
+  conversation adds nothing).
+- **The satisfaction rating is captured** into `source_metadata` (`rating`,
+  `remark`, `rated_at` when available) and surfaced on the feedback detail — not
+  appended to the text, so "Rating: 5/5" never skews sentiment analysis.
+- **Changed items are re-analyzed** through the normal pipeline (sentiment,
+  categories, churn, health). Unchanged items are not touched.
+- **The webhook stays optional** — for near-instant delivery of new conversations;
+  replies and ratings no longer depend on it.
+- *Honest limits:* enrichment applies to conversations the pull re-sees after this
+  ships — older conversations stay first-message-only until they get new activity
+  (no backfill); "the full thread is now scored" is the extent of the quality claim;
+  the webhook's `replied`/`rating.added` events remain dedup-inert (a flagged
+  follow-up, not fixed here).
+
 ### Added — Intercom write-back: note + close on resolve (opt-in)
 
 - **Opt-in, off by default.** Per-org toggle on **Settings → Integrations →
@@ -344,6 +365,11 @@ message of a conversation, with replies and ratings arriving via webhook only; a
 backlog drains over several runs. No claim is made about analysis quality — this changes
 whether feedback arrives and whether it links to a customer, nothing else.
 
+**Correction (2026-08-15):** the honest-limits line above said replies and ratings
+arrive "via webhook only" — and in practice that path was inert, so neither reached
+analysis in any install. The pull now ingests both directly (conversation-parts
+enrichment; see the Added entry above). The webhook remains optional, for latency.
+
 ### Fixed — A weekly cleanup job had never run
 
 The beat schedule referenced `tasks.churn_playbooks.purge_old_executions`, missing the `src.`
@@ -403,6 +429,11 @@ not happen the way it does for Zendesk.
 
 If you want support tickets flowing in with the least setup, Zendesk remains the better
 path: a pasted API token, and polling that works without exposing any public URL.
+
+**Correction (2026-08-15):** "webhook-only — no polling fallback" was true when the
+guide was written and stale since the token-paste pull shipped on 2026-08-01: the
+pull ingests conversations every 15 minutes with no webhook required, and now
+includes replies and ratings. See the pull entries above.
 
 ### Added — Discord alerts
 
