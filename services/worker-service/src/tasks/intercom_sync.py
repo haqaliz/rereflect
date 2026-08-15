@@ -108,6 +108,51 @@ def _persist_terminal_status(integration_id: int, status: str, error: str) -> No
             db.commit()
 
 
+def _enrich_conversation_replies(db, item, reply_parts, rating) -> bool:
+    """Merge NEW reply parts into item.text and item.source_metadata.
+
+    Diff is by part_id membership against source_metadata["replies"].
+    Returns True iff item.text actually changed (new replies merged);
+    a rating-only update returns False (metadata changed, no re-analysis).
+
+    Never touches customer_email (admin/bot rule — adapter contract).
+    """
+    from src.adapters.intercom_parts import format_reply_merge, new_reply_parts
+
+    metadata = dict(item.source_metadata or {})
+
+    # Collapse duplicate part_ids within one payload: a part is merged once.
+    seen: set = set()
+    unique_parts = []
+    for part in reply_parts:
+        if part["part_id"] not in seen:
+            seen.add(part["part_id"])
+            unique_parts.append(part)
+
+    merged_part_ids = [r["part_id"] for r in metadata.get("replies", [])]
+    new_parts = new_reply_parts(unique_parts, merged_part_ids)
+
+    text_changed = False
+    if new_parts:
+        blocks = "".join(format_reply_merge(p) for p in new_parts)
+        item.text = (item.text or "") + blocks
+        metadata["replies"] = list(metadata.get("replies", [])) + new_parts
+        text_changed = True
+
+    if rating is not None:
+        # Metadata mirrors the adapter's "keys omitted when absent" contract.
+        for key in ("rating", "remark", "rated_at"):
+            if key in rating:
+                metadata[key] = rating[key]
+            else:
+                metadata.pop(key, None)
+
+    if metadata != (item.source_metadata or {}):
+        item.source_metadata = metadata
+
+    return text_changed
+
+
 def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     """Pull conversations for one org since the stored cursor.
 
