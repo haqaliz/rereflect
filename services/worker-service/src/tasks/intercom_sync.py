@@ -198,9 +198,13 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     max_updated_at: Optional[int] = None
     starting_after: Optional[str] = None
     pages = 0
+    # Per-query constant from Intercom (the window's total, fixed at run
+    # start); the last page's value wins by construction. None when the
+    # payload omits it → no estimate this run (defensive, honest).
+    total_count: Optional[int] = None
 
     while pages < MAX_PAGES_PER_RUN:
-        conversations, next_cursor, _total_count = client.search_conversations(
+        conversations, next_cursor, total_count = client.search_conversations(
             updated_since=updated_since, starting_after=starting_after
         )
         pages += 1
@@ -308,6 +312,14 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
             integ.id,
         )
 
+    # The `>=` boundary re-fetch can inflate seen above the window total,
+    # so the delta is clamped at 0 — a negative "remaining" is a lie.
+    remaining_estimate = (
+        max(0, total_count - conversations_seen)
+        if total_count is not None
+        else None
+    )
+
     return {
         "conversations_seen": conversations_seen,
         "conversations_ingested": conversations_ingested,
@@ -315,6 +327,7 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
         "dropped_by_cap": dropped_by_cap,
         "no_source_match": not sources,
         "cursor": max_updated_at,
+        "backlog_remaining": remaining_estimate,
     }
 
 
