@@ -39,6 +39,7 @@ const baseStatus: IntercomConnectionStatus = {
   last_sync_status: null,
   last_error: null,
   feedback_items_ingested: 42,
+  backlog_remaining: null,
   writeback_enabled: false,
   writeback_action: null,
   last_writeback_at: null,

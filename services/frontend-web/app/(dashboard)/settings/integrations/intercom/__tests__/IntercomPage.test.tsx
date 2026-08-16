@@ -63,6 +63,7 @@ const DISCONNECTED = {
   last_sync_status: null,
   last_error: null,
   feedback_items_ingested: 0,
+  backlog_remaining: null,
   writeback_enabled: false,
   writeback_action: null,
   last_writeback_at: null,
@@ -82,6 +83,7 @@ const CONNECTED = {
   last_sync_status: 'ok',
   last_error: null,
   feedback_items_ingested: 42,
+  backlog_remaining: 137,
   writeback_enabled: false,
   writeback_action: 'note_and_close',
   last_writeback_at: null,
@@ -229,16 +231,86 @@ describe('IntercomSettingsPage', () => {
     expect(await screen.findByText('42')).toBeInTheDocument();
   });
 
+  it('shows the backlog estimate row while a drain is in progress', async () => {
+    mockGetStatus.mockResolvedValue({ ...CONNECTED, backlog_remaining: 137 });
+
+    render(<IntercomSettingsPage />);
+
+    expect(
+      await screen.findByText(/≈ 137 conversations left to sync/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/estimate, drains over runs/)).toBeInTheDocument();
+  });
+
+  it('hides the backlog row when backlog_remaining is null', async () => {
+    mockGetStatus.mockResolvedValue({ ...CONNECTED, backlog_remaining: null });
+
+    render(<IntercomSettingsPage />);
+
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled());
+    expect(
+      screen.queryByText(/conversations left to sync/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the backlog row when the window is fully drained (0)', async () => {
+    mockGetStatus.mockResolvedValue({ ...CONNECTED, backlog_remaining: 0 });
+
+    render(<IntercomSettingsPage />);
+
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled());
+    expect(
+      screen.queryByText(/conversations left to sync/)
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the backlog row when disconnected', async () => {
+    mockGetStatus.mockResolvedValue(DISCONNECTED);
+
+    render(<IntercomSettingsPage />);
+
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled());
+    expect(
+      screen.queryByText(/conversations left to sync/)
+    ).not.toBeInTheDocument();
+  });
+
   it('explains a connected-but-zero state instead of just showing 0', async () => {
     // The half-state that would otherwise look like a bug: syncing fine, but
     // nothing has arrived because nobody has written in since connecting.
-    mockGetStatus.mockResolvedValue({ ...CONNECTED, feedback_items_ingested: 0 });
+    // backlog_remaining must be 0 here — a positive estimate would be the
+    // drain row's explanation and the alert is gated off while one shows.
+    mockGetStatus.mockResolvedValue({
+      ...CONNECTED,
+      feedback_items_ingested: 0,
+      backlog_remaining: 0,
+    });
 
     render(<IntercomSettingsPage />);
 
     expect(
       await screen.findByText(/no feedback has been ingested yet/i)
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/never backfills anything from before you connected/)
+    ).toBeInTheDocument();
+  });
+
+  it('hides the zero-ingested alert while a backlog remains', async () => {
+    // With a positive estimate visible, "nothing has been updated since you
+    // connected" would contradict the drain row — the row is the explanation.
+    mockGetStatus.mockResolvedValue({
+      ...CONNECTED,
+      feedback_items_ingested: 0,
+      backlog_remaining: 137,
+    });
+
+    render(<IntercomSettingsPage />);
+
+    await waitFor(() => expect(mockGetStatus).toHaveBeenCalled());
+    expect(
+      screen.queryByText(/no feedback has been ingested/)
+    ).not.toBeInTheDocument();
   });
 
   it('disconnects through the confirm dialog', async () => {

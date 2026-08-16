@@ -200,6 +200,19 @@ export default function IntercomSettingsPage() {
                   <dt className="text-muted-foreground">Feedback ingested</dt>
                   <dd>{status.feedback_items_ingested ?? 0}</dd>
                 </div>
+                {status.backlog_remaining !== null &&
+                  status.backlog_remaining > 0 && (
+                    <div>
+                      <dt className="text-muted-foreground">
+                        Backlog remaining
+                      </dt>
+                      <dd>
+                        ≈ {status.backlog_remaining.toLocaleString()}{' '}
+                        conversations left to sync — estimate, drains over
+                        runs
+                      </dd>
+                    </div>
+                  )}
               </dl>
 
               {status.last_error && (
@@ -211,14 +224,22 @@ export default function IntercomSettingsPage() {
 
               {status.has_feedback_source &&
                 status.feedback_items_ingested === 0 &&
-                status.last_synced_at && (
+                status.last_synced_at &&
+                // While a positive estimate is visible, the row itself is the
+                // explanation — "nothing has been updated since you connected"
+                // would contradict it.
+                !(
+                  status.backlog_remaining !== null &&
+                  status.backlog_remaining > 0
+                ) && (
                   <Alert>
                     <AlertCircle className="w-4 h-4" />
                     <AlertDescription>
                       Connected and syncing, but no feedback has been ingested
                       yet. That is expected if no one has written in since you
-                      connected — Rereflect only picks up conversations updated
-                      after that point, and never backfills history.
+                      connected — Rereflect only syncs conversations updated
+                      after that point, and never backfills anything from
+                      before you connected.
                     </AlertDescription>
                   </Alert>
                 )}

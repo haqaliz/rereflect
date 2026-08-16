@@ -32,6 +32,10 @@ export interface IntercomConnectionStatus {
   // How many feedback items this integration has produced. A connected
   // integration sitting at 0 is the most useful thing an operator can know.
   feedback_items_ingested: number;
+  // Estimated conversations left to sync in the current drain window (from
+  // Intercom's total_count minus seen at the last completed run). null = no
+  // estimate: never synced, failed run, OAuth, or an empty window.
+  backlog_remaining: number | null;
   // Resolve write-back config/status (config-api-routes aspect). Required —
   // the card only ever reads them while connected, and the connected response
   // always carries them.
