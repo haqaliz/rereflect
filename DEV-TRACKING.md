@@ -501,7 +501,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   that pass is this one. Registration-only, no task-body change. See
   `docs/planning/per-org-churn-model/calibration-beat-fix/`.
 
-### Deferred v2 — Intercom (opened 2026-08-01; 2 SHIPPED, 2 NOT STARTED)
+### Deferred v2 — Intercom (opened 2026-08-01; 3 SHIPPED, 1 NOT STARTED)
 
 Recorded here rather than only in `docs/planning/intercom-selfhost-ingestion/` so they are
 visible from the backlog. None block anything; the integration is fully operable without them.
@@ -525,8 +525,18 @@ visible from the backlog. None block anything; the integration is fully operable
   `feat/intercom-writeback`: the wire-or-delete P2 landed as **wire it** — opt-in
   note + close on resolve, off by default, resolved-only. The "Two-Way Sync" rule
   now resolves: copy may return only in the form shipped. See the FIXED P2 above.
-- **`intercom-backlog-drain-visibility`** — a large backlog drains over several 20-page runs
-  with no operator-visible progress; the settings page shows a count but not "N remaining".
+- ~~**`intercom-backlog-drain-visibility`** — a large backlog drains over several 20-page runs
+  with no operator-visible progress; the settings page shows a count but not "N remaining".~~
+  — **SHIPPED 2026-08-15** via `feat/intercom-backlog-drain-visibility`
+  (merged <merge-sha>, PR <# pending>): the Intercom settings page Connection card
+  now shows **"≈ N conversations left to sync"** after a completed pull run — an
+  estimate computed from Intercom's `total_count` for the run's window (an estimate,
+  not a queue count: arrivals during the drain shift later windows, the boundary
+  conversation re-counts itself). Token-paste connections only; absent until a
+  completed run and cleared on error — a failed run never leaves a stale number.
+  Drain mechanics (20-page cap, cursor resume) unchanged. Backend
+  `intercom_integrations.backlog_remaining` (migration f5a6b7c8d9e0) + status
+  field + model-parity type-tuple entry + client 3-tuple `total_count` surface.
 - **`intercom-oauth-path-retirement`** — two credential paths now coexist (D4). If nobody is
   using OAuth, retiring it removes a second tenancy discriminator to keep correct. Needs
   evidence of use before deciding.
