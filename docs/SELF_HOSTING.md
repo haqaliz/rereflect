@@ -1943,6 +1943,16 @@ request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
 >   is no backfill.
 > - A very large backlog drains over several runs rather than one — each run
 >   fetches up to 20 pages and the cursor resumes where it stopped.
+> - After a completed run, the settings page shows **"≈ N conversations left to
+>   sync"** — an **estimate** computed from Intercom's `total_count` for that run's
+>   sync window, not a queue count: conversations updated during the drain shift
+>   later windows, and the boundary conversation re-counts itself. The row appears
+>   only when there is something left to show (a non-empty window) and only for
+>   token-paste connections — OAuth has no pull, so it never shows there.
+> - The estimate is absent until a completed run, and a failed run **clears it**
+>   rather than leaving a stale number.
+> - The drain mechanics (20-page cap, cursor resume) are unchanged — the estimate
+>   reports progress, it does not speed it up.
 > - The webhook's `replied` / `rating.added` events are still dedup-inert today
 >   (flagged follow-up, not fixed) — the pull is what delivers replies and ratings.
 > - No claim is made about analysis quality beyond: the full thread is now scored

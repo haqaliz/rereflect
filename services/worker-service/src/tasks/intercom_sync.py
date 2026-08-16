@@ -110,6 +110,9 @@ def _persist_terminal_status(integration_id: int, status: str, error: str) -> No
         if row:
             row.last_sync_status = status
             row.last_error = error[:2000] if error else None
+            # A failed run never leaves a stale backlog_remaining beside a
+            # failed status (sync-estimate: both error paths route here).
+            row.backlog_remaining = None
             row.updated_at = datetime.utcnow()
             db.commit()
 
@@ -198,9 +201,13 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     max_updated_at: Optional[int] = None
     starting_after: Optional[str] = None
     pages = 0
+    # Per-query constant from Intercom (the window's total, fixed at run
+    # start); the last page's value wins by construction. None when the
+    # payload omits it → no estimate this run (defensive, honest).
+    total_count: Optional[int] = None
 
     while pages < MAX_PAGES_PER_RUN:
-        conversations, next_cursor = client.search_conversations(
+        conversations, next_cursor, total_count = client.search_conversations(
             updated_since=updated_since, starting_after=starting_after
         )
         pages += 1
@@ -308,6 +315,14 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
             integ.id,
         )
 
+    # The `>=` boundary re-fetch can inflate seen above the window total,
+    # so the delta is clamped at 0 — a negative "remaining" is a lie.
+    remaining_estimate = (
+        max(0, total_count - conversations_seen)
+        if total_count is not None
+        else None
+    )
+
     return {
         "conversations_seen": conversations_seen,
         "conversations_ingested": conversations_ingested,
@@ -315,6 +330,7 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
         "dropped_by_cap": dropped_by_cap,
         "no_source_match": not sources,
         "cursor": max_updated_at,
+        "backlog_remaining": remaining_estimate,
     }
 
 
@@ -365,6 +381,9 @@ def _sync_intercom_org_body(task_self, integration_id: int) -> Dict[str, Any]:
 
             integ.last_sync_status = "ok"
             integ.last_error = None
+            # Always written on a completed run — including None (unknown
+            # total), which overwrites any stale number from a prior run.
+            integ.backlog_remaining = result["backlog_remaining"]
             integ.updated_at = datetime.utcnow()
             db.commit()
 

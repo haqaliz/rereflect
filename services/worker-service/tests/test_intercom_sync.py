@@ -175,17 +175,24 @@ def _no_op_side_effects(monkeypatch):
 def _fake_client(pages):
     """A client whose search_conversations walks the given pages.
 
-    Each page is (conversations, next_cursor), where the conversations are in
-    the RAW search-API shape. The real client's `_normalize` is applied here so
-    the fake returns exactly what the real one returns -- otherwise the sync
-    tests would silently pass against a shape production never produces.
+    Each page is (conversations, next_cursor, total_count), where the
+    conversations are in the RAW search-API shape and `total_count` defaults
+    to None (absent) -- concrete values ride in when the sync-estimate aspect
+    needs them. The real client's `_normalize` is applied here so the fake
+    returns exactly what the real one returns -- otherwise the sync tests
+    would silently pass against a shape production never produces.
     """
     from src.clients.intercom import IntercomClient
 
+    pages = [p + (None,) if len(p) == 2 else p for p in pages]
     client = MagicMock()
     client.search_conversations.side_effect = [
-        ([IntercomClient._normalize(c) for c in convs], cursor)
-        for convs, cursor in pages
+        (
+            [IntercomClient._normalize(c) for c in convs],
+            cursor,
+            total_count,
+        )
+        for convs, cursor, total_count in pages
     ]
     client.close = MagicMock()
     return client
@@ -254,9 +261,10 @@ class TestIntercomClientSearch:
             )
 
         client = IntercomClient("tok", transport=httpx.MockTransport(handler))
-        conversations, cursor = client.search_conversations(updated_since=0)
+        conversations, cursor, total_count = client.search_conversations(updated_since=0)
 
         assert cursor is None
+        assert total_count is None
         assert "conversation_message" in conversations[0]
         assert conversations[0]["conversation_message"]["author"]["email"] == (
             "dana@example.com"
@@ -298,6 +306,48 @@ class TestIntercomClientSearch:
         client = IntercomClient("tok", transport=httpx.MockTransport(handler))
         with pytest.raises(IntercomTransientError):
             client.search_conversations(updated_since=0)
+
+    def test_returns_total_count_when_present(self):
+        """R1 — Intercom's per-query total_count rides the 3-tuple."""
+        import httpx
+
+        from src.clients.intercom import IntercomClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "conversations": [_conversation("c1", "Billing is broken")],
+                    "pages": {"next": {"starting_after": "abc123"}},
+                    "total_count": 42,
+                },
+            )
+
+        client = IntercomClient("tok", transport=httpx.MockTransport(handler))
+        conversations, cursor, total_count = client.search_conversations(
+            updated_since=0
+        )
+
+        assert total_count == 42
+        assert cursor == "abc123"
+        assert len(conversations) == 1
+
+    def test_returns_none_when_total_count_absent(self):
+        """Defensive — an envelope without total_count yields None, never a
+        crash and never a fabricated number."""
+        import httpx
+
+        from src.clients.intercom import IntercomClient
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, json={"conversations": [], "pages": {}}
+            )
+
+        client = IntercomClient("tok", transport=httpx.MockTransport(handler))
+        _, _, total_count = client.search_conversations(updated_since=0)
+
+        assert total_count is None
 
 
 # ──────────────────────────── Sync core ───────────────────────────────────────
@@ -480,6 +530,126 @@ class TestSyncOrg:
 
         assert result["no_source_match"] is True
         assert db.query(FeedbackItem).count() == 0
+
+
+class TestSyncOrgEstimate:
+    """sync-estimate: `_sync_org` computes backlog_remaining from the client's
+    per-query total_count (max(0, total - seen), None when the total is
+    unknown). The last page's total wins by construction — Intercom returns
+    the same window total on every page of one query."""
+
+    def test_computes_remaining_from_total_minus_seen(
+        self, db, _no_op_side_effects
+    ):
+        """Two pages, same per-query total on both — pins the per-query
+        semantics: 5 total, 3 seen across pages → 2 remaining."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client(
+            [
+                (
+                    [_conversation("c1", "one"), _conversation("c2", "two")],
+                    "cursor-1",
+                    5,
+                ),
+                ([_conversation("c3", "three")], None, 5),
+            ]
+        )
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["conversations_seen"] == 3
+        assert result["backlog_remaining"] == 2
+
+    def test_drained_window_reports_zero(self, db, _no_op_side_effects):
+        """total == seen → 0 (int, not None) — the drained-install signal."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client(
+            [([_conversation("c1", "one"), _conversation("c2", "two"), _conversation("c3", "three")], None, 3)]
+        )
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["backlog_remaining"] == 0
+        assert isinstance(result["backlog_remaining"], int)
+
+    def test_seen_can_exceed_total_without_a_negative_estimate(
+        self, db, _no_op_side_effects
+    ):
+        """The `>=` boundary re-fetch inflates seen above the window total
+        (a first-run inclusive window re-counts the boundary conversation).
+        max(0, total - seen) must clamp to 0, never go negative."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([_conversation("c1", "one")], None, 0)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["backlog_remaining"] == 0
+
+    def test_unknown_total_yields_none(self, db, _no_op_side_effects):
+        """total_count absent from the payload → key present, value None —
+        an honest 'no estimate this run', never a fabricated number."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([_conversation("c1", "one")], None, None)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert "backlog_remaining" in result
+        assert result["backlog_remaining"] is None
+
+    def test_empty_window_yields_none_when_total_unknown(
+        self, db, _no_op_side_effects
+    ):
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([], None, None)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["backlog_remaining"] is None
+
+    def test_backlog_remaining_is_an_additive_key(
+        self, db, _no_op_side_effects
+    ):
+        """The FULL result key set — the enrichment feature's
+        changed_feedback_ids/dropped_by_cap are asserted present and
+        untouched, so a future deletion of either cannot silently pass."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([_conversation("c1", "one")], None, 5)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert set(result.keys()) == {
+            "conversations_seen",
+            "conversations_ingested",
+            "changed_feedback_ids",
+            "dropped_by_cap",
+            "no_source_match",
+            "cursor",
+            "backlog_remaining",
+        }
 
 
 class TestSyncOrgEnrichment:
@@ -720,6 +890,160 @@ class TestSyncOrgEnrichment:
         db.refresh(item_b)
         assert "I fixed it" in item_b.text
         assert item_a.text.count("I fixed it") == 1
+
+
+class TestSyncOrgBodyPersistence:
+    """sync-estimate: a completed run persists backlog_remaining on the
+    integration row — the estimate (int), an honest None when the total was
+    unknown (overwriting any stale number), and 0 when the window is drained."""
+
+    def test_success_persists_estimate_on_the_row(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client([([], None, 5)])
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        result = _sync_intercom_org_body(MagicMock(), integ.id)
+
+        assert result["status"] == "ok"
+        assert result["backlog_remaining"] == 5
+        db.refresh(integ)
+        assert integ.last_sync_status == "ok"
+        assert integ.backlog_remaining == 5
+
+    def test_unknown_total_overwrites_a_stale_estimate(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """A completed run with an unknown total writes None — never a stale
+        number beside a fresh last_sync_status="ok" (PRD R3 risk decision)."""
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        integ.backlog_remaining = 3  # stale from a previous run
+        db.commit()
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client([([], None, None)])
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        _sync_intercom_org_body(MagicMock(), integ.id)
+
+        db.refresh(integ)
+        assert integ.last_sync_status == "ok"
+        assert integ.backlog_remaining is None
+
+    def test_zero_estimate_persists_as_zero_not_null(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """A drained window persists 0 — the sync writes the truth; the UI's
+        'no row' rules are the frontend aspect's job."""
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client([([_conversation("c1", "one")], None, 1)])
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        _sync_intercom_org_body(MagicMock(), integ.id)
+
+        db.refresh(integ)
+        assert integ.last_sync_status == "ok"
+        assert integ.backlog_remaining == 0
+        assert integ.backlog_remaining is not None
+
+
+class TestSyncErrorResetsBacklog:
+    """sync-estimate: a FAILED run never leaves a stale backlog_remaining
+    beside a failed status — both error paths reset it to None (seeded with a
+    stale value to prove the reset, not just absence)."""
+
+    def test_auth_error_resets_backlog_remaining(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """D7 — a static auth failure records auth_error without disconnecting;
+        the stale estimate is cleared."""
+        from src.clients.intercom import IntercomAuthError
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        integ.backlog_remaining = 7  # stale from a previous run
+        db.commit()
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        failing = MagicMock()
+        failing.search_conversations.side_effect = IntercomAuthError("401")
+        failing.close = MagicMock()
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: failing)
+
+        result = _sync_intercom_org_body(MagicMock(), integ.id)
+
+        db.refresh(integ)
+        assert integ.is_active is True, "an auth failure must not disconnect the org"
+        assert integ.last_sync_status == "auth_error"
+        assert integ.last_error
+        assert integ.backlog_remaining is None
+        assert result["status"] == "error"
+
+    def test_transient_error_resets_backlog_remaining(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """A transient failure records transient_error and retries; the stale
+        estimate is cleared."""
+        from src.clients.intercom import IntercomTransientError
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        integ.backlog_remaining = 7  # stale from a previous run
+        db.commit()
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        failing = MagicMock()
+        failing.search_conversations.side_effect = IntercomTransientError("503")
+        failing.close = MagicMock()
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: failing)
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = IntercomTransientError("503")
+
+        with pytest.raises(IntercomTransientError):
+            _sync_intercom_org_body(task_self, integ.id)
+
+        task_self.retry.assert_called_once()
+        db.refresh(integ)
+        assert integ.last_sync_status == "transient_error"
+        assert integ.last_error
+        assert integ.backlog_remaining is None
 
 
 class TestAuthFailureHandling:

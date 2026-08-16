@@ -313,6 +313,6 @@ class TestAlembicSingleHead:
         assert len(lines) == 1, (
             f"expected exactly one alembic head, got {len(lines)}: {lines}"
         )
-        assert "e4f5a6b7c8d9" in lines[0], (
-            f"the single head must be our revision e4f5a6b7c8d9, got: {lines[0]}"
+        assert "f5a6b7c8d9e0" in lines[0], (
+            f"the single head must be our revision f5a6b7c8d9e0, got: {lines[0]}"
         )

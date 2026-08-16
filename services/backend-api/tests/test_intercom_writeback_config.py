@@ -510,6 +510,7 @@ class TestWritebackStatusExtension:
         assert body["last_writeback_at"] is None
         assert body["last_writeback_status"] is None
         assert body["last_writeback_error"] is None
+        assert body["backlog_remaining"] is None
 
     def test_status_existing_fields_byte_identical(
         self, client: TestClient, db: Session, owner_headers: dict, test_organization
@@ -534,6 +535,7 @@ class TestWritebackStatusExtension:
         row.last_writeback_at = datetime(2026, 7, 20, 14, 5, 0)
         row.last_writeback_status = "success"
         row.last_writeback_error = None
+        row.backlog_remaining = 42
         db.commit()
         db.add(
             FeedbackItem(
@@ -571,6 +573,18 @@ class TestWritebackStatusExtension:
         assert body["last_writeback_at"] == "2026-07-20T14:05:00"
         assert body["last_writeback_status"] == "success"
         assert body["last_writeback_error"] is None
+        assert body["backlog_remaining"] == 42
+
+    def test_status_backlog_remaining_null_when_unset(
+        self, client: TestClient, owner_headers: dict
+    ):
+        """A connected row that has never been synced reports no estimate."""
+        _connected(client, owner_headers)
+        response = client.get(
+            "/api/v1/integrations/intercom/status", headers=owner_headers
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["backlog_remaining"] is None
 
 
 # ─────────── AC2: enabling sends nothing (no HTTP, no dispatch) ───────────────

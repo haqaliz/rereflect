@@ -153,6 +153,10 @@ class IntercomStatusResponse(BaseModel):
     # usage-decline-churn-labels. A connected integration sitting at 0 is the
     # single most useful thing an operator can know about it.
     feedback_items_ingested: int = 0
+    # Backlog drain estimate (intercom-backlog-drain-visibility): how many
+    # conversations remain in the sync window after the last completed run.
+    # None = no estimate (never-synced, error reset, OAuth path has no pull).
+    backlog_remaining: Optional[int] = None
     # Write-back config/status (config-api-routes aspect)
     writeback_enabled: bool = False
     writeback_action: str = "note_and_close"
@@ -289,6 +293,7 @@ def _build_status_response(
         last_sync_status=row.last_sync_status,
         last_error=row.last_error,
         feedback_items_ingested=_count_ingested_items(db, org_id),
+        backlog_remaining=row.backlog_remaining,
         writeback_enabled=row.writeback_enabled,
         writeback_action=row.writeback_action,
         last_writeback_at=row.last_writeback_at,
