@@ -184,10 +184,15 @@ def _fake_client(pages):
     """
     from src.clients.intercom import IntercomClient
 
+    pages = [p + (None,) if len(p) == 2 else p for p in pages]
     client = MagicMock()
     client.search_conversations.side_effect = [
-        ([IntercomClient._normalize(c) for c in convs], cursor, None)
-        for convs, cursor in pages
+        (
+            [IntercomClient._normalize(c) for c in convs],
+            cursor,
+            total_count,
+        )
+        for convs, cursor, total_count in pages
     ]
     client.close = MagicMock()
     return client
@@ -525,6 +530,126 @@ class TestSyncOrg:
 
         assert result["no_source_match"] is True
         assert db.query(FeedbackItem).count() == 0
+
+
+class TestSyncOrgEstimate:
+    """sync-estimate: `_sync_org` computes backlog_remaining from the client's
+    per-query total_count (max(0, total - seen), None when the total is
+    unknown). The last page's total wins by construction — Intercom returns
+    the same window total on every page of one query."""
+
+    def test_computes_remaining_from_total_minus_seen(
+        self, db, _no_op_side_effects
+    ):
+        """Two pages, same per-query total on both — pins the per-query
+        semantics: 5 total, 3 seen across pages → 2 remaining."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client(
+            [
+                (
+                    [_conversation("c1", "one"), _conversation("c2", "two")],
+                    "cursor-1",
+                    5,
+                ),
+                ([_conversation("c3", "three")], None, 5),
+            ]
+        )
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["conversations_seen"] == 3
+        assert result["backlog_remaining"] == 2
+
+    def test_drained_window_reports_zero(self, db, _no_op_side_effects):
+        """total == seen → 0 (int, not None) — the drained-install signal."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client(
+            [([_conversation("c1", "one"), _conversation("c2", "two"), _conversation("c3", "three")], None, 3)]
+        )
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["backlog_remaining"] == 0
+        assert isinstance(result["backlog_remaining"], int)
+
+    def test_seen_can_exceed_total_without_a_negative_estimate(
+        self, db, _no_op_side_effects
+    ):
+        """The `>=` boundary re-fetch inflates seen above the window total
+        (a first-run inclusive window re-counts the boundary conversation).
+        max(0, total - seen) must clamp to 0, never go negative."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([_conversation("c1", "one")], None, 0)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["backlog_remaining"] == 0
+
+    def test_unknown_total_yields_none(self, db, _no_op_side_effects):
+        """total_count absent from the payload → key present, value None —
+        an honest 'no estimate this run', never a fabricated number."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([_conversation("c1", "one")], None, None)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert "backlog_remaining" in result
+        assert result["backlog_remaining"] is None
+
+    def test_empty_window_yields_none_when_total_unknown(
+        self, db, _no_op_side_effects
+    ):
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([], None, None)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert result["backlog_remaining"] is None
+
+    def test_backlog_remaining_is_an_additive_key(
+        self, db, _no_op_side_effects
+    ):
+        """The FULL result key set — the enrichment feature's
+        changed_feedback_ids/dropped_by_cap are asserted present and
+        untouched, so a future deletion of either cannot silently pass."""
+        from src.tasks.intercom_sync import _sync_org
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id)
+        _make_source(db, org.id)
+
+        client = _fake_client([([_conversation("c1", "one")], None, 5)])
+        result = _sync_org(org.id, db, client, integ)
+
+        assert set(result.keys()) == {
+            "conversations_seen",
+            "conversations_ingested",
+            "changed_feedback_ids",
+            "dropped_by_cap",
+            "no_source_match",
+            "cursor",
+            "backlog_remaining",
+        }
 
 
 class TestSyncOrgEnrichment:
