@@ -527,8 +527,8 @@ visible from the backlog. None block anything; the integration is fully operable
   now resolves: copy may return only in the form shipped. See the FIXED P2 above.
 - ~~**`intercom-backlog-drain-visibility`** — a large backlog drains over several 20-page runs
   with no operator-visible progress; the settings page shows a count but not "N remaining".~~
-  — **SHIPPED 2026-08-15** via `feat/intercom-backlog-drain-visibility`
-  (merged <merge-sha>, PR <# pending>): the Intercom settings page Connection card
+  — **SHIPPED 2026-08-16** via `feat/intercom-backlog-drain-visibility`
+  (merged `300fb05d`, PR #17): the Intercom settings page Connection card
   now shows **"≈ N conversations left to sync"** after a completed pull run — an
   estimate computed from Intercom's `total_count` for the run's window (an estimate,
   not a queue count: arrivals during the drain shift later windows, the boundary
