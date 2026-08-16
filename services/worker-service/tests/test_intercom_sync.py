@@ -892,6 +892,87 @@ class TestSyncOrgEnrichment:
         assert item_a.text.count("I fixed it") == 1
 
 
+class TestSyncOrgBodyPersistence:
+    """sync-estimate: a completed run persists backlog_remaining on the
+    integration row — the estimate (int), an honest None when the total was
+    unknown (overwriting any stale number), and 0 when the window is drained."""
+
+    def test_success_persists_estimate_on_the_row(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client([([], None, 5)])
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        result = _sync_intercom_org_body(MagicMock(), integ.id)
+
+        assert result["status"] == "ok"
+        assert result["backlog_remaining"] == 5
+        db.refresh(integ)
+        assert integ.last_sync_status == "ok"
+        assert integ.backlog_remaining == 5
+
+    def test_unknown_total_overwrites_a_stale_estimate(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """A completed run with an unknown total writes None — never a stale
+        number beside a fresh last_sync_status="ok" (PRD R3 risk decision)."""
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        integ.backlog_remaining = 3  # stale from a previous run
+        db.commit()
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client([([], None, None)])
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        _sync_intercom_org_body(MagicMock(), integ.id)
+
+        db.refresh(integ)
+        assert integ.last_sync_status == "ok"
+        assert integ.backlog_remaining is None
+
+    def test_zero_estimate_persists_as_zero_not_null(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """A drained window persists 0 — the sync writes the truth; the UI's
+        'no row' rules are the frontend aspect's job."""
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client([([_conversation("c1", "one")], None, 1)])
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        _sync_intercom_org_body(MagicMock(), integ.id)
+
+        db.refresh(integ)
+        assert integ.last_sync_status == "ok"
+        assert integ.backlog_remaining == 0
+        assert integ.backlog_remaining is not None
+
+
 class TestAuthFailureHandling:
     def test_auth_error_records_status_without_deactivating(
         self, db, monkeypatch, _no_op_side_effects

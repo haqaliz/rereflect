@@ -378,6 +378,9 @@ def _sync_intercom_org_body(task_self, integration_id: int) -> Dict[str, Any]:
 
             integ.last_sync_status = "ok"
             integ.last_error = None
+            # Always written on a completed run — including None (unknown
+            # total), which overwrites any stale number from a prior run.
+            integ.backlog_remaining = result["backlog_remaining"]
             integ.updated_at = datetime.utcnow()
             db.commit()
 
