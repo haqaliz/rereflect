@@ -1283,6 +1283,11 @@ class IntercomIntegration(Base):
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
 
+    # Backlog drain estimate (intercom-backlog-drain-visibility): mirrors
+    # backend src/models/intercom_integration.py. No server_default (worker
+    # mirror convention; parity tests check names/types).
+    backlog_remaining = Column(Integer, nullable=True)
+
     # Intercom write-back (intercom-writeback aspect): mirrors backend
     # src/models/intercom_integration.py. No server_default (worker mirror
     # convention; parity tests check names/types).

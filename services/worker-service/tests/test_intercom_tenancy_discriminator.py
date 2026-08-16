@@ -327,6 +327,10 @@ WRITEBACK_INTEGRATION_COLUMNS = (
     "last_writeback_at",
     "last_writeback_status",
     "last_writeback_error",
+    # Misnamed-but-functional: this tuple is the intercom_integrations
+    # type-parity set, not just writeback columns. backlog_remaining joins
+    # it so Integer vs BigInteger drift is caught by the type test.
+    "backlog_remaining",
 )
 WRITEBACK_FEEDBACK_COLUMNS = ("intercom_writeback_at",)
 
