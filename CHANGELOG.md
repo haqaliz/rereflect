@@ -7,6 +7,21 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Intercom settings page shows the remaining-backlog estimate
+
+- **"≈ N remaining" on the Connection card.** After a completed pull run, the
+  Intercom settings page shows how much of a large backlog is left ("≈ N
+  conversations left to sync — estimate, drains over runs"), computed from
+  Intercom's `total_count` for that run's sync window. A first connect with a big
+  history now shows real drain progress instead of an opaque ingested count.
+- **Absent when there is nothing honest to show** — no row when the window is
+  empty, the run failed (the estimate is cleared, never left stale), the
+  connection is disconnected, or the organization connects via OAuth (no pull).
+- *Honest limits:* the number is an **estimate, not a queue count** — conversations
+  updated during the drain shift later windows and the boundary conversation
+  re-counts itself; token-paste connections only; present only after a completed
+  run; the 20-page/run drain mechanics are unchanged.
+
 ### Added — Intercom pull now ingests replies and ratings
 
 - **Replies are merged into the item.** The 15-minute pull used to ingest the first
