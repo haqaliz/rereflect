@@ -547,6 +547,7 @@ class TestIngestedItemCount:
         )
         assert response.status_code == 200
         assert response.json()["feedback_items_ingested"] == 0
+        assert response.json()["backlog_remaining"] is None
 
     def test_status_counts_only_this_orgs_intercom_items(
         self, client: TestClient, db: Session, owner_headers: dict, test_organization
