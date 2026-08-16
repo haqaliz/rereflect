@@ -70,6 +70,12 @@ class IntercomIntegration(Base):
     last_sync_status = Column(String(50), nullable=True)
     last_error = Column(Text, nullable=True)
 
+    # Backlog drain estimate (intercom-backlog-drain-visibility): how many
+    # conversations remain in the sync window after the last completed run.
+    # Written by the worker sync task; reset to NULL on error paths. None =
+    # no estimate (never-synced, error reset, OAuth path has no pull).
+    backlog_remaining = Column(Integer, nullable=True)
+
     # Intercom write-back (intercom-writeback aspect): per-org opt-in, off by
     # default, + status readout. Mirrors the CRM writeback column set
     # (hubspot_integration.py). writeback_action is validated at the Pydantic
