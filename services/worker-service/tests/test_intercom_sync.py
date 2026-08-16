@@ -973,6 +973,79 @@ class TestSyncOrgBodyPersistence:
         assert integ.backlog_remaining is not None
 
 
+class TestSyncErrorResetsBacklog:
+    """sync-estimate: a FAILED run never leaves a stale backlog_remaining
+    beside a failed status — both error paths reset it to None (seeded with a
+    stale value to prove the reset, not just absence)."""
+
+    def test_auth_error_resets_backlog_remaining(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """D7 — a static auth failure records auth_error without disconnecting;
+        the stale estimate is cleared."""
+        from src.clients.intercom import IntercomAuthError
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        integ.backlog_remaining = 7  # stale from a previous run
+        db.commit()
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        failing = MagicMock()
+        failing.search_conversations.side_effect = IntercomAuthError("401")
+        failing.close = MagicMock()
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: failing)
+
+        result = _sync_intercom_org_body(MagicMock(), integ.id)
+
+        db.refresh(integ)
+        assert integ.is_active is True, "an auth failure must not disconnect the org"
+        assert integ.last_sync_status == "auth_error"
+        assert integ.last_error
+        assert integ.backlog_remaining is None
+        assert result["status"] == "error"
+
+    def test_transient_error_resets_backlog_remaining(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        """A transient failure records transient_error and retries; the stale
+        estimate is cleared."""
+        from src.clients.intercom import IntercomTransientError
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        integ.backlog_remaining = 7  # stale from a previous run
+        db.commit()
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+
+        import src.tasks.intercom_sync as mod
+
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        failing = MagicMock()
+        failing.search_conversations.side_effect = IntercomTransientError("503")
+        failing.close = MagicMock()
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: failing)
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = IntercomTransientError("503")
+
+        with pytest.raises(IntercomTransientError):
+            _sync_intercom_org_body(task_self, integ.id)
+
+        task_self.retry.assert_called_once()
+        db.refresh(integ)
+        assert integ.last_sync_status == "transient_error"
+        assert integ.last_error
+        assert integ.backlog_remaining is None
+
+
 class TestAuthFailureHandling:
     def test_auth_error_records_status_without_deactivating(
         self, db, monkeypatch, _no_op_side_effects

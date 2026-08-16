@@ -110,6 +110,9 @@ def _persist_terminal_status(integration_id: int, status: str, error: str) -> No
         if row:
             row.last_sync_status = status
             row.last_error = error[:2000] if error else None
+            # A failed run never leaves a stale backlog_remaining beside a
+            # failed status (sync-estimate: both error paths route here).
+            row.backlog_remaining = None
             row.updated_at = datetime.utcnow()
             db.commit()
 
