@@ -63,7 +63,7 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
   follow-up, not fixed here).
 
 **Correction (<merge-date>):** the honest-limits line above said the webhook's
-`replied`/`rating.added` events remain dedup-inert (a flagged follow-up). That
+`replied`/`rating.added` events were a flagged follow-up — not yet fixed. That
 follow-up is now shipped — see the Added entry above: webhook replied/rating
 deliveries enrich the conversation's existing item in real time (payload-first,
 existing-item-only, no backfill; the pull stays the fallback).
