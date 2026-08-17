@@ -18,6 +18,13 @@ from src.adapters import get_adapter
 logger = logging.getLogger(__name__)
 
 
+# Intercom events routed to the webhook enrichment branch (PRD R1) instead of
+# the trigger/dedup/create flow. The `enriched` status logged here is NEW
+# vocabulary: it is never dedup-relevant (the dedup filter below matches only
+# processed/pending) and never blocks a later `created` delivery.
+INTERCOM_WEBHOOK_ENRICH_EVENTS = ("conversation.user.replied", "conversation.rating.added")
+
+
 # ---------------------------------------------------------------------------
 # Local token decryption (mirrors zendesk_sync.py _decrypt)
 # R6: Worker cannot import from backend-api; uses its own Fernet helper.
@@ -293,6 +300,45 @@ def _process_event_for_source(
         if config_channel and event_channel and config_channel != event_channel:
             return {"source_id": source_id, "status": "channel_mismatch"}
 
+    # Intercom replied/rating events bypass trigger + dedup: route straight into
+    # the webhook enrichment module. Enrichment is NOT trigger-gated and NEVER
+    # creates items — it merges into the conversation's existing FeedbackItem, or
+    # logs a noop/ignored row (the create path owns item creation).
+    if source.source_type == "intercom" and event_type in INTERCOM_WEBHOOK_ENRICH_EVENTS:
+        # Lazy import — house convention (analysis.py:156, source_events.py:389).
+        # Plain import, never a swallowed-`except` import (import-sweep guard).
+        from src.services.intercom_webhook_enrich import enrich_webhook_item
+
+        result = enrich_webhook_item(db, source, event_type, event_data)
+        outcome = result["status"]
+        conv_id = ((event_data.get("data") or {}).get("item") or {}).get("id")
+
+        if outcome == "enriched":
+            _log_event(
+                db, source_id, org_id, external_event_id, event_type,
+                event_data, "enriched", None,
+                feedback_id=result.get("feedback_id"),
+                message_id=conv_id,
+            )
+        elif outcome.startswith("noop"):
+            _log_event(
+                db, source_id, org_id, external_event_id, event_type,
+                event_data, "ignored", None, message_id=conv_id,
+            )
+        else:  # "error/auth_error" and any unexpected module status
+            event_log = _log_event(
+                db, source_id, org_id, external_event_id, event_type,
+                event_data, "failed", None, message_id=conv_id,
+            )
+            event_log.error_message = outcome
+
+        return {
+            "source_id": source_id,
+            "status": outcome,
+            "changed": result.get("changed", False),
+            "feedback_id": result.get("feedback_id"),
+        }
+
     # Check triggers
     triggers = source.triggers or {}
     trigger_matched = adapter.check_triggers(event_type, event_data, triggers)
@@ -477,7 +523,7 @@ def _log_event(
         feedback_id=feedback_id,
         event_data=event_data,
         received_at=datetime.utcnow(),
-        processed_at=datetime.utcnow() if status in ["processed", "ignored"] else None,
+        processed_at=datetime.utcnow() if status in {"processed", "ignored", "enriched", "failed"} else None,
     )
 
     db.add(event_log)

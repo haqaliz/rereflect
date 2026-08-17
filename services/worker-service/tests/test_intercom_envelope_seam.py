@@ -519,7 +519,8 @@ class TestWebhookEnrichmentBranch:
         replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
         result = self._deliver(replied)
 
-        assert result["status"] == "error/auth_error"
+        assert result["status"] == "processed"
+        assert result["results"][0]["status"] == "error/auth_error"
         assert db.query(FeedbackItem).count() == 0
         rows = db.query(FeedbackSourceEvent).all()
         assert len(rows) == 1
