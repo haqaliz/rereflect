@@ -72,6 +72,12 @@ def process_source_event(
 
     Returns:
         dict with processing results
+
+    Note: Intercom `conversation.user.replied` / `conversation.rating.added`
+    events bypass the trigger check and dedup. They are enriched into the
+    existing per-conversation FeedbackItem, log `enriched` (or `ignored` /
+    `failed`), and dispatch bounded re-analysis strictly after the end-commit
+    (PRD R1/R3/R4).
     """
     from src.models import (
         FeedbackSource, FeedbackSourceEvent, FeedbackItem,
