@@ -516,7 +516,7 @@ visible from the backlog. None block anything; the integration is fully operable
   `source_metadata`, changed items re-analyzed, unchanged untouched. No backfill:
   older conversations stay first-message-only until the pull re-sees them.
   **Follow-up (defect) — FIXED** via `feat/intercom-webhook-reply-rating` (merged
-  <merge-sha>, PR <# pending>): the webhook reply/rating path is no longer inert — a
+  ac9b55a2, PR #18): the webhook reply/rating path is no longer inert — a
   `conversation.user.replied` / `conversation.rating.added` delivery now enriches the
   conversation's existing item in real time (payload-first parts + rating; detail-fetch
   fallback when the payload lacks parts; `enriched` event-log status so the created

@@ -31,13 +31,13 @@ must state the new reality honestly and the tracking markers must flip — part 
 - **Flag-only (no edit):** the latent webhook reply/rating defect (dedup key +
   seed-trigger make webhook replied/rating events inert) — recorded as a follow-up
   defect note inside the SHIPPED marker, not fixed here (prd.md out-of-scope). —
-  **SHIPPED <merge-date>** as `intercom-webhook-reply-rating` (see that card's
+  **SHIPPED 2026-08-17** as `intercom-webhook-reply-rating` (see that card's
   planning dir).
 
 ## Out of scope
 
 - Fixing the webhook reply/rating path (separate defect). — now shipped as
-  `intercom-webhook-reply-rating` (<merge-date>).
+  `intercom-webhook-reply-rating` (2026-08-17).
 - `intercom-backlog-drain-visibility` / `intercom-oauth-path-retirement` markers.
 - Landing page copy (nothing claims pull replies there; verify with a grep).
 

@@ -163,7 +163,7 @@ minutes"), but `sync_all_intercom` iterates only `IntercomIntegration` rows
 | R2 | **Re-analysis churn**: every reply triggers a full LLM/analysis pass | Bounded to changed items only (R4); re-analysis is a normal queued task; the plan should assert unchanged items never dispatch |
 | R3 | **Enrichment of admin replies** could look like customer sentiment | Content included, `_contact_email` rule untouched — never attributed; honest docs note |
 | R4 | **Duplicate text on redelivery** | Idempotent by part_id set in `source_metadata` (R3); redelivery test (R7) |
-| R5 | **Latent webhook reply/rating path** (findings: dedup key + seed trigger make it inert) | Flagged as a separate defect — NOT fixed in this card (scope discipline); the docs pass states the honest current state. **— SHIPPED <merge-date>** by `intercom-webhook-reply-rating`: the webhook replied/rating path now enriches the conversation's existing item in real time (existing-item-only). |
+| R5 | **Latent webhook reply/rating path** (findings: dedup key + seed trigger make it inert) | Flagged as a separate defect — NOT fixed in this card (scope discipline); the docs pass states the honest current state. **— SHIPPED 2026-08-17** by `intercom-webhook-reply-rating`: the webhook replied/rating path now enriches the conversation's existing item in real time (existing-item-only). |
 | R6 | **Old conversations stay first-message-only** | Honest limit, stated in docs (no backfill — enrichment applies to conversations the pull re-sees) |
 
 **Open questions**
@@ -182,7 +182,7 @@ minutes"), but `sync_all_intercom` iterates only `IntercomIntegration` rows
   and cross-path dedup).
 - ~~**Fixing the latent webhook reply/rating path** (flagged as a separate defect; the
   docs pass states the honest current state instead of claiming webhook parity).~~
-  — **SHIPPED <merge-date>** (`intercom-webhook-reply-rating`): the webhook replied/rating
+  — **SHIPPED 2026-08-17** (`intercom-webhook-reply-rating`): the webhook replied/rating
   path now enriches the conversation's existing item in real time (existing-item-only,
   no backfill; the pull stays the fallback). See
   `docs/planning/intercom-webhook-reply-rating/`.
@@ -217,7 +217,7 @@ minutes"), but `sync_all_intercom` iterates only `IntercomIntegration` rows
 - 🟡 **The webhook-parity myth is bigger than the card.** The finding that replied/rating
   webhook events dedup into nothing contradicts CHANGELOG/SELF_HOSTING claims that
   predate this work; correcting those claims is in scope (R8) but the actual webhook
-  defect is a separate card that should follow — **shipped <merge-date>** as
+  defect is a separate card that should follow — **shipped 2026-08-17** as
   `intercom-webhook-reply-rating`.
 - 🟢 Scope, invariant preservation, idempotency, and honesty framing are pinned.
 
