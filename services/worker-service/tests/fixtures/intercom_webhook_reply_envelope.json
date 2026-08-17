@@ -1,0 +1,46 @@
+{
+  "type": "notification_event",
+  "topic": "conversation.user.replied",
+  "id": "notif_golden_0002",
+  "app_id": "abc123",
+  "created_at": 1785400100,
+  "data": {
+    "type": "notification_event_data",
+    "item": {
+      "type": "conversation",
+      "id": "conv_golden_200",
+      "created_at": 1785399990,
+      "conversation_message": {
+        "type": "conversation_message",
+        "id": "msg_golden_200",
+        "subject": "",
+        "body": "<p>The billing page times out when I try to download an invoice.</p>",
+        "author": {
+          "type": "user",
+          "id": "contact_golden_300",
+          "name": "Dana Okafor",
+          "email": "dana@example.com"
+        }
+      },
+      "conversation_parts": {
+        "type": "conversation_parts.list",
+        "conversation_parts": [
+          {
+            "type": "conversation_part",
+            "id": "part_golden_210",
+            "part_type": "comment",
+            "body": "<p>Still broken after the latest update. The download button does nothing.</p>",
+            "author": {
+              "type": "user",
+              "id": "contact_golden_310",
+              "name": "Sam Rivers",
+              "email": "sam@example.com"
+            },
+            "created_at": 1785400100
+          }
+        ]
+      },
+      "conversation_rating": null
+    }
+  }
+}

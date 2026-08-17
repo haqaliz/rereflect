@@ -47,6 +47,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.adapters.intercom import IntercomAdapter
+from src.adapters.intercom_parts import extract_rating, extract_reply_parts
 from src.models import FeedbackSource, Integration, Organization
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "intercom_webhook_envelope.json"
@@ -67,6 +68,49 @@ def load_golden_envelope() -> dict:
             "than skipping this test."
         )
     return json.loads(FIXTURE_PATH.read_text())
+
+
+REPLY_FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "intercom_webhook_reply_envelope.json"
+)
+
+RATING_FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "intercom_webhook_rating_envelope.json"
+)
+
+
+def load_golden_reply_envelope() -> dict:
+    """Load the shared reply contract fixture.
+
+    Deliberately raises rather than skipping when the file is missing. A
+    `pytest.skip` here would recreate precisely the silent-gap failure this
+    file exists to close: a green suite that proves nothing.
+    """
+    if not REPLY_FIXTURE_PATH.exists():
+        raise AssertionError(
+            f"Golden Intercom reply envelope fixture missing at {REPLY_FIXTURE_PATH}. "
+            "It is a shared contract also read by "
+            "services/backend-api/tests/test_intercom.py -- restore it rather "
+            "than skipping this test."
+        )
+    return json.loads(REPLY_FIXTURE_PATH.read_text())
+
+
+def load_golden_rating_envelope() -> dict:
+    """Load the shared rating contract fixture.
+
+    Deliberately raises rather than skipping when the file is missing. A
+    `pytest.skip` here would recreate precisely the silent-gap failure this
+    file exists to close: a green suite that proves nothing.
+    """
+    if not RATING_FIXTURE_PATH.exists():
+        raise AssertionError(
+            f"Golden Intercom rating envelope fixture missing at {RATING_FIXTURE_PATH}. "
+            "It is a shared contract also read by "
+            "services/backend-api/tests/test_intercom.py -- restore it rather "
+            "than skipping this test."
+        )
+    return json.loads(RATING_FIXTURE_PATH.read_text())
 
 
 @pytest.fixture
@@ -294,3 +338,50 @@ class TestQueuedPayloadProducesFeedback:
 
         assert result["status"] == "no_sources"
         assert db.query(FeedbackItem).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Reply/rating feed-enrichment seam (the webhook-enrich-module's inputs)
+# ---------------------------------------------------------------------------
+
+
+class TestReplyRatingEnvelopesFeedEnrichmentSeam:
+    """Pins the exact key path and parsed shape the enrichment module consumes.
+
+    The webhook-enrich-module aspect builds `src/services/intercom_webhook_enrich.py`
+    against this contract: conversation id from `event_data["data"]["item"]["id"]`,
+    replies from `extract_reply_parts` (conversation_parts.conversation_parts[]),
+    rating from `extract_rating` (conversation_rating). The fixtures are
+    conversation-wrapped exactly like the pull path's real API shape, so the same
+    seams that parse the pull parse these envelopes unchanged.
+
+    See docs/planning/intercom-webhook-reply-rating/webhook-enrich-module/spec.md.
+    """
+
+    def test_reply_envelope_yields_conversation_id_and_reply_part(self):
+        envelope = load_golden_reply_envelope()
+        item = envelope["data"]["item"]
+        assert item["id"] == "conv_golden_200"
+
+        parts = extract_reply_parts(item)
+        assert len(parts) == 1
+        assert parts[0]["part_id"] == "part_golden_210"
+        assert parts[0]["author"]["email"] == "sam@example.com"
+        assert parts[0]["body"] == (
+            "Still broken after the latest update. The download button does nothing."
+        )
+        assert parts[0]["created_at"] == "1785400100"
+
+        assert extract_rating(item) is None
+
+    def test_rating_envelope_yields_rating_and_no_parts(self):
+        envelope = load_golden_rating_envelope()
+        item = envelope["data"]["item"]
+        assert item["id"] == "conv_golden_300"
+
+        assert extract_reply_parts(item) == []
+        assert extract_rating(item) == {
+            "rating": 5,
+            "remark": "Quick fix, great support!",
+            "rated_at": "1785400200",
+        }
