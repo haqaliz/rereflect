@@ -1,56 +1,77 @@
-# Card — feat/intercom-backlog-drain-visibility (freeform, no GitHub issue)
+# Card — feat/intercom-webhook-reply-rating (freeform, no GitHub issue)
 
-Source: DEV-TRACKING.md "Deferred v2 — Intercom" entry `intercom-backlog-drain-visibility`
-(line ~517-518). Branch `feat/intercom-backlog-drain-visibility`, worktree
-`.claude/worktrees/feat-intercom-backlog-drain`.
+Source: the follow-up defect note recorded in DEV-TRACKING.md:518-522 (from
+`intercom-pull-replies-and-ratings`, PR #16), plus the dig findings of that feature.
+Branch `feat/intercom-webhook-reply-rating`, worktree
+`.claude/worktrees/feat-intercom-webhook-reply`.
 
 ## Brief
 
-A large Intercom backlog drains over **several 20-page runs** (first connect with a big
-history), with **no operator-visible progress**: the Intercom settings page shows a
-count (ingested/workspace/last-sync state) but not **"N remaining"**. This card adds an
-honest remaining-backlog estimate to the sync status the operator can read on
-Settings → Integrations → Intercom.
+The Intercom **webhook reply/rating path is inert**. Two independent causes:
 
-## Facts (from prior digs, verified 2026-08-15)
+1. **Dedup key = conversation id for all three event types**
+   (`adapters/intercom.py:171-180` → `source_events.py:312-319`): a
+   `conversation.user.replied` or `conversation.rating.added` event dedups against the
+   conversation's `created` row and never creates or updates anything.
+2. **The seeded source trigger is `{"new_conversations": True}`**
+   (`intercom_integration.py:262-271`): replied/rating webhook events fail
+   `check_triggers` before the dedup is even reached.
 
-- The pull (`worker-service/src/tasks/intercom_sync.py`) runs `POST /conversations/search`
-  with `updated_at >= cursor`, `starting_after` pagination, `MAX_PAGES_PER_RUN = 20`,
-  cursor advances to max `updated_at` per run. The search response carries
-  `total_count` (Intercom's documented response field) — the client currently drops it.
-- The Intercom settings page Connection card (`frontend-web/.../settings/integrations/intercom/page.tsx:167-235`)
-  shows workspace, token hint, last-synced, last-error, and an **ingested count** —
-  the count referenced by the deferred entry. `lib/api/intercom.ts` status type drives it.
-- `GET /api/v1/integrations/intercom/status` (`backend-api/src/api/routes/intercom_integration.py:407-420`)
-  returns workspace/admin metadata + sync state.
-- `IntercomIntegration` (backend + worker mirror) has sync-status columns; model parity
-  is CI-asserted. Alembic head on master: `e4f5a6b7c8d9`.
+Since #16, the 15-minute **pull** enriches the per-conversation item with replies +
+rating. This card gives the **webhook path the same enrichment in real time** — a
+webhook reply/rating event should merge into the existing item (same merge semantics,
+same bounded re-analysis), not vanish. For webhook-wired installs this removes the up
+to-15-minute latency for reply/rating content; for pull-only installs nothing changes.
 
 ## Caveats (carried into the PRD, must not be papered over)
 
-- **It is an estimate, not a count.** `total_count` reflects the window at the moment
-  of the query (`updated_at >= cursor-at-run-start`); conversations updated during the
-  drain shift the window, and the boundary re-fetch re-counts one conversation. The UI
-  must label it an estimate (e.g. "≈ N remaining").
-- **Token-paste only.** The pull iterates `IntercomIntegration` rows only — OAuth orgs
-  have no pull, so no backlog number exists for them (already a documented truth fix
-  from `intercom-pull-replies-and-ratings`). The card must not show a backlog for OAuth
-  connections.
-- **First-run semantics.** On connect, `last_synced_at` is absent → cursor = `connected_at`;
-  the first run's `total_count` IS the full backlog. Absent sync history or empty
-  window → no backlog line (or "0" only when a run has actually completed).
+- **Payload-shape divergence (the dig's open question, unresolved).** The adapter's
+  `_extract_reply`/`_extract_rating` expect **part-shaped** items (top-level `body`,
+  `author`, `id` = part id), while the backend's own webhook tests use
+  **conversation-wrapped** payloads (`item.conversation_parts.conversation_parts[]`,
+  `item.conversation_rating`) — and the real Intercom webhook payloads are
+  conversation-wrapped. Against real payloads, `_extract_reply` reads `item.get("body")`
+  → `""` → `empty_text` ignored. **The enrichment must key off the conversation id
+  and fetch/merge robustly regardless of the item shape** (the pull already fetches
+  `GET /conversations/{id}` via `IntercomClient.get_conversation`).
+- **One-item-per-conversation invariant stays.** Webhook reply/rating events enrich
+  the existing item; they never create siblings (the D3 invariant, pinned by six
+  characterization tests).
+- **Trigger semantics.** The seed trigger (`new_conversations` only) means replied/
+  rating events were never even evaluated. Fixing the delivery path must also decide
+  the trigger story: replied/rating events should be deliverable (checked) regardless
+  of trigger config, since they now *enrich* rather than create — or the seed trigger
+  must gain `replies`/`ratings`. Decide in the PRD.
+- **Re-analysis is bounded** (only changed items, via the `reanalyze_feedback` seam
+  from #16) — a webhook reply re-analyzes its conversation's item exactly once.
+
+## Roadmap facts (from DEV-TRACKING.md, cited)
+
+- Follow-up note (DEV-TRACKING.md:518-522): "the webhook reply/rating path is still
+  inert — the dedup key (`external_message_id` = conversation id for all three event
+  types) and the `new_conversations`-only seed trigger make `conversation.user.replied`
+  / `conversation.rating.added` events dedup into nothing; the pull covers the content
+  on its 15-minute cycle."
+- Enrichment + reanalysis seams to reuse (from #16): `_enrich_conversation_replies`
+  (intercom_sync.py), `extract_reply_parts`/`extract_rating`/`format_reply_merge`
+  (adapters/intercom_parts.py), `reanalyze_feedback` (analysis.py), and
+  `IntercomClient.get_conversation` (clients/intercom.py).
 
 ## Deliverables (proposed, refine in PRD)
 
-1. Sync computes and persists an honest remaining estimate after each run (new
-   `backlog_remaining` column on `IntercomIntegration` + worker mirror + parity).
-2. `GET /status` exposes it; the settings page Connection card renders "≈ N remaining"
-   (with honest copy; hidden for OAuth/unconnected/never-synced states).
-3. Docs: SELF_HOSTING + CHANGELOG + DEV-TRACKING deferred-v2 entry → SHIPPED.
+1. Webhook replied/rating events reliably reach an enrichment path: conversation id
+   extracted robustly from the payload, existing item found, merge + bounded
+   re-analysis via the #16 seams.
+2. Trigger story resolved (delivery regardless of `new_conversations`-only seed, with
+   tests).
+3. Payload-shape divergence resolved or pinned (golden fixture for the replied/rating
+   webhook envelopes, read by both suites like the created-envelope fixture).
+4. Docs + CHANGELOG + DEV-TRACKING follow-up note → FIXED.
 
 ## Out of scope (guardrails)
 
-- Not changing the drain mechanics (page cap, cursor) — this is visibility only.
-- Not building `intercom-oauth-path-retirement` (gated on evidence of use) or the
-  latent webhook reply/rating defect (already flagged as a follow-up).
-- No plan gates (`SELF_HOSTED=true`); no new vendor dependency.
+- Not changing the pull enrichment (#16) — this is the webhook delivery path only.
+- Not building `intercom-oauth-path-retirement` (gated on evidence of use).
+- No plan gates (`SELF_HOSTED=true`); no new vendor dependency; no claims about
+  analysis quality beyond "webhook-wired installs get reply/rating content in real
+  time instead of on the pull cycle".

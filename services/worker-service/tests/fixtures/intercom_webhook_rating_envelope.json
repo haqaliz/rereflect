@@ -1,0 +1,33 @@
+{
+  "type": "notification_event",
+  "topic": "conversation.rating.added",
+  "id": "notif_golden_0003",
+  "app_id": "abc123",
+  "created_at": 1785400200,
+  "data": {
+    "type": "notification_event_data",
+    "item": {
+      "type": "conversation",
+      "id": "conv_golden_300",
+      "created_at": 1785399990,
+      "conversation_message": {
+        "type": "conversation_message",
+        "id": "msg_golden_300",
+        "subject": "",
+        "body": "<p>The billing page times out when I try to download an invoice.</p>",
+        "author": {
+          "type": "user",
+          "id": "contact_golden_300",
+          "name": "Dana Okafor",
+          "email": "dana@example.com"
+        }
+      },
+      "conversation_rating": {
+        "type": "conversation_rating",
+        "rating": 5,
+        "remark": "Quick fix, great support!",
+        "created_at": 1785400200
+      }
+    }
+  }
+}

@@ -278,7 +278,7 @@ class FeedbackSourceEvent(Base):
     external_message_id = Column(String(255), nullable=True)
     event_type = Column(String(50), nullable=False)  # message, reaction, mention, webhook
 
-    status = Column(String(20), nullable=False, default='pending')  # pending, processed, ignored, failed
+    status = Column(String(20), nullable=False, default='pending')  # pending, processed, ignored, failed, enriched — enriched is never dedup-relevant (dedup matches only processed/pending; it never blocks a later `created` delivery)
     trigger_matched = Column(String(100), nullable=True)
 
     feedback_id = Column(Integer, nullable=True)

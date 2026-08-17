@@ -1953,8 +1953,14 @@ request body, signed with the app's Client Secret (`INTERCOM_CLIENT_SECRET`).
 >   rather than leaving a stale number.
 > - The drain mechanics (20-page cap, cursor resume) are unchanged — the estimate
 >   reports progress, it does not speed it up.
-> - The webhook's `replied` / `rating.added` events are still dedup-inert today
->   (flagged follow-up, not fixed) — the pull is what delivers replies and ratings.
+> - For webhook-wired installs, the webhook's `replied` / `rating.added` events now
+>   enrich the conversation's item in **real time** (when the item exists): a reply
+>   is merged into the item's text and the rating stored on it — no longer waiting
+>   on the pull. The pull remains the guaranteed fallback for every install.
+> - Webhook enrichment applies only to conversations whose items already exist — no
+>   backfill (same rule as the pull); a reply on a conversation Rereflect never
+>   created stays unseen. Payloads without conversation parts fall back to a
+>   `GET /conversations/{id}` detail fetch.
 > - No claim is made about analysis quality beyond: the full thread is now scored
 >   instead of the first message. Sentiment, categorization and churn behave
 >   exactly as they do for every other source.

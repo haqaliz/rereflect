@@ -18,6 +18,13 @@ from src.adapters import get_adapter
 logger = logging.getLogger(__name__)
 
 
+# Intercom events routed to the webhook enrichment branch (PRD R1) instead of
+# the trigger/dedup/create flow. The `enriched` status logged here is NEW
+# vocabulary: it is never dedup-relevant (the dedup filter below matches only
+# processed/pending) and never blocks a later `created` delivery.
+INTERCOM_WEBHOOK_ENRICH_EVENTS = ("conversation.user.replied", "conversation.rating.added")
+
+
 # ---------------------------------------------------------------------------
 # Local token decryption (mirrors zendesk_sync.py _decrypt)
 # R6: Worker cannot import from backend-api; uses its own Fernet helper.
@@ -65,6 +72,12 @@ def process_source_event(
 
     Returns:
         dict with processing results
+
+    Note: Intercom `conversation.user.replied` / `conversation.rating.added`
+    events bypass the trigger check and dedup. They are enriched into the
+    existing per-conversation FeedbackItem, log `enriched` (or `ignored` /
+    `failed`), and dispatch bounded re-analysis strictly after the end-commit
+    (PRD R1/R3/R4).
     """
     from src.models import (
         FeedbackSource, FeedbackSourceEvent, FeedbackItem,
@@ -102,6 +115,15 @@ def process_source_event(
                 )
                 results.append(result)
 
+            # Text-changed webhook enrichments, order-preserved and deduped
+            # (one delivery may match several FeedbackSources for the same
+            # org+conversation). The created/pending result dicts have no
+            # `changed` key, so they are never collected here.
+            changed_feedback_ids = list(dict.fromkeys(
+                r["feedback_id"] for r in results
+                if r.get("changed") and r.get("feedback_id")
+            ))
+
             db.commit()
 
             # Invalidate dashboard/analytics cache for affected orgs
@@ -110,6 +132,25 @@ def process_source_event(
             for org_id in org_ids:
                 cache_invalidate(f"dashboard:{org_id}:*")
                 cache_invalidate(f"analytics:{org_id}:*")
+
+            # Re-analysis dispatch — strictly AFTER the end-commit + cache
+            # invalidation. reanalyze_feedback commits itself (analysis.py:299),
+            # so calling it before the core commit would re-analyze stale text
+            # (PRD R4; pull precedent intercom_sync.py:388 -> :397-406). Guarded
+            # per item so a seam failure can never break the delivery — the
+            # seam's own task retries.
+            from src.tasks.analysis import reanalyze_feedback
+
+            for feedback_id in changed_feedback_ids:
+                try:
+                    reanalyze_feedback(db, feedback_id)
+                except Exception:
+                    logger.exception(
+                        "Intercom webhook enrichment: re-analysis dispatch failed for "
+                        "feedback %s (event %s)",
+                        feedback_id,
+                        external_event_id,
+                    )
 
             return {"status": "processed", "results": results}
 
@@ -292,6 +333,45 @@ def _process_event_for_source(
         event_channel = event_data.get("channel") or event_data.get("item", {}).get("channel")
         if config_channel and event_channel and config_channel != event_channel:
             return {"source_id": source_id, "status": "channel_mismatch"}
+
+    # Intercom replied/rating events bypass trigger + dedup: route straight into
+    # the webhook enrichment module. Enrichment is NOT trigger-gated and NEVER
+    # creates items — it merges into the conversation's existing FeedbackItem, or
+    # logs a noop/ignored row (the create path owns item creation).
+    if source.source_type == "intercom" and event_type in INTERCOM_WEBHOOK_ENRICH_EVENTS:
+        # Lazy import — house convention (analysis.py:156, source_events.py:389).
+        # Plain import, never a swallowed-`except` import (import-sweep guard).
+        from src.services.intercom_webhook_enrich import enrich_webhook_item
+
+        result = enrich_webhook_item(db, source, event_type, event_data)
+        outcome = result["status"]
+        conv_id = ((event_data.get("data") or {}).get("item") or {}).get("id")
+
+        if outcome == "enriched":
+            _log_event(
+                db, source_id, org_id, external_event_id, event_type,
+                event_data, "enriched", None,
+                feedback_id=result.get("feedback_id"),
+                message_id=conv_id,
+            )
+        elif outcome.startswith("noop"):
+            _log_event(
+                db, source_id, org_id, external_event_id, event_type,
+                event_data, "ignored", None, message_id=conv_id,
+            )
+        else:  # "error/auth_error" and any unexpected module status
+            event_log = _log_event(
+                db, source_id, org_id, external_event_id, event_type,
+                event_data, "failed", None, message_id=conv_id,
+            )
+            event_log.error_message = outcome
+
+        return {
+            "source_id": source_id,
+            "status": outcome,
+            "changed": result.get("changed", False),
+            "feedback_id": result.get("feedback_id"),
+        }
 
     # Check triggers
     triggers = source.triggers or {}
@@ -477,7 +557,7 @@ def _log_event(
         feedback_id=feedback_id,
         event_data=event_data,
         received_at=datetime.utcnow(),
-        processed_at=datetime.utcnow() if status in ["processed", "ignored"] else None,
+        processed_at=datetime.utcnow() if status in {"processed", "ignored", "enriched", "failed"} else None,
     )
 
     db.add(event_log)
