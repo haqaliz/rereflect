@@ -680,3 +680,60 @@ class TestWebhookEnrichmentDispatch:
         assert seam.call_count == 0
 
 
+class TestWebhookEnrichmentTransient:
+    """Phase 3 — a 429/5xx from the enrichment path flows to the task retry
+    with NO partial commit (spec test 6). The guard never catches
+    IntercomTransientError, so the existing except/rollback/retry handles it.
+    """
+
+    def test_transient_429_retries_without_partial_commit(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from celery.exceptions import Retry
+
+        import src.services.intercom_webhook_enrich as enrich_mod
+        from src.clients.intercom import IntercomTransientError
+        from src.models import FeedbackItem, FeedbackSourceEvent
+        from src.tasks.source_events import process_source_event
+
+        org = _make_org(db)
+        integration = _make_intercom_integration(db, org.id, workspace_id="abc123")
+        _make_intercom_source(db, org.id, integration.id)
+        _patch_db_session(monkeypatch, db)
+
+        monkeypatch.setattr(
+            enrich_mod,
+            "enrich_webhook_item",
+            MagicMock(side_effect=IntercomTransientError("rate limited")),
+        )
+
+        task_self = MagicMock()
+        task_self.retry.side_effect = Retry()
+
+        conv_id = "conv_seq_800"
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+
+        # `process_source_event.run` is pre-bound to the task instance, so the
+        # MagicMock `self` is injected via `run.__func__` (the underlying task
+        # body) — the pull precedent's plain-body `_body(task_self, ...)` shape.
+        with pytest.raises(Retry):
+            process_source_event.run.__func__(
+                task_self,
+                source_type="intercom",
+                external_event_id=replied["id"],
+                event_type=replied["topic"],
+                event_data=replied,
+                provider_context={
+                    "conversation_id": conv_id,
+                    "workspace_id": replied["app_id"],
+                },
+            )
+
+        task_self.retry.assert_called_once()
+        assert db.query(FeedbackSourceEvent).count() == 0, (
+            "a transient must not leave a partial event row behind"
+        )
+        assert db.query(FeedbackItem).count() == 0
+
+
+
