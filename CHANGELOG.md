@@ -7,6 +7,25 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Intercom webhook replies & ratings now enrich items in real time
+
+- **The webhook path is no longer inert.** `conversation.user.replied` and
+  `conversation.rating.added` deliveries used to be silently dropped (dedup'd
+  against the conversation's created row — the #16 follow-up). They now enrich the
+  conversation's existing feedback item in real time: a reply is merged into the
+  item's text (idempotent by part id), the satisfaction rating lands on the item.
+- **Payload-first, with a fallback fetch.** Real payloads are conversation-wrapped
+  and read payload-first; a payload without conversation parts falls back to a
+  `GET /conversations/{id}` detail fetch.
+- **Re-analysis once, after commit.** Text-changing enrichments dispatch exactly one
+  re-analysis; rating-only changes dispatch none.
+- **The pull stays the guaranteed fallback** — unchanged; the create path is
+  untouched (webhook enrichment never creates items).
+- *Honest limits:* webhook enrichment applies only to conversations whose items
+  already exist (no backfill — same rule as the pull); payloads without parts fall
+  back to a detail fetch; no analysis-quality claim beyond what the pull already
+  makes.
+
 ### Added — Intercom settings page shows the remaining-backlog estimate
 
 - **"≈ N remaining" on the Connection card.** After a completed pull run, the
@@ -42,6 +61,12 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
   (no backfill); "the full thread is now scored" is the extent of the quality claim;
   the webhook's `replied`/`rating.added` events remain dedup-inert (a flagged
   follow-up, not fixed here).
+
+**Correction (<merge-date>):** the honest-limits line above said the webhook's
+`replied`/`rating.added` events remain dedup-inert (a flagged follow-up). That
+follow-up is now shipped — see the Added entry above: webhook replied/rating
+deliveries enrich the conversation's existing item in real time (payload-first,
+existing-item-only, no backfill; the pull stays the fallback).
 
 ### Added — Intercom write-back: note + close on resolve (opt-in)
 
