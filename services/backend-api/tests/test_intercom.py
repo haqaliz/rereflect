@@ -508,19 +508,13 @@ class TestIntercomWebhook:
         mock_queue: MagicMock,
         client: TestClient,
     ):
-        """Should queue conversation.user.replied events."""
-        payload = {
-            "topic": "conversation.user.replied",
-            "app_id": "abc123",
-            "data": {
-                "item": {
-                    "type": "conversation",
-                    "id": "conv_200",
-                    "conversation_parts": {"conversation_parts": [{"body": "Still broken"}]},
-                }
-            },
-        }
-        body = json.dumps(payload).encode()
+        """Pins the full queue kwargs for conversation.user.replied against the
+        golden fixture: the route must queue the FULL envelope, the
+        conversation id (item.id) as external_event_id, and app_id as
+        provider_context.workspace_id. Values are derived from the fixture, so
+        a mismatched fixture fails the test."""
+        envelope = load_golden_reply_envelope()
+        body = json.dumps(envelope).encode()
         sig = _make_intercom_signature(body, "webhook-secret")
 
         response = client.post(
@@ -529,9 +523,16 @@ class TestIntercomWebhook:
             headers={"Content-Type": "application/json", "X-Hub-Signature": sig},
         )
         assert response.status_code == 200
-        mock_queue.assert_called_once()
-        call_kwargs = mock_queue.call_args
-        assert call_kwargs[1]["event_type"] == "conversation.user.replied"
+        mock_queue.assert_called_once_with(
+            source_type="intercom",
+            external_event_id=envelope["data"]["item"]["id"],
+            event_type="conversation.user.replied",
+            event_data=envelope,
+            provider_context={
+                "conversation_id": envelope["data"]["item"]["id"],
+                "workspace_id": envelope["app_id"],
+            },
+        )
 
     @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
     @patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-rating")
@@ -540,19 +541,13 @@ class TestIntercomWebhook:
         mock_queue: MagicMock,
         client: TestClient,
     ):
-        """Should queue conversation.rating.added events."""
-        payload = {
-            "topic": "conversation.rating.added",
-            "app_id": "abc123",
-            "data": {
-                "item": {
-                    "type": "conversation",
-                    "id": "conv_300",
-                    "conversation_rating": {"rating": 5, "remark": "Great support!"},
-                }
-            },
-        }
-        body = json.dumps(payload).encode()
+        """Pins the full queue kwargs for conversation.rating.added against the
+        golden fixture: the route must queue the FULL envelope, the
+        conversation id (item.id) as external_event_id, and app_id as
+        provider_context.workspace_id. Values are derived from the fixture, so
+        a mismatched fixture fails the test."""
+        envelope = load_golden_rating_envelope()
+        body = json.dumps(envelope).encode()
         sig = _make_intercom_signature(body, "webhook-secret")
 
         response = client.post(
@@ -561,7 +556,16 @@ class TestIntercomWebhook:
             headers={"Content-Type": "application/json", "X-Hub-Signature": sig},
         )
         assert response.status_code == 200
-        mock_queue.assert_called_once()
+        mock_queue.assert_called_once_with(
+            source_type="intercom",
+            external_event_id=envelope["data"]["item"]["id"],
+            event_type="conversation.rating.added",
+            event_data=envelope,
+            provider_context={
+                "conversation_id": envelope["data"]["item"]["id"],
+                "workspace_id": envelope["app_id"],
+            },
+        )
 
     @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
     def test_webhook_ignores_unsupported_topic(self, client: TestClient):
@@ -615,6 +619,59 @@ def load_golden_envelope() -> dict:
     return json.loads(GOLDEN_ENVELOPE_PATH.read_text())
 
 
+GOLDEN_REPLY_ENVELOPE_PATH = (
+    # tests/ -> backend-api/ -> services/
+    pathlib.Path(__file__).resolve().parents[2]
+    / "worker-service"
+    / "tests"
+    / "fixtures"
+    / "intercom_webhook_reply_envelope.json"
+)
+
+GOLDEN_RATING_ENVELOPE_PATH = (
+    # tests/ -> backend-api/ -> services/
+    pathlib.Path(__file__).resolve().parents[2]
+    / "worker-service"
+    / "tests"
+    / "fixtures"
+    / "intercom_webhook_rating_envelope.json"
+)
+
+
+def load_golden_reply_envelope() -> dict:
+    """Load the Intercom reply envelope contract shared with the worker suite.
+
+    Deliberately raises rather than skipping when the file is absent. A skip
+    would turn the one test guarding this seam into a silent no-op -- which is
+    the exact failure mode that let the envelope defect ship in every release.
+    """
+    if not GOLDEN_REPLY_ENVELOPE_PATH.exists():
+        raise AssertionError(
+            f"Golden Intercom reply envelope fixture missing at {GOLDEN_REPLY_ENVELOPE_PATH}. "
+            "It is a shared contract also read by "
+            "services/worker-service/tests/test_intercom_envelope_seam.py -- "
+            "restore it rather than skipping this test."
+        )
+    return json.loads(GOLDEN_REPLY_ENVELOPE_PATH.read_text())
+
+
+def load_golden_rating_envelope() -> dict:
+    """Load the Intercom rating envelope contract shared with the worker suite.
+
+    Deliberately raises rather than skipping when the file is absent. A skip
+    would turn the one test guarding this seam into a silent no-op -- which is
+    the exact failure mode that let the envelope defect ship in every release.
+    """
+    if not GOLDEN_RATING_ENVELOPE_PATH.exists():
+        raise AssertionError(
+            f"Golden Intercom rating envelope fixture missing at {GOLDEN_RATING_ENVELOPE_PATH}. "
+            "It is a shared contract also read by "
+            "services/worker-service/tests/test_intercom_envelope_seam.py -- "
+            "restore it rather than skipping this test."
+        )
+    return json.loads(GOLDEN_RATING_ENVELOPE_PATH.read_text())
+
+
 class TestIntercomEnvelopeContract:
     """Pins the shape the route hands to the queue.
 
@@ -657,3 +714,71 @@ class TestIntercomEnvelopeContract:
         )
         assert queued["topic"] == "conversation.user.created"
         assert queued["data"]["item"]["id"] == "conv_golden_100"
+
+    @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
+    @patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-contract-reply")
+    def test_route_queues_the_full_reply_envelope(
+        self,
+        mock_queue: MagicMock,
+        client: TestClient,
+    ):
+        """The replied envelope on disk is what the route hands to the queue.
+
+        Same contract as test_route_queues_the_full_envelope, for the reply
+        envelope: worker-service's seams parse `conversation_parts`
+        (conversation.user.replied), and this test proves the route forwards
+        the whole envelope -- not just payload["data"].
+        """
+        envelope = load_golden_reply_envelope()
+        body = json.dumps(envelope).encode()
+        sig = _make_intercom_signature(body, "webhook-secret")
+
+        response = client.post(
+            "/api/v1/webhooks/intercom/events",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Hub-Signature": sig},
+        )
+
+        assert response.status_code == 200
+        queued = mock_queue.call_args.kwargs["event_data"]
+        assert queued == envelope, (
+            "The route must queue the whole reply envelope. Queuing only the "
+            "inner `data` object leaves the enrichment seams without the "
+            "conversation-wrapped shape they parse."
+        )
+        assert queued["topic"] == "conversation.user.replied"
+        assert queued["data"]["item"]["id"] == "conv_golden_200"
+
+    @patch("src.api.routes.source_webhooks.INTERCOM_CLIENT_SECRET", "webhook-secret")
+    @patch("src.api.routes.source_webhooks.queue_source_event", return_value="task-contract-rating")
+    def test_route_queues_the_full_rating_envelope(
+        self,
+        mock_queue: MagicMock,
+        client: TestClient,
+    ):
+        """The rating envelope on disk is what the route hands to the queue.
+
+        Same contract as test_route_queues_the_full_envelope, for the rating
+        envelope: worker-service's seams read `conversation_rating`
+        (conversation.rating.added), and this test proves the route forwards
+        the whole envelope -- not just payload["data"].
+        """
+        envelope = load_golden_rating_envelope()
+        body = json.dumps(envelope).encode()
+        sig = _make_intercom_signature(body, "webhook-secret")
+
+        response = client.post(
+            "/api/v1/webhooks/intercom/events",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Hub-Signature": sig},
+        )
+
+        assert response.status_code == 200
+        queued = mock_queue.call_args.kwargs["event_data"]
+        assert queued == envelope, (
+            "The route must queue the whole rating envelope. Queuing only the "
+            "inner `data` object leaves the enrichment seams without the "
+            "conversation-wrapped shape they parse."
+        )
+        assert queued["topic"] == "conversation.rating.added"
+        assert queued["data"]["item"]["id"] == "conv_golden_300"
