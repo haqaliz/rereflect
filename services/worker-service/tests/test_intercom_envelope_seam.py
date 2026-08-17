@@ -38,6 +38,7 @@ written against.
 See docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/.
 """
 
+import copy
 import json
 from contextlib import contextmanager
 from datetime import datetime
@@ -111,6 +112,17 @@ def load_golden_rating_envelope() -> dict:
             "than skipping this test."
         )
     return json.loads(RATING_FIXTURE_PATH.read_text())
+
+
+def _with_conv_id(envelope: dict, conv_id: str) -> dict:
+    """Deep-copy the envelope and force the conversation id.
+
+    Used so the sequence/out-of-order tests can pin one conversation id
+    regardless of the fixtures' own ids (`conv_golden_100/200/300`).
+    """
+    envelope = copy.deepcopy(envelope)
+    envelope["data"]["item"]["id"] = conv_id
+    return envelope
 
 
 @pytest.fixture
@@ -190,6 +202,7 @@ def _no_op_side_effects(monkeypatch):
     import src.tasks.analysis as analysis_mod
 
     monkeypatch.setattr(analysis_mod.analyze_single_feedback, "delay", MagicMock())
+    monkeypatch.setattr(analysis_mod, "reanalyze_feedback", MagicMock())
     monkeypatch.setattr(cache_mod, "cache_invalidate", MagicMock())
 
 
@@ -385,3 +398,133 @@ class TestReplyRatingEnvelopesFeedEnrichmentSeam:
             "remark": "Quick fix, great support!",
             "rated_at": "1785400200",
         }
+
+
+# ---------------------------------------------------------------------------
+# Webhook enrichment branch (core-branch-dispatch, PRD R1/R3/R4)
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookEnrichmentBranch:
+    """Phase 1 — intercom replied/rating events bypass trigger + dedup and
+    route straight into the webhook enrichment module: log `enriched`
+    (or `ignored`/`failed`), never create items, never block a later
+    `created` delivery.
+    """
+
+    def _setup(self, db, monkeypatch):
+        org = _make_org(db)
+        integration = _make_intercom_integration(db, org.id, workspace_id="abc123")
+        _make_intercom_source(db, org.id, integration.id)
+        _patch_db_session(monkeypatch, db)
+        return org
+
+    def _deliver(self, envelope, external_event_id=None):
+        from src.tasks.source_events import process_source_event
+
+        return process_source_event(
+            source_type="intercom",
+            external_event_id=external_event_id or envelope["id"],
+            event_type=envelope["topic"],
+            event_data=envelope,
+            provider_context={
+                "conversation_id": envelope["data"]["item"]["id"],
+                "workspace_id": envelope["app_id"],
+            },
+        )
+
+    def test_created_replied_rating_enrich_one_item(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from src.models import FeedbackItem, FeedbackSourceEvent
+
+        self._setup(db, monkeypatch)
+
+        conv_id = "conv_seq_100"
+        created = _with_conv_id(load_golden_envelope(), conv_id)
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+        rating = _with_conv_id(load_golden_rating_envelope(), conv_id)
+
+        self._deliver(created)
+        self._deliver(replied)
+        self._deliver(rating)
+
+        items = db.query(FeedbackItem).all()
+        assert len(items) == 1, (
+            "expected exactly one FeedbackItem: created delivers, replied/rating "
+            "must enrich it in place, never create a second"
+        )
+        item = items[0]
+        assert item.source_external_id == conv_id
+        assert (
+            "\n\n--- Reply by Sam Rivers (1785400100) ---\n"
+            "Still broken after the latest update. The download button does nothing."
+        ) in item.text
+        assert item.source_metadata["replies"][0]["part_id"] == "part_golden_210"
+        assert item.source_metadata["rating"] == 5
+
+        rows = db.query(FeedbackSourceEvent).all()
+        assert [r.status for r in rows] == ["processed", "enriched", "enriched"]
+        assert all(r.external_message_id == conv_id for r in rows)
+        assert all(r.feedback_id == item.id for r in rows)
+        # Phase 1 pin: terminal enrichment outcomes carry processed_at.
+        assert all(r.processed_at is not None for r in rows)
+
+    def test_reply_before_created_is_ignored_then_created_works(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        from src.models import FeedbackItem, FeedbackSourceEvent
+
+        self._setup(db, monkeypatch)
+
+        conv_id = "conv_seq_200"
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+
+        self._deliver(replied)
+        assert db.query(FeedbackItem).count() == 0
+        rows = db.query(FeedbackSourceEvent).all()
+        assert len(rows) == 1
+        assert rows[0].status == "ignored"
+        assert rows[0].external_message_id == conv_id
+
+        created = _with_conv_id(load_golden_envelope(), conv_id)
+        self._deliver(created)
+        items = db.query(FeedbackItem).all()
+        assert len(items) == 1, (
+            "the ignored reply row must NOT dedup the later created delivery "
+            "(ignored is outside the dedup filter's processed/pending set)"
+        )
+        assert items[0].source_external_id == conv_id
+
+    def test_auth_error_logs_failed_without_retry(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        import src.services.intercom_webhook_enrich as enrich_mod
+        from src.models import FeedbackItem, FeedbackSourceEvent
+
+        self._setup(db, monkeypatch)
+        monkeypatch.setattr(
+            enrich_mod,
+            "enrich_webhook_item",
+            MagicMock(
+                return_value={
+                    "status": "error/auth_error",
+                    "changed": False,
+                    "feedback_id": None,
+                }
+            ),
+        )
+
+        conv_id = "conv_seq_300"
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+        result = self._deliver(replied)
+
+        assert result["status"] == "error/auth_error"
+        assert db.query(FeedbackItem).count() == 0
+        rows = db.query(FeedbackSourceEvent).all()
+        assert len(rows) == 1
+        assert rows[0].status == "failed"
+        assert rows[0].error_message == "error/auth_error"
+        assert rows[0].external_message_id == conv_id
+        assert rows[0].processed_at is not None
+
