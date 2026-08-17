@@ -469,6 +469,12 @@ class TestWebhookEnrichmentBranch:
         assert all(r.feedback_id == item.id for r in rows)
         # Phase 1 pin: terminal enrichment outcomes carry processed_at.
         assert all(r.processed_at is not None for r in rows)
+        # Phase 2 pin: exactly one re-analysis — the replied leg only (the
+        # created leg goes through analyze_single_feedback, the rating leg is
+        # changed=False so it never dispatches).
+        import src.tasks.analysis as analysis_mod
+
+        assert analysis_mod.reanalyze_feedback.call_count == 1
 
     def test_reply_before_created_is_ignored_then_created_works(
         self, db, monkeypatch, _no_op_side_effects
@@ -528,4 +534,149 @@ class TestWebhookEnrichmentBranch:
         assert rows[0].error_message == "error/auth_error"
         assert rows[0].external_message_id == conv_id
         assert rows[0].processed_at is not None
+
+
+class TestWebhookEnrichmentDispatch:
+    """Phase 2 — text-changed enrichments dispatch exactly one bounded
+    re-analysis, strictly AFTER the end-commit + cache invalidation;
+    rating-only and idempotent re-deliveries dispatch none.
+    """
+
+    def _setup(self, db, monkeypatch):
+        org = _make_org(db)
+        integration = _make_intercom_integration(db, org.id, workspace_id="abc123")
+        _make_intercom_source(db, org.id, integration.id)
+        _patch_db_session(monkeypatch, db)
+        return org
+
+    def _deliver(self, envelope, external_event_id=None):
+        from src.tasks.source_events import process_source_event
+
+        return process_source_event(
+            source_type="intercom",
+            external_event_id=external_event_id or envelope["id"],
+            event_type=envelope["topic"],
+            event_data=envelope,
+            provider_context={
+                "conversation_id": envelope["data"]["item"]["id"],
+                "workspace_id": envelope["app_id"],
+            },
+        )
+
+    def test_redelivery_idempotent_with_one_reanalysis(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        import src.tasks.analysis as analysis_mod
+        from src.models import FeedbackItem
+
+        self._setup(db, monkeypatch)
+        seam = MagicMock(return_value=True)
+        monkeypatch.setattr(analysis_mod, "reanalyze_feedback", seam)
+
+        conv_id = "conv_seq_400"
+        created = _with_conv_id(load_golden_envelope(), conv_id)
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+
+        self._deliver(created)
+        self._deliver(replied, external_event_id="notif_reply_1")
+
+        item = db.query(FeedbackItem).one()
+        assert (
+            "\n\n--- Reply by Sam Rivers (1785400100) ---\n"
+            "Still broken after the latest update. The download button does nothing."
+        ) in item.text
+        assert seam.call_count == 1
+        seam.assert_called_with(db, item.id)
+        text_after_first = item.text
+        metadata_after_first = dict(item.source_metadata or {})
+
+        self._deliver(replied, external_event_id="notif_reply_2")
+
+        db.refresh(item)
+        assert item.text == text_after_first, (
+            "a redelivered reply must not re-append its already-merged part"
+        )
+        assert item.source_metadata == metadata_after_first
+        assert seam.call_count == 1, "an idempotent redelivery must not re-analyze"
+
+    def test_rating_only_updates_metadata_without_reanalysis(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        import src.tasks.analysis as analysis_mod
+        from src.models import FeedbackItem
+
+        self._setup(db, monkeypatch)
+        seam = MagicMock(return_value=True)
+        monkeypatch.setattr(analysis_mod, "reanalyze_feedback", seam)
+
+        conv_id = "conv_seq_500"
+        created = _with_conv_id(load_golden_envelope(), conv_id)
+        rating = _with_conv_id(load_golden_rating_envelope(), conv_id)
+
+        self._deliver(created)
+        self._deliver(rating)
+
+        item = db.query(FeedbackItem).one()
+        assert item.source_metadata["rating"] == 5
+        assert item.text == (
+            "The billing page times out when I try to download an invoice."
+        )
+        assert seam.call_count == 0, "a rating-only change must not re-analyze"
+
+    def test_reanalysis_dispatched_after_commit(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        import src.tasks.analysis as analysis_mod
+
+        self._setup(db, monkeypatch)
+
+        conv_id = "conv_seq_600"
+        created = _with_conv_id(load_golden_envelope(), conv_id)
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+
+        self._deliver(created)
+
+        committed = {"flag": False}
+        original_commit = db.commit
+
+        def _tracked_commit():
+            original_commit()
+            committed["flag"] = True
+
+        db.commit = _tracked_commit
+
+        def _seam(db_, feedback_id):
+            assert committed["flag"], (
+                "reanalysis dispatched BEFORE the end-commit — the batch task "
+                "would read stale text (PRD R4)"
+            )
+            return True
+
+        seam = MagicMock(side_effect=_seam)
+        monkeypatch.setattr(analysis_mod, "reanalyze_feedback", seam)
+
+        self._deliver(replied)
+
+        assert seam.call_count == 1
+
+    def test_reply_without_item_dispatches_nothing(
+        self, db, monkeypatch, _no_op_side_effects
+    ):
+        import src.tasks.analysis as analysis_mod
+        from src.models import FeedbackItem, FeedbackSourceEvent
+
+        self._setup(db, monkeypatch)
+        seam = MagicMock(return_value=True)
+        monkeypatch.setattr(analysis_mod, "reanalyze_feedback", seam)
+
+        conv_id = "conv_seq_700"
+        replied = _with_conv_id(load_golden_reply_envelope(), conv_id)
+        self._deliver(replied)
+
+        assert db.query(FeedbackItem).count() == 0
+        rows = db.query(FeedbackSourceEvent).all()
+        assert len(rows) == 1
+        assert rows[0].status == "ignored"
+        assert seam.call_count == 0
+
 
