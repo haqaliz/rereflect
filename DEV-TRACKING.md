@@ -515,11 +515,14 @@ visible from the backlog. None block anything; the integration is fully operable
   (one item per conversation, idempotent by part id), rating/remark in
   `source_metadata`, changed items re-analyzed, unchanged untouched. No backfill:
   older conversations stay first-message-only until the pull re-sees them.
-  **Follow-up (defect, not fixed):** the webhook reply/rating path is still inert —
-  the dedup key (`external_message_id` = conversation id for all three event types)
-  and the `new_conversations`-only seed trigger make `conversation.user.replied` /
-  `conversation.rating.added` events dedup into nothing; the pull covers the content
-  today. See `docs/planning/intercom-pull-replies-and-ratings/`.
+  **Follow-up (defect) — FIXED** via `feat/intercom-webhook-reply-rating` (merged
+  <merge-sha>, PR <# pending>): the webhook reply/rating path is no longer inert — a
+  `conversation.user.replied` / `conversation.rating.added` delivery now enriches the
+  conversation's existing item in real time (payload-first parts + rating; detail-fetch
+  fallback when the payload lacks parts; `enriched` event-log status so the created
+  path's dedup is untouched; re-analysis dispatched once after commit for text changes,
+  rating-only changes dispatch none). Existing-item-only — no backfill; the pull stays
+  the guaranteed fallback. See `docs/planning/intercom-webhook-reply-rating/`.
 - ~~**`intercom-writeback`** — still no write-back; `intercom_service.py` remains
   orphaned with zero production callers.~~ — **SHIPPED 2026-08-15** via
   `feat/intercom-writeback`: the wire-or-delete P2 landed as **wire it** — opt-in
