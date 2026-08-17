@@ -109,6 +109,15 @@ def process_source_event(
                 )
                 results.append(result)
 
+            # Text-changed webhook enrichments, order-preserved and deduped
+            # (one delivery may match several FeedbackSources for the same
+            # org+conversation). The created/pending result dicts have no
+            # `changed` key, so they are never collected here.
+            changed_feedback_ids = list(dict.fromkeys(
+                r["feedback_id"] for r in results
+                if r.get("changed") and r.get("feedback_id")
+            ))
+
             db.commit()
 
             # Invalidate dashboard/analytics cache for affected orgs
@@ -117,6 +126,25 @@ def process_source_event(
             for org_id in org_ids:
                 cache_invalidate(f"dashboard:{org_id}:*")
                 cache_invalidate(f"analytics:{org_id}:*")
+
+            # Re-analysis dispatch — strictly AFTER the end-commit + cache
+            # invalidation. reanalyze_feedback commits itself (analysis.py:299),
+            # so calling it before the core commit would re-analyze stale text
+            # (PRD R4; pull precedent intercom_sync.py:388 -> :397-406). Guarded
+            # per item so a seam failure can never break the delivery — the
+            # seam's own task retries.
+            from src.tasks.analysis import reanalyze_feedback
+
+            for feedback_id in changed_feedback_ids:
+                try:
+                    reanalyze_feedback(db, feedback_id)
+                except Exception:
+                    logger.exception(
+                        "Intercom webhook enrichment: re-analysis dispatch failed for "
+                        "feedback %s (event %s)",
+                        feedback_id,
+                        external_event_id,
+                    )
 
             return {"status": "processed", "results": results}
 
