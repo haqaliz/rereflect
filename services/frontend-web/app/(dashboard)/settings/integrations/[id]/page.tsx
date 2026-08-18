@@ -58,10 +58,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function IntegrationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const { user } = useAuth();
   const [integration, setIntegration] = useState<Integration | null>(null);
   const [logs, setLogs] = useState<AlertLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +83,16 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
     setConfirmAction(() => action);
   };
 
+  // Only admin/owner can manage integrations
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
+
+  // Redirect non-admin/owner to preferences
+  useEffect(() => {
+    if (user && user.role !== 'owner' && user.role !== 'admin') {
+      router.replace('/settings/preferences');
+    }
+  }, [user, router]);
+
   const [form, setForm] = useState({
     name: '',
     triggers: [] as string[],
@@ -90,6 +102,11 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
   });
 
   useEffect(() => {
+    // Don't fetch if user is not admin/owner (will be redirected)
+    if (user && user.role !== 'owner' && user.role !== 'admin') {
+      return;
+    }
+
     const loadData = async () => {
       try {
         setLoading(true);
@@ -212,6 +229,11 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
     const start = logsPage * logsPerPage;
     return logs.slice(start, start + logsPerPage);
   }, [logs, logsPage, logsPerPage]);
+
+  // Members are redirected to preferences — never render the admin surface.
+  if (user && !isAdminOrOwner) {
+    return null;
+  }
 
   if (loading) {
     return (
