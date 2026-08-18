@@ -139,15 +139,14 @@ def seed_copilot_system_templates(db) -> None:
 
 def warn_unconfigured_webhook_secrets(db) -> None:
     """
-    Boot-time visibility for Slack/email webhook shadow mode (Phase 4).
+    Boot-time fail-closed notice for unconfigured Slack/email webhook secrets.
 
-    verify_slack_signature and _verify_webhook_signature already log a
-    SECURITY-SHADOW warning on every unsigned request when their secret is
-    unset, but that per-request log is easy to miss under normal traffic.
-    This does the same check once, loudly, at startup — and only when it
-    actually matters (there is a live integration/source that depends on
-    the missing secret), so a fresh install with nothing configured yet
-    doesn't warn about a gap nobody has hit.
+    verify_slack_signature and _verify_webhook_signature now fail closed: when
+    their secret is unset, every delivery is rejected (401). A per-request log
+    is easy to miss under normal traffic, so this does the same check once,
+    loudly, at startup — and only when it actually matters (there is a live
+    integration/source that depends on the missing secret), so a fresh install
+    with nothing configured yet doesn't warn about a gap nobody has hit.
 
     Never blocks boot: any error here is caught and logged, matching
     seed_copilot_system_templates's contract.
@@ -165,10 +164,10 @@ def warn_unconfigured_webhook_secrets(db) -> None:
             ).first() is not None
             if has_active_slack:
                 logger.warning(
-                    "SECURITY-SHADOW: signature verification unconfigured — an active "
+                    "Signature verification unconfigured — an active "
                     "Slack integration exists but SLACK_SIGNING_SECRET is not set. "
-                    "Inbound Slack webhooks are being accepted unverified. See "
-                    "docs/SELF_HOSTING.md to configure the secret before enforcement lands."
+                    "Inbound Slack webhook deliveries will be rejected (401) until "
+                    "it is configured. See docs/SELF_HOSTING.md."
                 )
 
         if not RESEND_INBOUND_WEBHOOK_SECRET:
@@ -178,10 +177,10 @@ def warn_unconfigured_webhook_secrets(db) -> None:
             ).first() is not None
             if has_active_email_source:
                 logger.warning(
-                    "SECURITY-SHADOW: signature verification unconfigured — an active "
+                    "Signature verification unconfigured — an active "
                     "email feedback source exists but RESEND_INBOUND_WEBHOOK_SECRET is "
-                    "not set. Inbound email webhooks are being accepted unverified. See "
-                    "docs/SELF_HOSTING.md to configure the secret before enforcement lands."
+                    "not set. Inbound email webhook deliveries will be rejected (401) "
+                    "until it is configured. See docs/SELF_HOSTING.md."
                 )
     except Exception as e:
         logger.warning(f"warn_unconfigured_webhook_secrets: check failed, boot continues: {e}")
