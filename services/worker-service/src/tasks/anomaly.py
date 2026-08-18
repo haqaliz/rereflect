@@ -5,32 +5,13 @@ Runs hourly via Celery Beat to detect negative sentiment spikes.
 
 import logging
 import math
-import os
 from datetime import datetime, timedelta
 
 from celery import shared_task
 
-from cryptography.fernet import InvalidToken
-
 from src.database import get_db_session
-from src.tasks.alerts import send_discord_message_webhook
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Local token decryption (mirrors zendesk_sync.py _decrypt)
-# R6: Worker cannot import from backend-api; uses its own Fernet helper.
-# ---------------------------------------------------------------------------
-
-
-def _decrypt(token: str) -> str:
-    """Decrypt a Fernet-encrypted string using LLM_ENCRYPTION_KEY."""
-    from cryptography.fernet import Fernet
-    key = os.environ.get("LLM_ENCRYPTION_KEY")
-    if not key:
-        raise ValueError("LLM_ENCRYPTION_KEY is not set")
-    return Fernet(key.encode()).decrypt(token.encode()).decode()
 
 
 @shared_task
@@ -218,146 +199,3 @@ def _dispatch_anomaly_alerts(db, org, anomaly):
             "baseline_negative_pct": anomaly.baseline_negative_pct,
         },
     )
-
-
-def _send_anomaly_email(to_email: str, org_name: str, anomaly):
-    """Send anomaly alert email."""
-    from src.email import send_anomaly_alert_email
-
-    send_anomaly_alert_email(
-        to_email=to_email,
-        organization_name=org_name,
-        severity=anomaly.severity.upper(),
-        current_negative_pct=f"{anomaly.current_negative_pct:.0f}",
-        baseline_negative_pct=f"{anomaly.baseline_negative_pct:.0f}",
-        deviation_pct=f"{anomaly.deviation_pct:.0f}",
-        feedback_count=str(anomaly.feedback_count),
-    )
-
-
-def _send_anomaly_slack(db, org, anomaly):
-    """Send anomaly alert via Slack integration."""
-    from src.models import Integration
-
-    integrations = db.query(Integration).filter(
-        Integration.organization_id == org.id,
-        Integration.type == "slack",
-        Integration.is_active == True,
-    ).all()
-
-    if not integrations:
-        return
-
-    from src.tasks.alerts import send_slack_message_webhook, send_slack_message_oauth
-
-    severity_emoji = "🔴" if anomaly.severity == "critical" else "🟡"
-    text = (
-        f"{severity_emoji} *Sentiment Anomaly Detected*\n\n"
-        f"Negative sentiment spiked to *{anomaly.current_negative_pct:.0f}%* "
-        f"(baseline: {anomaly.baseline_negative_pct:.0f}%)\n"
-        f"Deviation: +{anomaly.deviation_pct:.0f}pp | "
-        f"Based on {anomaly.feedback_count} feedback items in the last 24h"
-    )
-
-    blocks = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"{severity_emoji} Sentiment Anomaly - {anomaly.severity.upper()}",
-                "emoji": True,
-            }
-        },
-        {"type": "divider"},
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": text,
-            }
-        },
-    ]
-
-    for integration in integrations:
-        try:
-            config = integration.config or {}
-            integration_type = config.get("integration_type", "webhook")
-
-            if integration_type == "oauth" and integration.oauth_access_token and config.get("channel_id"):
-                # Decrypt exactly once before sending. A missing key or corrupt
-                # ciphertext is a non-transient config error: log and skip the
-                # integration, never retry, never raise out of the task.
-                try:
-                    access_token = _decrypt(integration.oauth_access_token)
-                except (ValueError, InvalidToken) as exc:
-                    logger.error(
-                        f"Failed to decrypt Slack OAuth token for integration {integration.id}: {exc}"
-                    )
-                    continue
-                send_slack_message_oauth(
-                    access_token=access_token,
-                    channel_id=config["channel_id"],
-                    blocks=blocks,
-                    text=text,
-                )
-            elif config.get("webhook_url"):
-                send_slack_message_webhook(
-                    webhook_url=config["webhook_url"],
-                    blocks=blocks,
-                    text=text,
-                )
-        except Exception as e:
-            logger.error(f"Failed to send anomaly Slack message for integration {integration.id}: {e}")
-
-
-def _send_anomaly_discord(db, org, anomaly):
-    """Send anomaly alert via Discord integration.
-
-    Mirrors _send_anomaly_slack above (including its lack of last_used_at
-    bookkeeping — this alert path was never wired into notification_dispatch.py
-    to begin with, per TestDispatchAnomalyAlerts). A raising send is caught
-    per-integration so one bad webhook doesn't abort the rest.
-    """
-    from src.models import Integration
-
-    integrations = db.query(Integration).filter(
-        Integration.organization_id == org.id,
-        Integration.type == "discord",
-        Integration.is_active == True,
-    ).all()
-
-    if not integrations:
-        return
-
-    severity_emoji = "🔴" if anomaly.severity == "critical" else "🟡"
-    severity_label = anomaly.severity.upper()
-
-    content = f"Rereflect: Sentiment Anomaly ({severity_label})"
-    description = (
-        f"Negative sentiment spiked to **{anomaly.current_negative_pct:.0f}%** "
-        f"(baseline: {anomaly.baseline_negative_pct:.0f}%)\n"
-        f"Deviation: +{anomaly.deviation_pct:.0f}pp | "
-        f"Based on {anomaly.feedback_count} feedback items in the last 24h"
-    )
-    embeds = [
-        {
-            "title": f"{severity_emoji} Sentiment Anomaly - {severity_label}",
-            "description": description[:4096],  # THE CONTRACT: description <= 4096 chars
-            "color": 15548997 if anomaly.severity == "critical" else 16776960,  # red / yellow, decimal
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-        }
-    ]
-
-    for integration in integrations:
-        try:
-            config = integration.config or {}
-            webhook_url = config.get("webhook_url")
-
-            if webhook_url:
-                send_discord_message_webhook(
-                    webhook_url=webhook_url,
-                    embeds=embeds,
-                    content=content,
-                )
-        except Exception as e:
-            logger.error(f"Failed to send anomaly Discord message for integration {integration.id}: {e}")

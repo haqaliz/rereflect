@@ -346,8 +346,8 @@ class TestDispatchAnomalyAlerts:
     """_dispatch_anomaly_alerts delegates routing to the notification dispatcher.
 
     This class used to assert per-user channel fan-out (email on/off, Slack on/off,
-    org defaults vs user overrides) by patching _send_anomaly_email /
-    _send_anomaly_slack. That routing moved into notification_dispatch.dispatch_alert,
+    org defaults vs user overrides) by patching the old anomaly senders. That routing
+    moved into notification_dispatch.dispatch_alert,
     which resolves each user's preferences and — for email — queues a daily digest
     rather than sending immediately. _dispatch_anomaly_alerts no longer calls those
     helpers at all, so the old assertions could never pass. Channel routing is

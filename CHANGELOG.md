@@ -7,6 +7,20 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Removed — Dead anomaly-alert senders deleted (delivery unchanged)
+
+- **Cleanup, not a behavior change.** The worker's `_send_anomaly_slack`,
+  `_send_anomaly_discord` and `_send_anomaly_email` — plus the email sender they
+  called — were fully implemented but **never called**. Anomaly alerts already route
+  through the main dispatch pipe, which delivers **both** Slack and Discord with
+  per-user preferences and integration-health bookkeeping, so nothing about alert
+  delivery changes.
+- **Anomaly email is gone entirely — stated honestly.** That path was unreachable
+  before this change; the main pipe never delivered anomaly email (Slack/Discord
+  only). This is cleanup of a dead path, not a regression.
+
+||||||| 20599748
+=======
 ### Changed — Integration, create-issue and feedback-source management is now admin/owner-only in the UI
 
 The frontend now mirrors the backend RBAC (members were silently 403-ing on submit):

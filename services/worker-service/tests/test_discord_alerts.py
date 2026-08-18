@@ -4,7 +4,6 @@ TDD tests for Discord alert support (Track B — worker-service).
 Covers:
 - send_discord_message_webhook() in src/tasks/alerts.py (B1)
 - Discord embed builder + dispatch at all three alert sites (B2/B3)
-- _send_anomaly_discord() in src/tasks/anomaly.py (B3)
 
 Per THE CONTRACT (docs/planning/discord-notifications/alert-pipe/spec.md):
 worker-service's sender RAISES on failure (unlike the backend-api sender, which

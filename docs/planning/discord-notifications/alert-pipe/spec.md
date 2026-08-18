@@ -84,6 +84,10 @@ the fact that the worker version takes `content` as a **required** positional.
   - `notification_dispatch.py::_dispatch_slack_health_alert` (~:59)
   - `tasks/anomaly.py::_send_anomaly_slack` (~:219) — **easy to miss, not in
     notification_dispatch.py**
+  > **Note (2026-08-18, `worker-cleanup-smalls`):** the third site no longer exists —
+  > `_send_anomaly_slack` (and its Discord twin) were never wired and were deleted.
+  > Anomaly alerts route through the main pipe: `_dispatch_anomaly_alerts` →
+  > `dispatch_alert` → `_dispatch_slack_alert` / `_dispatch_discord_alert`.
 - **B4** Tests: patch at the **import site** (`src.services.<module>.send_discord_message_webhook`
   / `src.tasks.anomaly...`) because these modules import at module top. Getting this wrong
   gives a test that passes while patching nothing. Assert the raising contract is caught and

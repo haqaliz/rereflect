@@ -67,6 +67,10 @@ What users actually receive alerts from is `dispatch_alert` and friends. That is
   - `worker-service/src/notification_dispatch.py::_dispatch_slack_health_alert` (~:59)
   - `worker-service/src/tasks/anomaly.py::_send_anomaly_slack` (~:219) — easy to miss, it
     does not live in `notification_dispatch.py`.
+  > **Note (2026-08-18, `worker-cleanup-smalls`):** the third site no longer exists —
+  > `_send_anomaly_slack` (and its Discord twin) were never wired and were deleted.
+  > Anomaly alerts route through the main pipe: `_dispatch_anomaly_alerts` →
+  > `dispatch_alert` → `_dispatch_slack_alert` / `_dispatch_discord_alert`.
 - **R5 — Frontend must not lie.** Today a Discord row would render with a **Slack icon** and
   a Test button that 404s. Fix the two-way `intercom ? … : Slack` ternaries
   (`integrations/page.tsx:281-286`, `:160`; `[id]/page.tsx:259`, `:149`), add a
@@ -122,6 +126,10 @@ What users actually receive alerts from is `dispatch_alert` and friends. That is
 | 2 | Missing `_send_anomaly_slack` because it is not in `notification_dispatch.py`. | Named explicitly in R4. |
 | 3 | `SlackAlertLog` is only written by the legacy path, which is out of scope — so a Discord integration shows an **empty log list** in the UI. | Accept and document. Pre-existing asymmetry: the health and dispatch paths do not log for Slack either. |
 | 4 | Users may expect per-user Discord toggles in Settings → Notifications. | Out of scope, documented. Org-level integration first. |
+
+> **Note (2026-08-18, `worker-cleanup-smalls`):** risk 2 is moot — `_send_anomaly_slack`
+> was never wired and was deleted; the main pipe already covered Slack + Discord anomaly
+> delivery. See `docs/planning/worker-cleanup-smalls/`.
 
 **Open question:** should the "Coming Soon" Discord card on the marketing site
 (`landing-web/lib/integrations.ts`) be updated in this branch? *Leaning yes for the app card

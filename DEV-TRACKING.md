@@ -208,7 +208,23 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 - **Why P5:** documented in `docs/SELF_HOSTING.md` and the changelog, so it is a known
   limitation rather than a surprise — but it will read as a bug to the first person who hits it.
 
-### P6 — Dead anomaly-alert functions (cleanup, NOT STARTED)
+### P6 — Dead anomaly-alert functions — **FIXED**, merged `<merge-sha>`, PR <# pending> (2026-08-18)
+> Shipped (the wire-or-delete decision landed as **delete**): `_send_anomaly_slack`
+> (:238-310), `_send_anomaly_discord` (:313-363) and `_send_anomaly_email` (:223-235)
+> were fully implemented and **never called** — anomaly alerts route via
+> `_dispatch_anomaly_alerts` → `dispatch_alert`, which delivers **both** Slack and
+> Discord on the main pipe with per-user preferences + health bookkeeping. All three
+> orphans are deleted, plus their dead callee `src.email.send_anomaly_alert_email`,
+> the `send_discord_message_webhook` import and the `_decrypt` helper (they were the
+> orphans' only users — every other worker decrypt mirror stays), and the two test
+> files pinning them (10 tests). Sweep proof: grep
+> `_send_anomaly_slack|_send_anomaly_discord|_send_anomaly_email|send_anomaly_alert_email`
+> → zero hits in `services/` production code; the only remaining mentions are the
+> historical docstring lines in the deliberately-untouched
+> `TestDispatchAnomalyAlerts` (:345-409, stays green) and the planning docs. Worker
+> suite 1824 passed. **Anomaly email delivery is gone entirely — stated honestly:** it
+> was unreachable before this change; the main pipe never delivered anomaly email
+> (Slack/Discord only), so this is not a regression.
 - [ ] `services/worker-service/src/tasks/anomaly.py::_send_anomaly_slack` is fully
       implemented and **never called** — anomaly alerts route via `_dispatch_anomaly_alerts`
       → `dispatch_alert` (`anomaly.py:169` → `:185`). Its new Discord twin

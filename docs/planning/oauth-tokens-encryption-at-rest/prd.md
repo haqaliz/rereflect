@@ -84,6 +84,10 @@ Non-goals for metrics: adoption numbers (single-tenant OSS; we don't collect the
   - worker: `alerts.py:445` (`send_slack_alert`), `source_events.py:314`
     (Slack + Intercom `fetch_context`), `anomaly.py:270`, `notification_dispatch.py:104`
     and `:701`.
+  > **Note (2026-08-18, `worker-cleanup-smalls`):** the `anomaly.py:270` read site is
+  > gone — the anomaly Slack sender that owned it was dead code and was deleted; its
+  > `_decrypt` mirror went with it. Worker read sites now: `alerts.py:445`,
+  > `source_events.py:314`, `notification_dispatch.py:104`, `:701`.
   Truthiness guards (`if not integration.oauth_access_token`) stay as-is — ciphertext is
   truthy, so they keep working; decryption happens at the send site, never inside the
   send helpers (`send_slack_message_oauth`, `fetch_context`) and never as a model
