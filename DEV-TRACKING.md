@@ -420,7 +420,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   A one-sided test would have left the seam exactly as exposed. Prefer this shape for any
   contract that crosses the backend/worker boundary.
   See `docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/`.
-- ~~**`slack-email-signature-enforcement`**~~ — **FIXED** (merged <merge-sha>, PR <# pending>).
+- ~~**`slack-email-signature-enforcement`**~~ — **FIXED** (merged a2c54288, PR #19).
   The shadow period is over; both verifiers fail closed. `verify_slack_signature`
   (source_webhooks.py) and `_verify_webhook_signature` (email_webhooks.py) now log a
   non-shadow warning and `return False` when the secret is unset, so unconfigured
