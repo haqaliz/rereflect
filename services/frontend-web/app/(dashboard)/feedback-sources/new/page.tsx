@@ -52,6 +52,7 @@ import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -82,7 +83,11 @@ type Step = 'type' | 'integration' | 'triggers' | 'mapping' | 'confirm' | 'email
 function NewSourceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   const initialType = searchParams.get('type');
+
+  // Only admin/owner can create sources (backend enforces; UI hides the affordance)
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
   // Determine initial step based on type
   const getInitialStep = (): Step => {
@@ -1211,10 +1216,12 @@ function NewSourceContent() {
                 <Button variant="outline" onClick={() => setStep('mapping')}>
                   Back
                 </Button>
-                <Button onClick={handleSubmit} disabled={loading}>
-                  {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Create Source
-                </Button>
+                {isAdminOrOwner && (
+                  <Button onClick={handleSubmit} disabled={loading}>
+                    {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    Create Source
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

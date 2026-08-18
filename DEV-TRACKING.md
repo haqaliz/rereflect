@@ -499,13 +499,14 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   A new `tests/test_beat_schedule_integrity.py` resolves every scheduled task name to a
   real function so this class cannot recur — it is the same "wired at one end, dead at the
   other" shape as the P0/P0b import bugs and the orphaned write-back module.
-- **`signup-promo-banner-vestigial` (NOT STARTED).** `app/signup/page.tsx` still renders an
-  invite banner gated on a hardcoded `VALID_PROMO_CODES` list read from a `?promo=` query
-  param. There is no promo backend and no billing, so it can neither grant nor withhold
-  anything. Its plan-tier copy ("3 months of Pro free", "2,500 feedback/mo") was corrected
-  on the Intercom branch because it was actively misleading, but **the mechanism itself is
-  vestigial and should probably be deleted** — deliberately left standing rather than
-  removing a UI surface outside that card's scope.
+- **`signup-promo-banner-vestigial` — FIXED** on `chore/frontend-cleanup-smalls`
+  (2026-08-18). The promo-banner machinery in `app/signup/page.tsx` is deleted:
+  the `VALID_PROMO_CODES` const, the `?promo=` + localStorage state/effect, the
+  banner JSX, the `.promo-banner` gsap refs, and the `trackEvent("Promo Signup", …)`
+  reads on both submit paths. The dead `analytics.promoSignup` /
+  `analytics.promoCheckoutStarted` helpers are gone too. The `Sparkles` import stays
+  (used by the "Start Your Free Trial" badge). Test-neutral — no test pinned the
+  banner; the signup-adjacent suites stay green. (merged <merge-sha>, PR <# pending>)
 
 ### Found while doing the churn-model work (2026-08-14)
 
@@ -622,10 +623,16 @@ was left by a branch that shipped the fix and did not update the row.
 > `2e071c56` (sweep-guard `tests/test_integration_rbac_sweep.py` enumerates every
 > integration/config router module so the zero-deps class cannot silently recur — mirror
 > of `test_webhook_verifiers_fail_closed.py`). Backend suite 4674 passed. **Follow-up
-> (chore, not started): `frontend-integration-role-guards`** — 3 member-reachable
-> surfaces now 403 after gating: `settings/integrations/[id]` + `new` pages, the Linear
-> branch of `feedbacks/[id]/create-issue` (Jira/Asana already 403 for members), and
-> `feedback-sources/*` write buttons. See `docs/planning/integration-routes-rbac/`.
+> `frontend-integration-role-guards` — FIXED** on `chore/frontend-cleanup-smalls`
+> (2026-08-18). The 3 member-reachable surfaces now mirror the backend RBAC:
+> `settings/integrations/[id]` + `new` redirect members to `/settings/preferences`
+> (house guard); the `feedbacks/[id]/create-issue` wizard shows an admins/owners-only
+> copy card instead of the (silently 403ing) wizard — Jira/Asana included, not just
+> Linear; and the `feedback-sources/*` write controls (list add/pause/configure/delete,
+> detail delete/inputs/switches/save, new create) are hidden/disabled for members while
+> the read views stay member-open and `feedback-sources/pending` is untouched. TDD:
+> member+admin tests per surface. (merged <merge-sha>, PR <# pending>)
+> See `docs/planning/integration-routes-rbac/`.
 
 - [ ] `services/backend-api/src/api/routes/integrations.py` contains **zero** occurrences of
       `403`, `require_admin_or_owner` or `require_owner`. `get_current_org` validates the JWT
