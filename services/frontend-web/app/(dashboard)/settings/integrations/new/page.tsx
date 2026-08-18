@@ -33,6 +33,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { DiscordIcon } from '@/components/icons/DiscordIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 type IntegrationType = 'slack' | 'intercom' | 'discord';
 type ConnectionMethod = 'oauth' | 'webhook';
@@ -52,6 +53,7 @@ function isValidDiscordWebhookUrl(url: string): boolean {
 function NewIntegrationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templateVariables, setTemplateVariables] = useState<TemplateVariable[]>([]);
@@ -71,7 +73,22 @@ function NewIntegrationContent() {
     message_template: '',
   });
 
+  // Only admin/owner can manage integrations
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
+
+  // Redirect non-admin/owner to preferences
   useEffect(() => {
+    if (user && user.role !== 'owner' && user.role !== 'admin') {
+      router.replace('/settings/preferences');
+    }
+  }, [user, router]);
+
+  useEffect(() => {
+    // Don't fetch if user is not admin/owner (will be redirected)
+    if (user && user.role !== 'owner' && user.role !== 'admin') {
+      return;
+    }
+
     const loadTemplateVariables = async () => {
       try {
         const data = await integrationsAPI.getTemplateVariables();
@@ -179,6 +196,11 @@ function NewIntegrationContent() {
   };
 
   const needsDigestTime = form.triggers.includes('daily_digest') || form.triggers.includes('weekly_digest');
+
+  // Members are redirected to preferences — never render the admin surface.
+  if (user && !isAdminOrOwner) {
+    return null;
+  }
 
   const headerIconBg =
     integrationType === 'intercom'

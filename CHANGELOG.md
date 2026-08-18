@@ -19,6 +19,35 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
   before this change; the main pipe never delivered anomaly email (Slack/Discord
   only). This is cleanup of a dead path, not a regression.
 
+||||||| 20599748
+=======
+### Changed — Integration, create-issue and feedback-source management is now admin/owner-only in the UI
+
+The frontend now mirrors the backend RBAC (members were silently 403-ing on submit):
+
+- **Integration detail + new pages redirect members** to Settings → Preferences
+  (`settings/integrations/[id]` and `settings/integrations/new`), matching every other
+  integration page.
+- **The create-issue wizard shows an admins/owners-only card** for members instead of
+  the wizard (whose mount-time status calls all 403'd, showing every provider as "Not
+  connected"). The page is deliberately not redirected — it is deep-linked from a
+  member-visible feedback detail page.
+- **Feedback-source write controls are hidden/disabled for members** — the list page's
+  Add Source, per-row Pause/Configure/Delete and per-type "+" are gone; the detail page
+  hides Delete/Save and disables every input/switch/trigger; the new-page wizard hides
+  Create Source. Read views (source list, webhook/email address cards, recent events)
+  stay member-open, and the pending-review page is untouched.
+
+These are UI affordances; the backend 403s remain the actual enforcement.
+
+### Removed — Vestigial signup promo banner + dead analytics helpers
+
+- The signup page no longer reads a `?promo=` query param or localStorage to show an
+  "invited to Rereflect" banner gated on a hardcoded promo-code list. There is no promo
+  backend and no billing (Rereflect is free and fully unlocked), so the offer could
+  neither be honoured nor withheld.
+- The now-dead `promoSignup` / `promoCheckoutStarted` analytics helpers are removed too.
+
 ### Removed — the orphaned internal realtime-push endpoint
 
 - **The internal HTTP endpoint for pushing realtime events (and its

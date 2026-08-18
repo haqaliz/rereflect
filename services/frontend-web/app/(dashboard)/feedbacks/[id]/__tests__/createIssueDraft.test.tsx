@@ -11,13 +11,26 @@ vi.mock('next/navigation', () => ({
 }));
 
 // ── AuthContext ───────────────────────────────────────────────────────────────
+const mockUseAuth = vi.fn();
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({
-    user: { id: 1, email: 'owner@test.com', role: 'owner', plan: 'business', organization_id: 1 },
-    isLoading: false,
-    isAuthenticated: true,
-  }),
+  useAuth: () => mockUseAuth(),
 }));
+
+const ownerUser = {
+  id: 1,
+  email: 'owner@test.com',
+  role: 'owner',
+  plan: 'business',
+  organization_id: 1,
+};
+
+const memberUser = {
+  id: 2,
+  email: 'member@test.com',
+  role: 'member',
+  plan: 'business',
+  organization_id: 1,
+};
 
 // ── feedback API ──────────────────────────────────────────────────────────────
 const mockFeedback = {
@@ -148,6 +161,7 @@ async function goToAsanaConfigure() {
 describe('create-issue wizard — Draft with AI', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: ownerUser, isLoading: false, isAuthenticated: true });
     aiSettingsGet.mockResolvedValue(CONFIGURED_CLOUD_SETTINGS);
     aiSettingsListKeys.mockResolvedValue([{ provider: 'openai', key_hint: '...abcd', is_valid: true, created_at: '2026-01-01' }]);
     draftIssueContent.mockResolvedValue({ title: 'AI title', body: 'AI body' });
@@ -295,5 +309,26 @@ describe('create-issue wizard — Draft with AI', () => {
 
     resolveDraft!({ title: 'AI title', body: 'AI body' });
     await waitFor(() => expect(screen.getByDisplayValue('AI title')).toBeInTheDocument());
+  });
+});
+
+describe('create-issue wizard — member role', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: memberUser, isLoading: false, isAuthenticated: true });
+    aiSettingsGet.mockResolvedValue(CONFIGURED_CLOUD_SETTINGS);
+    aiSettingsListKeys.mockResolvedValue([]);
+  });
+
+  it('shows the admins/owners-only copy card and hides the wizard for members', async () => {
+    render(<CreateIssuePage />);
+
+    expect(
+      await screen.findByText(/only admins and owners can create issues/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Select Integration')).not.toBeInTheDocument();
+    expect(screen.queryByText('Jira')).not.toBeInTheDocument();
+    expect(screen.queryByText('Asana')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /draft with ai/i })).not.toBeInTheDocument();
   });
 });

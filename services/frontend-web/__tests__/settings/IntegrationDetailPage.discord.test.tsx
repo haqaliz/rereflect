@@ -6,9 +6,15 @@ import React, { Suspense } from 'react';
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockPush = vi.fn();
-const mockRouter = { push: mockPush, replace: vi.fn() };
+const mockReplace = vi.fn();
+const mockRouter = { push: mockPush, replace: mockReplace };
 vi.mock('next/navigation', () => ({
   useRouter: () => mockRouter,
+}));
+
+const mockUseAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock('@/lib/api/integrations', () => ({
@@ -49,6 +55,24 @@ const mockTestDiscord = integrationsAPI.testDiscord as ReturnType<typeof vi.fn>;
 const templateVariablesResponse = {
   variables: [{ name: 'text', description: 'Feedback text', example: 'Great product!' }],
   default_template: 'New feedback: {{text}}',
+};
+
+const adminUser = {
+  id: 1,
+  email: 'admin@test.com',
+  role: 'admin',
+  plan: 'enterprise',
+  organization_id: 1,
+  is_system_admin: false,
+};
+
+const memberUser = {
+  id: 2,
+  email: 'member@test.com',
+  role: 'member',
+  plan: 'enterprise',
+  organization_id: 1,
+  is_system_admin: false,
 };
 
 function makeIntegration(overrides: Partial<Record<string, any>> = {}) {
@@ -92,6 +116,7 @@ async function renderDetailPage(id = '1') {
 describe('IntegrationDetailPage - Discord row', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: adminUser });
     mockGetLogs.mockResolvedValue([]);
     mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
   });
@@ -140,6 +165,7 @@ describe('IntegrationDetailPage - Discord row', () => {
 describe('IntegrationDetailPage - Test button dispatches per integration type', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: adminUser });
     mockGetLogs.mockResolvedValue([]);
     mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
     mockTestSlack.mockResolvedValue({ success: true, message: 'Slack test sent' });
@@ -180,5 +206,29 @@ describe('IntegrationDetailPage - Test button dispatches per integration type', 
       expect(mockTestSlack).toHaveBeenCalledWith(1);
     });
     expect(mockTestDiscord).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntegrationDetailPage - member redirect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: memberUser });
+    mockGetLogs.mockResolvedValue([]);
+    mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
+  });
+
+  it('redirects a member user to /settings/preferences and does not render the admin surface', async () => {
+    mockGet.mockResolvedValue(makeIntegration({ id: 1, type: 'slack', name: 'Slack Alerts' }));
+
+    await renderDetailPage('1');
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/settings/preferences');
+    });
+
+    expect(screen.queryByRole('button', { name: /^Test$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save Changes/ })).not.toBeInTheDocument();
+    expect(mockGet).not.toHaveBeenCalled();
   });
 });

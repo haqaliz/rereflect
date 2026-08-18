@@ -525,6 +525,35 @@ function CreateIssueContent() {
 
   const stepIndex = STEPS.findIndex(s => s.key === currentStep);
 
+  // Only admins and owners can create issues — members see a copy card
+  // instead of the wizard (deliberate: no redirect, the page is deep-linked
+  // from a member-visible feedback detail page).
+  if (user && user.role !== 'owner' && user.role !== 'admin') {
+    return (
+      <div className="min-h-screen pattern-bg">
+        <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+          <div className="flex items-center gap-4 animate-fade-in">
+            <div className="p-3 rounded-xl bg-primary/10">
+              <GitBranch className="w-6 h-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold">Create Issue</h1>
+              <p className="text-sm text-muted-foreground">Link feedback to your project tracker</p>
+            </div>
+          </div>
+          <Card className="animate-slide-up">
+            <CardHeader>
+              <CardTitle>Only admins and owners can create issues from feedback</CardTitle>
+              <CardDescription>
+                Ask an admin or owner in your workspace to create the issue for you.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen pattern-bg">
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
