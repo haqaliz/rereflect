@@ -262,7 +262,12 @@ async def handle_generic_webhook(
     body = await request.body()
     body_str = body.decode('utf-8')
 
-    # Verify secret if configured
+    # Verify secret when the source has one (fails closed: missing or
+    # mismatched header -> 401). New webhook sources are minted with a
+    # secret_token at creation (see feedback_sources.py), so this branch is
+    # the default for them; the no-secret branch below only exists for
+    # grandfathered sources, which keep the documented capability-URL
+    # posture until an operator PATCHes in a secret.
     config = matching_source.provider_config or {}
     secret_token = config.get("secret_token")
     if secret_token:

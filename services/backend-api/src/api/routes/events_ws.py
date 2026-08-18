@@ -18,30 +18,21 @@ Server → Client:
     "data": { ... },
     "timestamp": "2026-02-24T...",
   }
-
-Internal HTTP endpoint for Celery workers:
-  POST /api/internal/events/emit
-  Header: X-Internal-Secret: <INTERNAL_EVENTS_SECRET>
-  Body: { "org_id": int, "event_type": str, "data": dict }
 """
 
 import asyncio
-import hmac
 import json
 import logging
-import os
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from src.api.auth import decode_access_token
 from src.database.session import get_db
 from src.models.user import User
 from src.services.event_connection_manager import event_manager
-from src.services.event_emitter import emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +40,6 @@ router = APIRouter(tags=["events-ws"])
 
 HEARTBEAT_INTERVAL = 30   # seconds
 IDLE_TIMEOUT = 600         # 10 minutes (passive endpoint, longer than copilot)
-
-INTERNAL_SECRET = os.getenv("INTERNAL_EVENTS_SECRET", "")
 
 
 # -- Authentication ------------------------------------------------------------
@@ -135,44 +124,3 @@ async def events_ws(
     finally:
         await event_manager.disconnect(websocket, user.id, org.id)
 
-
-# -- Internal HTTP endpoint for Celery workers ---------------------------------
-
-
-class InternalEventRequest(BaseModel):
-    org_id: int
-    event_type: str
-    data: dict = {}
-    exclude_user_id: Optional[int] = None
-
-
-@router.post("/api/internal/events/emit", status_code=200)
-async def internal_emit(
-    request: InternalEventRequest,
-    x_internal_secret: Optional[str] = Header(None),
-):
-    """
-    Internal endpoint for Celery workers to push events.
-    Protected by INTERNAL_EVENTS_SECRET shared secret.
-    """
-    if not INTERNAL_SECRET or not x_internal_secret:
-        raise HTTPException(status_code=403, detail="Invalid internal secret")
-
-    try:
-        secret_matches = hmac.compare_digest(x_internal_secret, INTERNAL_SECRET)
-    except TypeError:
-        # compare_digest rejects non-ASCII str input; treat it as a mismatch
-        # rather than letting it surface as a 500.
-        secret_matches = False
-
-    if not secret_matches:
-        raise HTTPException(status_code=403, detail="Invalid internal secret")
-
-    await emit_event(
-        org_id=request.org_id,
-        event_type=request.event_type,
-        data=request.data,
-        exclude_user_id=request.exclude_user_id,
-    )
-
-    return {"ok": True}

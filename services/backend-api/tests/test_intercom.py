@@ -154,15 +154,10 @@ class TestIntercomOAuthCallback:
         test_organization: Organization,
     ):
         """Should exchange code for token, fetch workspace info, and create integration."""
-        from src.api.routes.integrations import oauth_states
+        from src.services.oauth_state import sign_oauth_state
 
-        # Pre-populate state
-        test_state = "test-state-abc123"
-        oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "name": "My Intercom",
-            "provider": "intercom",
-        }
+        # Stateless signed state (mirrors what /oauth/connect issues)
+        test_state = sign_oauth_state(test_organization.id, "My Intercom")
 
         # Mock the httpx.Client calls
         mock_token_response = MagicMock()
@@ -218,14 +213,9 @@ class TestIntercomOAuthCallback:
         test_organization: Organization,
     ):
         """Should reject with 422 (never silently store plaintext) when LLM_ENCRYPTION_KEY is unset."""
-        from src.api.routes.integrations import oauth_states
+        from src.services.oauth_state import sign_oauth_state
 
-        test_state = "test-state-missing-key"
-        oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "name": "My Intercom",
-            "provider": "intercom",
-        }
+        test_state = sign_oauth_state(test_organization.id, "My Intercom")
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {"token": "xyztoken123"}

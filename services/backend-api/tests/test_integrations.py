@@ -762,13 +762,9 @@ class TestSlackOAuthCallback:
         test_organization: Organization,
     ):
         """Should store the OAuth token encrypted at rest, never plaintext."""
-        from src.api.routes.integrations import oauth_states
+        from src.services.oauth_state import sign_oauth_state
 
-        test_state = "test-state-abc123"
-        oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "name": "My Slack",
-        }
+        test_state = sign_oauth_state(test_organization.id, "My Slack")
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {
@@ -815,13 +811,9 @@ class TestSlackOAuthCallback:
         test_organization: Organization,
     ):
         """Should reject with 422 (never silently store plaintext) when LLM_ENCRYPTION_KEY is unset."""
-        from src.api.routes.integrations import oauth_states
+        from src.services.oauth_state import sign_oauth_state
 
-        test_state = "test-state-missing-key"
-        oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "name": "My Slack",
-        }
+        test_state = sign_oauth_state(test_organization.id, "My Slack")
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {
@@ -844,6 +836,58 @@ class TestSlackOAuthCallback:
 
         assert response.status_code == 422
         assert "LLM_ENCRYPTION_KEY" in response.json()["detail"]
+
+
+class TestSlackOAuthCallbackStateless:
+    """The Slack OAuth callback is stateless: signed-state, no process dict.
+
+    The state is HMAC-signed with the app secret; a forged/expired state
+    must fail closed to the same invalid_state redirect the old dict-pop
+    path produced.
+    """
+
+    @patch("src.api.routes.integrations.SLACK_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.integrations.SLACK_CLIENT_SECRET", "test-client-secret")
+    def test_callback_rejects_tampered_state(
+        self,
+        client: TestClient,
+        test_organization: Organization,
+    ):
+        """A state with a valid shape but a tampered payload → invalid_state."""
+        from src.services.oauth_state import sign_oauth_state
+        from src.services.oauth_state import verify_oauth_state
+
+        state = sign_oauth_state(test_organization.id, "My Slack")
+        assert verify_oauth_state(state) is not None  # sanity: our state is valid
+
+        payload_b64, _, sig = state.rpartition(".")
+        forged = f"{payload_b64}x.{sig}"
+        response = client.get(
+            f"/api/v1/integrations/slack/oauth/callback?code=authcode123&state={forged}",
+            follow_redirects=False,
+        )
+        assert response.status_code == 307
+        assert "oauth_error=invalid_state" in response.headers["location"]
+
+    @patch("src.api.routes.integrations.SLACK_CLIENT_ID", "test-client-id")
+    @patch("src.api.routes.integrations.SLACK_CLIENT_SECRET", "test-client-secret")
+    def test_callback_rejects_expired_state(
+        self,
+        client: TestClient,
+        test_organization: Organization,
+    ):
+        """An expired (TTL-elapsed) state → invalid_state, never accepted."""
+        from src.services.oauth_state import sign_oauth_state
+
+        with patch("src.services.oauth_state.time.time", return_value=1_000_000_000):
+            state = sign_oauth_state(test_organization.id, "My Slack")
+
+        response = client.get(
+            f"/api/v1/integrations/slack/oauth/callback?code=authcode123&state={state}",
+            follow_redirects=False,
+        )
+        assert response.status_code == 307
+        assert "oauth_error=invalid_state" in response.headers["location"]
 
 
 def _make_oauth_slack_integration(

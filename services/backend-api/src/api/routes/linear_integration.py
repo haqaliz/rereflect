@@ -37,6 +37,7 @@ from src.models.linear_integration import (
 from src.models.organization import Organization
 from src.models.user import User
 from src.services.linear_client import LinearClient
+from src.services.oauth_state import sign_oauth_state, verify_oauth_state
 from src.utils.encryption import encrypt_api_key
 
 logger = logging.getLogger(__name__)
@@ -52,9 +53,6 @@ LINEAR_REDIRECT_URI = os.environ.get(
 )
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
-
-# In-memory OAuth state (use Redis with TTL in production)
-linear_oauth_states: dict = {}
 
 # Default status mappings applied on first connect
 DEFAULT_STATUS_MAPPINGS = [
@@ -317,11 +315,8 @@ def linear_oauth_connect(
             detail="Linear OAuth is not configured. Set LINEAR_CLIENT_ID environment variable.",
         )
 
-    state = secrets.token_urlsafe(32)
-    linear_oauth_states[state] = {
-        "organization_id": current_org.id,
-        "user_id": current_user.id,
-    }
+    # Stateless signed state (org + user travel in the signed blob; no store)
+    state = sign_oauth_state(current_org.id, "linear", user_id=current_user.id)
 
     params = {
         "client_id": LINEAR_CLIENT_ID,
@@ -357,7 +352,8 @@ async def linear_oauth_callback(
             url=f"{FRONTEND_URL}/settings/integrations?oauth_error=missing_params"
         )
 
-    state_data = linear_oauth_states.pop(state, None)
+    # Validate state (stateless: HMAC-signed, TTL-bounded, fails closed)
+    state_data = verify_oauth_state(state)
     if not state_data:
         logger.error(f"Invalid or expired Linear OAuth state: {state}")
         return RedirectResponse(

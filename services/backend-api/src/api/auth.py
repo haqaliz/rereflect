@@ -16,8 +16,9 @@ load_dotenv()
 # with a key anyone could read off GitHub, and forging a token for any
 # organization needed nothing but the URL.
 #
-# Same class as INTERNAL_EVENTS_SECRET's "dev-secret" default, fixed on
-# feat/integration-auth-tenancy-hardening. That one could fail closed by
+# Same class as the internal-events push endpoint's "dev-secret" default,
+# fixed on feat/integration-auth-tenancy-hardening (that endpoint has since
+# been deleted — it had no production caller). That one could fail closed by
 # rejecting requests; this one cannot, because a JWT key that refuses to work
 # means nobody can log in. So it fails LOUD: refuse to start, with an
 # actionable message, rather than starting up quietly forgeable.
