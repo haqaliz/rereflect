@@ -208,7 +208,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 - **Why P5:** documented in `docs/SELF_HOSTING.md` and the changelog, so it is a known
   limitation rather than a surprise — but it will read as a bug to the first person who hits it.
 
-### P6 — Dead anomaly-alert functions — **FIXED**, merged `<merge-sha>`, PR <# pending> (2026-08-18)
+### P6 — Dead anomaly-alert functions — **FIXED**, merged `1cc46b37`, PR #22 (2026-08-18)
 > Shipped (the wire-or-delete decision landed as **delete**): `_send_anomaly_slack`
 > (:238-310), `_send_anomaly_discord` (:313-363) and `_send_anomaly_email` (:223-235)
 > were fully implemented and **never called** — anomaly alerts route via
@@ -449,7 +449,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   `.env.example`, `.env.prod.example` and CHANGELOG (behavior-change entry +
   correction of the grace-period note) now tell operators to set
   `SLACK_SIGNING_SECRET` / `RESEND_INBOUND_WEBHOOK_SECRET`.
-  **Follow-up — S1 — DONE** (merged <merge-sha>, PR <# pending>): the generic
+  **Follow-up — S1 — DONE** (merged 20599748, PR #20): the generic
   inbound webhook now **mints-and-requires**. Webhook sources created after
   2026-08-18 carry a per-source `secret_token` (minted at creation, displayed
   once as `webhook_secret` in the create response, stripped from every other
@@ -482,7 +482,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   case-insensitively before an event is persisted. ORIGINAL ENTRY: — `source_webhooks.py:229-233` writes
   `dict(request.headers)` into `FeedbackSourceEvent.event_data`, including the source's own
   `X-Webhook-Secret`. Anyone with read access to that table can forge the webhook.
-- ~~**`events-emit-wire-up-or-delete`**~~ — **FIXED** (merged <merge-sha>, PR <# pending>).
+- ~~**`events-emit-wire-up-or-delete`**~~ — **FIXED** (merged 20599748, PR #20).
   **Deleted.** The orphaned internal HTTP push endpoint + `InternalEventRequest`
   (events_ws.py), its 11 tests (test_event_emitter.py keeps the `emit_event`
   service tests), the `.env.example` / `.env.prod.example` blocks and the
@@ -522,7 +522,7 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   reads on both submit paths. The dead `analytics.promoSignup` /
   `analytics.promoCheckoutStarted` helpers are gone too. The `Sparkles` import stays
   (used by the "Start Your Free Trial" badge). Test-neutral — no test pinned the
-  banner; the signup-adjacent suites stay green. (merged <merge-sha>, PR <# pending>)
+  banner; the signup-adjacent suites stay green. (merged bd4b192b, PR #21)
 
 ### Found while doing the churn-model work (2026-08-14)
 
@@ -647,7 +647,7 @@ was left by a branch that shipped the fix and did not update the row.
 > Linear; and the `feedback-sources/*` write controls (list add/pause/configure/delete,
 > detail delete/inputs/switches/save, new create) are hidden/disabled for members while
 > the read views stay member-open and `feedback-sources/pending` is untouched. TDD:
-> member+admin tests per surface. (merged <merge-sha>, PR <# pending>)
+> member+admin tests per surface. (merged bd4b192b, PR #21)
 > See `docs/planning/integration-routes-rbac/`.
 
 - [ ] `services/backend-api/src/api/routes/integrations.py` contains **zero** occurrences of
@@ -687,7 +687,7 @@ was left by a branch that shipped the fix and did not update the row.
 > corrected to encrypted-at-rest (P1, merged `737bbd5`) — see the comment fix in
 > this change.
 
-### P3 — `oauth-state-in-process-dict` — **FIXED** (merged <merge-sha>, PR <# pending>)
+### P3 — `oauth-state-in-process-dict` — **FIXED** (merged 20599748, PR #20)
 > Shipped on `chore/backend-security-smalls`: OAuth `state` for Slack, Intercom
 > and Linear is now **stateless and HMAC-signed** — the module-level
 > `oauth_states` / `linear_oauth_states` dicts are deleted and replaced by
