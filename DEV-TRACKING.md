@@ -420,10 +420,22 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   A one-sided test would have left the seam exactly as exposed. Prefer this shape for any
   contract that crosses the backend/worker boundary.
   See `docs/planning/intercom-selfhost-ingestion/envelope-seam-fix/`.
-- **`slack-email-signature-enforcement`** — flip the two shadow-mode verifiers to fail closed and
-  delete their entries from `SHADOW_ALLOWLIST` in `tests/test_webhook_verifiers_fail_closed.py`
-  (that test fails until you do). Update the `SELF_HOSTING.md` table, which still describes them
-  as accepting unverified deliveries.
+- ~~**`slack-email-signature-enforcement`**~~ — **FIXED** (merged <merge-sha>, PR <# pending>).
+  The shadow period is over; both verifiers fail closed. `verify_slack_signature`
+  (source_webhooks.py) and `_verify_webhook_signature` (email_webhooks.py) now log a
+  non-shadow warning and `return False` when the secret is unset, so unconfigured
+  Slack/email deliveries are rejected with 401. `SHADOW_ALLOWLIST` in
+  `tests/test_webhook_verifiers_fail_closed.py` is empty and pinned — the sweep guard
+  went RED first (both verifiers still failed open), then GREEN after the flip. The
+  shadow tests were flipped to fail-closed expectations; startup warnings were
+  re-scoped from "being accepted unverified" to the fail-closed notice; SELF_HOSTING,
+  `.env.example`, `.env.prod.example` and CHANGELOG (behavior-change entry +
+  correction of the grace-period note) now tell operators to set
+  `SLACK_SIGNING_SECRET` / `RESEND_INBOUND_WEBHOOK_SECRET`.
+  **Follow-up (NOT STARTED): S1 — the generic inbound webhook's per-source
+  `secret_token` still fails open when unset** (source_webhooks.py:270-274 skips
+  verification when the source has no secret_token). Recorded here; explicitly out of
+  scope of the fail-closed flip.
 - ~~**`linear-webhook-secret-plaintext`**~~ — **FIXED** on `bug/linear-webhook-secret-plaintext`
   (2026-08-09). Linear's `webhook_secret` is now Fernet-encrypted at rest like every other
   integration: encrypt-on-write at the OAuth callback (missing `LLM_ENCRYPTION_KEY` → 422,

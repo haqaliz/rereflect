@@ -2465,17 +2465,18 @@ Set the secret for each source you actually use:
 | Source | Variable | Where to get it | If unset |
 |---|---|---|---|
 | Intercom | `INTERCOM_CLIENT_SECRET` | Intercom app → Client Secret | **Rejected (401).** Fails closed. |
-| Slack | `SLACK_SIGNING_SECRET` | Slack app → Basic Information → Signing Secret | **Accepted unverified**, warning logged. A future release will reject. |
-| Inbound email | `RESEND_INBOUND_WEBHOOK_SECRET` | Resend → inbound webhook settings | **Accepted unverified**, warning logged. A future release will reject. |
+| Slack | `SLACK_SIGNING_SECRET` | Slack app → Basic Information → Signing Secret | **Rejected (401).** Fails closed. |
+| Inbound email | `RESEND_INBOUND_WEBHOOK_SECRET` | Resend → inbound webhook settings | **Rejected (401).** Fails closed. |
 | Zendesk | *(per-integration, set in the app)* | Generated when you enable the Zendesk webhook | Rejected (401). Fails closed. |
 | Jira / Asana / Linear | *(per-integration, set in the app)* | Generated on connect | Rejected. Fails closed. |
 
-Slack and inbound email are in a **grace period**: they still accept unsigned
-deliveries so that existing installs keep ingesting, but every such request logs a
-`SECURITY-SHADOW` warning naming the missing variable, and the backend warns at
-startup if you have an active Slack integration with no signing secret. Settings →
-Integrations also flags the affected integration. Set the secret before the next
-release turns those warnings into rejections.
+Slack and inbound email **fail closed**: if `SLACK_SIGNING_SECRET` or
+`RESEND_INBOUND_WEBHOOK_SECRET` is unset, every delivery is rejected with 401. The
+backend warns at startup when you have an active Slack integration or email source
+with no signing secret, and Settings → Integrations flags Slack. Set the secret for
+any source you actually use: `SLACK_SIGNING_SECRET` (Slack app → Basic Information
+→ Signing Secret) and `RESEND_INBOUND_WEBHOOK_SECRET` (Resend → inbound webhook
+settings).
 
 Zendesk, Jira, Asana and Linear store their webhook secret **per integration** in the
 database rather than in an environment variable, so there is nothing to configure in

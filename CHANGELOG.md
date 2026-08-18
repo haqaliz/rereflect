@@ -7,6 +7,21 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Changed — Slack and inbound-email webhooks now require a signing secret (fail closed)
+
+- **Behavior change.** `SLACK_SIGNING_SECRET` and `RESEND_INBOUND_WEBHOOK_SECRET`
+  are no longer optional when you use those sources: an unset secret now rejects
+  every delivery with **401** instead of accepting it unverified. This ends the
+  grace period that shipped with the webhook hardening; the two verifiers now fail
+  closed exactly like the other five (Intercom/Zendesk/Jira/Asana/Linear).
+- **If you never set them, set them now.** `SLACK_SIGNING_SECRET` (Slack app →
+  Basic Information → Signing Secret) and `RESEND_INBOUND_WEBHOOK_SECRET` (Resend →
+  inbound webhook settings) — otherwise Slack and inbound-email feedback stops
+  arriving. The backend warns at startup when an active Slack integration or email
+  source has no signing secret, and Settings → Integrations flags Slack.
+- **Already configured:** no change — valid signatures accepted, invalid rejected,
+  exactly as before.
+
 ### Added — Intercom webhook replies & ratings now enrich items in real time
 
 - **The webhook path is no longer inert.** `conversation.user.replied` and
@@ -322,6 +337,11 @@ They still accept unsigned deliveries for now, but log a `SECURITY-SHADOW` warni
 request, warn at startup when an active integration has no secret, and are flagged in
 Settings → Integrations. A future release rejects them. The test allowlisting them fails the
 moment that happens, so the grace period cannot quietly become permanent.
+
+**Correction (2026-08-17):** the grace period has ended — the flip shipped. Slack and
+inbound-email webhooks now fail closed: an unset signing secret rejects every delivery with
+401. Set `SLACK_SIGNING_SECRET` / `RESEND_INBOUND_WEBHOOK_SECRET`, or those sources stop
+delivering. See the Unreleased behavior-change entry above.
 
 ### Fixed — Intercom ingestion never produced a feedback item, in any release
 

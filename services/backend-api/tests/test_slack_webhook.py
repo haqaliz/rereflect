@@ -3,10 +3,10 @@
 Slack ingestion has live production traffic (unlike Intercom, whose ingestion
 never worked because of a separate envelope-shape bug — see test_intercom.py's
 TestVerifyIntercomSignatureFailsClosed for the fail-closed treatment there).
-Flipping Slack closed immediately would silently stop real feedback flowing
-for any operator who never set SLACK_SIGNING_SECRET, so it gets shadow mode
-instead: keep accepting, but log loudly via the SECURITY-SHADOW marker so the
-gap is visible, with enforcement to follow in a later release.
+It shipped in shadow mode for a grace period (keep accepting, but log
+loudly) so operators could set SLACK_SIGNING_SECRET before enforcement. That
+grace period ended 2026-08-17: the verifier now fails closed like the other
+five — an unset secret rejects the delivery with 401.
 """
 import hashlib
 import hmac
@@ -25,15 +25,12 @@ def _make_slack_signature(body: str, timestamp: str, secret: str) -> str:
     ).hexdigest()
 
 
-class TestVerifySlackSignatureShadowMode:
+class TestVerifySlackSignatureFailClosed:
     """Unit-level coverage of verify_slack_signature's unset-secret path."""
 
-    def test_missing_secret_accepts_in_shadow_but_warns(
-        self, caplog: pytest.LogCaptureFixture
-    ):
-        """Shadow mode: an unset secret must still return True (Slack keeps
-        accepting live traffic), but must log the SECURITY-SHADOW marker so
-        an operator can find and close the gap before enforcement lands."""
+    def test_missing_secret_rejects(self, caplog: pytest.LogCaptureFixture):
+        """Fail closed: an unset secret must return False (reject), logging
+        the non-shadow warning that names the missing variable."""
         from src.api.routes.source_webhooks import verify_slack_signature
 
         with caplog.at_level("WARNING"):
@@ -41,43 +38,35 @@ class TestVerifySlackSignatureShadowMode:
                 body="{}", timestamp=str(int(time.time())), signature="v0=whatever", secret=""
             )
 
-        assert result is True
+        assert result is False
         assert any(
-            "SECURITY-SHADOW: signature verification unconfigured" in record.message
+            "SLACK_SIGNING_SECRET not configured, rejecting webhook (fails closed)"
+            in record.message
             for record in caplog.records
         )
 
 
-class TestSlackWebhookShadowMode:
+class TestSlackWebhookFailClosed:
     """Tests for POST /api/v1/webhooks/slack/events signature handling."""
 
     @patch("src.api.routes.source_webhooks.SLACK_SIGNING_SECRET", "")
-    def test_unset_secret_accepts_request_and_logs_marker(
-        self, client: TestClient, caplog: pytest.LogCaptureFixture
-    ):
-        """With SLACK_SIGNING_SECRET unset, an unsigned request is still
-        accepted (200) — shadow mode, not fail-closed — but the shadow
-        marker must be logged."""
+    def test_unset_secret_rejects_request(self, client: TestClient):
+        """With SLACK_SIGNING_SECRET unset, an unsigned request is rejected
+        with 401 — fail closed, matching the other webhook verifiers."""
         payload = {"type": "url_verification", "challenge": "abc123"}
         body = json.dumps(payload)
 
-        with caplog.at_level("WARNING"):
-            response = client.post(
-                "/api/v1/webhooks/slack/events",
-                content=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Slack-Request-Timestamp": str(int(time.time())),
-                    "X-Slack-Signature": "v0=whatever",
-                },
-            )
-
-        assert response.status_code == 200
-        assert response.json()["challenge"] == "abc123"
-        assert any(
-            "SECURITY-SHADOW: signature verification unconfigured" in record.message
-            for record in caplog.records
+        response = client.post(
+            "/api/v1/webhooks/slack/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Slack-Request-Timestamp": str(int(time.time())),
+                "X-Slack-Signature": "v0=whatever",
+            },
         )
+
+        assert response.status_code == 401
 
     @patch("src.api.routes.source_webhooks.SLACK_SIGNING_SECRET", "real-secret")
     def test_configured_secret_rejects_bad_signature(self, client: TestClient):

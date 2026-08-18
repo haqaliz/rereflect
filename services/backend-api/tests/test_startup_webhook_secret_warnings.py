@@ -1,11 +1,11 @@
 """
-Boot-time visibility for the Slack / email webhook shadow mode (Phase 4).
+Boot-time fail-closed notice for unconfigured Slack / email webhook secrets.
 
 source_webhooks.verify_slack_signature and email_webhooks._verify_webhook_signature
-already log a SECURITY-SHADOW warning on every unsigned request when their secret
-is unset — but that's a request-path log, easy to miss under normal traffic. This
-is the boot-time equivalent: loud, once, at startup, only when it actually matters
-(there's a live integration/source that needs the secret).
+fail closed: when their secret is unset every delivery is rejected (401). That
+per-request log is easy to miss under normal traffic, so this is the boot-time
+equivalent: loud, once, at startup, only when it actually matters (there's a
+live integration/source that needs the secret).
 """
 import pytest
 from unittest.mock import patch
@@ -46,8 +46,8 @@ class TestSlackStartupWarning:
             fn(db)
 
         assert any(
-            "SECURITY-SHADOW: signature verification unconfigured" in r.message
-            and "Slack" in r.message
+            "deliveries will be rejected" in r.message
+            and "SLACK_SIGNING_SECRET" in r.message
             for r in caplog.records
         )
 
@@ -65,7 +65,7 @@ class TestSlackStartupWarning:
         with caplog.at_level("WARNING"):
             fn(db)
 
-        assert not any("SECURITY-SHADOW" in r.message for r in caplog.records)
+        assert not any("will be rejected" in r.message for r in caplog.records)
 
     @patch("src.api.routes.source_webhooks.SLACK_SIGNING_SECRET", "")
     def test_no_warning_when_no_active_slack_integration(
@@ -82,7 +82,7 @@ class TestSlackStartupWarning:
         with caplog.at_level("WARNING"):
             fn(db)
 
-        assert not any("SECURITY-SHADOW" in r.message for r in caplog.records)
+        assert not any("will be rejected" in r.message for r in caplog.records)
 
 
 class TestEmailStartupWarning:
@@ -104,8 +104,8 @@ class TestEmailStartupWarning:
             fn(db)
 
         assert any(
-            "SECURITY-SHADOW: signature verification unconfigured" in r.message
-            and "email" in r.message.lower()
+            "deliveries will be rejected" in r.message
+            and "RESEND_INBOUND_WEBHOOK_SECRET" in r.message
             for r in caplog.records
         )
 
@@ -126,7 +126,7 @@ class TestEmailStartupWarning:
         with caplog.at_level("WARNING"):
             fn(db)
 
-        assert not any("SECURITY-SHADOW" in r.message for r in caplog.records)
+        assert not any("will be rejected" in r.message for r in caplog.records)
 
     @patch("src.api.routes.email_webhooks.RESEND_INBOUND_WEBHOOK_SECRET", None)
     def test_no_warning_when_no_active_email_source(
@@ -145,7 +145,7 @@ class TestEmailStartupWarning:
         with caplog.at_level("WARNING"):
             fn(db)
 
-        assert not any("SECURITY-SHADOW" in r.message for r in caplog.records)
+        assert not any("will be rejected" in r.message for r in caplog.records)
 
 
 class TestStartupWarningNeverBlocksBoot:
