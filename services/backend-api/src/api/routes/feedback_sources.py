@@ -4,6 +4,7 @@ Supports Slack, Discord, Webhooks, and other integrations.
 """
 
 import logging
+import secrets
 import uuid
 from typing import List, Optional
 from datetime import datetime
@@ -21,6 +22,18 @@ from cryptography.fernet import InvalidToken
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/feedback-sources", tags=["feedback-sources"])
+
+
+def _serialized_provider_config(source: "FeedbackSource") -> dict:
+    """Provider config as returned to clients.
+
+    The per-source `secret_token` is display-once (create response only, via
+    `webhook_secret`); it is stripped everywhere else so the capability-URL
+    view never echoes the delivery credential.
+    """
+    config = dict(source.provider_config or {})
+    config.pop("secret_token", None)
+    return config
 
 
 # ============ Pydantic Schemas ============
@@ -86,6 +99,9 @@ class FeedbackSourceResponse(BaseModel):
     updated_at: datetime
     # Computed fields
     webhook_url: Optional[str] = None
+    # Display-once: only the create response carries the minted per-source
+    # secret. GET/PATCH/list responses leave this None.
+    webhook_secret: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -254,7 +270,7 @@ def list_feedback_sources(
             "integration_id": source.integration_id,
             "source_type": source.source_type,
             "name": source.name,
-            "provider_config": source.provider_config or {},
+            "provider_config": _serialized_provider_config(source),
             "triggers": source.triggers or {},
             "field_mapping": source.field_mapping or {},
             "auto_import": source.auto_import,
@@ -409,9 +425,16 @@ def create_feedback_source(
         if integration_config.get("workspace_name"):
             provider_config["workspace_name"] = integration_config["workspace_name"]
 
+    webhook_secret = None
     if data.source_type == "webhook":
         webhook_id = str(uuid.uuid4())
         provider_config["webhook_id"] = webhook_id
+        # Mint-and-require: new generic webhook sources always carry a
+        # per-source secret (delivery fails closed without it). Shown once
+        # in this response only; grandfathered sources without one keep the
+        # documented capability-URL posture until an operator PATCHes one in.
+        webhook_secret = secrets.token_urlsafe(32)
+        provider_config["secret_token"] = webhook_secret
 
     if data.source_type == "email":
         # Generate unique inbound address: feedback-{8char_hash}@rereflect.ca
@@ -441,7 +464,7 @@ def create_feedback_source(
         "integration_id": source.integration_id,
         "source_type": source.source_type,
         "name": source.name,
-        "provider_config": source.provider_config or {},
+        "provider_config": _serialized_provider_config(source),
         "triggers": source.triggers or {},
         "field_mapping": source.field_mapping or {},
         "auto_import": source.auto_import,
@@ -453,6 +476,7 @@ def create_feedback_source(
         "created_at": source.created_at,
         "updated_at": source.updated_at,
         "webhook_url": None,
+        "webhook_secret": webhook_secret,
     }
 
     if source.source_type == "webhook":
@@ -476,7 +500,7 @@ def get_feedback_source(
         "integration_id": source.integration_id,
         "source_type": source.source_type,
         "name": source.name,
-        "provider_config": source.provider_config or {},
+        "provider_config": _serialized_provider_config(source),
         "triggers": source.triggers or {},
         "field_mapping": source.field_mapping or {},
         "auto_import": source.auto_import,
@@ -535,7 +559,7 @@ def update_feedback_source(
         "integration_id": source.integration_id,
         "source_type": source.source_type,
         "name": source.name,
-        "provider_config": source.provider_config or {},
+        "provider_config": _serialized_provider_config(source),
         "triggers": source.triggers or {},
         "field_mapping": source.field_mapping or {},
         "auto_import": source.auto_import,
