@@ -2469,6 +2469,7 @@ Set the secret for each source you actually use:
 | Inbound email | `RESEND_INBOUND_WEBHOOK_SECRET` | Resend → inbound webhook settings | **Rejected (401).** Fails closed. |
 | Zendesk | *(per-integration, set in the app)* | Generated when you enable the Zendesk webhook | Rejected (401). Fails closed. |
 | Jira / Asana / Linear | *(per-integration, set in the app)* | Generated on connect | Rejected. Fails closed. |
+| Generic inbound webhook | *(per-source, set in the app)* | Minted at source creation, shown once | New sources reject unsigned deliveries (401); pre-existing sources without a secret stay capability-URL |
 
 Slack and inbound email **fail closed**: if `SLACK_SIGNING_SECRET` or
 `RESEND_INBOUND_WEBHOOK_SECRET` is unset, every delivery is rejected with 401. The
@@ -2482,14 +2483,21 @@ Zendesk, Jira, Asana and Linear store their webhook secret **per integration** i
 database rather than in an environment variable, so there is nothing to configure in
 `.env` for those — the secret is created when you connect.
 
-### The internal events endpoint
+**Generic inbound webhook (Sources → Webhook).** The generic webhook source
+(`POST <your-api-base>/api/v1/webhooks/inbound/{webhook_id}`) authenticates
+deliveries with a per-source secret stored in the app, not an environment variable:
 
-`POST /api/internal/events/emit` pushes realtime events to connected dashboards and is
-guarded by `INTERNAL_EVENTS_SECRET`. **It has no default**: if the variable is unset,
-the endpoint rejects every request with `403`, which is the safe state. Nothing in
-Rereflect calls this endpoint today — it exists for external tooling that wants to push
-events into the dashboard. Generate a secret with `openssl rand -hex 32` if you use it,
-and keep the endpoint off the public internet either way.
+- Sources **created after 2026-08-18** are minted with a `secret_token` at creation
+  and show it **once** in the create response (`webhook_secret`). Deliveries to
+  those sources must send it as the `X-Webhook-Secret` header — missing or wrong →
+  **401 (fails closed)**.
+- Sources **created before that** have no secret and keep the capability-URL model:
+  any delivery with the (unguessable, member-visible) URL is accepted. To harden one,
+  add a secret via **PATCH** on the source with
+  `provider_config.secret_token` (e.g. `curl -X PATCH .../api/v1/feedback-sources/{id}
+  -H 'Content-Type: application/json' -d '{"provider_config": {"webhook_id":
+  "<existing id>", "secret_token": "<random string>"}}'` — the stored `webhook_id` is
+  preserved). From then on the source fails closed like a new one.
 
 ### Redis is required for automation cooldowns
 
