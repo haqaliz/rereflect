@@ -6,7 +6,8 @@ import React from 'react';
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockPush = vi.fn();
-const mockRouter = { push: mockPush, replace: vi.fn() };
+const mockReplace = vi.fn();
+const mockRouter = { push: mockPush, replace: mockReplace };
 // Stable searchParams instance per test (re-assigned in beforeEach), avoids
 // re-triggering effects that depend on identity.
 let mockSearchParams = new URLSearchParams();
@@ -14,6 +15,11 @@ vi.mock('next/navigation', () => ({
   useRouter: () => mockRouter,
   useSearchParams: () => mockSearchParams,
   usePathname: () => '/settings/integrations/new',
+}));
+
+const mockUseAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock('@/lib/api/integrations', () => ({
@@ -53,9 +59,28 @@ const templateVariablesResponse = {
   default_template: 'New feedback: {{text}}',
 };
 
+const adminUser = {
+  id: 1,
+  email: 'admin@test.com',
+  role: 'admin',
+  plan: 'enterprise',
+  organization_id: 1,
+  is_system_admin: false,
+};
+
+const memberUser = {
+  id: 2,
+  email: 'member@test.com',
+  role: 'member',
+  plan: 'enterprise',
+  organization_id: 1,
+  is_system_admin: false,
+};
+
 describe('NewIntegrationPage - Discord tile selection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: adminUser });
     mockSearchParams = new URLSearchParams();
     mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
   });
@@ -110,6 +135,7 @@ describe('NewIntegrationPage - Discord tile selection', () => {
 describe('NewIntegrationPage - preselected via ?type=discord', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: adminUser });
     mockSearchParams = new URLSearchParams('type=discord');
     mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
   });
@@ -129,6 +155,7 @@ describe('NewIntegrationPage - preselected via ?type=discord', () => {
 describe('NewIntegrationPage - submit calls the right API per type', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: adminUser });
     mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
     mockCreateDiscordWebhook.mockResolvedValue({ id: 99, type: 'discord' });
     mockCreateSlackWebhook.mockResolvedValue({ id: 98, type: 'slack' });
@@ -209,5 +236,26 @@ describe('NewIntegrationPage - submit calls the right API per type', () => {
       );
     });
     expect(mockCreateDiscordWebhook).not.toHaveBeenCalled();
+  });
+});
+
+describe('NewIntegrationPage - member redirect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseAuth.mockReturnValue({ user: memberUser });
+    mockSearchParams = new URLSearchParams();
+    mockGetTemplateVariables.mockResolvedValue(templateVariablesResponse);
+  });
+
+  it('redirects a member user to /settings/preferences and does not render the connect form', async () => {
+    render(<NewIntegrationPage />);
+
+    await waitFor(() => {
+      expect(mockReplace).toHaveBeenCalledWith('/settings/preferences');
+    });
+
+    expect(screen.queryByText('Connect to Slack')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Create Integration/ })).not.toBeInTheDocument();
+    expect(mockGetTemplateVariables).not.toHaveBeenCalled();
   });
 });
