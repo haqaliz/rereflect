@@ -7,12 +7,13 @@ default install every auth token, OIDC state value and Salesforce OAuth state
 value was signed with a key anyone could read off GitHub. Forging a token for
 any organization required nothing but the URL.
 
-This is the same class as `INTERNAL_EVENTS_SECRET`, which defaulted to
-"dev-secret" and was fixed on feat/integration-auth-tenancy-hardening. That one
-could fail closed by rejecting requests. This one cannot -- a JWT secret that
-refuses to work means nobody can log in -- so it fails LOUD instead: the
-application refuses to import with an actionable message rather than starting
-up quietly insecure.
+This is the same class as the internal-events push endpoint's shared secret,
+which defaulted to "dev-secret" and was fixed on
+feat/integration-auth-tenancy-hardening (that endpoint has since been deleted).
+That one could fail closed by rejecting requests. This one cannot -- a JWT
+secret that refuses to work means nobody can log in -- so it fails LOUD
+instead: the application refuses to import with an actionable message rather
+than starting up quietly insecure.
 
 Upgrade consequence, stated plainly: an operator who was relying on the default
 must now set JWT_SECRET, and existing sessions are invalidated because they were

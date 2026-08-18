@@ -312,7 +312,7 @@ Three problems, each of which was the shipped default rather than an edge case:
   payload-supplied id is present. Four branches had no guard for the missing case and fell
   through to "every active source on the instance." Only Zendesk was guarded — it had been
   fixed once, in isolation, and the identical shape was left standing everywhere else.
-- **`/api/internal/events/emit` shipped with a public default secret.** It defaulted to the
+- **The internal events push endpoint shipped with a public default secret.** It defaulted to the
   literal `"dev-secret"` in an open-source repository, compared it non-constant-time, and
   took the target `org_id` straight from the request body. This one required no integration
   to be configured at all.
@@ -327,7 +327,8 @@ feedback injection, which is why the tenancy fix landed first and why the shape 
 deliberately still pending.
 
 **Fixed:** Intercom and Linear now fail closed; the tenancy guard is applied to all four
-unguarded branches; `INTERNAL_EVENTS_SECRET` has no default and is compared in constant time.
+unguarded branches; the internal events push secret has no default and is compared in
+constant time.
 A new test enumerates every signature verifier in the codebase and asserts each fails closed,
 so this cannot be fixed one verifier at a time again.
 

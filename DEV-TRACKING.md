@@ -344,10 +344,11 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 > - **The inbound-email (Resend) verifier also failed open**, and resolves its org by matching an
 >   attacker-supplied address across every org's sources. Its rate limit is keyed on the
 >   *resolved* org, so it throttles the victim.
-> - **`/api/internal/events/emit` was worse than this P0** — `INTERNAL_EVENTS_SECRET` defaulted to
+> - **The internal events push endpoint was worse than this P0** — its shared secret defaulted to
 >   the literal `"dev-secret"`, compared with `!=`, with `org_id` taken from the request body. It
->   needs no integration configured at all. Fixed; it also turns out to have **no production
->   caller** (see [[dead-crossprocess-surface]]), so failing it closed was migration-free.
+>   needs no integration configured at all. Fixed; it also turned out to have **no production
+>   caller** (see [[dead-crossprocess-surface]]), so failing it closed was migration-free —
+>   and it has since been **deleted** (2026-08-18, `chore/backend-security-smalls`).
 > - **`_verify_linear_signature` also failed open** — found by the new cross-verifier test, not by
 >   the sweep. Fixed; behaviour-neutral (its sole caller already guarded).
 >
@@ -466,7 +467,8 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   without `JWT_SECRET`, and the old public default is rejected explicitly so it cannot be
   pasted back in as a "fix". **Upgrading installs must set it, and existing sessions are
   invalidated** — documented in `SELF_HOSTING.md`. ORIGINAL ENTRY: — `src/api/auth.py:11` defaults to `"dev-secret-key"`. Same class as
-  the `events/emit` default, far larger blast radius.
+  the internal-events push endpoint's default (fixed on
+  `feat/integration-auth-tenancy-hardening`, then deleted 2026-08-18), far larger blast radius.
 
 ### Found while doing the Intercom work (2026-08-01)
 

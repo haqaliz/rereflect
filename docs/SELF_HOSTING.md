@@ -2499,15 +2499,6 @@ deliveries with a per-source secret stored in the app, not an environment variab
   "<existing id>", "secret_token": "<random string>"}}'` — the stored `webhook_id` is
   preserved). From then on the source fails closed like a new one.
 
-### The internal events endpoint
-
-`POST /api/internal/events/emit` pushes realtime events to connected dashboards and is
-guarded by `INTERNAL_EVENTS_SECRET`. **It has no default**: if the variable is unset,
-the endpoint rejects every request with `403`, which is the safe state. Nothing in
-Rereflect calls this endpoint today — it exists for external tooling that wants to push
-events into the dashboard. Generate a secret with `openssl rand -hex 32` if you use it,
-and keep the endpoint off the public internet either way.
-
 ### Redis is required for automation cooldowns
 
 Churn/health automation rules (including the `run_playbook` action triggered by a
