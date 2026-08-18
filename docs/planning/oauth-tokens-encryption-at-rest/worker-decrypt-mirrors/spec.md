@@ -20,6 +20,9 @@ dead-import defect that must not be copied.
   (Slack + Intercom), `anomaly.py:270`, `notification_dispatch.py:104`, `:701`.
   Truthiness guards at `alerts.py:356,417` and `anomaly.py:268` /
   `notification_dispatch.py:102,699` stay as-is.
+  > **Note (2026-08-18, `worker-cleanup-smalls`):** `anomaly.py:270` and its guard no
+  > longer exist — the anomaly Slack sender was dead code and was deleted; the worker
+  > read sites are now `alerts.py:445`, `source_events.py:314`, `notification_dispatch.py:104`, `:701`.
 - R4: fix `intercom_sync.py:76-80` `_decrypt` to use the same local Fernet helper
   instead of `from src.utils.encryption import decrypt_api_key`; pin with a test that
   calls it **without** monkeypatching `_decrypt`.
