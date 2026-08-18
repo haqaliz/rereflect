@@ -58,6 +58,7 @@ import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -87,6 +88,10 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const resolvedParams = use(params);
   const sourceId = parseInt(resolvedParams.id);
+  const { user } = useAuth();
+
+  // Only admin/owner can manage sources (backend enforces; UI hides the affordances)
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
   const [source, setSource] = useState<FeedbackSource | null>(null);
   const [events, setEvents] = useState<FeedbackSourceEvent[]>([]);
@@ -355,14 +360,16 @@ function SourceDetailContent({ params }: { params: Promise<{ id: string }> }) {
                 </div>
               </div>
             </div>
-            <Button
-              variant="outline"
-              onClick={handleDelete}
-              className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
-            </Button>
+            {isAdminOrOwner && (
+              <Button
+                variant="outline"
+                onClick={handleDelete}
+                className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete
+              </Button>
+            )}
           </div>
         </div>
 
@@ -546,6 +553,7 @@ requests.post(
                 value={form.name}
                 onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
                 placeholder="Enter a name for this source"
+                disabled={!isAdminOrOwner}
               />
             </div>
 
@@ -558,6 +566,7 @@ requests.post(
               <Switch
                 checked={form.is_active}
                 onCheckedChange={checked => setForm(prev => ({ ...prev, is_active: checked }))}
+                disabled={!isAdminOrOwner}
               />
             </div>
 
@@ -574,6 +583,7 @@ requests.post(
               <Switch
                 checked={form.auto_import}
                 onCheckedChange={checked => setForm(prev => ({ ...prev, auto_import: checked }))}
+                disabled={!isAdminOrOwner}
               />
             </div>
           </CardContent>
@@ -603,6 +613,7 @@ requests.post(
                         id={`trigger-${trigger.key}`}
                         checked={isEnabled}
                         onCheckedChange={() => toggleTrigger(trigger.key)}
+                        disabled={!isAdminOrOwner}
                       />
                     )}
                     <div className="flex-1">
@@ -624,8 +635,9 @@ requests.post(
                               onChange={e => setReactionInput(e.target.value)}
                               onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addReaction())}
                               className="flex-1"
+                              disabled={!isAdminOrOwner}
                             />
-                            <Button type="button" onClick={addReaction} size="sm">
+                            <Button type="button" onClick={addReaction} size="sm" disabled={!isAdminOrOwner}>
                               Add
                             </Button>
                           </div>
@@ -636,7 +648,7 @@ requests.post(
                                   key={emoji}
                                   variant="secondary"
                                   className="cursor-pointer"
-                                  onClick={() => removeReaction(emoji)}
+                                  onClick={() => isAdminOrOwner && removeReaction(emoji)}
                                 >
                                   :{emoji}: ×
                                 </Badge>
@@ -656,8 +668,9 @@ requests.post(
                               onChange={e => setKeywordInput(e.target.value)}
                               onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addKeyword())}
                               className="flex-1"
+                              disabled={!isAdminOrOwner}
                             />
-                            <Button type="button" onClick={addKeyword} size="sm">
+                            <Button type="button" onClick={addKeyword} size="sm" disabled={!isAdminOrOwner}>
                               Add
                             </Button>
                           </div>
@@ -668,7 +681,7 @@ requests.post(
                                   key={keyword}
                                   variant="secondary"
                                   className="cursor-pointer"
-                                  onClick={() => removeKeyword(keyword)}
+                                  onClick={() => isAdminOrOwner && removeKeyword(keyword)}
                                 >
                                   {keyword} ×
                                 </Badge>
@@ -696,6 +709,7 @@ requests.post(
               <Label>Text Source</Label>
               <Select
                 value={form.field_mapping.text_source || 'message'}
+                disabled={!isAdminOrOwner}
                 onValueChange={value =>
                   setForm(prev => ({
                     ...prev,
@@ -718,6 +732,7 @@ requests.post(
               <Label>Include Author Info</Label>
               <Switch
                 checked={form.field_mapping.include_author ?? true}
+                disabled={!isAdminOrOwner}
                 onCheckedChange={checked =>
                   setForm(prev => ({
                     ...prev,
@@ -731,6 +746,7 @@ requests.post(
               <Label>Include Source Name</Label>
               <Switch
                 checked={form.field_mapping.include_source_name ?? true}
+                disabled={!isAdminOrOwner}
                 onCheckedChange={checked =>
                   setForm(prev => ({
                     ...prev,
@@ -816,16 +832,18 @@ requests.post(
         </Dialog>
 
         {/* Save Button */}
-        <div className="flex justify-end">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save Changes
-          </Button>
-        </div>
+        {isAdminOrOwner && (
+          <div className="flex justify-end">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-2" />
+              )}
+              Save Changes
+            </Button>
+          </div>
+        )}
       </main>
     </div>
   );

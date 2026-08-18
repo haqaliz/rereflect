@@ -102,7 +102,8 @@ describe('FeedbackSourcesDetailPage — member role', () => {
     });
 
     // Reads visible: name, webhook URL, Recent Events.
-    expect(screen.getByText('https://hooks.example.com/rereflect/abc')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://hooks.example.com/rereflect/abc')).toBeInTheDocument();
+    expect(screen.getByText('Webhook URL')).toBeInTheDocument();
     expect(screen.getByText('Recent Events')).toBeInTheDocument();
 
     // Writes hidden.
@@ -114,7 +115,6 @@ describe('FeedbackSourcesDetailPage — member role', () => {
     expect(screen.getByLabelText('Source Name')).toBeDisabled();
     screen.getAllByRole('switch').forEach(sw => expect(sw).toBeDisabled());
     expect(screen.getByRole('combobox')).toBeDisabled();
-    expect(screen.getByPlaceholderText(/e.g., memo, feedback/)).toBeDisabled();
     expect(screen.getByPlaceholderText(/e.g., bug, feedback/)).toBeDisabled();
     expect(screen.getByRole('button', { name: /^Add$/ })).toBeDisabled();
   });

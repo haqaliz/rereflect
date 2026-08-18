@@ -41,6 +41,7 @@ import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Source type icon mapping
 const SOURCE_ICONS: Record<string, React.ElementType> = {
@@ -67,6 +68,7 @@ const SOURCE_COLORS: Record<string, string> = {
 };
 
 function FeedbackSourcesContent() {
+  const { user } = useAuth();
   const [sources, setSources] = useState<FeedbackSource[]>([]);
   const [sourceTypes, setSourceTypes] = useState<SourceTypeInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +76,9 @@ function FeedbackSourcesContent() {
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmMessage, setConfirmMessage] = useState('');
+
+  // Only admin/owner can manage sources (backend enforces; UI hides the affordances)
+  const isAdminOrOwner = user?.role === 'owner' || user?.role === 'admin';
 
   const requestConfirm = (message: string, action: () => void) => {
     setConfirmMessage(message);
@@ -191,12 +196,14 @@ function FeedbackSourcesContent() {
                   Pending Queue
                 </Button>
               </Link>
-              <Link href="/feedback-sources/new">
-                <Button className="flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  Add Source
-                </Button>
-              </Link>
+              {isAdminOrOwner && (
+                <Link href="/feedback-sources/new">
+                  <Button className="flex items-center gap-2">
+                    <Plus className="w-4 h-4" />
+                    Add Source
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -217,12 +224,14 @@ function FeedbackSourcesContent() {
                 <p className="text-muted-foreground mb-6">
                   Connect a source to start receiving feedback automatically
                 </p>
-                <Link href="/feedback-sources/new">
-                  <Button>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Your First Source
-                  </Button>
-                </Link>
+                {isAdminOrOwner && (
+                  <Link href="/feedback-sources/new">
+                    <Button>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Your First Source
+                    </Button>
+                  </Link>
+                )}
               </div>
             ) : (
               <div className="space-y-4">
@@ -316,48 +325,50 @@ function FeedbackSourcesContent() {
                           </div>
                         </Link>
 
-                        <div className="flex items-center gap-2 ml-4">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleToggleActive(source);
-                            }}
-                            disabled={togglingId === source.id}
-                            title={source.is_active ? 'Pause source' : 'Activate source'}
-                          >
-                            {togglingId === source.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : source.is_active ? (
-                              <Pause className="w-4 h-4" />
-                            ) : (
-                              <Play className="w-4 h-4" />
-                            )}
-                          </Button>
-                          <Link href={`/feedback-sources/${source.id}`}>
-                            <Button variant="outline" size="sm" title="Configure">
-                              <Settings2 className="w-4 h-4" />
+                        {isAdminOrOwner && (
+                          <div className="flex items-center gap-2 ml-4">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleToggleActive(source);
+                              }}
+                              disabled={togglingId === source.id}
+                              title={source.is_active ? 'Pause source' : 'Activate source'}
+                            >
+                              {togglingId === source.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : source.is_active ? (
+                                <Pause className="w-4 h-4" />
+                              ) : (
+                                <Play className="w-4 h-4" />
+                              )}
                             </Button>
-                          </Link>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleDelete(source);
-                            }}
-                            disabled={deletingId === source.id}
-                            className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                            title="Delete"
-                          >
-                            {deletingId === source.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
-                          </Button>
-                        </div>
+                            <Link href={`/feedback-sources/${source.id}`}>
+                              <Button variant="outline" size="sm" title="Configure">
+                                <Settings2 className="w-4 h-4" />
+                              </Button>
+                            </Link>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleDelete(source);
+                              }}
+                              disabled={deletingId === source.id}
+                              className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                              title="Delete"
+                            >
+                              {deletingId === source.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </div>
+                        )}
                       </div>
 
                       {/* Stats row */}
@@ -445,7 +456,7 @@ function FeedbackSourcesContent() {
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">{type.description}</p>
                       </div>
-                      {type.available && (
+                      {type.available && isAdminOrOwner && (
                         <Link href={`/feedback-sources/new?type=${type.type}`}>
                           <Button size="sm" variant="outline">
                             <Plus className="w-4 h-4" />
