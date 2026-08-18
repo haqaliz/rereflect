@@ -19,6 +19,49 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
   before this change; the main pipe never delivered anomaly email (Slack/Discord
   only). This is cleanup of a dead path, not a regression.
 
+### Removed — the orphaned internal realtime-push endpoint
+
+- **The internal HTTP endpoint for pushing realtime events (and its
+  shared-secret env guard) is deleted** — it had zero production callers
+  since it shipped (verified repo-wide), so nothing breaks. The WebSocket
+  side (`/ws/events`), the `emit_event` service and its in-process callers
+  are unchanged, and webhook dispatch is unaffected (that is a different
+  mechanism entirely).
+- Operators who set that env var can drop the variable; the related
+  `.env.example` / `.env.prod.example` entries and the SELF_HOSTING section
+  are removed.
+
+### Security — generic inbound webhook sources now mint a per-source secret (fail closed)
+
+- **New generic webhook sources get a secret.** Creating a Webhook source now
+  mints a per-source `secret_token` (shown **once** in the create response as
+  `webhook_secret`) and deliveries to it must send it as the
+  `X-Webhook-Secret` header — missing or wrong → **401 (fails closed)**.
+- **Existing sources are grandfathered.** Sources created before this change
+  have no secret and keep the capability-URL model; to harden one, PATCH the
+  source with `provider_config.secret_token` (the stored `webhook_id` is
+  preserved), and it starts failing closed too. See *Inbound webhook signing
+  secrets* in `docs/SELF_HOSTING.md`.
+- *Honest limits:* the secret lives in the source's `provider_config` JSON
+  (same storage as `webhook_id`) — per-source secret encryption is a recorded
+  follow-up; the capability-URL posture only changes for sources created
+  after this release.
+
+### Fixed — OAuth connect state is stateless (Slack, Intercom, Linear)
+
+- **The in-process OAuth state dicts are gone.** Slack, Intercom and Linear
+  OAuth `state` is now an HMAC-signed, app-secret-keyed, 10-minute-TTL blob
+  (stateless, same scheme as Salesforce) instead of a module-level Python
+  dict. OAuth callbacks no longer fail when they land on a different backend
+  replica than the one that issued the authorize URL, and nothing unbounded
+  accumulates in memory.
+- **Forged or expired state fails closed** — tampered, expired, or
+  wrong-key states redirect with `oauth_error=invalid_state`, exactly like
+  invalid states did before.
+- *Honest limits:* signing uses the app secret (`JWT_SECRET`); a secret
+  compromise invalidates state freshness the same way it would for any HMAC
+  scheme.
+
 ### Changed — Slack and inbound-email webhooks now require a signing secret (fail closed)
 
 - **Behavior change.** `SLACK_SIGNING_SECRET` and `RESEND_INBOUND_WEBHOOK_SECRET`
@@ -324,7 +367,7 @@ Three problems, each of which was the shipped default rather than an edge case:
   payload-supplied id is present. Four branches had no guard for the missing case and fell
   through to "every active source on the instance." Only Zendesk was guarded — it had been
   fixed once, in isolation, and the identical shape was left standing everywhere else.
-- **`/api/internal/events/emit` shipped with a public default secret.** It defaulted to the
+- **The internal events push endpoint shipped with a public default secret.** It defaulted to the
   literal `"dev-secret"` in an open-source repository, compared it non-constant-time, and
   took the target `org_id` straight from the request body. This one required no integration
   to be configured at all.
@@ -339,7 +382,8 @@ feedback injection, which is why the tenancy fix landed first and why the shape 
 deliberately still pending.
 
 **Fixed:** Intercom and Linear now fail closed; the tenancy guard is applied to all four
-unguarded branches; `INTERNAL_EVENTS_SECRET` has no default and is compared in constant time.
+unguarded branches; the internal events push secret has no default and is compared in
+constant time.
 A new test enumerates every signature verifier in the codebase and asserts each fails closed,
 so this cannot be fixed one verifier at a time again.
 

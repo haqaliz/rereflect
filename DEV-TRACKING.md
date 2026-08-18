@@ -360,10 +360,11 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 > - **The inbound-email (Resend) verifier also failed open**, and resolves its org by matching an
 >   attacker-supplied address across every org's sources. Its rate limit is keyed on the
 >   *resolved* org, so it throttles the victim.
-> - **`/api/internal/events/emit` was worse than this P0** — `INTERNAL_EVENTS_SECRET` defaulted to
+> - **The internal events push endpoint was worse than this P0** — its shared secret defaulted to
 >   the literal `"dev-secret"`, compared with `!=`, with `org_id` taken from the request body. It
->   needs no integration configured at all. Fixed; it also turns out to have **no production
->   caller** (see [[dead-crossprocess-surface]]), so failing it closed was migration-free.
+>   needs no integration configured at all. Fixed; it also turned out to have **no production
+>   caller** (see [[dead-crossprocess-surface]]), so failing it closed was migration-free —
+>   and it has since been **deleted** (2026-08-18, `chore/backend-security-smalls`).
 > - **`_verify_linear_signature` also failed open** — found by the new cross-verifier test, not by
 >   the sweep. Fixed; behaviour-neutral (its sole caller already guarded).
 >
@@ -448,10 +449,15 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   `.env.example`, `.env.prod.example` and CHANGELOG (behavior-change entry +
   correction of the grace-period note) now tell operators to set
   `SLACK_SIGNING_SECRET` / `RESEND_INBOUND_WEBHOOK_SECRET`.
-  **Follow-up (NOT STARTED): S1 — the generic inbound webhook's per-source
-  `secret_token` still fails open when unset** (source_webhooks.py:270-274 skips
-  verification when the source has no secret_token). Recorded here; explicitly out of
-  scope of the fail-closed flip.
+  **Follow-up — S1 — DONE** (merged <merge-sha>, PR <# pending>): the generic
+  inbound webhook now **mints-and-requires**. Webhook sources created after
+  2026-08-18 carry a per-source `secret_token` (minted at creation, displayed
+  once as `webhook_secret` in the create response, stripped from every other
+  response) and fail closed on delivery — missing or wrong `X-Webhook-Secret`
+  → 401. Grandfathered sources without a secret keep the documented
+  capability-URL posture until an operator PATCHes in a secret (SELF_HOSTING
+  documents the model). Covered by `tests/test_generic_webhook_secret.py`
+  (the route had zero tests before).
 - ~~**`linear-webhook-secret-plaintext`**~~ — **FIXED** on `bug/linear-webhook-secret-plaintext`
   (2026-08-09). Linear's `webhook_secret` is now Fernet-encrypted at rest like every other
   integration: encrypt-on-write at the OAuth callback (missing `LLM_ENCRYPTION_KEY` → 422,
@@ -476,13 +482,20 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   case-insensitively before an event is persisted. ORIGINAL ENTRY: — `source_webhooks.py:229-233` writes
   `dict(request.headers)` into `FeedbackSourceEvent.event_data`, including the source's own
   `X-Webhook-Secret`. Anyone with read access to that table can forge the webhook.
-- **`events-emit-wire-up-or-delete`** — the endpoint has no production caller. Same call as
-  `intercom-writeback-orphaned` (P2): wire it up or delete it.
+- ~~**`events-emit-wire-up-or-delete`**~~ — **FIXED** (merged <merge-sha>, PR <# pending>).
+  **Deleted.** The orphaned internal HTTP push endpoint + `InternalEventRequest`
+  (events_ws.py), its 11 tests (test_event_emitter.py keeps the `emit_event`
+  service tests), the `.env.example` / `.env.prod.example` blocks and the
+  SELF_HOSTING section are gone. It had zero production callers since
+  inception (it is a realtime-WS push seam, NOT the webhook dispatcher —
+  webhook dispatch is untouched; the WS side `/ws/events`, `emit_event` and
+  its ~11 in-process callers all survive).
 - ~~**`jwt-secret-default`**~~ — **FIXED** 2026-08-01. No default; the app refuses to start
   without `JWT_SECRET`, and the old public default is rejected explicitly so it cannot be
   pasted back in as a "fix". **Upgrading installs must set it, and existing sessions are
   invalidated** — documented in `SELF_HOSTING.md`. ORIGINAL ENTRY: — `src/api/auth.py:11` defaults to `"dev-secret-key"`. Same class as
-  the `events/emit` default, far larger blast radius.
+  the internal-events push endpoint's default (fixed on
+  `feat/integration-auth-tenancy-hardening`, then deleted 2026-08-18), far larger blast radius.
 
 ### Found while doing the Intercom work (2026-08-01)
 
@@ -667,12 +680,20 @@ was left by a branch that shipped the fix and did not update the row.
 > corrected to encrypted-at-rest (P1, merged `737bbd5`) — see the comment fix in
 > this change.
 
-### P3 — `oauth-state-in-process-dict` (bug, NOT STARTED)
-- [ ] `oauth_states` (`services/backend-api/src/api/routes/integrations.py:39`) is a
-      module-level Python dict with no TTL and no Redis/DB backing. OAuth callbacks fail
-      intermittently on any multi-replica backend, since the callback may land on a different
-      process than the one that issued the authorize URL. Affects Slack and Intercom.
-- [ ] Also an unbounded in-memory store — entries are never expired.
+### P3 — `oauth-state-in-process-dict` — **FIXED** (merged <merge-sha>, PR <# pending>)
+> Shipped on `chore/backend-security-smalls`: OAuth `state` for Slack, Intercom
+> and Linear is now **stateless and HMAC-signed** — the module-level
+> `oauth_states` / `linear_oauth_states` dicts are deleted and replaced by
+> `src/services/oauth_state.py` (`sign_oauth_state` / `verify_oauth_state`,
+> app-secret keyed via `JWT_SECRET`, `STATE_TTL_SECONDS = 600`, fail-closed
+> `None` on any invalid/expired/unsafe-compare mismatch, digest/encoding
+> byte-identical to the Salesforce precedent). The signed blob carries
+> `{organization_id, name, nonce, exp}` (+ `user_id` for Linear), so callbacks
+> survive multi-replica backends (no process affinity) and nothing unbounded
+> accumulates in memory. The ~12 direct-seeding test sites now drive the
+> signed-state helpers; `tests/test_oauth_state.py` adds tamper/expiry/
+> wrong-key fail-closed cases plus route-level tampered/expired redirect
+> tests for Slack.
 
 ### No build required (recorded so they are not re-opened)
 - **Batch 1 — two comments** were **pure positive signal** on the no-telemetry / self-hosted

@@ -207,13 +207,9 @@ class TestLinearOAuthCallback:
         test_user: User,
     ):
         """Should exchange code for token, fetch org info, and create LinearIntegration."""
-        from src.api.routes.linear_integration import linear_oauth_states
+        from src.services.oauth_state import sign_oauth_state
 
-        test_state = "test-state-abc123"
-        linear_oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "user_id": test_user.id,
-        }
+        test_state = sign_oauth_state(test_organization.id, "Linear", user_id=test_user.id)
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {
@@ -264,17 +260,13 @@ class TestLinearOAuthCallback:
         test_user: User,
     ):
         """Should persist the Linear webhook secret as Fernet ciphertext, never plaintext."""
-        from src.api.routes.linear_integration import linear_oauth_states
         from src.models.linear_integration import LinearIntegration
+        from src.services.oauth_state import sign_oauth_state
         from src.utils.encryption import decrypt_api_key
 
         raw_secret = "raw-webhook-secret-abc123"
 
-        test_state = "test-state-ciphertext"
-        linear_oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "user_id": test_user.id,
-        }
+        test_state = sign_oauth_state(test_organization.id, "Linear", user_id=test_user.id)
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {
@@ -331,14 +323,10 @@ class TestLinearOAuthCallback:
         test_user: User,
     ):
         """Should reject with 422 (never silently store plaintext) when LLM_ENCRYPTION_KEY is unset."""
-        from src.api.routes.linear_integration import linear_oauth_states
         from src.models.linear_integration import LinearIntegration
+        from src.services.oauth_state import sign_oauth_state
 
-        test_state = "test-state-missing-key"
-        linear_oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "user_id": test_user.id,
-        }
+        test_state = sign_oauth_state(test_organization.id, "Linear", user_id=test_user.id)
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {"access_token": "lin_oauth_token_xyz"}
@@ -409,13 +397,9 @@ class TestLinearOAuthCallback:
         test_user: User,
     ):
         """Should create default status mappings on connect."""
-        from src.api.routes.linear_integration import linear_oauth_states
+        from src.services.oauth_state import sign_oauth_state
 
-        test_state = "test-state-defaults"
-        linear_oauth_states[test_state] = {
-            "organization_id": test_organization.id,
-            "user_id": test_user.id,
-        }
+        test_state = sign_oauth_state(test_organization.id, "Linear", user_id=test_user.id)
 
         mock_token_response = MagicMock()
         mock_token_response.json.return_value = {"access_token": "token-123"}
