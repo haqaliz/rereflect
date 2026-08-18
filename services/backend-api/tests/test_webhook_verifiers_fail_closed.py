@@ -14,10 +14,9 @@ cannot catch that class of drift. This one can.
 Two things it guarantees going forward:
 
 1. A NEW verifier that fails open fails this test immediately.
-2. The two verifiers knowingly left in shadow mode are named in an explicit
-   allowlist below. When they are flipped to fail closed, this test fails and
-   tells the author to remove the entry — so the shadow period cannot quietly
-   become permanent.
+2. The two verifiers that shipped in shadow mode (Slack, inbound email) are
+   no longer allowlisted — the allowlist below is empty and pinned, so a
+   verifier can never be silently added back to shadow mode.
 """
 
 import time
@@ -33,21 +32,14 @@ _TS = str(int(time.time()))
 
 
 # --- Shadow-mode allowlist ----------------------------------------------------
-# Verifiers that DELIBERATELY still accept unsigned deliveries, because their
-# ingestion path demonstrably works today and flipping them closed would silently
-# stop real feedback for any operator who never set the secret. Each logs a
-# "SECURITY-SHADOW" warning per request, warns at startup, and is flagged in
-# Settings -> Integrations.
+# EMPTY since the 2026-08-17 fail-closed flip: the last two shadow verifiers
+# (Slack, inbound email) now fail closed like the other five. The empty set is
+# pinned by test_allowlist_only_contains_known_shadow_verifiers below, so a
+# verifier can never be silently added back to shadow mode.
 #
-# THIS ALLOWLIST IS TEMPORARY. When a verifier below is flipped to fail closed,
-# delete its entry — this test will fail until you do, which is the point.
-#
-# Do NOT add to this list to make a new failure go away. A new fail-open verifier
-# is a defect, not a shadow rollout.
-SHADOW_ALLOWLIST = {
-    "source_webhooks.verify_slack_signature",
-    "email_webhooks._verify_webhook_signature",
-}
+# Do NOT add to this list. A fail-open verifier is a defect, not a shadow
+# rollout.
+SHADOW_ALLOWLIST: set[str] = set()
 
 
 def _call_slack(secret):
@@ -123,14 +115,11 @@ class TestEveryVerifierFailsClosed:
     def test_allowlist_only_contains_known_shadow_verifiers(self):
         """The allowlist must not grow silently.
 
-        Pinned so that adding an entry requires editing this assertion too --
-        a deliberate speed bump, since every entry is an endpoint accepting
-        unsigned traffic.
+        Pinned to the empty set so that adding an entry requires editing this
+        assertion too — a deliberate speed bump, since every entry is an
+        endpoint accepting unsigned traffic.
         """
-        assert SHADOW_ALLOWLIST == {
-            "source_webhooks.verify_slack_signature",
-            "email_webhooks._verify_webhook_signature",
-        }
+        assert SHADOW_ALLOWLIST == set()
 
     def test_every_allowlisted_verifier_is_actually_enumerated(self):
         """Guards against an allowlist entry whose verifier is no longer tested."""
