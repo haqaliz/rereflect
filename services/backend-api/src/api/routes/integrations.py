@@ -7,7 +7,6 @@ from datetime import datetime
 import httpx
 import logging
 import os
-import secrets
 import urllib.parse
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
@@ -19,6 +18,7 @@ from src.database.session import get_db
 from src.models.integration import Integration, SlackAlertLog
 from src.models.organization import Organization
 from src.api.dependencies import get_current_org, require_admin_or_owner, require_feature
+from src.services.oauth_state import sign_oauth_state, verify_oauth_state
 from src.utils.encryption import encrypt_api_key, decrypt_api_key
 from cryptography.fernet import InvalidToken
 
@@ -41,9 +41,6 @@ SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
 INTERCOM_CLIENT_ID = os.environ.get("INTERCOM_CLIENT_ID", "")
 INTERCOM_CLIENT_SECRET = os.environ.get("INTERCOM_CLIENT_SECRET", "")
 INTERCOM_REDIRECT_URI = os.environ.get("INTERCOM_REDIRECT_URI", "http://localhost:8000/api/v1/integrations/intercom/oauth/callback")
-
-# OAuth state storage (in production, use Redis or database)
-oauth_states: dict = {}
 
 
 # ============================================================================
@@ -810,15 +807,8 @@ def slack_oauth_connect(
             detail="Slack OAuth is not configured. Set SLACK_CLIENT_ID environment variable."
         )
 
-    # Generate a secure state parameter
-    state = secrets.token_urlsafe(32)
-
-    # Store state with org info (expires after 10 minutes in production, use Redis with TTL)
-    oauth_states[state] = {
-        "organization_id": current_org.id,
-        "name": name,
-        "created_at": datetime.utcnow()
-    }
+    # Stateless signed state (org + name travel in the signed blob; no store)
+    state = sign_oauth_state(current_org.id, name)
 
     # Build OAuth authorization URL
     # Scopes: chat:write allows posting messages, channels:read allows listing channels
@@ -862,8 +852,8 @@ def slack_oauth_callback(
             url=f"{FRONTEND_URL}/settings/integrations?oauth_error=missing_params"
         )
 
-    # Validate state
-    state_data = oauth_states.pop(state, None)
+    # Validate state (stateless: HMAC-signed, TTL-bounded, fails closed)
+    state_data = verify_oauth_state(state)
     if not state_data:
         logger.error(f"Invalid or expired OAuth state: {state}")
         return RedirectResponse(
@@ -1004,16 +994,8 @@ def intercom_oauth_connect(
             detail="Intercom OAuth is not configured. Set INTERCOM_CLIENT_ID environment variable."
         )
 
-    # Generate a secure state parameter
-    state = secrets.token_urlsafe(32)
-
-    # Store state with org info
-    oauth_states[state] = {
-        "organization_id": current_org.id,
-        "name": name,
-        "provider": "intercom",
-        "created_at": datetime.utcnow(),
-    }
+    # Stateless signed state (org + name travel in the signed blob; no store)
+    state = sign_oauth_state(current_org.id, name)
 
     # Build Intercom OAuth authorization URL
     params = {
@@ -1053,8 +1035,8 @@ def intercom_oauth_callback(
             url=f"{FRONTEND_URL}/settings/integrations?oauth_error=missing_params"
         )
 
-    # Validate state
-    state_data = oauth_states.pop(state, None)
+    # Validate state (stateless: HMAC-signed, TTL-bounded, fails closed)
+    state_data = verify_oauth_state(state)
     if not state_data:
         logger.error(f"Invalid or expired Intercom OAuth state: {state}")
         return RedirectResponse(
