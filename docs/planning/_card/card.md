@@ -1,68 +1,38 @@
-# Card — chore/slack-email-signature-enforcement (freeform, no GitHub issue)
+# Card — chore/frontend-cleanup-smalls (freeform, no GitHub issue)
 
-Source: the follow-up recorded in DEV-TRACKING.md:423-426, opened by the P0
-`intercom-webhook-unauthenticated-cross-org-write` hardening
-(`feat/integration-auth-tenancy-hardening`, 2026-07-29). Branch
-`chore/slack-email-signature-enforcement`, worktree `.claude/worktrees/chore-slack-email-sig`.
+Source: two recorded DEV-TRACKING items: `signup-promo-banner-vestigial` (:489-494)
+and `frontend-integration-role-guards` (:612-615). Branch
+`chore/frontend-cleanup-smalls`, worktree `.claude/worktrees/frontend-cleanup-smalls`.
 
-## Brief
+## Items (both frontend-web)
 
-The P0 webhook hardening shipped Slack and the inbound-email (Resend) verifiers in
-**shadow mode**: they accept unverified deliveries while logging a `SECURITY-SHADOW`
-marker + a startup warning + a Settings badge, because their ingestion works and a hard
-flip would stop real traffic. The follow-up: **flip both verifiers to fail closed** and
-delete their entries from the `SHADOW_ALLOWLIST` in
-`tests/test_webhook_verifiers_fail_closed.py` (that test fails until you do). Update
-the `SELF_HOSTING.md` table which still describes them as accepting unverified
-deliveries.
+1. **`signup-promo-banner-vestigial` (cleanup).** `app/signup/page.tsx` renders an
+   invite banner gated on a hardcoded `VALID_PROMO_CODES` list read from a `?promo=`
+   query param. There is no promo backend and no billing (Stripe removed in the OSS
+   pivot), so it can neither grant nor withhold anything. Delete the banner + the
+   promo-code machinery.
+2. **`frontend-integration-role-guards` (chore).** 3 member-reachable surfaces now
+   403 after the backend RBAC gating (`integrations-routes-missing-rbac`, 2026-08-09):
+   `settings/integrations/[id]` + `new` pages, the Linear branch of
+   `feedbacks/[id]/create-issue` (Jira/Asana already 403 for members), and
+   `feedback-sources/*` write buttons. Add member-facing UI guards (hide/disable +
+   honest copy) matching the existing patterns (isAdminOrOwner checks elsewhere).
 
-## Facts (from DEV-TRACKING.md, cited)
+## Caveats (carried into the PRD)
 
-- DEV-TRACKING.md:423-426: "**`slack-email-signature-enforcement`** — flip the two
-  shadow-mode verifiers to fail closed and delete their entries from
-  `SHADOW_ALLOWLIST` in `tests/test_webhook_verifiers_fail_closed.py` (that test fails
-  until you do). Update the `SELF_HOSTING.md` table, which still describes them as
-  accepting unverified deliveries."
-- The hardening entry (DEV-TRACKING.md:366-370): "**Slack and email ship in shadow**
-  (accept + `SECURITY-SHADOW` log + startup warning + a Settings badge) because their
-  ingestion works and a hard flip would stop real traffic. Intercom and Linear fail
-  closed immediately. `tests/test_webhook_verifiers_fail_closed.py` enumerates all
-  seven verifiers and allowlists exactly those two — flipping either breaks that test
-  by design, so the shadow period cannot become permanent."
-
-## Caveats (carried into the PRD, must not be papered over)
-
-- **Real-traffic risk.** Slack/email ingestion works today with unverified deliveries
-  (the operators' webhooks may not yet send valid signatures, or the secret env vars
-  are unset). Flipping to fail-closed means: an install without `SLACK_SIGNING_SECRET`
-  / Resend signature verification configured will now REJECT Slack/email webhook
-  deliveries until the operator configures the secret. This is the intended security
-  posture but is a behavior change — the PRD must state it plainly and the changelog +
-  SELF_HOSTING must tell operators exactly how to restore delivery (set the secret).
-- **Two different verification mechanisms** (Slack: `X-Slack-Signature` + timestamp
-  HMAC; email: Resend's `svix`-style signature headers) — the flip must fail closed in
-  the same way for both, and the sweep test enumerates all seven verifiers.
-- The shadow machinery (log + startup warning + Settings badge) may need removal or
-  re-scoping once nothing is shadowed — decide in the PRD (leave the generic
-  shadow plumbing for future use, or delete it).
+- The promo banner's removal must not break the signup page's layout/tests — the
+  banner may be referenced in signup tests.
+- The role-guard surfaces must keep admin/owner UX identical; only member UX
+  changes (hidden/disabled controls). Check how the existing guarded surfaces
+  (e.g. integrations page) handle members for consistency.
 
 ## Deliverables (proposed, refine in PRD)
 
-1. `verify_slack_signature` + the email/Resend verifier fail closed when the secret is
-   missing/invalid (reject with 401, no shadow log path).
-2. `SHADOW_ALLOWLIST` in `tests/test_webhook_verifiers_fail_closed.py` loses the two
-   entries (test goes RED first — the guard).
-3. SELF_HOSTING.md table + the webhook sections updated (no more "accepts unverified
-   deliveries" claims; operators told how to configure the secrets).
-4. CHANGELOG entry (behavior change: Slack/email webhooks now require a configured
-   signing secret) + DEV-TRACKING follow-up → FIXED.
-5. Decide the shadow-plumbing fate (keep generic machinery for future verifiers vs
-   delete).
+1. Promo banner + `VALID_PROMO_CODES` machinery deleted; signup tests updated.
+2. Member guards on the 3 surfaces with tests.
+3. DEV-TRACKING markers for both.
 
 ## Out of scope (guardrails)
 
-- Not changing the verifiers' crypto (HMAC scheme) — only the fail-open→fail-closed
-  posture.
-- Not touching Intercom/Linear/Zendesk verifiers (already fail closed).
-- No plan gates; no new dependencies; no frontend work (unless the Settings badge
-  removal is trivial and in scope — decide in PRD).
+- No backend changes (the 403s are the enforcement; this is UI-only).
+- No plan gates.
