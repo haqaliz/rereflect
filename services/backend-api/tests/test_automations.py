@@ -339,7 +339,8 @@ def test_list_templates(client: TestClient, db: Session, test_organization: Orga
     assert isinstance(templates, list)
     # 5 original (M4.4) + 1 (M10, usage-trend-automation-trigger)
     # + 1 (batch-sentiment-trigger, Track A)
-    assert len(templates) == 7
+    # + 1 (automation-send-customer-email)
+    assert len(templates) == 8
 
     ids = {t["id"] for t in templates}
     assert "churn_prevention" in ids
@@ -349,6 +350,7 @@ def test_list_templates(client: TestClient, db: Session, test_organization: Orga
     assert "positive_feedback_followup" in ids
     assert "usage_decline_outreach" in ids
     assert "batch_sentiment_alert" in ids
+    assert "at_risk_customer_outreach" in ids
 
 
 # ---------------------------------------------------------------------------

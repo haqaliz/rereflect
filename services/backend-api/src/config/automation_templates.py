@@ -1,9 +1,11 @@
 """
 Pre-built automation rule templates (M4.4 — Phase 1; template 6 added by
 usage-trend-automation-trigger's template-and-docs aspect, M10; template 7
-added by batch-sentiment-trigger, Track A).
+added by batch-sentiment-trigger, Track A; template 8 added by
+automation-send-customer-email — the first template whose action emails the
+CUSTOMER rather than the team).
 
-7 starter templates users can enable and customize from Settings > Automations.
+8 starter templates users can enable and customize from Settings > Automations.
 Each template is a dict that maps directly to the AutomationRule schema so it
 can be instantiated with a single call.
 
@@ -12,7 +14,9 @@ Optional `mode` key (M10): honored by `enable_template`
 original 5 templates are unaffected. Templates 6 and 7 set it, to "shadow" —
 `usage_trend` and `batch_sentiment_threshold` rules default to shadow
 everywhere else in the product (M7 / batch-sentiment-trigger) and a template
-that silently armed itself would be the one exception.
+that silently armed itself would be the one exception. Template 8 sets it for
+a sharper reason: its action sends a customer-facing email, so an armed-on-
+enable template would mail real customers on the strength of one click.
 """
 
 from typing import Any
@@ -206,6 +210,44 @@ AUTOMATION_TEMPLATES: list[dict[str, Any]] = [
                 "config": {"recipients": "admins", "channels": ["dashboard", "email"]},
             },
         ],
+        "cooldown_hours": 24,
+        "mode": "shadow",
+    },
+
+    # ------------------------------------------------------------------ #
+    # 8. At-Risk Customer Outreach (automation-send-customer-email)
+    # ------------------------------------------------------------------ #
+    {
+        "id": "at_risk_customer_outreach",
+        "name": "At-Risk Customer Outreach",
+        "description": (
+            "Email the customer (the re_engagement template) when their churn "
+            "probability crosses 0.6 — the automation-rule form of the "
+            "at-risk outreach playbook step. Starts in shadow mode so the "
+            "execution log fills with would-have-sent entries before you flip "
+            "it to active. Opt-out, the per-recipient cooldown and the "
+            "tokenized unsubscribe link are honored exactly as on bulk "
+            "outreach; with no RESEND_API_KEY configured every execution "
+            "records 'skipped: email not configured' rather than a silent "
+            "success."
+        ),
+        "trigger": {
+            "type": "churn_probability_threshold",
+            # `direction` is accepted-but-inert: the engine always fires on
+            # churn_probability >= threshold (automation_engine
+            # ._trigger_churn_probability) and seed_churn_cooldowns reads
+            # `threshold` only. Kept for shape parity with the API's
+            # ChurnProbabilityConfig, which defaults it to "above".
+            "config": {"threshold": 0.6, "direction": "above"},
+        },
+        "actions": [
+            {
+                "type": "send_customer_email",
+                "config": {"template": "re_engagement", "recipient": "customer"},
+            },
+        ],
+        # 24h, deliberately aligned with the OUTREACH_COOLDOWN_HOURS default so
+        # the rule's own cooldown does not outlive the shared outreach window.
         "cooldown_hours": 24,
         "mode": "shadow",
     },
