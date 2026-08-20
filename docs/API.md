@@ -453,6 +453,38 @@ invalid token → 400.
 `{ "outreach_opt_out": bool }` (extra fields 422) and returns the updated profile (which
 now includes the flag).
 
+### Automation customer email (`send_customer_email` action)
+
+**Action config** — an automation rule (admin/owner, `POST`/`PUT /api/v1/automations`) can
+carry an action of the form:
+
+```json
+{
+  "type": "send_customer_email",
+  "config": { "template": "re_engagement", "recipient": "customer" }
+}
+```
+
+`template` must be a key of the built-in outreach registry
+(`GET /api/v1/outreach/templates` — `re_engagement`, `weekly_digest_entry`); `recipient` is
+`customer` (default) or `cs_assignee` (the CS owner on the customer's health row). Any other
+key in `config` → 422 (the model is `extra="forbid"`), as is an unknown template or
+recipient.
+
+**Deliveries** — `GET /api/v1/automations/{rule_id}/deliveries` (admin/owner, org-scoped,
+newest first, `page` / `page_size` ≤ 100) returns
+`{ "deliveries": [...], "total", "page", "page_size" }` where each row is
+`{ id, rule_id, organization_id, customer_email, to_email, template_key, subject, status,
+reason, created_at }` and `status` is one of `queued | sent | skipped | failed`. A rule the
+caller's org does not own → 404; a member → 403.
+
+**Semantics** — a rule in `shadow` mode evaluates and logs but never creates a delivery or
+sends. On an active rule the evaluator writes a `queued` row and enqueues the send; the
+worker flips it to `sent`, or to `skipped` / `failed` with the reason (`opted out`,
+`in cooldown`, `email not configured`, a provider error). A skip is always recorded — it is
+never reported as a success. With `RESEND_API_KEY` unset, no send is enqueued at all and the
+row is written directly as `skipped: email not configured`.
+
 ## Common gotchas
 
 - **Trailing slashes** — match the route exactly; a missing/extra `/` can return 422.
