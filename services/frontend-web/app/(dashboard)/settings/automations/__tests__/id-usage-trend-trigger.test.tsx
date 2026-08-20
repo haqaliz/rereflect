@@ -39,6 +39,7 @@ vi.mock('@/lib/api/automations', () => ({
     delete: vi.fn(),
     toggle: vi.fn(),
     listExecutions: (...args: any[]) => mockListExecutions(...args),
+    listDeliveries: vi.fn().mockResolvedValue([]),
     listTemplates: vi.fn().mockResolvedValue([]),
     enableTemplate: vi.fn(),
   },

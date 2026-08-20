@@ -10,8 +10,19 @@ import {
   type TriggerType,
   type ActionType,
   type AutomationAction,
+  type SendCustomerEmailConfig,
 } from '@/lib/api/automations';
-import { listPlaybooks, type Playbook } from '@/lib/api/playbooks';
+import {
+  listPlaybooks,
+  SEND_EMAIL_RECIPIENTS,
+  SEND_EMAIL_RECIPIENT_LABELS,
+  type Playbook,
+} from '@/lib/api/playbooks';
+import {
+  BUILTIN_OUTREACH_TEMPLATES,
+  listOutreachTemplates,
+  type OutreachTemplateSummary,
+} from '@/lib/api/outreach';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -337,6 +348,37 @@ interface ActionRowProps {
   onChange: (action: AutomationAction) => void;
   onRemove: () => void;
   playbooks: Playbook[];
+  templateOptions: OutreachTemplateSummary[];
+}
+
+/**
+ * Seed a `send_customer_email` config, replacing anything stale.
+ *
+ * The backend config model is `extra="forbid"`, so a config carrying another
+ * action type's keys (`recipients`, `status`, `tone`, …) would 422 on save.
+ * A config is kept only when it is exactly `{ template, recipient }` with a
+ * known recipient; otherwise it is replaced with the defaults.
+ */
+export function seedSendCustomerEmailConfig(
+  config: Record<string, any> | undefined,
+  templateOptions: OutreachTemplateSummary[]
+): SendCustomerEmailConfig {
+  const template = config?.template;
+  const recipient = config?.recipient;
+  const onlyKnownKeys = Object.keys(config ?? {}).every(
+    k => k === 'template' || k === 'recipient'
+  );
+  const valid =
+    typeof template === 'string' &&
+    (recipient === 'customer' || recipient === 'cs_assignee') &&
+    onlyKnownKeys;
+
+  return valid
+    ? { template, recipient }
+    : {
+        template: templateOptions[0]?.key ?? BUILTIN_OUTREACH_TEMPLATES[0].key,
+        recipient: 'customer',
+      };
 }
 
 const ACTION_TYPES: ActionType[] = [
@@ -345,9 +387,10 @@ const ACTION_TYPES: ActionType[] = [
   'send_notification',
   'draft_response',
   'run_playbook',
+  'send_customer_email',
 ];
 
-function ActionRow({ index, action, onChange, onRemove, playbooks }: ActionRowProps) {
+function ActionRow({ index, action, onChange, onRemove, playbooks, templateOptions }: ActionRowProps) {
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
       <div className="flex-1 space-y-3">
@@ -360,6 +403,7 @@ function ActionRow({ index, action, onChange, onRemove, playbooks }: ActionRowPr
               send_notification: { recipients: 'admins', channels: ['dashboard'] },
               draft_response: { tone: 'professional' },
               run_playbook: {},
+              send_customer_email: seedSendCustomerEmailConfig({}, templateOptions),
             };
             onChange({ type: val as ActionType, config: defaults[val] || {} });
           }}
@@ -418,6 +462,51 @@ function ActionRow({ index, action, onChange, onRemove, playbooks }: ActionRowPr
             </Select>
           )
         )}
+
+        {/* Inline config for send_customer_email */}
+        {action.type === 'send_customer_email' && (
+          <div className="space-y-3">
+            <Select
+              value={typeof action.config?.template === 'string' ? action.config.template : ''}
+              onValueChange={val => onChange({ ...action, config: { ...action.config, template: val } })}
+            >
+              <SelectTrigger data-testid={`action-config-template-${index}`}>
+                <SelectValue placeholder="Select template..." />
+              </SelectTrigger>
+              <SelectContent>
+                {templateOptions.map(t => (
+                  <SelectItem key={t.key} value={t.key}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={
+                SEND_EMAIL_RECIPIENTS.includes(action.config?.recipient)
+                  ? action.config.recipient
+                  : ''
+              }
+              onValueChange={val => onChange({ ...action, config: { ...action.config, recipient: val } })}
+            >
+              <SelectTrigger data-testid={`action-config-recipient-${index}`}>
+                <SelectValue placeholder="Select recipient..." />
+              </SelectTrigger>
+              <SelectContent>
+                {SEND_EMAIL_RECIPIENTS.map(r => (
+                  <SelectItem key={r} value={r}>
+                    {SEND_EMAIL_RECIPIENT_LABELS[r]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Sent through the shared outreach path: opted-out customers are never
+              emailed, the same per-recipient cooldown as bulk outreach applies, and
+              with no email key configured the send is recorded as skipped.
+            </p>
+          </div>
+        )}
       </div>
 
       <Button
@@ -466,6 +555,7 @@ export default function NewAutomationPage() {
   const [cooldownHours, setCooldownHours] = useState(24);
   const [mode, setMode] = useState<'off' | 'shadow' | 'active'>('active');
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
+  const [outreachTemplates, setOutreachTemplates] = useState<OutreachTemplateSummary[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -473,6 +563,17 @@ export default function NewAutomationPage() {
       .then(all => setPlaybooks(all.filter(p => !p.is_template && p.is_active)))
       .catch(() => setPlaybooks([]));
   }, []);
+
+  useEffect(() => {
+    listOutreachTemplates()
+      .then(setOutreachTemplates)
+      .catch(() => {
+        setOutreachTemplates(null);
+        toast.error('Could not load outreach templates — using built-in options.');
+      });
+  }, []);
+
+  const templateOptions = outreachTemplates ?? BUILTIN_OUTREACH_TEMPLATES;
 
   const addAction = () => {
     setActions(prev => [...prev, { type: 'send_notification', config: { recipients: 'admins', channels: ['dashboard'] } }]);
@@ -668,6 +769,7 @@ export default function NewAutomationPage() {
                   onChange={updated => updateAction(i, updated)}
                   onRemove={() => removeAction(i)}
                   playbooks={playbooks}
+                  templateOptions={templateOptions}
                 />
               ))
             )}
