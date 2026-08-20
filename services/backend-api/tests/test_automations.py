@@ -430,3 +430,186 @@ def test_cooldown_validation(client: TestClient, db: Session, test_organization:
     max_payload = {**HEALTH_SCORE_RULE, "name": "Max Cooldown", "cooldown_hours": 168}
     r = client.post("/api/v1/automations", json=max_payload, headers=auth_headers)
     assert r.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# 18. send_customer_email action type (automation-send-customer-email,
+#     action-core Phase B)
+# ---------------------------------------------------------------------------
+
+SEND_EMAIL_RULE = {
+    "name": "At-Risk Outreach",
+    "trigger": {
+        "type": "health_score_threshold",
+        "config": {"threshold": 30, "direction": "below"},
+    },
+    "actions": [
+        {"type": "send_customer_email", "config": {"template": "re_engagement"}},
+    ],
+    "cooldown_hours": 24,
+}
+
+
+def test_create_rule_with_send_customer_email_action(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    r = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    assert r.status_code == 201, r.text
+    actions = r.json()["actions"]
+    assert len(actions) == 1
+    assert actions[0]["type"] == "send_customer_email"
+    # recipient is defaulted server-side so the stored config is complete
+    assert actions[0]["config"] == {
+        "template": "re_engagement",
+        "recipient": "customer",
+    }
+
+
+def test_create_rule_send_customer_email_with_cs_assignee_recipient(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    payload = {
+        **SEND_EMAIL_RULE,
+        "name": "CS Assignee Outreach",
+        "actions": [
+            {
+                "type": "send_customer_email",
+                "config": {"template": "re_engagement", "recipient": "cs_assignee"},
+            }
+        ],
+    }
+    r = client.post("/api/v1/automations", json=payload, headers=auth_headers)
+    assert r.status_code == 201, r.text
+    assert r.json()["actions"][0]["config"]["recipient"] == "cs_assignee"
+
+
+def test_create_rule_send_customer_email_unknown_template_422(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    payload = {
+        **SEND_EMAIL_RULE,
+        "actions": [{"type": "send_customer_email", "config": {"template": "nope"}}],
+    }
+    r = client.post("/api/v1/automations", json=payload, headers=auth_headers)
+    assert r.status_code == 422
+
+
+def test_create_rule_send_customer_email_unknown_config_key_422(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    payload = {
+        **SEND_EMAIL_RULE,
+        "actions": [
+            {
+                "type": "send_customer_email",
+                "config": {"template": "re_engagement", "foo": 1},
+            }
+        ],
+    }
+    r = client.post("/api/v1/automations", json=payload, headers=auth_headers)
+    assert r.status_code == 422
+
+
+def test_create_rule_send_customer_email_bad_recipient_422(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    payload = {
+        **SEND_EMAIL_RULE,
+        "actions": [
+            {
+                "type": "send_customer_email",
+                "config": {"template": "re_engagement", "recipient": "boss"},
+            }
+        ],
+    }
+    r = client.post("/api/v1/automations", json=payload, headers=auth_headers)
+    assert r.status_code == 422
+
+
+def test_create_rule_send_customer_email_missing_template_422(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    payload = {
+        **SEND_EMAIL_RULE,
+        "actions": [{"type": "send_customer_email", "config": {}}],
+    }
+    r = client.post("/api/v1/automations", json=payload, headers=auth_headers)
+    assert r.status_code == 422
+
+
+def test_update_rule_send_customer_email_validates(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+
+    bad = client.put(
+        f"/api/v1/automations/{rule_id}",
+        json={
+            "actions": [
+                {"type": "send_customer_email", "config": {"template": "nope"}}
+            ]
+        },
+        headers=auth_headers,
+    )
+    assert bad.status_code == 422
+
+    good = client.put(
+        f"/api/v1/automations/{rule_id}",
+        json={
+            "actions": [
+                {
+                    "type": "send_customer_email",
+                    "config": {"template": "weekly_digest_entry", "recipient": "customer"},
+                }
+            ]
+        },
+        headers=auth_headers,
+    )
+    assert good.status_code == 200, good.text
+    assert good.json()["actions"][0]["config"]["template"] == "weekly_digest_entry"
+
+
+def test_rule_list_and_get_return_send_customer_email_action(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+
+    listed = client.get("/api/v1/automations", headers=auth_headers)
+    assert listed.status_code == 200
+    rows = [r for r in listed.json()["rules"] if r["id"] == rule_id]
+    assert rows and rows[0]["actions"][0]["type"] == "send_customer_email"
+
+    got = client.get(f"/api/v1/automations/{rule_id}", headers=auth_headers)
+    assert got.status_code == 200
+    assert got.json()["actions"][0]["config"]["template"] == "re_engagement"
+
+
+# --- Unit: SendCustomerEmailConfig ----------------------------------------
+
+def test_send_customer_email_config_unit():
+    import pydantic
+
+    from src.api.routes.automations import SendCustomerEmailConfig
+
+    cfg = SendCustomerEmailConfig(template="weekly_digest_entry")
+    assert cfg.recipient == "customer"
+
+    cfg2 = SendCustomerEmailConfig(template="weekly_digest_entry", recipient="cs_assignee")
+    assert cfg2.recipient == "cs_assignee"
+
+    for bad in (
+        {"template": "nope"},
+        {"template": "re_engagement", "recipient": "boss"},
+        {"template": "re_engagement", "extra_key": True},
+        {},
+    ):
+        with pytest.raises(pydantic.ValidationError):
+            SendCustomerEmailConfig(**bad)
+
+
+def test_send_customer_email_is_a_valid_action_type():
+    from src.api.routes.automations import VALID_ACTION_TYPES
+
+    assert "send_customer_email" in VALID_ACTION_TYPES

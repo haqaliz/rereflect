@@ -11,13 +11,14 @@ Endpoints:
   DELETE /api/v1/automations/{id}                         Delete rule (Admin+)
   PATCH  /api/v1/automations/{id}/toggle                  Pause / resume rule (Admin+)
   GET    /api/v1/automations/{id}/executions              Execution log (last 50)
+  GET    /api/v1/automations/{id}/deliveries              send_customer_email delivery log (Admin+)
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -34,6 +35,7 @@ from src.database.session import get_db
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import RULE_MODES, AutomationRule
 from src.services.automation_engine import seed_churn_cooldowns
+from src.services.outreach_templates import OUTREACH_TEMPLATES
 from src.models.churn_playbook import ChurnPlaybook
 from src.models.organization import Organization
 from src.models.user import User
@@ -62,6 +64,7 @@ VALID_ACTION_TYPES = frozenset({
     "send_notification",
     "draft_response",
     "run_playbook",
+    "send_customer_email",
 })
 
 VALID_WORKFLOW_STATUSES = frozenset({"new", "in_review", "resolved", "closed"})
@@ -241,6 +244,33 @@ class RunPlaybookConfig(BaseModel):
     # can't hit the DB.
 
 
+class SendCustomerEmailConfig(BaseModel):
+    """Config for the `send_customer_email` action.
+
+    `template` is a key of the built-in outreach registry
+    (`src/services/outreach_templates.py`) — the same registry the playbook
+    `send_email` step and the bulk outreach campaign use. `recipient` picks who
+    actually receives it: the customer themselves, or the CS owner assigned on
+    the customer's health row.
+
+    `extra="forbid"` so the frontend can never persist a key the engine ignores.
+    """
+
+    template: str
+    recipient: Literal["customer", "cs_assignee"] = "customer"
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("template")
+    @classmethod
+    def validate_template(cls, v: str) -> str:
+        if v not in OUTREACH_TEMPLATES:
+            raise ValueError(
+                f"template must be one of {sorted(OUTREACH_TEMPLATES)}"
+            )
+        return v
+
+
 # ---------------------------------------------------------------------------
 # Pydantic — trigger / action wrappers
 # ---------------------------------------------------------------------------
@@ -301,6 +331,10 @@ class ActionSchema(BaseModel):
             DraftResponseConfig(**cfg)
         elif t == "run_playbook":
             RunPlaybookConfig(**cfg)
+        elif t == "send_customer_email":
+            # Normalize: persist the defaulted `recipient` so the stored config
+            # is always complete (the engine + worker mirrors read it directly).
+            self.config = SendCustomerEmailConfig(**cfg).model_dump()
 
         return self
 
