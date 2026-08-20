@@ -39,6 +39,7 @@ vi.mock('@/lib/api/automations', () => ({
   ACTION_TYPE_LABELS: {
     auto_assign: 'Auto-Assign',
     run_playbook: 'Run churn playbook',
+    send_customer_email: 'Send Customer Email',
   },
   PLAN_AUTOMATION_LIMITS: {
     free: 0,

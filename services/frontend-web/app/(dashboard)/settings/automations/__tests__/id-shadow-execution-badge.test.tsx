@@ -48,6 +48,7 @@ vi.mock('@/lib/api/automations', () => ({
   },
   ACTION_TYPE_LABELS: {
     run_playbook: 'Run churn playbook',
+    send_customer_email: 'Send Customer Email',
   },
 }));
 

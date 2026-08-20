@@ -44,6 +44,7 @@ vi.mock('@/lib/api/automations', () => ({
     send_notification: 'Send Notification',
     draft_response: 'Draft AI Response',
     run_playbook: 'Run churn playbook',
+    send_customer_email: 'Send Customer Email',
   },
   PLAN_AUTOMATION_LIMITS: {
     free: 0,
