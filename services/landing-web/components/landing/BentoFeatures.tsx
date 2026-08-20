@@ -187,7 +187,7 @@ const smallCards: {
     icon: Zap,
     title: 'AI Workflow Automation',
     description:
-      'Create IF/THEN rules that auto-assign, escalate, notify, run a save playbook, and draft responses when churn risk spikes, product usage starts declining, bugs are reported, or sentiment drops. Run any rule in shadow mode first to see what it would have done.',
+      'Create IF/THEN rules that auto-assign, escalate, notify, run a save playbook, draft responses, or email the at-risk customer directly when churn risk spikes, product usage starts declining, bugs are reported, or sentiment drops. Run any rule in shadow mode first to see what it would have done.',
     animation: 'pulse',
   },
   {
