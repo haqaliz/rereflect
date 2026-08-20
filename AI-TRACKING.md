@@ -50,7 +50,7 @@
 | Customer sentiment alerts | Yes | Notification center, Slack, email | Pro+ |
 | On-Demand AI Reports | Yes | My Reports page, Copilot Cmd+K chips, PDF export | Business+ |
 | AI Trust: Human-in-the-Loop | Yes | Thumbs up/down on Copilot, category/sentiment corrections, AI Accuracy tab | Pro+ |
-| AI Workflow Automation | Yes | Settings > Automations (list, create, detail, templates, execution log) | Pro+ (5 rules), Business (20), Enterprise (unlimited) |
+| AI Workflow Automation | Yes | Settings > Automations (list, create, detail, templates, execution log, email deliveries; email-the-customer action) | Pro+ (5 rules), Business (20), Enterprise (unlimited) |
 | Advanced Churn Prediction (probability, timeline, cohorts, playbooks, accuracy) | Yes | Churn Cohorts page, Playbooks editor, Churn Accuracy card, ChurnProbabilityBadge | Business+ |
 | Unified Customer Timeline (feedback + usage + churn + health events, cursor-paginated) | Yes | Customer profile "Full Activity Timeline" card (load-more) + `/customers/{email}/timeline` | Unlocked (OSS) |
 | Customer 360 Public API (full profile, timeline, health) | Yes | `GET /api/public/v1/customers/{email}` + `/timeline` + `/health` (API-key read scope) | Unlocked (OSS) |
@@ -368,6 +368,7 @@
 > cross. v1 supports manual trigger + run-batch only. Auto-execution on threshold cross is M4.1.5.").
 > See `docs/planning/churn-triggered-playbooks/`.
 - [x] AutomationEngine (M4.4): new `churn_probability_threshold` trigger + new `run_playbook` action
+      (as of 2026-08-20 these rules can also `send_customer_email` — see the M4.4 block)
 - [x] `AutomationRule.mode` — `off` / `shadow` (evaluate + log, don't execute) / `active`
 - [x] Worker seam: the churn-probability recompute fires these rules via an isolated evaluator, reusing
       the identical per-(rule, customer) Redis cooldown scheme as the existing M4.4 triggers
@@ -418,6 +419,11 @@
 - [x] Redis cooldown per customer per rule
 - [x] Settings > Automations pages (list, create, detail with execution log, template picker)
 - [x] 17 backend API + 16 engine + 10 frontend = 43 TDD tests
+- [x] 5th action type `send_customer_email` — emails the customer (or their CS owner) a built-in
+      outreach template, in the backend engine and all three worker mirrors; delivery audit table
+      + `GET /api/v1/automations/{rule_id}/deliveries` + rule-detail Email Deliveries tab; seeded
+      "At-Risk Customer Outreach" shadow template (shipped 2026-08-20 as
+      `automation-send-customer-email`, see `docs/planning/automation-send-customer-email/`)
 
 **Q4 Deliverables**: Advanced churn prediction, custom models, benchmarks, workflow automation (M4.4 COMPLETE)
 **Plan Gating**: Custom models = Enterprise, benchmarks = Pro+, automation = Pro+ (5 rules) / Business (20) / Enterprise (unlimited)

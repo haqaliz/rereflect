@@ -7,6 +7,26 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Automation rules can email the customer (`send_customer_email`)
+
+- **Behavior change.** An `active` automation rule carrying a `send_customer_email`
+  action now sends a customer-facing email when it fires — the automation-rule form of
+  the playbook `send_email` step and bulk outreach. It works on every trigger that
+  carries a customer, in the backend engine and all three worker mirrors
+  (feedback, churn-probability, usage-trend). The seeded **At-Risk Customer Outreach**
+  template ships in **shadow mode**: it evaluates and logs, and sends nothing until you
+  flip it to active.
+- **The shipped outreach protections are honored verbatim.** Per-customer opt-out and
+  the tokenized `List-Unsubscribe` link apply unchanged; the per-recipient outreach
+  cooldown is shared with bulk campaigns, so the two paths cannot double-email the same
+  customer inside the window; with `RESEND_API_KEY` unset the result is a loud
+  `skipped: email not configured`, never a silent success.
+- **Every send is audited.** Each fire writes an `automation_email_deliveries` row
+  (`queued` → `sent | skipped | failed` + reason), readable per rule on the rule
+  detail page's Email Deliveries tab and via
+  `GET /api/v1/automations/{rule_id}/deliveries` (admin/owner).
+- See `docs/planning/automation-send-customer-email/`.
+
 ### Removed — Dead anomaly-alert senders deleted (delivery unchanged)
 
 - **Cleanup, not a behavior change.** The worker's `_send_anomaly_slack`,
@@ -19,8 +39,6 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
   before this change; the main pipe never delivered anomaly email (Slack/Discord
   only). This is cleanup of a dead path, not a regression.
 
-||||||| 20599748
-=======
 ### Changed — Integration, create-issue and feedback-source management is now admin/owner-only in the UI
 
 The frontend now mirrors the backend RBAC (members were silently 403-ing on submit):

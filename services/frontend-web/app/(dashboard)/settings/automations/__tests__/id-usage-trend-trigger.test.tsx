@@ -39,6 +39,7 @@ vi.mock('@/lib/api/automations', () => ({
     delete: vi.fn(),
     toggle: vi.fn(),
     listExecutions: (...args: any[]) => mockListExecutions(...args),
+    listDeliveries: vi.fn().mockResolvedValue([]),
     listTemplates: vi.fn().mockResolvedValue([]),
     enableTemplate: vi.fn(),
   },
@@ -56,6 +57,7 @@ vi.mock('@/lib/api/automations', () => ({
     send_notification: 'Send Notification',
     draft_response: 'Draft AI Response',
     run_playbook: 'Run churn playbook',
+    send_customer_email: 'Send Customer Email',
   },
 }));
 

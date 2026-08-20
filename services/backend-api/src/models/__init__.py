@@ -65,6 +65,7 @@ from .oidc_config import OidcConfig
 from .saml_config import SamlConfig
 from .saml_auth_request import SamlAuthRequest
 from .outreach_campaign import OutreachCampaign, OutreachCampaignRecipient
+from .automation_email_delivery import AutomationEmailDelivery
 
 __all__ = [
     "Base",
@@ -144,4 +145,5 @@ __all__ = [
     "SamlAuthRequest",
     "OutreachCampaign",
     "OutreachCampaignRecipient",
+    "AutomationEmailDelivery",
 ]

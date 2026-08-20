@@ -926,3 +926,204 @@ def test_batch_sentiment_cooldown_key_uses_org_sentinel(db):
 
     expected_key = f"automation_cooldown:{rule.id}:__org__"
     fake_redis.setex.assert_called_once_with(expected_key, 6 * 3600, "1")
+
+
+# ---------------------------------------------------------------------------
+# send_customer_email action (automation-send-customer-email, worker-mirrors
+# Phase 3) — this mirror now HANDLES it; every skip stays loud.
+# ---------------------------------------------------------------------------
+
+
+def _make_org(db, org_id=1, product_name="Acme"):
+    from src.models import Organization
+
+    org = Organization(id=org_id, name="Acme", plan="pro",
+                       product_name_display=product_name)
+    db.add(org)
+    db.commit()
+    return org
+
+
+def _make_health(db, org_id=1, email="cust@example.com", name="Dana",
+                 is_archived=False, cs_owner_user_id=None):
+    from src.models import CustomerHealth
+
+    row = CustomerHealth(
+        organization_id=org_id,
+        customer_email=email,
+        customer_name=name,
+        health_score=20,
+        is_archived=is_archived,
+        cs_owner_user_id=cs_owner_user_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+EMAIL_ACTION = {
+    "type": "send_customer_email",
+    "config": {"template": "re_engagement", "recipient": "customer"},
+}
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_customer_email_action_queues_delivery(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org(db)
+    fb = _make_feedback(db, pain_point_category="billing")
+    _make_health(db)
+    rule = _make_rule(db, trigger_config={"categories": ["billing"]},
+                      actions=[EMAIL_ACTION])
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_feedback_triggers(db, 1, context)
+
+    row = db.query(AutomationEmailDelivery).one()
+    assert row.status == "queued"
+    assert row.to_email == "cust@example.com"
+    assert "Dana" in row.body
+    assert "Acme" in row.body
+    mock_task.delay.assert_called_once_with(row.id)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    assert log.status == "success"
+    result = next(a for a in log.actions_executed if a["type"] == "send_customer_email")
+    assert result["error"] is None
+    assert result["result"] == {"status": "queued", "delivery_id": row.id}
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_customer_email_no_key_is_loud(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org(db)
+    fb = _make_feedback(db, pain_point_category="billing")
+    _make_health(db)
+    rule = _make_rule(db, trigger_config={"categories": ["billing"]},
+                      actions=[EMAIL_ACTION])
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    with patch("src.email.RESEND_API_KEY", ""):
+        evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    assert log.status == "failed"
+    result = next(a for a in log.actions_executed if a["type"] == "send_customer_email")
+    assert result["error"] == "email not configured"
+
+    row = db.query(AutomationEmailDelivery).one()
+    assert row.status == "skipped"
+    assert row.reason == "email not configured"
+    mock_task.delay.assert_not_called()
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_customer_email_org_wide_trigger_is_loud(mock_redis, mock_task, db):
+    """batch_sentiment_threshold carries a pivot feedback's email — not a
+    recipient. The skip is keyed on the TRIGGER TYPE, not the context value."""
+    from src.models import AutomationEmailDelivery
+
+    _make_org(db)
+    for _ in range(5):
+        _make_feedback(db, sentiment_label="negative")
+    fb = _make_feedback(db, sentiment_label="negative")
+    _make_health(db)
+    rule = _make_rule(
+        db,
+        trigger_type="batch_sentiment_threshold",
+        trigger_config={"sentiment": "negative", "threshold": 1, "mode": "count",
+                        "window_days": 7},
+        actions=[EMAIL_ACTION],
+    )
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    assert log is not None, "the org-wide rule should still have fired"
+    result = next(a for a in log.actions_executed if a["type"] == "send_customer_email")
+    assert result["error"] == "no customer email (org-wide trigger)"
+    assert db.query(AutomationEmailDelivery).count() == 0
+    mock_task.delay.assert_not_called()
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_customer_email_archived_customer_is_loud(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org(db)
+    fb = _make_feedback(db, pain_point_category="billing")
+    _make_health(db, is_archived=True)
+    rule = _make_rule(db, trigger_config={"categories": ["billing"]},
+                      actions=[EMAIL_ACTION])
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    result = next(a for a in log.actions_executed if a["type"] == "send_customer_email")
+    assert result["error"] == "customer archived"
+    assert db.query(AutomationEmailDelivery).count() == 0
+    mock_task.delay.assert_not_called()
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_customer_email_cs_assignee_resolves_owner(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org(db)
+    owner = _make_user(db, role="owner", email="owner@acme.test")
+    fb = _make_feedback(db, pain_point_category="billing")
+    _make_health(db, cs_owner_user_id=owner.id)
+    _make_rule(
+        db,
+        trigger_config={"categories": ["billing"]},
+        actions=[{
+            "type": "send_customer_email",
+            "config": {"template": "re_engagement", "recipient": "cs_assignee"},
+        }],
+    )
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_feedback_triggers(db, 1, context)
+
+    row = db.query(AutomationEmailDelivery).one()
+    assert row.to_email == "owner@acme.test"
+    assert row.customer_email == "cust@example.com"
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_customer_email_unknown_template_is_loud(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org(db)
+    fb = _make_feedback(db, pain_point_category="billing")
+    _make_health(db)
+    rule = _make_rule(
+        db,
+        trigger_config={"categories": ["billing"]},
+        actions=[{"type": "send_customer_email", "config": {"template": "nope"}}],
+    )
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    result = next(a for a in log.actions_executed if a["type"] == "send_customer_email")
+    assert result["error"] == "unknown template key: nope"
+    assert db.query(AutomationEmailDelivery).count() == 0
+    mock_task.delay.assert_not_called()

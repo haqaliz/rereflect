@@ -16,7 +16,33 @@ export type ActionType =
   | 'change_status'
   | 'send_notification'
   | 'draft_response'
-  | 'run_playbook';
+  | 'run_playbook'
+  | 'send_customer_email';
+
+/** Who a `send_customer_email` action actually mails. */
+export type SendCustomerEmailRecipient = 'customer' | 'cs_assignee';
+
+/**
+ * Config for the `send_customer_email` action. The backend model is
+ * `extra="forbid"` — writing any key beyond these two 422s the save.
+ */
+export interface SendCustomerEmailConfig {
+  template: string;
+  recipient: SendCustomerEmailRecipient;
+}
+
+/** One `send_customer_email` delivery audit row (GET /automations/{id}/deliveries). */
+export interface AutomationEmailDelivery {
+  id: number;
+  rule_id: number;
+  customer_email: string | null;
+  to_email: string | null;
+  template_key: string;
+  subject: string | null;
+  status: 'queued' | 'sent' | 'skipped' | 'failed';
+  reason: string | null;
+  created_at: string;
+}
 
 export interface AutomationAction {
   type: ActionType | string;
@@ -120,6 +146,11 @@ export const automationsAPI = {
     return Array.isArray(response.data) ? response.data : response.data.executions ?? [];
   },
 
+  listDeliveries: async (id: number): Promise<AutomationEmailDelivery[]> => {
+    const response = await apiClient.get(`/api/v1/automations/${id}/deliveries`);
+    return Array.isArray(response.data) ? response.data : response.data.deliveries ?? [];
+  },
+
   listTemplates: async (): Promise<AutomationTemplate[]> => {
     const response = await apiClient.get('/api/v1/automations/templates');
     return Array.isArray(response.data) ? response.data : response.data.templates ?? [];
@@ -149,6 +180,7 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
   send_notification: 'Send Notification',
   draft_response: 'Draft AI Response',
   run_playbook: 'Run churn playbook',
+  send_customer_email: 'Send Customer Email',
 };
 
 export const PLAN_AUTOMATION_LIMITS: Record<string, number | null> = {

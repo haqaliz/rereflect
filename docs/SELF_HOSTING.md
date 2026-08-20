@@ -1041,9 +1041,48 @@ What ships with the outreach primitives:
   (`POST /api/v1/customers/bulk/outreach/draft`) never sends — it only fills the
   composer's fields.
 
-The playbook `send_email` step and the bulk "Trigger outreach campaign" action consume these
-primitives; `APP_URL` must point at your frontend for the unsubscribe link in the
-`List-Unsubscribe` header to resolve.
+The playbook `send_email` step, the bulk "Trigger outreach campaign" action and the
+automation `send_customer_email` action (below) consume these primitives; `APP_URL` must
+point at your frontend for the unsubscribe link in the `List-Unsubscribe` header to resolve.
+
+### Automation email (the `send_customer_email` action)
+
+An automation rule (**Settings → Automations**) can email the customer directly. Add a
+`Send Customer Email` action, pick one of the built-in outreach templates
+(`re_engagement`, `weekly_digest_entry` — the same registry the playbook `send_email` step
+and bulk outreach use) and pick who receives it: `customer` (the person the rule fired
+about) or `cs_assignee` (the CS owner on that customer's health row). It works on every
+trigger that carries a customer: health score, churn risk level, churn probability, usage
+trend, category match and sentiment pattern.
+
+**Shadow mode never sends.** Rules run `off` / `shadow` / `active`. A shadow rule evaluates
+and writes an execution-log entry, and stops there — no email, no delivery row. The seeded
+**At-Risk Customer Outreach** template ships in shadow deliberately: read a week of
+would-have-sent entries before you flip it to active.
+
+**With no key, the skip is loud.** With `RESEND_API_KEY` unset, an active rule records
+`skipped: email not configured` on both the action result and a delivery row. It is never
+reported as a success. That is the default state of a fresh self-hosted install, so expect
+to see it until you configure Resend.
+
+**Opt-out and unsubscribe are honored verbatim.** The send goes through the same path as
+bulk outreach, so `customer_health_scores.outreach_opt_out` and the tokenized
+`List-Unsubscribe` link apply unchanged — an opted-out customer is never emailed and the
+delivery row records `skipped: opted out`. An archived customer is skipped before anything
+is queued.
+
+**The outreach cooldown is shared.** Automation sends and bulk campaigns write the same
+per-recipient key (Redis DB 1, `OUTREACH_COOLDOWN_HOURS`, default 24h), so a customer
+cannot be emailed twice inside the window by one path and then the other. This is separate
+from — and additional to — the automation rule's own cooldown
+(`automation_cooldown:{rule_id}:{customer_email}`), which is checked before any action runs.
+
+**Every send is audited.** Each action fire writes an `automation_email_deliveries` row:
+`queued` at evaluation time, then `sent` / `skipped` / `failed` with a reason once the
+worker has processed it. Read them per rule on the rule detail page's **Email Deliveries**
+tab, or via `GET /api/v1/automations/{rule_id}/deliveries` (admin/owner). A row stuck at
+`queued` means the worker never picked the job up — check that Celery and Redis are running;
+re-firing the rule creates a fresh row rather than retrying the old one.
 
 ## Public API — bulk feedback writes & taxonomy CRUD
 

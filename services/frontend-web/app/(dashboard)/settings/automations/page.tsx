@@ -29,6 +29,7 @@ import {
   RefreshCcw,
   Bell,
   Bot,
+  Mail,
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -41,6 +42,7 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   change_status: <RefreshCcw className="w-3.5 h-3.5" />,
   send_notification: <Bell className="w-3.5 h-3.5" />,
   draft_response: <Bot className="w-3.5 h-3.5" />,
+  send_customer_email: <Mail className="w-3.5 h-3.5" />,
 };
 
 function TriggerBadge({ type }: { type: string }) {

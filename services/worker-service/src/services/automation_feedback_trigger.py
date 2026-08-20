@@ -31,8 +31,10 @@ discipline and this comment (see automation_engine.py for the reciprocal
 pointer).
 
 Unlike `automation_churn_trigger` (which only implements `run_playbook`),
-this mirror implements the other four action types
-(`auto_assign`, `change_status`, `send_notification`, `draft_response`) —
+this mirror implements four action types (`auto_assign`, `change_status`,
+`send_notification`, `draft_response`) plus `send_customer_email`
+(automation-send-customer-email — the handler is shared with the other two
+mirrors, `src.services.automation_email_delivery.execute_send_customer_email`).
 `run_playbook` is explicitly OUT of scope here and, like any other
 unimplemented action type, must record a loud `error` in `actions_executed`
 rather than being silently skipped (that silent-skip class of bug is exactly
@@ -54,6 +56,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.email import _send_with_template
+from src.services.automation_email_delivery import execute_send_customer_email
 from src.models import FeedbackItem, Integration, Notification, User
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
@@ -501,6 +504,18 @@ def _execute_actions(
                 r = _execute_notify(action_config, feedback, rule, db)
             elif action_type == "draft_response":
                 r = _execute_draft_response(action_config, feedback, db)
+            elif action_type == "send_customer_email":
+                # Org-wide triggers carry the PIVOT feedback's email in
+                # context — not a recipient. Key the skip on the trigger type
+                # so an org-wide rule can never email one arbitrary customer.
+                subject_email = (
+                    None
+                    if rule.trigger_type in ORG_WIDE_TRIGGER_TYPES
+                    else context.get("customer_email")
+                )
+                r = execute_send_customer_email(
+                    action_config, rule, subject_email, db
+                )
             else:
                 r = {
                     "type": action_type,

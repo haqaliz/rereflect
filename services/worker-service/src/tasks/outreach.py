@@ -1,12 +1,17 @@
 """
-Per-recipient outreach campaign send task (bulk-campaign-api aspect).
+Outreach send tasks — the only place an outreach email is actually sent.
 
     send_outreach_email(campaign_id, recipient_id) — send one outreach email
     via `src.services.outreach_sender.send_outreach_email` (outreach-core's
     helper owns opt-out / cooldown / no-key / List-Unsubscribe checks) and
     record the outcome on the recipient row + campaign status.
 
-The task name string `tasks.outreach.send_outreach_email` is byte-identical
+    send_automation_email(delivery_id) — same sender, for one automation
+    `send_customer_email` action (automation-send-customer-email). Flips the
+    `automation_email_deliveries` row queued -> sent|skipped|failed; never
+    leaves it queued.
+
+The task name strings are byte-identical
 to the backend's dispatch strings (`POST /customers/bulk/outreach` and
 `POST /outreach/campaigns/{id}/retry`) — a mismatch is the
 automations-delivery-integrity bug class. Imports are worker-local only
@@ -160,3 +165,95 @@ def _process_recipient(
         campaign_id, recipient_id, recipient.status, recipient.error,
     )
     return {"status": recipient.status, "error": recipient.error}
+
+
+@shared_task(bind=True, name="tasks.outreach.send_automation_email")
+def send_automation_email(self, delivery_id: int) -> dict:
+    """Send one automation `send_customer_email` delivery; never re-raises.
+
+    The task name is byte-identical to the backend engine's dispatch string
+    (`AutomationEngine._execute_send_customer_email` →
+    `send_task("tasks.outreach.send_automation_email")`) and to the worker
+    mirrors' `.delay()` — a mismatch is the automations-delivery-integrity bug
+    class.
+
+    Returns:
+        {"status": "sent"}                    — sender ok
+        {"status": "skipped", "error": ...}   — sender skip (opted out, cooldown)
+                                                or duplicate dispatch of a
+                                                terminal delivery
+        {"status": "failed", "error": ...}    — sender failure (no key, resend error)
+        {"status": "error", "error": ...}     — missing delivery, task exception
+
+    A delivery row is NEVER left `queued` by an exception.
+    """
+    from src.models import AutomationEmailDelivery
+
+    with get_db_session() as db:
+        try:
+            return _process_automation_delivery(db, delivery_id)
+        except Exception as exc:
+            logger.exception(
+                "outreach task: unhandled exception delivery=%s: %s", delivery_id, exc
+            )
+            try:
+                delivery = (
+                    db.query(AutomationEmailDelivery).filter_by(id=delivery_id).first()
+                )
+                if delivery is not None and delivery.status not in TERMINAL_STATUSES:
+                    delivery.status = "failed"
+                    delivery.reason = f"task error: {exc}"
+                    db.commit()
+            except Exception as inner_exc:
+                logger.error(
+                    "outreach task: failed to mark delivery %s failed: %s",
+                    delivery_id, inner_exc,
+                )
+            return {"status": "error", "error": str(exc)}
+
+
+def _process_automation_delivery(db, delivery_id: int) -> dict:
+    """Orchestrate one automation send: load → guard → send → map."""
+    from src.models import Organization
+    from src.services.automation_email_delivery import (
+        get_delivery_row,
+        set_delivery_outcome,
+    )
+
+    delivery = get_delivery_row(db, delivery_id)
+    if delivery is None:
+        logger.warning("outreach task: delivery %s not found", delivery_id)
+        return {"status": "error", "error": "delivery not found"}
+
+    if delivery.status in TERMINAL_STATUSES:
+        # Duplicate dispatch (a retry racing a live task) never re-sends.
+        return {
+            "status": "skipped",
+            "error": f"already terminal ({delivery.status})",
+        }
+
+    org = db.query(Organization).filter_by(id=delivery.organization_id).first()
+    product_name = (org.product_name_display if org else None) or "Rereflect"
+
+    result = outreach_sender.send_outreach_email(
+        db,
+        org_id=delivery.organization_id,
+        # The address actually emailed. For a `cs_assignee` delivery this is
+        # the CS owner, so opt-out + the shared outreach cooldown are evaluated
+        # against the person receiving the mail — which is the honest reading of
+        # both guards.
+        customer_email=delivery.to_email,
+        subject=delivery.subject,
+        body=delivery.body,
+        product_name=product_name,
+        template_key=delivery.template_key,
+    )
+
+    if result.get("ok"):
+        set_delivery_outcome(db, delivery, "sent", None)
+    elif result.get("status") == "skipped":
+        set_delivery_outcome(db, delivery, "skipped", result.get("reason") or "skipped")
+    else:
+        set_delivery_outcome(db, delivery, "failed", result.get("reason") or "send failed")
+
+    return {"status": delivery.status, "error": delivery.reason}

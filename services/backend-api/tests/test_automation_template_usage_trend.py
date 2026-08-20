@@ -45,8 +45,9 @@ def test_templates_endpoint_returns_six_including_usage_decline_outreach(
     response = client.get("/api/v1/automations/templates", headers=auth_headers)
     assert response.status_code == 200
     templates = response.json()
-    # 6 pre-existing + batch_sentiment_alert (batch-sentiment-trigger, Track A).
-    assert len(templates) == 7
+    # 6 pre-existing + batch_sentiment_alert (batch-sentiment-trigger, Track A)
+    # + at_risk_customer_outreach (automation-send-customer-email).
+    assert len(templates) == 8
 
     ids = {t["id"] for t in templates}
     assert USAGE_TEMPLATE_ID in ids

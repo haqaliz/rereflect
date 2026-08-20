@@ -469,3 +469,120 @@ def test_non_run_playbook_actions_are_ignored(mock_redis, mock_task, db):
     assert len(logs) == 1
     assert logs[0].status == "success"
     assert logs[0].actions_executed == []
+
+
+# ---------------------------------------------------------------------------
+# send_customer_email (automation-send-customer-email, worker-mirrors Phase 4)
+# This mirror now executes send_customer_email in addition to run_playbook.
+# Every OTHER action type still silently skips (pinned above).
+# ---------------------------------------------------------------------------
+
+
+def _make_org_row(db, org_id=1, product_name="Acme"):
+    from src.models import Organization
+
+    org = Organization(id=org_id, name="Acme", plan="pro",
+                       product_name_display=product_name)
+    db.add(org)
+    db.commit()
+    return org
+
+
+def _make_health_row(db, org_id=1, email="cust@example.com", name="Dana",
+                     is_archived=False, cs_owner_user_id=None):
+    from src.models import CustomerHealth
+
+    row = CustomerHealth(
+        organization_id=org_id,
+        customer_email=email,
+        customer_name=name,
+        health_score=20,
+        is_archived=is_archived,
+        cs_owner_user_id=cs_owner_user_id,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _make_owner(db, org_id=1, email="owner@acme.test"):
+    from src.models import User
+
+    user = User(email=email, organization_id=org_id, role="owner")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+EMAIL_ACTION = {
+    "type": "send_customer_email",
+    "config": {"template": "re_engagement", "recipient": "customer"},
+}
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_send_customer_email_action_executes(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org_row(db)
+    _make_health_row(db)
+    _make_rule(db, mode="active", states=["declining"], actions=[EMAIL_ACTION])
+
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    row = db.query(AutomationEmailDelivery).one()
+    assert row.status == "queued"
+    assert row.to_email == "cust@example.com"
+    mock_task.delay.assert_called_once_with(row.id)
+
+    log = db.query(AutomationExecution).one()
+    assert log.status == "success"
+    assert log.actions_executed[0]["result"] == {
+        "status": "queued", "delivery_id": row.id
+    }
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_send_customer_email_cs_assignee_resolves_owner(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org_row(db)
+    owner = _make_owner(db)
+    _make_health_row(db, cs_owner_user_id=owner.id)
+    _make_rule(
+        db, mode="active", states=["declining"],
+        actions=[{"type": "send_customer_email",
+                  "config": {"template": "re_engagement", "recipient": "cs_assignee"}}],
+    )
+
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    assert db.query(AutomationEmailDelivery).one().to_email == "owner@acme.test"
+
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_send_customer_email_no_key_is_loud(mock_redis, mock_task, db):
+    from src.models import AutomationEmailDelivery
+
+    _make_org_row(db)
+    _make_health_row(db)
+    _make_rule(db, mode="active", states=["declining"], actions=[EMAIL_ACTION])
+
+    with patch("src.email.RESEND_API_KEY", ""):
+        evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    log = db.query(AutomationExecution).one()
+    assert log.status == "failed"
+    assert log.actions_executed[0]["error"] == "email not configured"
+
+    row = db.query(AutomationEmailDelivery).one()
+    assert row.status == "skipped"
+    assert row.reason == "email not configured"
+    mock_task.delay.assert_not_called()

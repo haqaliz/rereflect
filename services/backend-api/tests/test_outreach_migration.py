@@ -313,6 +313,8 @@ class TestAlembicSingleHead:
         assert len(lines) == 1, (
             f"expected exactly one alembic head, got {len(lines)}: {lines}"
         )
-        assert "f5a6b7c8d9e0" in lines[0], (
-            f"the single head must be our revision f5a6b7c8d9e0, got: {lines[0]}"
+        # The head moves with every new migration; update this pin when you add
+        # one (currently a2b3c4d5e6f7 — add_automation_email_deliveries).
+        assert "a2b3c4d5e6f7" in lines[0], (
+            f"the single head must be the newest revision a2b3c4d5e6f7, got: {lines[0]}"
         )

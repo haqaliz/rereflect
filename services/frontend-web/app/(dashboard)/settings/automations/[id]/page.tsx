@@ -13,9 +13,21 @@ import {
   type TriggerType,
   type ActionType,
   type AutomationAction,
+  type AutomationEmailDelivery,
+  type SendCustomerEmailConfig,
 } from '@/lib/api/automations';
-import { listPlaybooks, type Playbook } from '@/lib/api/playbooks';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  listPlaybooks,
+  SEND_EMAIL_RECIPIENTS,
+  SEND_EMAIL_RECIPIENT_LABELS,
+  type Playbook,
+} from '@/lib/api/playbooks';
+import {
+  BUILTIN_OUTREACH_TEMPLATES,
+  listOutreachTemplates,
+  type OutreachTemplateSummary,
+} from '@/lib/api/outreach';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -46,6 +58,13 @@ import {
 import { toast } from 'sonner';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const DELIVERY_STATUS_VARIANTS: Record<string, 'outline' | 'secondary' | 'destructive'> = {
+  queued: 'outline',
+  sent: 'secondary',
+  skipped: 'secondary',
+  failed: 'destructive',
+};
 
 function formatTs(iso: string | null): string {
   if (!iso) return '—';
@@ -431,6 +450,7 @@ const ACTION_TYPES: ActionType[] = [
   'send_notification',
   'draft_response',
   'run_playbook',
+  'send_customer_email',
 ];
 
 interface ActionRowProps {
@@ -440,15 +460,57 @@ interface ActionRowProps {
   onRemove: () => void;
   disabled?: boolean;
   playbooks: Playbook[];
+  templateOptions: OutreachTemplateSummary[];
 }
 
-function ActionRow({ index, action, onChange, onRemove, disabled, playbooks }: ActionRowProps) {
+/**
+ * Seed a `send_customer_email` config, replacing anything stale.
+ *
+ * This page preserves config across an action-type switch, which is fine for
+ * every other type — but the backend `send_customer_email` config model is
+ * `extra="forbid"`, so a leftover `recipients`/`status`/`tone` key would 422
+ * the save. A config survives only when it is exactly { template, recipient }
+ * with a known recipient.
+ */
+function seedSendCustomerEmailConfig(
+  config: Record<string, any> | undefined,
+  templateOptions: OutreachTemplateSummary[]
+): SendCustomerEmailConfig {
+  const template = config?.template;
+  const recipient = config?.recipient;
+  const onlyKnownKeys = Object.keys(config ?? {}).every(
+    k => k === 'template' || k === 'recipient'
+  );
+  const valid =
+    typeof template === 'string' &&
+    (recipient === 'customer' || recipient === 'cs_assignee') &&
+    onlyKnownKeys;
+
+  return valid
+    ? { template, recipient }
+    : {
+        template: templateOptions[0]?.key ?? BUILTIN_OUTREACH_TEMPLATES[0].key,
+        recipient: 'customer',
+      };
+}
+
+function ActionRow({ index, action, onChange, onRemove, disabled, playbooks, templateOptions }: ActionRowProps) {
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
       <div className="flex-1 space-y-3">
         <Select
           value={action.type}
-          onValueChange={val => onChange({ ...action, type: val as ActionType })}
+          onValueChange={val => {
+            if (val === 'send_customer_email') {
+              onChange({
+                ...action,
+                type: val,
+                config: seedSendCustomerEmailConfig(action.config, templateOptions),
+              });
+            } else {
+              onChange({ ...action, type: val as ActionType });
+            }
+          }}
           disabled={disabled}
         >
           <SelectTrigger data-testid={`action-type-select-${index}`}>
@@ -504,6 +566,53 @@ function ActionRow({ index, action, onChange, onRemove, disabled, playbooks }: A
               </SelectContent>
             </Select>
           )
+        )}
+
+        {action.type === 'send_customer_email' && (
+          <div className="space-y-3">
+            <Select
+              value={typeof action.config?.template === 'string' ? action.config.template : ''}
+              onValueChange={val => onChange({ ...action, config: { ...action.config, template: val } })}
+              disabled={disabled}
+            >
+              <SelectTrigger data-testid={`action-config-template-${index}`}>
+                <SelectValue placeholder="Select template..." />
+              </SelectTrigger>
+              <SelectContent>
+                {templateOptions.map(t => (
+                  <SelectItem key={t.key} value={t.key}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={
+                SEND_EMAIL_RECIPIENTS.includes(action.config?.recipient)
+                  ? action.config.recipient
+                  : ''
+              }
+              onValueChange={val => onChange({ ...action, config: { ...action.config, recipient: val } })}
+              disabled={disabled}
+            >
+              <SelectTrigger data-testid={`action-config-recipient-${index}`}>
+                <SelectValue placeholder="Select recipient..." />
+              </SelectTrigger>
+              <SelectContent>
+                {SEND_EMAIL_RECIPIENTS.map(r => (
+                  <SelectItem key={r} value={r}>
+                    {SEND_EMAIL_RECIPIENT_LABELS[r]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Sent through the shared outreach path: opted-out customers are never
+              emailed, the same per-recipient cooldown as bulk outreach applies, and
+              with no email key configured the send is recorded as skipped. A rule in
+              shadow mode never sends.
+            </p>
+          </div>
         )}
       </div>
 
@@ -563,6 +672,8 @@ export default function AutomationDetailPage() {
   const [actions, setActions] = useState<AutomationAction[]>([]);
   const [cooldownHours, setCooldownHours] = useState(24);
   const [mode, setMode] = useState<'off' | 'shadow' | 'active'>('active');
+  const [deliveries, setDeliveries] = useState<AutomationEmailDelivery[]>([]);
+  const [outreachTemplates, setOutreachTemplates] = useState<OutreachTemplateSummary[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
@@ -580,13 +691,19 @@ export default function AutomationDetailPage() {
 
     async function load() {
       try {
-        const [r, execs, allPlaybooks] = await Promise.all([
+        const [r, execs, allPlaybooks, dels] = await Promise.all([
           automationsAPI.get(ruleId),
           automationsAPI.listExecutions(ruleId),
           listPlaybooks().catch(() => []),
+          // Members are not allowed to read deliveries (the endpoint 403s) —
+          // don't ask.
+          isAdminOrOwner
+            ? automationsAPI.listDeliveries(ruleId).catch(() => [])
+            : Promise.resolve([]),
         ]);
         setRule(r);
         setExecutions(execs);
+        setDeliveries(dels);
         setPlaybooks(allPlaybooks.filter(p => !p.is_template && p.is_active));
 
         // Populate form
@@ -604,7 +721,18 @@ export default function AutomationDetailPage() {
       }
     }
     load();
-  }, [ruleId]);
+  }, [ruleId, isAdminOrOwner]);
+
+  useEffect(() => {
+    listOutreachTemplates()
+      .then(setOutreachTemplates)
+      .catch(() => {
+        setOutreachTemplates(null);
+        toast.error('Could not load outreach templates — using built-in options.');
+      });
+  }, []);
+
+  const templateOptions = outreachTemplates ?? BUILTIN_OUTREACH_TEMPLATES;
 
   const handleSave = useCallback(async () => {
     if (!rule) return;
@@ -743,6 +871,9 @@ export default function AutomationDetailPage() {
           <TabsList>
             <TabsTrigger value="configuration">Configuration</TabsTrigger>
             <TabsTrigger value="execution-log">Execution Log</TabsTrigger>
+            {isAdminOrOwner && (
+              <TabsTrigger value="email-deliveries">Email Deliveries</TabsTrigger>
+            )}
           </TabsList>
 
           {/* ── Configuration Tab ──────────────────────────────────── */}
@@ -882,6 +1013,7 @@ export default function AutomationDetailPage() {
                       onRemove={() => removeAction(i)}
                       disabled={!isAdminOrOwner}
                       playbooks={playbooks}
+                      templateOptions={templateOptions}
                     />
                   ))
                 )}
@@ -985,6 +1117,73 @@ export default function AutomationDetailPage() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* ── Email Deliveries Tab ────────────────────────────────── */}
+          {isAdminOrOwner && (
+            <TabsContent value="email-deliveries" className="mt-4">
+              <Card>
+                <CardHeader className="border-b border-border">
+                  <CardTitle>Email Deliveries</CardTitle>
+                  <CardDescription>
+                    One row per <code>Send Customer Email</code> action. A
+                    <strong> skipped</strong> row is the honest record of a send that
+                    did not happen — the reason says why.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  {deliveries.length === 0 ? (
+                    <p className="text-center py-8 text-muted-foreground text-sm">
+                      No email deliveries yet.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-muted-foreground text-left">
+                            <th className="pb-2 font-medium">Timestamp</th>
+                            <th className="pb-2 font-medium">Recipient</th>
+                            <th className="pb-2 font-medium">Template</th>
+                            <th className="pb-2 font-medium">Subject</th>
+                            <th className="pb-2 font-medium">Status</th>
+                            <th className="pb-2 font-medium">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {deliveries.map(d => (
+                            <tr key={d.id} className="hover:bg-muted/30 transition-colors">
+                              <td className="py-2.5 text-muted-foreground text-xs">
+                                {formatTs(d.created_at)}
+                              </td>
+                              <td className="py-2.5 text-xs">
+                                {d.to_email ?? d.customer_email ?? '—'}
+                              </td>
+                              <td className="py-2.5 text-xs text-muted-foreground">
+                                {d.template_key}
+                              </td>
+                              <td className="py-2.5 text-xs">{d.subject ?? '—'}</td>
+                              <td className="py-2.5">
+                                <Badge
+                                  variant={DELIVERY_STATUS_VARIANTS[d.status] ?? 'secondary'}
+                                  className={
+                                    d.status === 'sent' ? 'bg-green-500 text-white text-xs' : 'text-xs'
+                                  }
+                                >
+                                  {d.status}
+                                </Badge>
+                              </td>
+                              <td className="py-2.5 text-xs text-muted-foreground">
+                                {d.reason ?? '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
 
