@@ -423,7 +423,8 @@
       outreach template, in the backend engine and all three worker mirrors; delivery audit table
       + `GET /api/v1/automations/{rule_id}/deliveries` + rule-detail Email Deliveries tab; seeded
       "At-Risk Customer Outreach" shadow template (shipped 2026-08-20 as
-      `automation-send-customer-email`, see `docs/planning/automation-send-customer-email/`)
+      `automation-send-customer-email`, merged c4f5a431, PR #23 — see
+      `docs/planning/automation-send-customer-email/`)
 
 **Q4 Deliverables**: Advanced churn prediction, custom models, benchmarks, workflow automation (M4.4 COMPLETE)
 **Plan Gating**: Custom models = Enterprise, benchmarks = Pro+, automation = Pro+ (5 rules) / Business (20) / Enterprise (unlimited)
