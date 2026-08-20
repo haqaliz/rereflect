@@ -359,7 +359,7 @@ interface ActionRowProps {
  * A config is kept only when it is exactly `{ template, recipient }` with a
  * known recipient; otherwise it is replaced with the defaults.
  */
-export function seedSendCustomerEmailConfig(
+function seedSendCustomerEmailConfig(
   config: Record<string, any> | undefined,
   templateOptions: OutreachTemplateSummary[]
 ): SendCustomerEmailConfig {
