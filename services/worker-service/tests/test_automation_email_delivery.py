@@ -134,6 +134,15 @@ def test_task_name_constant_matches_backend_dispatch_string():
     assert AUTOMATION_EMAIL_TASK_NAME == "tasks.outreach.send_automation_email"
 
 
+def test_registered_task_name_matches_the_constant():
+    """The seam pin: the registered Celery task name, the constant the mirrors
+    document, and the backend's dispatch string are all one string. A drift
+    here enqueues work nothing will ever run."""
+    from src.tasks.outreach import send_automation_email as task
+
+    assert task.name == AUTOMATION_EMAIL_TASK_NAME
+
+
 # ---------------------------------------------------------------------------
 # 2. Row helpers
 # ---------------------------------------------------------------------------
