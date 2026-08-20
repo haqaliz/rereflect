@@ -20,7 +20,7 @@ import logging
 from datetime import datetime
 from typing import Any, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,7 @@ from src.api.dependencies import (
 from src.config.automation_templates import AUTOMATION_TEMPLATES, TEMPLATES_BY_ID
 from src.config.plans import get_automation_rule_limit, has_feature
 from src.database.session import get_db
+from src.models.automation_email_delivery import AutomationEmailDelivery
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import RULE_MODES, AutomationRule
 from src.services.automation_engine import seed_churn_cooldowns
@@ -413,6 +414,34 @@ class ExecutionResponse(BaseModel):
     executed_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DeliveryResponse(BaseModel):
+    """One `send_customer_email` delivery audit row.
+
+    `body` is deliberately not exposed — the list surface only needs the
+    outcome, and the rendered body can be long.
+    """
+
+    id: int
+    rule_id: int
+    organization_id: int
+    customer_email: str
+    to_email: str
+    template_key: str
+    subject: str
+    status: str
+    reason: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DeliveryListResponse(BaseModel):
+    deliveries: List[DeliveryResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 class TemplateResponse(BaseModel):
@@ -847,3 +876,47 @@ def get_executions(
         .all()
     )
     return executions
+
+
+@router.get(
+    "/{rule_id}/deliveries",
+    response_model=DeliveryListResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
+def get_deliveries(
+    rule_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+):
+    """Delivery log for a rule's `send_customer_email` actions (newest first).
+
+    One row per action fire: `queued` while the worker task is pending, then
+    `sent` / `skipped` / `failed` with a `reason`. A `skipped` row is the honest
+    record of a send that did not happen (no email key, customer opted out,
+    cooldown) — it is never reported as a success.
+    """
+    # Org scoping: 404 for a rule the caller's org does not own.
+    _get_rule_or_404(rule_id, current_org.id, db)
+
+    query = db.query(AutomationEmailDelivery).filter(
+        AutomationEmailDelivery.rule_id == rule_id
+    )
+    total = query.count()
+    rows = (
+        query.order_by(
+            AutomationEmailDelivery.created_at.desc(),
+            AutomationEmailDelivery.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return DeliveryListResponse(
+        deliveries=[DeliveryResponse.model_validate(r) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )

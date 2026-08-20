@@ -3,6 +3,8 @@ Tests for AI Workflow Automation API (M4.4) — Phase 1.
 
 TDD: tests written before implementation.
 """
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -613,3 +615,116 @@ def test_send_customer_email_is_a_valid_action_type():
     from src.api.routes.automations import VALID_ACTION_TYPES
 
     assert "send_customer_email" in VALID_ACTION_TYPES
+
+
+# ---------------------------------------------------------------------------
+# 19. GET /{rule_id}/deliveries (action-core Phase D)
+# ---------------------------------------------------------------------------
+
+def _make_delivery(db: Session, org_id: int, rule_id: int, *, status: str = "queued",
+                   reason: str | None = None, minutes_ago: int = 0):
+    from datetime import timedelta
+
+    from src.models.automation_email_delivery import AutomationEmailDelivery
+
+    row = AutomationEmailDelivery(
+        organization_id=org_id,
+        rule_id=rule_id,
+        customer_email="c@x.com",
+        to_email="c@x.com",
+        template_key="re_engagement",
+        subject="We'd love to hear from you",
+        body="Hi there",
+        status=status,
+        reason=reason,
+        created_at=datetime.utcnow() - timedelta(minutes=minutes_ago),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def test_get_deliveries_returns_rows_newest_first(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+
+    older = _make_delivery(db, test_organization.id, rule_id, status="sent", minutes_ago=30)
+    newer = _make_delivery(db, test_organization.id, rule_id, status="skipped",
+                           reason="customer opted out", minutes_ago=1)
+
+    r = client.get(f"/api/v1/automations/{rule_id}/deliveries", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 2
+    ids = [d["id"] for d in body["deliveries"]]
+    assert ids == [newer.id, older.id]
+
+    first = body["deliveries"][0]
+    for key in ("id", "rule_id", "organization_id", "customer_email", "to_email",
+                "template_key", "subject", "status", "reason", "created_at"):
+        assert key in first
+    assert first["status"] == "skipped"
+    assert first["reason"] == "customer opted out"
+
+
+def test_get_deliveries_empty_rule_returns_empty_list(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+
+    r = client.get(f"/api/v1/automations/{rule_id}/deliveries", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["deliveries"] == []
+    assert r.json()["total"] == 0
+
+
+def test_get_deliveries_member_forbidden(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+
+    member = _make_user(db, test_organization, role="member")
+    r = client.get(f"/api/v1/automations/{rule_id}/deliveries", headers=_token(member))
+    assert r.status_code == 403
+
+
+def test_get_deliveries_other_org_rule_404(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+
+    other_org = _make_org(db, plan="pro")
+    other_admin = _make_user(db, other_org, role="admin")
+
+    r = client.get(f"/api/v1/automations/{rule_id}/deliveries", headers=_token(other_admin))
+    assert r.status_code == 404
+
+
+def test_get_deliveries_paginates(
+    client: TestClient, db: Session, test_organization: Organization, auth_headers: dict
+):
+    created = client.post("/api/v1/automations", json=SEND_EMAIL_RULE, headers=auth_headers)
+    rule_id = created.json()["id"]
+    for i in range(5):
+        _make_delivery(db, test_organization.id, rule_id, minutes_ago=i)
+
+    r = client.get(
+        f"/api/v1/automations/{rule_id}/deliveries?page=1&page_size=2", headers=auth_headers
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["deliveries"]) == 2
+    assert body["total"] == 5
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+
+    too_big = client.get(
+        f"/api/v1/automations/{rule_id}/deliveries?page_size=101", headers=auth_headers
+    )
+    assert too_big.status_code == 422
