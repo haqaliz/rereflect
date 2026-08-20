@@ -426,6 +426,8 @@ class AutomationEngine:
                     r = self._execute_draft_response(action_config, feedback)
                 elif action_type == "run_playbook":
                     r = self._execute_run_playbook(action_config, context, rule)
+                elif action_type == "send_customer_email":
+                    r = self._execute_send_customer_email(action_config, context, rule)
                 else:
                     r = {"type": action_type, "result": None, "error": f"Unknown action type: {action_type}"}
             except Exception as exc:
@@ -785,6 +787,135 @@ class AutomationEngine:
         return {
             "type": "run_playbook",
             "result": {"execution_id": exec_row.id, "playbook_id": playbook_id},
+            "error": None,
+        }
+
+    def _execute_send_customer_email(
+        self,
+        config: dict,
+        context: Dict[str, Any],
+        rule: AutomationRule,
+    ) -> Dict:
+        """
+        Email the customer (or their CS owner) with a built-in outreach template.
+
+        Writes an `automation_email_deliveries` audit row (`queued`) and enqueues
+        the worker task `tasks.outreach.send_automation_email`, which is the ONLY
+        place a send actually happens — opt-out, tokenized unsubscribe and the
+        shared per-recipient outreach cooldown are enforced there
+        (`worker-service/src/services/outreach_sender.py`).
+
+        Every skip is loud: an `error` string on the action result and nothing
+        enqueued. The no-key skip additionally leaves a `skipped` row so a
+        self-hoster can see the send never happened (the rest of the skips are
+        evaluator-side decisions with no delivery to audit).
+        """
+        from src.models.automation_email_delivery import AutomationEmailDelivery
+        from src.models.customer_health import CustomerHealth
+        from src.models.organization import Organization
+        from src.models.user import User
+        from src.services import email_service
+        from src.services.outreach_templates import (
+            OUTREACH_TEMPLATES,
+            render_outreach_template,
+        )
+
+        def _err(message: str) -> Dict:
+            return {"type": "send_customer_email", "result": None, "error": message}
+
+        template_key = config.get("template")
+        if template_key not in OUTREACH_TEMPLATES:
+            return _err(f"unknown template key: {template_key}")
+
+        recipient = config.get("recipient", "customer")
+
+        customer_email = (context.get("customer_email") or "").strip().lower()
+        # "__org__" is the worker mirrors' org-wide sentinel — an org-wide
+        # trigger has no customer to email.
+        if not customer_email or customer_email == "__org__":
+            return _err("no customer email (org-wide trigger)")
+
+        health = (
+            self.db.query(CustomerHealth)
+            .filter(
+                CustomerHealth.organization_id == rule.organization_id,
+                CustomerHealth.customer_email == customer_email,
+            )
+            .first()
+        )
+        # A missing health row is NOT archived (mirrors the sender's
+        # missing-row-is-not-opted-out semantics).
+        if health is not None and health.is_archived:
+            return _err("customer archived")
+
+        if not email_service._is_email_enabled():
+            delivery = AutomationEmailDelivery(
+                organization_id=rule.organization_id,
+                rule_id=rule.id,
+                customer_email=customer_email,
+                to_email=customer_email,
+                template_key=template_key,
+                subject="(not rendered — email not configured)",
+                body="",
+                status="skipped",
+                reason="email not configured",
+            )
+            self.db.add(delivery)
+            self.db.flush()
+            return _err("email not configured")
+
+        if recipient == "cs_assignee":
+            if health is None:
+                return _err("no health row for customer")
+            if not health.cs_owner_user_id:
+                return _err("no CS owner assigned")
+            owner = (
+                self.db.query(User)
+                .filter(User.id == health.cs_owner_user_id)
+                .first()
+            )
+            if owner is None or not owner.email:
+                return _err("CS owner has no email")
+            to_email = owner.email
+        else:
+            to_email = customer_email
+
+        org = (
+            self.db.query(Organization)
+            .filter(Organization.id == rule.organization_id)
+            .first()
+        )
+        product_name = (org.product_name_display if org else None) or "Rereflect"
+        customer_name = (health.customer_name if health else "") or ""
+
+        tpl = OUTREACH_TEMPLATES[template_key]
+        # render_outreach_template renders the BODY only — the subject carries
+        # its own {{PRODUCT_NAME}} token.
+        subject = tpl.subject.replace("{{PRODUCT_NAME}}", product_name)
+        body = render_outreach_template(template_key, customer_name, product_name)
+
+        delivery = AutomationEmailDelivery(
+            organization_id=rule.organization_id,
+            rule_id=rule.id,
+            customer_email=customer_email,
+            to_email=to_email,
+            template_key=template_key,
+            subject=subject,
+            body=body,
+            status="queued",
+        )
+        self.db.add(delivery)
+        self.db.flush()
+
+        from src.background.celery_client import get_celery_app
+
+        get_celery_app().send_task(
+            "tasks.outreach.send_automation_email", args=[delivery.id]
+        )
+
+        return {
+            "type": "send_customer_email",
+            "result": {"status": "queued", "delivery_id": delivery.id},
             "error": None,
         }
 
