@@ -36,9 +36,16 @@ from sqlalchemy.orm import Session
 from src.models import ChurnPlaybook, ChurnPlaybookExecution
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
+from src.services.automation_email_delivery import execute_send_customer_email
 from src.tasks.churn_playbooks import run_playbook
 
 logger = logging.getLogger(__name__)
+
+# Action types this mirror executes. Everything else is silently skipped (the
+# narrow-mirror contract this module shipped with); `send_customer_email` was
+# added by automation-send-customer-email so a churn/usage rule can actually
+# email the at-risk customer.
+HANDLED_ACTION_TYPES = ("run_playbook", "send_customer_email")
 
 
 # ---------------------------------------------------------------------------
@@ -211,20 +218,39 @@ def _execute_run_playbook_actions(
     rule: AutomationRule, org_id: int, customer_email: str, db: Session
 ) -> List[Dict[str, Any]]:
     """
-    Execute only `run_playbook` actions from *rule.actions*.
+    Execute the action types this mirror handles (`HANDLED_ACTION_TYPES`):
+    `run_playbook` and `send_customer_email`.
 
-    Non-`run_playbook` action types (`auto_assign`, `change_status`,
-    `send_notification`, `draft_response`) are ignored here — the worker
-    seam only auto-runs churn playbooks; those other actions remain
-    backend-only (fired via the backend health-score path, which does use
-    the full AutomationEngine).
+    The other action types (`auto_assign`, `change_status`,
+    `send_notification`, `draft_response`) are still ignored here — they need
+    a feedback item this trigger does not have, and remain backend-only
+    (fired via the backend health-score path, which uses the full
+    AutomationEngine).
+
+    `send_customer_email` shares its handler with the other two worker mirrors
+    (`src.services.automation_email_delivery.execute_send_customer_email`) so
+    the three can never drift on the same process's own semantics.
     """
     results: List[Dict[str, Any]] = []
     for action in (rule.actions or []):
-        if not isinstance(action, dict) or action.get("type") != "run_playbook":
+        if not isinstance(action, dict):
+            continue
+
+        action_type = action.get("type")
+        if action_type not in HANDLED_ACTION_TYPES:
+            # Every other action type is still silently skipped here — pinned
+            # by test_non_run_playbook_actions_are_ignored. Making them loud is
+            # a separate delivery-integrity change.
             continue
 
         config: dict = action.get("config", {}) or {}
+
+        if action_type == "send_customer_email":
+            results.append(
+                execute_send_customer_email(config, rule, customer_email, db)
+            )
+            continue
+
         playbook_id = config.get("playbook_id")
         if not playbook_id:
             results.append(

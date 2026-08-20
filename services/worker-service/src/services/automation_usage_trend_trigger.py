@@ -54,9 +54,16 @@ from src.models import ChurnPlaybook, ChurnPlaybookExecution
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
 from src.services.usage_trend_severity import is_worsening_transition
+from src.services.automation_email_delivery import execute_send_customer_email
 from src.tasks.churn_playbooks import run_playbook
 
 logger = logging.getLogger(__name__)
+
+# Action types this mirror executes. Everything else is silently skipped (the
+# narrow-mirror contract this module shipped with); `send_customer_email` was
+# added by automation-send-customer-email so a churn/usage rule can actually
+# email the at-risk customer.
+HANDLED_ACTION_TYPES = ("run_playbook", "send_customer_email")
 
 # `ChurnPlaybookExecution.triggered_by` value for auto-runs fired by this
 # evaluator — distinct from "auto_probability" (M4.1.5). Must stay exactly
@@ -261,18 +268,32 @@ def _execute_run_playbook_actions(
     rule: AutomationRule, org_id: int, customer_email: str, db: Session
 ) -> List[Dict[str, Any]]:
     """
-    Execute only `run_playbook` actions from *rule.actions*.
-
-    Non-`run_playbook` action types are ignored here — same deliberately
-    narrow scope as `automation_churn_trigger._execute_run_playbook_actions`
-    (the worker seam only auto-runs churn playbooks).
+    Execute the action types this mirror handles (`HANDLED_ACTION_TYPES`):
+    `run_playbook` and `send_customer_email` — same narrow scope as
+    `automation_churn_trigger._execute_run_playbook_actions`, and the same
+    shared `send_customer_email` handler. Every other action type is still
+    silently ignored here.
     """
     results: List[Dict[str, Any]] = []
     for action in (rule.actions or []):
-        if not isinstance(action, dict) or action.get("type") != "run_playbook":
+        if not isinstance(action, dict):
+            continue
+
+        action_type = action.get("type")
+        if action_type not in HANDLED_ACTION_TYPES:
+            # Every other action type is still silently skipped here — pinned
+            # by test_non_run_playbook_actions_are_ignored. Making them loud is
+            # a separate delivery-integrity change.
             continue
 
         config: dict = action.get("config", {}) or {}
+
+        if action_type == "send_customer_email":
+            results.append(
+                execute_send_customer_email(config, rule, customer_email, db)
+            )
+            continue
+
         playbook_id = config.get("playbook_id")
         if not playbook_id:
             results.append(
