@@ -1492,3 +1492,46 @@ class OutreachCampaignRecipient(Base):
     status = Column(String(20), nullable=False, default="queued", server_default="queued")
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AutomationEmailDelivery(Base):
+    """Audit row for one automation `send_customer_email` action — no-FK mirror.
+
+    Byte-for-byte column parity with backend-api's
+    `src/models/automation_email_delivery.py` (the worker cannot import it —
+    `tests/test_automation_email_delivery.py` pins the column set so the two
+    can never drift silently). The table is created by the backend's migration
+    `a2b3c4d5e6f7_add_automation_email_deliveries` — the worker owns no
+    migrations.
+
+    Status lifecycle: `queued` (written by whichever evaluator fired the rule)
+    -> `sent | skipped | failed` (written by `tasks.outreach.send_automation_email`,
+    the only place a send happens). A row is never left `queued` by an
+    exception.
+
+    Deliberately NO `automation_execution_id`: the execution log is written
+    AFTER actions run on every evaluator, so the id is never knowable at
+    row-creation time.
+    """
+    __tablename__ = "automation_email_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    rule_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    to_email = Column(String(255), nullable=False)
+    template_key = Column(String(50), nullable=False)
+    subject = Column(String(200), nullable=False)
+    body = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="queued", server_default="queued")
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_automation_email_deliveries_org_created",
+            "organization_id",
+            "created_at",
+        ),
+    )
