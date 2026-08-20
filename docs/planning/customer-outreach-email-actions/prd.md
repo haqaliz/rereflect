@@ -236,9 +236,14 @@ RBAC: all mutations `require_admin_or_owner` (customers-router precedent
 
 ## Out of Scope
 
-- **Automations-engine `send_customer_email` action type** — deferred v2 (the two worker
+- ~~**Automations-engine `send_customer_email` action type** — deferred v2 (the two worker
   churn/usage mirrors silently skip unknown actions; adding it there is its own
-  delivery-integrity project). Playbook steps + bulk campaign only in v1.
+  delivery-integrity project). Playbook steps + bulk campaign only in v1.~~
+  **CLOSED 2026-08-20** by `automation-send-customer-email`: the action ships in the
+  backend engine and all three worker mirrors (the churn/usage mirrors now handle it
+  explicitly and still silent-skip every other type), with a delivery audit table, a
+  per-rule deliveries endpoint and a seeded shadow-mode template. See
+  `docs/planning/automation-send-customer-email/`.
 - **Fixing the other 5 unimplemented seeded playbook action types** (`notify`, `tag`,
   `create_task`, `schedule_task`, `trigger_automation`) — separate card; noted.
 - **SMTP transport**; org-editable templates; campaign scheduling/sequences;
