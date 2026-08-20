@@ -379,3 +379,38 @@ def test_execute_send_customer_email_bad_config_is_loud(mock_task, db):
 
     assert db.query(AutomationEmailDelivery).count() == 0
     mock_task.delay.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 5. Durable-then-publish
+# ---------------------------------------------------------------------------
+
+@patch("src.services.automation_email_delivery.send_automation_email")
+def test_execute_send_customer_email_commits_before_enqueueing(mock_task, db):
+    """The row must be committed before its id is handed to the worker.
+
+    Proven the hard way by a live run (2026-08-21): with only a flush, a real
+    worker consumed the message ~2ms after publish, logged `delivery not
+    found`, and the row sat `queued` forever with nothing sent. The mirrors
+    commit at the END of _evaluate_rule, which is far too late.
+    """
+    _make_org(db)
+    rule = _make_rule(db)
+
+    calls = []
+    mock_task.delay.side_effect = lambda *a, **k: calls.append("delay")
+    real_commit = db.commit
+
+    def spy_commit():
+        calls.append("commit")
+        real_commit()
+
+    with patch("src.email.RESEND_API_KEY", "test-key"):
+        with patch.object(db, "commit", side_effect=spy_commit):
+            execute_send_customer_email(CONFIG, rule, "cust@example.com", db)
+
+    assert "delay" in calls, "the task was never enqueued"
+    assert "commit" in calls, "the delivery row was never committed"
+    assert calls.index("commit") < calls.index("delay"), (
+        f"the row must be committed before the message is published; got {calls}"
+    )

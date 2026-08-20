@@ -177,6 +177,7 @@ def execute_send_customer_email(
             status="skipped",
             reason="email not configured",
         )
+        db.commit()
         return _err("email not configured")
 
     if recipient == "cs_assignee":
@@ -215,6 +216,12 @@ def execute_send_customer_email(
         subject=subject,
         body=body,
     )
+
+    # COMMIT BEFORE PUBLISH. The worker task loads this row by id and wins the
+    # race easily — a live run had it log "delivery not found" ~2ms after the
+    # publish, leaving the row `queued` forever and sending nothing. The
+    # mirrors' own commit happens at the end of _evaluate_rule, far too late.
+    db.commit()
 
     try:
         send_automation_email.delay(delivery.id)

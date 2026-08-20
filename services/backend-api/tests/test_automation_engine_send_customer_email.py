@@ -435,3 +435,51 @@ def test_send_customer_email_render_falls_back_to_rereflect(
     # substituted too (render_outreach_template only renders the body).
     assert "{{PRODUCT_NAME}}" not in row.subject
     assert "Rereflect" in row.subject
+
+
+# ---------------------------------------------------------------------------
+# 11. The delivery row must be COMMITTED before the task is enqueued
+# ---------------------------------------------------------------------------
+
+@patch("src.background.celery_client.get_celery_app")
+def test_send_customer_email_commits_before_enqueueing(
+    mock_get_celery_app, db: Session, test_organization: Organization
+):
+    """Durable-then-publish, proven the hard way.
+
+    A live end-to-end run (2026-08-21) had a real Celery worker consume the
+    message ~2ms after publish and log `delivery not found`, because the
+    backend had only flushed the row — the commit came later, at the end of
+    _evaluate_rule. The row then sat `queued` forever and no email was ever
+    sent. Publishing a reference to a row that is not yet visible to other
+    connections is a lost race by construction, not a narrow one.
+
+    A single in-memory session cannot observe cross-connection visibility, so
+    this asserts the ordering that produces it.
+    """
+    from src.services.automation_engine import AutomationEngine
+
+    calls: list[str] = []
+
+    mock_app = MagicMock()
+    mock_app.send_task.side_effect = lambda *a, **k: calls.append("send_task")
+    mock_get_celery_app.return_value = mock_app
+
+    _make_health(db, test_organization.id)
+    _make_rule(db, test_organization.id, actions=[EMAIL_ACTION])
+
+    engine = AutomationEngine(db)
+    real_commit = db.commit
+
+    def spy_commit():
+        calls.append("commit")
+        real_commit()
+
+    with patch.object(db, "commit", side_effect=spy_commit):
+        _fire(engine, test_organization.id, _context())
+
+    assert "send_task" in calls, "the task was never enqueued"
+    assert "commit" in calls, "the delivery row was never committed"
+    assert calls.index("commit") < calls.index("send_task"), (
+        f"the row must be committed before the message is published; got {calls}"
+    )

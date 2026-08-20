@@ -809,6 +809,10 @@ class AutomationEngine:
         enqueued. The no-key skip additionally leaves a `skipped` row so a
         self-hoster can see the send never happened (the rest of the skips are
         evaluator-side decisions with no delivery to audit).
+
+        Unlike the other handlers this one COMMITS: the delivery row must be
+        durable before its id is published to the worker (see the comment at
+        the commit call).
         """
         from src.models.automation_email_delivery import AutomationEmailDelivery
         from src.models.customer_health import CustomerHealth
@@ -861,7 +865,7 @@ class AutomationEngine:
                 reason="email not configured",
             )
             self.db.add(delivery)
-            self.db.flush()
+            self.db.commit()
             return _err("email not configured")
 
         if recipient == "cs_assignee":
@@ -905,7 +909,12 @@ class AutomationEngine:
             status="queued",
         )
         self.db.add(delivery)
-        self.db.flush()
+        # COMMIT BEFORE PUBLISH. The worker loads this row by id, and it wins
+        # the race easily: a live run had it log "delivery not found" ~2ms
+        # after the publish, leaving the row `queued` forever and sending
+        # nothing. A flush is not enough — the row has to be visible to other
+        # connections before its id is handed to another process.
+        self.db.commit()
 
         from src.background.celery_client import get_celery_app
 
