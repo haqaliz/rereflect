@@ -7,11 +7,13 @@ email dispatch, per-schedule exception isolation, generate_schedule_once.
 """
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
 from src.models import CustomerHealth, FeedbackItem, Organization
 from src.services.report_generator import ReportGenerator
+from src.services.scheduled_report_narrative import generate_report_narrative
 
 
 # ---------------------------------------------------------------------------
@@ -198,3 +200,87 @@ class TestReportGeneratorMirror:
         }
         assert risk_rows["at_risk"] == 1
         assert risk_rows["critical"] == 1
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Narrative writer
+# ---------------------------------------------------------------------------
+
+
+class TestReportNarrative:
+    def _report_data(self):
+        return {
+            "title": "Executive Summary — Jul 26 to Aug 25, 2026",
+            "sections": [
+                {
+                    "heading": "Overview",
+                    "data": {
+                        "type": "table",
+                        "columns": ["Metric", "Value"],
+                        "rows": [
+                            ["Total Feedback", 3],
+                            ["Urgent Items", 1],
+                            ["At-Risk Customers", 2],
+                        ],
+                    },
+                },
+                {
+                    "heading": "Sentiment Analysis",
+                    "data": {
+                        "type": "table",
+                        "columns": ["Sentiment", "Count"],
+                        "rows": [
+                            ["positive", 1],
+                            ["negative", 1],
+                            ["neutral", 1],
+                        ],
+                    },
+                },
+            ],
+        }
+
+    def test_returns_text_when_llm_configured(self, db):
+        org = _make_org(db)
+
+        class _FakeResponse:
+            content = "A concise data-led narrative."
+
+        with patch(
+            "src.services.scheduled_report_narrative.call_llm_for_org",
+            return_value=_FakeResponse(),
+        ) as mock_call:
+            narrative = generate_report_narrative(self._report_data(), org.id, db)
+
+        assert narrative == "A concise data-led narrative."
+        assert mock_call.call_count == 1
+        kwargs = mock_call.call_args.kwargs
+        assert kwargs["org_id"] == org.id
+        assert kwargs["task_type"] == "report_narrative"
+        prompt = kwargs["request"].messages[0]["content"]
+        assert "Overview" in prompt
+        assert "Total Feedback" in prompt
+
+    def test_returns_none_when_resolver_returns_none(self, db):
+        org = _make_org(db)
+
+        with patch(
+            "src.services.scheduled_report_narrative.call_llm_for_org",
+            return_value=None,
+        ):
+            narrative = generate_report_narrative(self._report_data(), org.id, db)
+
+        assert narrative is None
+
+    def test_returns_none_when_completion_raises(self, db):
+        org = _make_org(db)
+
+        with patch(
+            "src.services.scheduled_report_narrative.call_llm_for_org",
+            side_effect=RuntimeError("provider down"),
+        ):
+            narrative = generate_report_narrative(self._report_data(), org.id, db)
+
+        assert narrative is None
+
+    def test_returns_none_when_org_id_missing(self, db):
+        assert generate_report_narrative(self._report_data(), None, db) is None
+        assert generate_report_narrative(self._report_data(), 1, None) is None
