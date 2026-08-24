@@ -42,6 +42,7 @@ from .feedback_response import FeedbackResponse
 from .webhook_endpoint import WebhookEndpoint
 from .webhook_delivery import WebhookDelivery
 from .report import Report
+from .report_schedule import ReportSchedule
 from .ai_correction import AICorrection
 from .automation_rule import AutomationRule
 from .automation_execution import AutomationExecution
@@ -116,6 +117,7 @@ __all__ = [
     "WebhookEndpoint",
     "WebhookDelivery",
     "Report",
+    "ReportSchedule",
     "AICorrection",
     "AutomationRule",
     "AutomationExecution",
