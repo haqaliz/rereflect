@@ -56,12 +56,14 @@ Resend, with in-app availability always and zero dependency on a key.
 ### Must-have
 1. **Schedule CRUD (backend)** — `ReportSchedule` model (org-scoped) + REST API
    `GET/POST/PATCH/DELETE /api/v1/report-schedules` + `POST .../{id}/toggle`.
-   - Fields: `report_type` (fixed 4: `executive_summary` | `customer_health` |
-     `feature_prioritization` | `churn_risk`), `cadence` (`daily` | `weekly` | `monthly`),
-     `hour_utc` (0-23), `day_of_week` (0-6, required for weekly), `day_of_month` (1-31,
-     required for monthly), `recipients` (JSON list of emails, max 20, deduped/trimmed,
-     default `[creator_email]`), `enabled` (bool), `last_run_at` (nullable),
-     `created_by_user_id` (nullable FK).
+- Fields: `report_type` (fixed 4: `executive_summary` | `customer_health` |
+      `feature_prioritization` | `churn_risk`), `date_range_days` (7|30|90, default 30 —
+      added beyond the PRD draft so the schedule explicitly chooses the window instead of
+      inventing a cadence→range mapping; flagged assumption, see §6), `cadence` (`daily` |
+      `weekly` | `monthly`), `hour_utc` (0-23), `day_of_week` (0-6, required for weekly),
+      `day_of_month` (1-31, required for monthly), `recipients` (JSON list of emails, max 20,
+      deduped/trimmed, default `[creator_email]`), `enabled` (bool), `last_run_at`
+      (nullable), `created_by_user_id` (nullable FK).
    - RBAC: list/get = feature-gated member; create/update/delete/toggle =
      `require_admin_or_owner` (mirrors `reports.py` DELETE + integration routes).
    - Validation errors → 422; cross-org → 404.
@@ -194,6 +196,11 @@ All org-scoped (cross-org → 404). Request/response via Pydantic schemas; unkno
 6. **LLM-failure behavior (open):** narrative falls back to data-only on LLM error — already
    spec'd; confirm during review that a hard `is_configured` gate should also skip narrative
    rather than the whole run (PRD: skips narrative only).
+7. **`date_range_days` on the schedule (assumption, implemented):** the schedule carries its
+   own `date_range_days` (7|30|90, default 30) instead of deriving the window from cadence.
+   This makes the window explicit per schedule and reuses the existing report-generator
+   ranges verbatim; the UI select exposes 7/30/90. Backend validation rejects anything else
+   (422).
 
 ## 7. Out of Scope
 
