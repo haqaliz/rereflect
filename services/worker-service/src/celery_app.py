@@ -69,6 +69,7 @@ celery_app = Celery(
         "src.tasks.zendesk_status_sync",
         "src.tasks.asana_sync",
         "src.tasks.outreach",
+        "src.tasks.scheduled_reports",
     ],
 )
 
@@ -305,6 +306,14 @@ celery_app.conf.beat_schedule = {
     "sync-asana-status-every-15-min": {
         "task": "src.tasks.asana_sync.sync_all_asana",
         "schedule": 900.0,  # every 15 minutes
+    },
+    # Materialize due report schedules into Report rows — hourly at :15 UTC
+    # (avoids the crowded top-of-hour and the Monday 06:00-08:30 cluster).
+    # The task filters schedules by cadence + hour_utc and atomically claims
+    # each window (scheduled-ai-reports / worker-scheduled-generation).
+    "generate-scheduled-reports": {
+        "task": "src.tasks.scheduled_reports.generate_scheduled_reports",
+        "schedule": crontab(minute=15),
     },
 }
 
