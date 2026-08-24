@@ -24,6 +24,7 @@ from src.api.routes import feedback_issue_draft as feedback_issue_draft_router  
 from src.api.routes import webhooks as webhooks_router
 from src.api.routes import health as health_routes
 from src.api.routes import reports as reports_router
+from src.api.routes import report_schedules as report_schedules_router  # noqa: E402 — scheduled-ai-reports
 from src.api.routes import account as account_router
 from src.api.routes import ai_corrections as ai_corrections_router  # noqa: E402 — M3.8 Track B
 from src.api.routes import automations as automations_router  # noqa: E402 — M4.4 AI Workflow Automation
@@ -416,6 +417,7 @@ app.include_router(webhooks_router.router)
 app.include_router(health_routes.router)
 # On-Demand AI Reports (M2.4)
 app.include_router(reports_router.router)
+app.include_router(report_schedules_router.router)
 # GDPR Compliance (M3.7)
 app.include_router(account_router.router)
 # AI Trust — Human-in-the-Loop corrections (M3.8 Track B)
