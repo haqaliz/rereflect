@@ -120,6 +120,24 @@ def _send_with_template(to: str, template_id: str, variables: Dict[str, Any]) ->
     return _send_email(to, rendered_subject, rendered_html)
 
 
+def send_scheduled_report_email(
+    to_email: str,
+    organization_name: str,
+    subject: str,
+    html: str,
+) -> bool:
+    """
+    Send a scheduled AI report email via the raw HTML path (BYOK Resend).
+
+    `subject`/`html` come from the report renderer
+    (`src.services.scheduled_report_email`). `organization_name` is part of
+    the caller contract (the scheduled-generation aspect) and is currently
+    carried by the rendered subject; it is accepted so the signature stays
+    stable. Returns False (no send) when RESEND_API_KEY is unset.
+    """
+    return _send_email(to=to_email, subject=subject, html=html)
+
+
 def send_weekly_digest_email(
     to_email: str,
     organization_name: str,
