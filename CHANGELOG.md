@@ -7,6 +7,30 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Scheduled & emailed AI reports
+
+- **Reports on a fixed cadence, not just on demand.** The My Reports page (`/reports`)
+  gains a **Scheduled** tab where admins/owners create report schedules: one of the four
+  report types (executive summary, customer health, feature prioritization, churn risk),
+  a date range (7/30/90 days), a cadence (daily/weekly/monthly), an hour (UTC), and an
+  optional recipient list (seeded with the creator's email; empty = in-app only). Members
+  see the list read-only.
+- **The worker materializes them on cadence.** An hourly Celery beat task claims each due
+  schedule exactly once per window (atomic `last_run_at` claim — overlapping beats never
+  double-run a window) and persists a real `Report` row tagged `source="scheduled"`, so
+  scheduled reports appear in the normal Reports list.
+- **Email delivery when you bring a key.** With `RESEND_API_KEY` set, every recipient on
+  the schedule receives the generated report at its scheduled hour (UTC); with no key,
+  generation still happens in-app and email is skipped silently — zero dependency on a
+  key, and a run is never failed by email.
+- **Cadence semantics.** Daily = every day at the chosen hour; weekly = the chosen
+  weekday (`Sun`–`Sat`); monthly = the chosen day of month — a day-31 schedule skips
+  shorter months (accepted, documented). All times are UTC.
+- API: `GET/POST/PATCH/DELETE /api/v1/report-schedules` +
+  `POST /api/v1/report-schedules/{id}/toggle` (create/update/delete/toggle are
+  admin/owner; the list is member-readable). No plan gates — everything unlocked.
+- See `docs/planning/scheduled-ai-reports/`.
+
 ### Added — Automation rules can email the customer (`send_customer_email`)
 
 - **Behavior change.** An `active` automation rule carrying a `send_customer_email`

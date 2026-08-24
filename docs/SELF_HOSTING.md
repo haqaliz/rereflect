@@ -1084,6 +1084,29 @@ tab, or via `GET /api/v1/automations/{rule_id}/deliveries` (admin/owner). A row 
 `queued` means the worker never picked the job up — check that Celery and Redis are running;
 re-firing the rule creates a fresh row rather than retrying the old one.
 
+### Scheduled reports (recurring AI reports)
+
+The My Reports page (`/reports`) has a **Scheduled** tab for recurring AI reports. It is
+part of the base product: no plan gate, no new environment variables, and **no email
+dependency**.
+
+- **No new env.** Scheduled-report email reuses `RESEND_API_KEY` — the same BYO-key Resend
+  integration as every other email path. With the key set, each recipient on a schedule
+  receives the report email when it runs. **With no key, generation still happens**: the
+  report is persisted in-app and email is skipped silently — the run is never failed by
+  email.
+- **Cadence semantics are UTC.** A schedule stores an hour 0-23 in UTC plus a cadence:
+  `daily` (every day at that hour), `weekly` (a weekday `Sun`–`Sat` + hour) or `monthly`
+  (a day of month 1-31 + hour). The worker checks due schedules hourly; there is no
+  timezone conversion — the hour you pick is the UTC hour.
+- **Day-31 schedules skip shorter months.** A monthly schedule on the 31st runs only in
+  months that have a 31st; the window is skipped, never backfilled.
+- **Recipients are optional.** The create form seeds the creator's email; clearing it
+  means in-app only. With a key, every non-empty recipient receives the report.
+- Schedules are admin/owner-manageable; members see the list read-only. API:
+  `GET/POST/PATCH/DELETE /api/v1/report-schedules[/{id}]` + `POST
+  /api/v1/report-schedules/{id}/toggle`.
+
 ## Public API — bulk feedback writes & taxonomy CRUD
 
 Two additions to the `/api/public/v1` public API (see [docs/API.md](API.md) for the full public
