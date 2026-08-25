@@ -175,6 +175,9 @@
 - [x] Frontend: My Reports page, ReportPreview component, 4 Cmd+K template chips
 - [x] Reports in sidebar under Workspace
 - [x] 105 backend + 36 WS + 10 frontend tests
+- [x] **Follow-on (2026-08-25, `feat/scheduled-ai-reports`):** scheduled/recurring reports + email
+      delivery — closes the two M2.4 non-goals (`PRD-ON-DEMAND-AI-REPORTS.md:37-38`). See
+      `docs/planning/scheduled-ai-reports/` and the DEV-TRACKING entry.
 
 **Q2 Deliverables**: Multi-model LLM (M2.1 COMPLETE), AI copilot (M2.2 COMPLETE), response suggestions (M2.3 COMPLETE), on-demand reports (M2.4 COMPLETE)
 **Plan Gating**: Copilot queries tiered by plan, response generation Business+, reports Business+
