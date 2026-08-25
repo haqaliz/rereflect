@@ -287,3 +287,37 @@ def toggle_schedule(
     db.commit()
     db.refresh(schedule)
     return schedule
+
+
+def _dispatch_manual_run(schedule_id: int) -> None:
+    """Dispatch the worker's generate_schedule_once without importing worker modules."""
+    from src.background.celery_client import get_celery_app
+
+    app = get_celery_app()
+    app.send_task(
+        "src.tasks.scheduled_reports.generate_schedule_once", args=[schedule_id]
+    )
+
+
+@router.post(
+    "/{schedule_id}/run",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[
+        Depends(require_feature("ai_reports")),
+        Depends(require_admin_or_owner),
+    ],
+)
+def run_schedule(
+    schedule_id: int,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manual "sync now": dispatch the worker task for one schedule.
+
+    The worker task claims the current cadence window the same way the beat
+    task does, so a manual run is exactly-once per window. Responds 202 with
+    the schedule id; the report row appears asynchronously.
+    """
+    _get_org_schedule(db, current_org.id, schedule_id)
+    _dispatch_manual_run(schedule_id)
+    return {"status": "queued", "schedule_id": schedule_id}

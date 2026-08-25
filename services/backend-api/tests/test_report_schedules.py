@@ -12,6 +12,7 @@ Covers:
 
 import pytest
 from datetime import datetime, timedelta
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -898,3 +899,63 @@ class TestScheduleValidation:
             headers=admin_headers,
         )
         assert resp.status_code == 422
+
+# ── API: Manual run ───────────────────────────────────────────────────────────
+
+
+class TestRunSchedule:
+    """POST /api/v1/report-schedules/{id}/run (manual "sync now")"""
+
+    RUN_TASK = "src.tasks.scheduled_reports.generate_schedule_once"
+
+    def test_run_schedule_dispatches_exact_task(
+        self,
+        client: TestClient,
+        db: Session,
+        admin_headers: dict,
+        sample_schedule,
+    ):
+        with patch(
+            "src.background.celery_client.get_celery_app"
+        ) as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "task-x"
+            resp = client.post(
+                f"/api/v1/report-schedules/{sample_schedule.id}/run",
+                headers=admin_headers,
+            )
+
+        assert resp.status_code == 202
+        assert resp.json() == {
+            "status": "queued",
+            "schedule_id": sample_schedule.id,
+        }
+        mock_get_app.return_value.send_task.assert_called_once_with(
+            self.RUN_TASK, args=[sample_schedule.id]
+        )
+
+    def test_run_schedule_403_for_member(
+        self, client: TestClient, member_headers: dict, sample_schedule
+    ):
+        with patch("src.background.celery_client.get_celery_app") as mock_get_app:
+            resp = client.post(
+                f"/api/v1/report-schedules/{sample_schedule.id}/run",
+                headers=member_headers,
+            )
+
+        assert resp.status_code == 403
+        mock_get_app.return_value.send_task.assert_not_called()
+
+    def test_run_schedule_404_for_other_org(
+        self,
+        client: TestClient,
+        other_admin_headers: dict,
+        sample_schedule,  # belongs to business_org
+    ):
+        with patch("src.background.celery_client.get_celery_app") as mock_get_app:
+            resp = client.post(
+                f"/api/v1/report-schedules/{sample_schedule.id}/run",
+                headers=other_admin_headers,
+            )
+
+        assert resp.status_code == 404
+        mock_get_app.return_value.send_task.assert_not_called()
