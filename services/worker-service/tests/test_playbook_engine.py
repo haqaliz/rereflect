@@ -975,3 +975,49 @@ def test_execute_persists_started_at_and_completed_at(db, monkeypatch):
     assert updated.completed_at is not None
     assert before <= updated.started_at <= after
     assert updated.started_at <= updated.completed_at
+
+
+# ---------------------------------------------------------------------------
+# Mid-run commit finalization (trigger-automation AC6 characterization pin)
+# ---------------------------------------------------------------------------
+
+def test_execute_finalizes_done_when_handler_commits_mid_run(db, monkeypatch):
+    """
+    Characterization pin (trigger-automation AC6): `_evaluate_rule` calls
+    `db.commit()` INSIDE the playbook run's session. The engine must still
+    finalize correctly afterwards — status `done` with the FULL action_log
+    intact (every entry, nothing lost to the mid-run commit).
+    """
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=[
+        {"type": "commits", "config": {}},
+        {"type": "after_commit", "config": {}},
+    ])
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
+        db.commit()  # mid-run commit, like automation_churn_trigger._evaluate_rule
+        return {"ok": True, "result": {"handled": action_type}}
+
+    monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
+
+    playbook_engine.execute(exe.id, db)
+
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+    assert updated.status == "done"
+    assert updated.completed_at is not None
+    assert len(updated.action_log) == 2
+    assert updated.action_log[0] == {
+        "type": "commits",
+        "ok": True,
+        "result": {"handled": "commits"},
+        "error": None,
+    }
+    assert updated.action_log[1] == {
+        "type": "after_commit",
+        "ok": True,
+        "result": {"handled": "after_commit"},
+        "error": None,
+    }
