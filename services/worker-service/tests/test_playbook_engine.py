@@ -11,7 +11,7 @@ Action handlers are monkeypatched to isolate engine logic.
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import Integer, String, create_engine
+from sqlalchemy import JSON, Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -152,6 +152,31 @@ def test_worker_customer_health_mirrors_cs_owner_user_id_column():
     col = cols["cs_owner_user_id"]
     assert col.nullable is True
     assert isinstance(col.type, Integer)
+
+
+def test_worker_customer_health_mirrors_tags_column(db):
+    """Mirror parity: backend CustomerHealth.tags (JSON, nullable, default=list)
+    has a JSON mirror column whose default is the `list` callable (never a shared
+    [] literal) and which round-trips a list through the DB."""
+    cols = {c.name: c for c in CustomerHealth.__table__.columns}
+    assert "tags" in cols
+    col = cols["tags"]
+    assert col.nullable is True
+    assert isinstance(col.type, JSON)
+    # SQLAlchemy 2.x wraps callable defaults in a lambda (schema.py
+    # util.wrap_callable), so assert callability — NOT `arg is list` — to
+    # guard the mutable-default trap (a shared [] literal is not callable).
+    assert callable(col.default.arg)
+
+    health = CustomerHealth(
+        organization_id=1,
+        customer_email="tags@example.com",
+        tags=["beta", "alpha"],
+    )
+    db.add(health)
+    db.commit()
+    db.refresh(health)
+    assert health.tags == ["beta", "alpha"]
 
 
 def test_worker_organization_mirrors_product_name_display_column():

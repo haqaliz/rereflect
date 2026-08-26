@@ -490,6 +490,11 @@ class CustomerHealth(Base):
     # customer_health.py — plain Integer, no FK, worker mirror style).
     cs_owner_user_id = Column(Integer, nullable=True)
 
+    # segment-actions: operator-managed tags (bulk tag action) — mirror of
+    # backend-api customer_health.py. default MUST be the `list` callable,
+    # never a shared `[]` literal (SQLAlchemy mutable-default trap).
+    tags = Column(JSON, nullable=True, default=list)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
