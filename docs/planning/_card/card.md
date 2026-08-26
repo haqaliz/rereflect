@@ -1,56 +1,50 @@
-# Card — Scheduled & Emailed AI Reports (freeform task)
+# Card: Complete the seeded playbook action types
 
-> Freeform task (no GitHub issue). Source brief: the `rereflect-next` recommendation handoff,
-> validated against the repo's own tracking + PRD files on 2026-08-24.
+**Type:** feat (freeform, no GitHub issue)
+**Slug:** `playbook-action-types`
+**Branch:** `feat/playbook-action-types`
+**Source:** `rereflect-next` recommendation (2026-08-26), verified against code
 
-## The task in one line
+## Brief
 
-Turn Rereflect's shipped **on-demand AI reports** (M2.4) into **recurring / scheduled reports**
-with optional **email delivery**, reusing the existing report generator, the BYOK Resend email
-service, and the Celery beat scheduler.
+The churn-playbook executor implements only 5 of the 11 action types the seeder declares valid.
+6 of the 7 seeded playbook templates therefore contain actions that fail with
+`"unsupported action type"` on every execution — the same inert-template disease class as the
+P0 `automation-worker-triggers-dead` fix, but for the playbook engine.
 
-## Why now (grounding)
+## Verified facts (from code)
 
-- `PRD-ON-DEMAND-AI-REPORTS.md` §3 Non-Goals explicitly lists:
-  - *"No scheduled/recurring reports (manual trigger only)"* (line 37)
-  - *"No email delivery of reports"* (line 38)
-  - *"No custom report builder (fixed 4 types)"* (line 39)
-  - *"No custom date ranges (3 predefined only)"* (line 43)
-- M2.4 On-Demand AI Reports is `COMPLETE` (`AI-TRACKING.md:51`): reports live in code —
-  `Report` model, `GET/POST/DELETE /api/v1/reports`, `ReportGenerator`, My Reports page, PDF export.
-- Email infrastructure already exists and is BYOK: weekly digest, team invites, password reset,
-  and the automation `send_customer_email` action (M4.4, shipped 2026-08-20). No `RESEND_API_KEY`
-  → sends are skipped (established skip pattern).
-- Cadence/recurrence scheduling already exists elsewhere (weekly digest day/hour on user,
-  Celery beat tasks) — the machinery to schedule is present.
+- `services/backend-api/src/services/playbook_seeder.py:24-36` — `VALID_ACTION_TYPES` includes
+  `assign, notify, draft_response, send_email, tag, schedule_task, create_task, trigger_automation,
+  auto_assign, change_status, send_notification`.
+- `services/worker-service/src/services/playbook_engine.py:171-186` — `_dispatch_action` supports
+  only `assign, change_status, send_notification, draft_response, send_email`. Everything else
+  returns `ok=False, error="unsupported action type: '<type>'"`.
+- Seeded templates with unsupported actions (`playbook_seeder.py`):
+  - **Critical Save** — `notify` (line 57) → fails
+  - **Churn Prevention** — `schedule_task` (line 96) → fails
+  - **At-Risk Outreach** — `tag` (line 115) → fails
+  - **Light-Touch Nudge** — `tag` + `create_task` (lines 138, 142) → fail
+  - **Power-User Recovery** — `notify` + `create_task` (lines 161, 173) → fail
+  - **New-Customer Save** — `trigger_automation` (line 192) → fails
+  - **Silent-Churn Watch** — `create_task` (line 219) → fails (send_email part works)
+- Executions complete `status="done"` with failed actions buried in `action_log`
+  (`worker-service/tests/test_playbook_engine.py:574-600` pins this "loud entry" behavior).
+- The repo names this as the next card: `docs/planning/customer-outreach-email-actions/prd.md:247-255`
+  — "Fixing the other 5 unimplemented seeded playbook action types (`notify`, `tag`, `schedule_task`,
+  `create_task`, `trigger_automation`) — separate card; noted."
 
-## Scope intent (first slice, per the recommendation)
+## Shipped seams to reuse
 
-1. Schedule CRUD (per org): report type (one of the fixed 4), cadence (daily/weekly/monthly),
-   day-of-week + hour (UTC), enabled/disabled.
-2. A Celery beat task that generates scheduled reports on cadence, reusing `ReportGenerator`
-   with the existing predefined date ranges.
-3. Optional email delivery via `email_service` (BYOK Resend; no key → generate in-app only, never
-   fail the schedule). Recipient: the schedule owner (or org recipients) — exact rule to be
-   decided in the PRD.
-4. Frontend: "Scheduled Reports" surface on the My Reports page (list, create, toggle, delete).
+- `tag` → `customer_health_scores.tags` (segment-actions, `AI-TRACKING.md:345`)
+- `notify` → `notification_dispatch` (Slack/Discord/dashboard channels)
+- `create_task` / `schedule_task` → Jira / Asana / Linear integration clients already shipped
+- `trigger_automation` → M4.4 `AutomationEngine` (`backend-api/src/services/automation_engine.py:416-432`)
 
-## Non-goals for this slice (candidates, confirm in PRD)
+## Known caveats (must be resolved in PRD/plan)
 
-- No custom report builder (fixed 4 types stay).
-- No custom date ranges beyond the existing 3 predefined.
-- No plan gates (all unlocked, OSS posture).
-
-## Caveats flagged at handoff
-
-- Email delivery is **BYOK and optional** — generation must never depend on a key.
-- Keep the fixed report types + predefined ranges; do not build a builder.
-- Scheduled runs reuse the existing `ReportGenerator` — no new LLM feasibility question, just
-  recurrence CRUD + beat + delivery.
-
-## Verification plan (how this slice is considered done)
-
-- Backend pytest: schedule CRUD + beat task + email path (with/without key) + auth/RBAC.
-- Worker pytest where the beat task lives (or backend if it runs there).
-- Frontend `npm run lint` + `npm run test`.
-- One alembic head; migration for the schedule table.
+1. `trigger_automation` needs a recursion guard (rule → playbook → rule loops) and a cooldown story.
+2. `create_task` needs a decided target-provider policy — seeded configs name no provider
+   (Jira vs Asana vs Linear vs internal queue).
+3. Consider surfacing failed actions in the playbook-run UI, since executions currently
+   complete "done" with failures only in the action log.
