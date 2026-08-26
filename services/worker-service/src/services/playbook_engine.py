@@ -180,6 +180,8 @@ def _dispatch_action(
         return _handle_send_email(action_config, customer_email, health, db)
     elif action_type == "tag":
         return _handle_tag(action_config, customer_email, health, db)
+    elif action_type == "notify":
+        return _handle_notify(action_config, customer_email, health, db)
     else:
         return {
             "ok": False,
@@ -555,6 +557,176 @@ def _handle_tag(
             "error": f"failed to persist tags: {exc}",
         }
     return {"ok": True, "result": {"tag": tag, "tags": new_tags}}
+
+
+def _handle_notify(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Deliver a message over the requested channel.
+
+    channel:
+      "slack"    → post to every active `Integration` row of type "slack"
+                   for the org, via the tasks.alerts webhook sender (which
+                   RAISES — wrapped here so a failing send is a loud
+                   `ok: False`, never a crash). `target` is advisory: it is
+                   recorded in the result, not resolved to a channel.
+      "discord"  → same shape via the Discord webhook sender.
+      "dashboard"→ create in-app `Notification` rows via the
+                   `notification_dispatch.dispatch_alert` seam (honors
+                   UserAlertPreference), reporting `{notifications_created: N}`.
+
+    Integration selection follows the `send_notification` precedent in
+    automation_feedback_trigger.py: active rows only, webhook_url from
+    `config.webhook_url`, per-integration send wrapped in try/except.
+    """
+    from src.models import Integration
+    from src.tasks.alerts import (
+        send_discord_message_webhook,
+        send_slack_message_webhook,
+    )
+    from src.notification_dispatch import dispatch_alert
+
+    message = config.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return {
+            "ok": False,
+            "result": None,
+            "error": "notify step missing 'message' in config",
+        }
+    channel = (config.get("channel") or "").strip().lower()
+    if not channel:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "notify step missing 'channel' in config",
+        }
+
+    org_id = health.organization_id
+    title = f"Playbook notification for {customer_email}"
+
+    if channel == "slack":
+        integrations = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org_id,
+                Integration.type == "slack",
+                Integration.is_active.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            return {
+                "ok": False,
+                "result": None,
+                "error": "no slack integration connected",
+            }
+        blocks = [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{title}*\n{message}"},
+            }
+        ]
+        sent, errors = _dispatch_external_notify(
+            integrations,
+            send_slack_message_webhook,
+            lambda integration: {"blocks": blocks, "text": title},
+        )
+        result = {
+            "channel": "slack",
+            "integrations_sent": sent,
+            "target": config.get("target"),
+        }
+        if errors:
+            return {"ok": False, "result": result, "error": "; ".join(errors)}
+        return {"ok": True, "result": result, "error": None}
+
+    if channel == "discord":
+        integrations = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org_id,
+                Integration.type == "discord",
+                Integration.is_active.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            return {
+                "ok": False,
+                "result": None,
+                "error": "no discord integration connected",
+            }
+        embeds = [{"title": title, "description": message}]
+        sent, errors = _dispatch_external_notify(
+            integrations,
+            send_discord_message_webhook,
+            lambda integration: {"embeds": embeds, "content": message},
+        )
+        result = {
+            "channel": "discord",
+            "integrations_sent": sent,
+            "target": config.get("target"),
+        }
+        if errors:
+            return {"ok": False, "result": result, "error": "; ".join(errors)}
+        return {"ok": True, "result": result, "error": None}
+
+    if channel == "dashboard":
+        try:
+            counts = dispatch_alert(
+                org_id,
+                "churn_risk",
+                title,
+                message,
+                link=f"/customers/{customer_email}",
+            )
+        except Exception as exc:
+            logger.warning(
+                "playbook_engine: dashboard notify failed for org %s: %s",
+                org_id, exc,
+            )
+            return {
+                "ok": False,
+                "result": None,
+                "error": f"dashboard notify failed: {exc}",
+            }
+        return {
+            "ok": True,
+            "result": {"notifications_created": counts.get("inapp", 0)},
+            "error": None,
+        }
+
+    return {
+        "ok": False,
+        "result": None,
+        "error": f"unknown notify channel: '{channel}'",
+    }
+
+
+def _dispatch_external_notify(integrations, send, build_kwargs) -> tuple:
+    """
+    Send one message per integration via `send`, wrapping the sender's RAISE
+    contract per-integration (a failing webhook must not abort the others).
+    Returns (sent_count, error_strings).
+    """
+    sent = 0
+    errors = []
+    for integration in integrations:
+        webhook_url = (integration.config or {}).get("webhook_url")
+        if not webhook_url:
+            errors.append(f"integration {integration.id} has no webhook_url")
+            continue
+        try:
+            send(webhook_url=webhook_url, **build_kwargs(integration))
+            sent += 1
+        except Exception as exc:
+            logger.warning(
+                "playbook_engine: notify send failed for integration %s: %s",
+                integration.id, exc,
+            )
+            errors.append(f"integration {integration.id}: {exc}")
+    return sent, errors
 
 
 def _finalize_execution(
