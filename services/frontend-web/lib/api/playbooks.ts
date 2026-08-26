@@ -8,6 +8,38 @@ export interface SendEmailConfig {
   recipient: 'customer' | 'cs_assignee';
 }
 
+/**
+ * Config for `notify`. Key names match exactly what the worker
+ * `_handle_notify` reads: `channel`, `target` (advisory — recorded in the
+ * result, not resolved to a channel), `message`.
+ */
+export interface NotifyActionConfig {
+  channel: 'slack' | 'discord' | 'dashboard';
+  target?: string;
+  message: string;
+}
+
+/** Config for `tag` — the worker `_handle_tag` reads `tag`. */
+export interface TagActionConfig {
+  tag: string;
+}
+
+/**
+ * Config for `create_task` and `schedule_task` — matches what the worker
+ * `_persist_task` reads (`description`, `due_in_days`, `priority`).
+ * `schedule_task` must never carry `priority` (the worker refuses it loudly).
+ */
+export interface TaskActionConfig {
+  description: string;
+  due_in_days?: number;
+  priority?: 'low' | 'medium' | 'high';
+}
+
+/** Config for `trigger_automation` — the worker `_handle_trigger_automation` reads `automation_name`. */
+export interface TriggerAutomationConfig {
+  automation_name: string;
+}
+
 export interface PlaybookAction {
   type:
     | 'assign'
@@ -15,6 +47,11 @@ export interface PlaybookAction {
     | 'send_notification'
     | 'draft_response'
     | 'send_email'
+    | 'notify'
+    | 'tag'
+    | 'create_task'
+    | 'schedule_task'
+    | 'trigger_automation'
     | string;
   [k: string]: unknown;
 }
@@ -40,11 +77,19 @@ export interface PlaybookExecution {
   customer_email: string;
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
   triggered_by: string;
-  action_log: unknown[];
+  action_log: PlaybookActionLogEntry[];
   error_message: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+}
+
+/** One per-action outcome recorded by the worker engine (`playbook_engine._run_actions`). */
+export interface PlaybookActionLogEntry {
+  type: string;
+  ok: boolean;
+  result?: unknown;
+  error?: string;
 }
 
 export interface PlaybookDetail extends Playbook {
@@ -174,6 +219,11 @@ export const ACTION_TYPE_LABELS: Record<string, string> = {
   send_notification: 'Send Notification',
   draft_response: 'Draft AI Response',
   send_email: 'Send Email',
+  notify: 'Notify',
+  tag: 'Tag',
+  create_task: 'Create task',
+  schedule_task: 'Schedule task',
+  trigger_automation: 'Trigger automation',
 };
 
 /**
