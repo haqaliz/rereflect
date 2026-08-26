@@ -86,7 +86,10 @@ def execute(execution_id: int, db: Session) -> dict:
                                    action_log=[])
 
     # Execute each action, collecting outcomes
-    action_log = _run_actions(playbook.action_sequence or [], execution.customer_email, health, db)
+    action_log = _run_actions(
+        playbook.action_sequence or [], execution.customer_email, health, db,
+        execution_id=execution.id,
+    )
 
     # Determine final status
     any_ok = any(entry.get("ok") for entry in action_log)
@@ -124,6 +127,7 @@ def _run_actions(
     customer_email: str,
     health: CustomerHealth,
     db: Session,
+    execution_id: int = None,
 ) -> list:
     """
     Execute each action dict in sequence. Continues past failures.
@@ -134,7 +138,10 @@ def _run_actions(
         action_type: str = action.get("type", "")
         action_config: dict = action.get("config", {})
         try:
-            outcome = _dispatch_action(action_type, action_config, customer_email, health, db)
+            outcome = _dispatch_action(
+                action_type, action_config, customer_email, health, db,
+                execution_id=execution_id,
+            )
             log.append({
                 "type": action_type,
                 "ok": outcome.get("ok", True),
@@ -156,6 +163,7 @@ def _dispatch_action(
     customer_email: str,
     health: CustomerHealth,
     db: Session,
+    execution_id: int = None,
 ) -> dict:
     """
     Dispatch an action to the appropriate handler.
@@ -165,7 +173,7 @@ def _dispatch_action(
     importable from the worker).
 
     Supported types: assign, change_status, send_notification, draft_response,
-    send_email.
+    send_email, tag, notify, create_task, schedule_task, trigger_automation.
     Unknown types return ok=False with an 'unsupported action type' error.
     """
     if action_type == "assign":
@@ -182,6 +190,14 @@ def _dispatch_action(
         return _handle_tag(action_config, customer_email, health, db)
     elif action_type == "notify":
         return _handle_notify(action_config, customer_email, health, db)
+    elif action_type == "create_task":
+        return _handle_create_task(
+            action_config, customer_email, health, db, execution_id=execution_id,
+        )
+    elif action_type == "schedule_task":
+        return _handle_schedule_task(
+            action_config, customer_email, health, db, execution_id=execution_id,
+        )
     else:
         return {
             "ok": False,
@@ -727,6 +743,131 @@ def _dispatch_external_notify(integrations, send, build_kwargs) -> tuple:
             )
             errors.append(f"integration {integration.id}: {exc}")
     return sent, errors
+
+
+def _handle_create_task(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session,
+    execution_id: int = None,
+) -> dict:
+    """Persist a follow-up task from the playbook run (playbook-tasks M3)."""
+    return _persist_task(
+        config, customer_email, health, db,
+        execution_id=execution_id, allow_priority=True,
+    )
+
+
+def _handle_schedule_task(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session,
+    execution_id: int = None,
+) -> dict:
+    """
+    Same as create_task but priority is not configurable (PRD M3): an
+    explicit priority is refused loudly — honest config, no silent ignore —
+    and the row is forced to 'medium'.
+    """
+    if config.get("priority") is not None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "schedule_task does not accept 'priority' in config",
+        }
+    return _persist_task(
+        config, customer_email, health, db,
+        execution_id=execution_id, allow_priority=False,
+    )
+
+
+def _persist_task(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session,
+    *,
+    execution_id: int = None,
+    allow_priority: bool = True,
+) -> dict:
+    """
+    Shared persistence for create_task / schedule_task.
+
+    Config: {description (required), due_in_days? (int >= 0), priority?
+    ("low"|"medium"|"high", default "medium"), due_at? (ISO datetime)}.
+    `due_at` precedence: explicit `due_at` > `due_in_days` > NULL.
+    Row: org from the run's health row, status "open", linked to the run's
+    execution. Persistence is wrapped — a DB failure rolls back and returns
+    `ok: False` so the session stays usable for sibling actions.
+    """
+    from src.models import PlaybookTask
+
+    description = config.get("description")
+    if not isinstance(description, str) or not description.strip():
+        return {
+            "ok": False,
+            "result": None,
+            "error": "task action missing 'description' in config",
+        }
+    description = description.strip()
+
+    due_at = None
+    raw_due_at = config.get("due_at")
+    if raw_due_at:
+        try:
+            due_at = datetime.fromisoformat(str(raw_due_at))
+        except ValueError:
+            return {
+                "ok": False,
+                "result": None,
+                "error": f"invalid due_at: '{raw_due_at}'",
+            }
+    else:
+        raw_due_in_days = config.get("due_in_days")
+        if raw_due_in_days is not None:
+            if (
+                isinstance(raw_due_in_days, bool)
+                or not isinstance(raw_due_in_days, int)
+                or raw_due_in_days < 0
+            ):
+                return {
+                    "ok": False,
+                    "result": None,
+                    "error": "due_in_days must be an integer >= 0",
+                }
+            due_at = datetime.utcnow() + timedelta(days=raw_due_in_days)
+
+    priority = config.get("priority", "medium")
+    if priority not in ("low", "medium", "high"):
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"invalid priority: '{priority}'",
+        }
+    if not allow_priority:
+        priority = "medium"
+
+    task = PlaybookTask(
+        organization_id=health.organization_id,
+        customer_email=customer_email,
+        description=description,
+        due_at=due_at,
+        priority=priority,
+        status="open",
+        playbook_execution_id=execution_id,
+    )
+    try:
+        db.add(task)
+        db.flush()
+    except Exception as exc:
+        logger.warning(
+            "playbook_engine: task persist failed for %s: %s", customer_email, exc,
+        )
+        db.rollback()
+        return {"ok": False, "result": None, "error": f"failed to persist task: {exc}"}
+
+    return {
+        "ok": True,
+        "result": {
+            "task_id": task.id,
+            "description": description,
+            "due_at": due_at.isoformat() if due_at else None,
+        },
+        "error": None,
+    }
 
 
 def _finalize_execution(

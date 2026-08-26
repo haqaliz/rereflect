@@ -767,7 +767,7 @@ def test_execute_runs_all_actions_in_sequence(db, monkeypatch):
 
     dispatched = []
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         dispatched.append(action_type)
         return {"ok": True, "result": {}}
 
@@ -790,7 +790,7 @@ def test_execute_continues_after_action_failure(db, monkeypatch):
 
     dispatched = []
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         dispatched.append(action_type)
         if action_type == "assign":
             raise RuntimeError("assign exploded")
@@ -814,7 +814,7 @@ def test_execute_action_log_records_each_outcome(db, monkeypatch):
     _make_health(db, org.id)
     exe = _make_execution(db, pb.id, org.id, status="queued")
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         return {"ok": True, "result": {"done": True}}
 
     monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
@@ -842,7 +842,7 @@ def test_execute_marks_done_when_any_action_succeeds(db, monkeypatch):
 
     call_count = [0]
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         call_count[0] += 1
         if call_count[0] == 1:
             raise RuntimeError("first action fails")
@@ -867,7 +867,7 @@ def test_execute_marks_failed_when_all_actions_fail(db, monkeypatch):
     _make_health(db, org.id)
     exe = _make_execution(db, pb.id, org.id, status="queued")
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
@@ -960,7 +960,7 @@ def test_execute_persists_started_at_and_completed_at(db, monkeypatch):
     _make_health(db, org.id)
     exe = _make_execution(db, pb.id, org.id, status="queued")
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         return {"ok": True, "result": {}}
 
     monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
