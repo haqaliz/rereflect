@@ -178,6 +178,8 @@ def _dispatch_action(
         return _handle_draft_response(action_config, customer_email, health, db)
     elif action_type == "send_email":
         return _handle_send_email(action_config, customer_email, health, db)
+    elif action_type == "tag":
+        return _handle_tag(action_config, customer_email, health, db)
     else:
         return {
             "ok": False,
@@ -498,6 +500,61 @@ def _handle_send_email(
         },
         "error": None,
     }
+
+
+def _handle_tag(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Add a tag to the customer's `health.tags` (JSON array).
+
+    Mirrors the backend bulk-tag constraints (`customers.py` BulkTagRequest):
+    tags are trimmed, must be non-empty and ≤50 chars, and a customer may
+    hold at most 20 tags. Over-cap / invalid tags are loud `ok: False` with
+    the row left unchanged; re-tagging an existing tag is an idempotent
+    success. The array is kept sorted and deduped.
+    """
+    _TAG_MAX_LENGTH = 50
+    _TAG_CAP_PER_CUSTOMER = 20
+
+    raw = config.get("tag")
+    if not isinstance(raw, str):
+        return {"ok": False, "result": None, "error": "tag must be a non-empty string"}
+    tag = raw.strip()
+    if not tag:
+        return {"ok": False, "result": None, "error": "tag must be a non-empty string"}
+    if len(tag) > _TAG_MAX_LENGTH:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"tag exceeds the {_TAG_MAX_LENGTH}-character limit",
+        }
+
+    existing = list(health.tags or [])
+    if tag in existing:
+        return {"ok": True, "result": {"tag": tag, "tags": existing}}
+    if len(existing) >= _TAG_CAP_PER_CUSTOMER:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"tag cap ({_TAG_CAP_PER_CUSTOMER}) reached",
+        }
+
+    new_tags = sorted(existing + [tag])
+    try:
+        health.tags = new_tags
+        db.flush()
+    except Exception as exc:
+        logger.warning(
+            "playbook_engine: tag persist failed for %s: %s", customer_email, exc,
+        )
+        db.rollback()
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"failed to persist tags: {exc}",
+        }
+    return {"ok": True, "result": {"tag": tag, "tags": new_tags}}
 
 
 def _finalize_execution(
