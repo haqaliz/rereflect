@@ -198,6 +198,8 @@ def _dispatch_action(
         return _handle_schedule_task(
             action_config, customer_email, health, db, execution_id=execution_id,
         )
+    elif action_type == "trigger_automation":
+        return _handle_trigger_automation(action_config, customer_email, health, db)
     else:
         return {
             "ok": False,
@@ -865,6 +867,130 @@ def _persist_task(
             "task_id": task.id,
             "description": description,
             "due_at": due_at.isoformat() if due_at else None,
+        },
+        "error": None,
+    }
+
+
+def _handle_trigger_automation(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Fire a named `churn_probability_threshold` automation rule for the
+    customer (trigger-automation aspect, M4).
+
+    The fire itself is DELEGATED to the existing single-rule evaluator
+    `automation_churn_trigger._evaluate_rule` — its threshold check, shared
+    Redis cooldown, AutomationExecution write and playbook enqueue are
+    authoritative; this handler never duplicates them. It only guards the
+    loud preconditions (name, mode, trigger type, cooldown_hours, available
+    probability) and reports what the seam did (fired vs not, and why not).
+
+    `_evaluate_rule` commits the session mid-run; the engine's finalization
+    handles that (pinned by test_execute_finalizes_done_when_handler_commits_mid_run).
+    """
+    from src.models.automation_rule import AutomationRule
+    from src.services import automation_churn_trigger
+
+    name = (config.get("automation_name") or "").strip()
+    if not name:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "trigger_automation step missing 'automation_name' in config",
+        }
+
+    rule = (
+        db.query(AutomationRule)
+        .filter(
+            AutomationRule.organization_id == health.organization_id,
+            AutomationRule.name == name,
+        )
+        .order_by(AutomationRule.created_at, AutomationRule.id)
+        .first()
+    )
+    if rule is None:
+        return {"ok": False, "result": None, "error": f"no rule named '{name}'"}
+
+    if rule.mode != "active":
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"rule '{name}' found but mode={rule.mode} — not fired",
+        }
+
+    if rule.trigger_type != "churn_probability_threshold":
+        if rule.trigger_type == "usage_trend":
+            return {
+                "ok": False,
+                "result": None,
+                "error": (
+                    "trigger type 'usage_trend' fires only from the daily recompute seam"
+                ),
+            }
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"trigger type '{rule.trigger_type}' fires only from its native evaluator",
+        }
+
+    if rule.cooldown_hours < 1:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"rule '{name}' has cooldown_hours < 1 — refused",
+        }
+
+    if health.churn_probability is None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "no churn probability available for customer",
+        }
+
+    try:
+        before_count = rule.execution_count or 0
+        automation_churn_trigger._evaluate_rule(
+            rule,
+            rule.organization_id,
+            customer_email,
+            float(health.churn_probability),
+            db,
+        )
+        fired = (rule.execution_count or 0) > before_count
+    except Exception as exc:
+        logger.warning(
+            "playbook_engine: trigger_automation failed for rule %s: %s",
+            rule.id, exc,
+        )
+        return {"ok": False, "result": None, "error": f"trigger_automation failed: {exc}"}
+
+    if fired:
+        return {
+            "ok": True,
+            "result": {"fired": True, "rule_id": rule.id, "automation_name": name},
+            "error": None,
+        }
+
+    # The seam ran but did not fire — report why, from its own observables.
+    if automation_churn_trigger._check_cooldown(rule.id, customer_email):
+        return {
+            "ok": True,
+            "result": {
+                "fired": False,
+                "rule_id": rule.id,
+                "automation_name": name,
+                "reason": "rule in cooldown for customer",
+            },
+            "error": None,
+        }
+    return {
+        "ok": True,
+        "result": {
+            "fired": False,
+            "rule_id": rule.id,
+            "automation_name": name,
+            "reason": "probability below rule threshold",
         },
         "error": None,
     }
