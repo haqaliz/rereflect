@@ -100,18 +100,24 @@ appears, CHANGELOG, `AI-TRACKING.md` / `DEV-TRACKING.md` rows, and the deferral 
   Config: `{description, due_in_days?, priority?}` (schedule_task: no priority).
   `due_at = now + due_in_days` calendar days. Result: `{task_id, description, due_at}`.
 - **M4 — `trigger_automation` action.** Config `{automation_name: string}`. Resolves an
-  active `AutomationRule` by name within the org (first match by `created_at, id` — the
-  model has no unique constraint; the chosen rule id is reported in the result), **fires
-  only trigger types `churn_probability_threshold` and `usage_trend`** (the customer-level
-  types the worker can evaluate standalone); any other trigger type → loud error. Firing
-  reuses the worker mirror's single-rule evaluation seam (extracted from
-  `automation_churn_trigger.py` / `automation_usage_trend_trigger.py` without changing
-  mirror behavior). **Recursion guard:** the rule's own Redis cooldown key
-  (`automation_cooldown:{rule_id}:{customer_email}`, DB 1 — same scheme the mirrors use)
-  is checked and set; rules with `cooldown_hours < 1` are refused. Lookup outcomes are
-  all loud with distinct reasons: unknown name → `no active rule named 'X'`; rule found
-  but `mode != "active"` → `rule 'X' found but mode=off/shadow — not fired`; trigger type
-  unsupported → `trigger type 'Y' not evaluable from playbook`.
+  `AutomationRule` by name within the org (first match by `created_at, id` — the model has
+  no unique constraint; the chosen rule id is reported in the result) and **fires only
+  trigger type `churn_probability_threshold`** — the one customer-level type evaluable from
+  the playbook context (the customer's `churn_probability` on the `CustomerHealth` row).
+  **`usage_trend` rules are not evaluable from a playbook** (the trigger is a transition
+  observed at the daily recompute seam; a playbook cannot reconstruct old→new) → loud error
+  `trigger type 'usage_trend' fires only from the daily recompute seam`. Any other trigger
+  type → loud error. Firing **reuses the existing single-rule entry**
+  `_evaluate_rule(rule, org_id, customer_email, probability, db)` in
+  `automation_churn_trigger.py:164` — which already checks the rule's own Redis cooldown
+  key (`automation_cooldown:{rule_id}:{customer_email}`, DB 1) and sets it before
+  committing, so a rule → playbook → rule cycle terminates across the async boundary.
+  **Recursion guard (belt):** rules with `cooldown_hours < 1` are refused
+  (`setex` TTL 0 would never hold). Lookup outcomes are all loud with distinct reasons:
+  unknown name → `no rule named 'X'`; rule found but `mode != "active"` →
+  `rule 'X' found but mode=off/shadow — not fired`; no probability on the customer →
+  `no churn probability available for customer`. `_evaluate_rule` commits mid-run — the
+  playbook execution finalizes correctly after it (characterization-tested).
 - **M5 — Seeder fixes + upgrade path.** Seeder's **New-Customer Save** `trigger_automation`
   config points at `"onboarding_playbook"`, which no seeder creates — retarget it to a real
   seeded automation (`At-Risk Customer Outreach`, which ships in shadow mode; per M4 the
@@ -140,12 +146,13 @@ appears, CHANGELOG, `AI-TRACKING.md` / `DEV-TRACKING.md` rows, and the deferral 
 
 ### Nice-to-have
 
-- **N1 — Provider task creation** (Jira / Asana / Linear) as the eventual target of
-  `create_task` — explicitly out of scope here (see Out of Scope).
-- **N2 — `trigger_automation` for per-feedback trigger types** (`sentiment_pattern`,
-  `feedback_category_match`) — needs a feedback-item context the engine lacks; v2.
+- **N2 — `trigger_automation` for other trigger types** (`usage_trend` from a playbook,
+  and the per-feedback types `sentiment_pattern`, `feedback_category_match`) — needs
+  context the engine lacks (transitions, feedback items); v2.
 - **N3 — A "partial failure" execution status** distinct from `done`/`failed` — status
   semantics change with UI ripple; revisit if operators ask.
+- **N4 — Provider task creation** (Jira / Asana / Linear) as the eventual target of
+  `create_task` — explicitly out of scope here (see Out of Scope).
 
 ## Technical Considerations
 
@@ -178,9 +185,11 @@ appears, CHANGELOG, `AI-TRACKING.md` / `DEV-TRACKING.md` rows, and the deferral 
 - **R1 — `trigger_automation` name ambiguity.** `AutomationRule.name` is not unique; two
   rules named the same resolve to the first match. Mitigation: deterministic order
   (created_at), documented in the action result.
-- **R2 — Single-rule evaluation extraction.** The mirrors evaluate all rules of a trigger
-  type per recompute; extracting a per-rule entry is the riskiest refactor in the card.
-  De-risked by characterization tests and strict TDD.
+- **R2 — Single-rule evaluation.** The seam already exists: `_evaluate_rule` in
+  `automation_churn_trigger.py:164` is a faithful per-rule entry (threshold, cooldown
+  check+set, shadow/active, execution row, commit). The real risk is its **mid-run
+  `db.commit()`** inside the playbook execution's session (the run row commits as
+  `running` before finalizing as `done`). Characterization-tested, not refactored.
 - **R3 — Slack channel resolution for `notify`.** OAuth sends need a `channel_id`; the
   seeder's `target` ("#cs-leads") is a name. v1 sends to the integration's configured
   channel and records `target` as advisory — stated in the result, documented in the UI
@@ -230,7 +239,7 @@ appears, CHANGELOG, `AI-TRACKING.md` / `DEV-TRACKING.md` rows, and the deferral 
    with TDD tests. No schema change. First slice, fully internal.
 2. **`playbook-tasks`** — M3: `PlaybookTask` model (backend + worker mirror) + Alembic
    migration + `create_task`/`schedule_task` handlers. (S1/N1 depend on this.)
-3. **`trigger-automation`** — M4: name lookup + single-rule evaluation seam + cooldown
-   guard, characterization-tested against the mirrors.
+3. **`trigger-automation`** — M4: name lookup + `_evaluate_rule` reuse (existing seam) +
+   mode/cooldown guards, characterization-tested against the churn mirror's suites.
 4. **`seeder-and-ui`** — M5 + M6 + M7: seeder update path + New-Customer Save retarget,
    frontend editor types/config forms, executions action-log surfacing. Depends on 1–3.
