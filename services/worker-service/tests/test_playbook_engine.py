@@ -190,6 +190,52 @@ def test_worker_organization_mirrors_product_name_display_column():
     assert col.type.length == 200
 
 
+def test_worker_playbook_task_mirror_matches_backend_columns():
+    """Mirror parity: the worker PlaybookTask mirror columns must exactly
+    match the backend-api model (playbook-action-types aspect). A drift here
+    is silent: the worker would read/write a column under a different name,
+    or miss one entirely, and fail at runtime rather than in a test.
+
+    Same sys.path/sys.modules swap technique as
+    test_zendesk_adapter.py::TestModelsAndMigration.
+    """
+    import os
+    import sys
+
+    from src.models import PlaybookTask as WorkerModel
+
+    worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+    worktree = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    backend_src = os.path.join(worktree, "services", "backend-api")
+
+    saved_mods = {
+        k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
+    }
+    for k in saved_mods:
+        del sys.modules[k]
+
+    sys.path.insert(0, backend_src)
+    try:
+        from src.models.playbook_task import PlaybookTask as BackendModel
+
+        backend_cols = {c.name for c in BackendModel.__table__.columns}
+    finally:
+        sys.path.remove(backend_src)
+        for k in list(sys.modules.keys()):
+            if k == "src" or k.startswith("src."):
+                del sys.modules[k]
+        sys.modules.update(saved_mods)
+
+    assert worker_cols == backend_cols, (
+        f"Column mismatch!\n"
+        f"  Worker only:  {worker_cols - backend_cols}\n"
+        f"  Backend only: {backend_cols - worker_cols}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # send_email step — recipient resolution (playbook-send-email-step)
 # ---------------------------------------------------------------------------
