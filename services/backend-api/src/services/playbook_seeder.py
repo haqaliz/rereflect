@@ -4,6 +4,13 @@ Playbook template seeder (M4.1 Phase 5.1).
 Idempotent — safe to call on every startup. Inserts the 7 pre-built system
 templates defined in SEED_TEMPLATES if they don't already exist (matched by
 name).  Templates have organization_id=NULL and is_template=True.
+
+Convergence predicate (PRD M5): a pristine seeded row — organization_id IS
+NULL, is_template, source_template_id IS NULL — whose stored action_sequence
+differs from the seed's is updated to the seed's action_sequence + description.
+This means an operator-edited pristine template is converged too.  Rows cloned
+by operators (source_template_id set) and org-owned rows are never touched.
+Idempotent: a second run performs no updates.
 """
 
 from __future__ import annotations
@@ -190,7 +197,7 @@ SEED_TEMPLATES: List[Dict[str, Any]] = [
         "action_sequence": [
             {
                 "type": "trigger_automation",
-                "config": {"automation_name": "onboarding_playbook"},
+                "config": {"automation_name": "At-Risk Customer Outreach"},
             },
             {
                 "type": "assign",
@@ -236,9 +243,14 @@ SEED_TEMPLATES: List[Dict[str, Any]] = [
 def seed_playbook_templates(db: Session) -> None:
     """Insert SEED_TEMPLATES as system templates if they don't exist yet.
 
-    Idempotent: matched by name + is_template=True. Skips existing records.
+    Idempotent: matched by name + is_template=True. Pristine seeded rows
+    (organization_id IS NULL, source_template_id IS NULL) whose stored
+    action_sequence differs from the seed converge to the seed's
+    action_sequence + description; cloned (source_template_id set) and
+    org-owned rows are left untouched. A second run performs no updates.
     """
     created = 0
+    updated = 0
     for tmpl_data in SEED_TEMPLATES:
         exists = (
             db.query(ChurnPlaybook)
@@ -249,6 +261,14 @@ def seed_playbook_templates(db: Session) -> None:
             .first()
         )
         if exists:
+            if (
+                exists.organization_id is None
+                and exists.source_template_id is None
+                and exists.action_sequence != tmpl_data["action_sequence"]
+            ):
+                exists.action_sequence = tmpl_data["action_sequence"]
+                exists.description = tmpl_data["description"]
+                updated += 1
             continue
 
         tmpl = ChurnPlaybook(
@@ -264,8 +284,11 @@ def seed_playbook_templates(db: Session) -> None:
         db.add(tmpl)
         created += 1
 
-    if created:
+    if created or updated:
         db.commit()
-        logger.info(f"Playbook seeder: created {created} system templates.")
+        if created:
+            logger.info(f"Playbook seeder: created {created} system templates.")
+        if updated:
+            logger.info(f"Playbook seeder: updated {updated} system templates.")
     else:
         logger.info("Playbook seeder: all templates already present, skipping.")
