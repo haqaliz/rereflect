@@ -195,7 +195,7 @@ const smallCards: {
     icon: TrendingDown,
     title: '30-Day Churn Probability',
     description:
-      'Predict 30-60 days out which customers will churn — with calibrated probabilities, factor breakdowns, and prevention playbooks. Honest accuracy tracking included.',
+      'Predict 30-60 days out which customers will churn — with calibrated probabilities, factor breakdowns, and prevention playbooks. Playbook steps notify your team on Slack or Discord, tag customers, queue follow-up tasks, or fire churn automations automatically. Honest accuracy tracking included.',
     animation: 'pulse',
   },
   {
