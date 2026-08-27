@@ -7,9 +7,9 @@ import FAQ from '@/components/landing/FAQ';
 
 describe('FAQ', () => {
   // Structure
-  it('renders heading "Frequently Asked Questions"', () => {
+  it('renders heading "Questions, answered."', () => {
     render(<FAQ />);
-    expect(screen.getByRole('heading', { name: /Frequently Asked Questions/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Questions, answered/i })).toBeInTheDocument();
   });
 
   it('renders all 12 FAQ questions as visible text', () => {

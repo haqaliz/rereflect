@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { Montserrat, Merriweather, Ubuntu_Mono } from "next/font/google";
+import { Montserrat, Merriweather, Ubuntu_Mono, Inter_Tight } from "next/font/google";
 import "./globals.css";
+import "./landing.css";
+import LandingSmoothScroll from "@/components/landing/LandingSmoothScroll";
 
 const montserrat = Montserrat({
   subsets: ["latin"],
@@ -19,6 +21,12 @@ const ubuntuMono = Ubuntu_Mono({
   subsets: ["latin"],
   weight: ["400", "700"],
   variable: "--font-mono",
+  display: "swap",
+});
+
+const interTight = Inter_Tight({
+  subsets: ["latin"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -84,8 +92,10 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className={`${montserrat.variable} ${merriweather.variable} ${ubuntuMono.variable} antialiased font-sans`}>
-        {children}
+      <body className={`${montserrat.variable} ${merriweather.variable} ${ubuntuMono.variable} ${interTight.variable} antialiased font-sans`}>
+        <LandingSmoothScroll>
+          <div className="landing-dark min-h-screen">{children}</div>
+        </LandingSmoothScroll>
       </body>
     </html>
   );
