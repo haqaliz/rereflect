@@ -7,6 +7,39 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Complete playbook action types
+
+- **All 7 seeded playbook templates now execute end-to-end.** The churn-playbook engine
+  previously implemented 5 of 11 declared action types, so 6 of 7 built-in templates
+  (Critical Save, Churn Prevention, At-Risk Outreach, Light-Touch Nudge, Power-User
+  Recovery, New-Customer Save, Silent-Churn Watch) contained steps that failed with
+  `unsupported action type` on every run — including auto-executed churn runs. The five
+  missing actions are implemented:
+  - **`notify`** — send the message to the org's connected Slack/Discord integration or
+    as in-app notifications for admins (`channel: slack|discord|dashboard`; `target` is
+    advisory — the integration's configured channel is used).
+  - **`tag`** — add a tag to the customer's health record (bulk-tag constraints: ≤50
+    chars, ≤20 tags/customer, sorted, deduped).
+  - **`create_task` / `schedule_task`** — persist an internal follow-up task
+    (`playbook_tasks` table) with a due date and priority.
+  - **`trigger_automation`** — fire a named `churn_probability_threshold` automation rule
+    for the customer, respecting the rule's own mode, threshold, and Redis cooldown
+    (rules with `cooldown_hours < 1` are refused — no rule→playbook→rule loops).
+    `usage_trend` rules and per-feedback triggers are not evaluable from a playbook and
+    report why, loudly.
+- **Failures are loud and visible.** Executions on the playbook detail page now expand
+  per-action results (type, ok/error, error text) instead of burying failures in an
+  unrendered log.
+- **The playbook editor offers the new action types** with config forms (channel/message,
+  tag name, task fields, automation picker) that round-trip the exact keys the engine
+  reads.
+- **Seeded templates converge on startup.** New-Customer Save's `trigger_automation` now
+  targets the real `At-Risk Customer Outreach` automation (seeded in shadow mode — the
+  step reports `mode=off/shadow — not fired` until you activate it), and pristine seeded
+  template rows are updated in place; cloned/org-owned playbooks are never touched.
+- One new table: `playbook_tasks` (write-only in this release — task rows appear in
+  execution results).
+
 ### Added — Scheduled & emailed AI reports
 
 - **Reports on a fixed cadence, not just on demand.** The My Reports page (`/reports`)

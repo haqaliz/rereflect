@@ -244,8 +244,11 @@ RBAC: all mutations `require_admin_or_owner` (customers-router precedent
   explicitly and still silent-skip every other type), with a delivery audit table, a
   per-rule deliveries endpoint and a seeded shadow-mode template. See
   `docs/planning/automation-send-customer-email/`.
-- **Fixing the other 5 unimplemented seeded playbook action types** (`notify`, `tag`,
-  `create_task`, `schedule_task`, `trigger_automation`) — separate card; noted.
+- ~~**Fixing the other 5 unimplemented seeded playbook action types** (`notify`, `tag`,
+  `create_task`, `schedule_task`, `trigger_automation`) — separate card; noted.~~ **CLOSED
+  2026-08-27** — shipped as `playbook-action-types` (worker engine handlers + internal
+  `playbook_tasks` table + seeder convergence + editor/execution-log UI). See
+  `docs/planning/playbook-action-types/`.
 - **SMTP transport**; org-editable templates; campaign scheduling/sequences;
   open/click tracking; segment-aware drafting beyond count/segment; bulk opt-out
   management; suppression-list UI.

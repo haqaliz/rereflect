@@ -362,6 +362,18 @@
 - [x] Churn timeline: time_to_churn_bucket (immediate / 2w / 2-4w / 1-3m / low) derived from probability + sentiment trend
 - [x] Churn cohort analysis: 3 dimensions (source, acquisition month, volume segment) with heatmap + breakdown charts
 - [x] Churn prevention playbooks: 7 pre-built templates (Critical Save, Prevention, At-Risk Outreach, etc.) + clone/edit with probability range binding
+  - **Follow-on (2026-08-27, `feat/playbook-action-types`):** the 5 unimplemented seeded
+        action types (`notify`, `tag`, `create_task`, `schedule_task`, `trigger_automation`)
+        now execute in the worker engine — 6 of 7 seeded templates previously hit
+        `unsupported action type` on every run (the same inert-template defect class as the
+        P0 automations fix, closed at `customer-outreach-email-actions/prd.md:247`).
+        `create_task`/`schedule_task` persist to a new internal `playbook_tasks` table;
+        `trigger_automation` fires a named `churn_probability_threshold` rule via the
+        existing `_evaluate_rule` seam (mode/threshold/cooldown respected, `cooldown_hours
+        < 1` refused — no rule→playbook→rule loops); seeder converges pristine template
+        rows (cloned/org-owned never touched); editor offers the new types; execution
+        action logs are surfaced per-action in the UI. See
+        `docs/planning/playbook-action-types/`.
 - [x] Accuracy tracking: precision/recall/F1/AUC metrics on organization + system admin accuracy dashboards, weekly refit Mondays 07:45 UTC
 - [x] Plan gate: Business+ (Pro gets enhanced risk_level + factor breakdown)
 
