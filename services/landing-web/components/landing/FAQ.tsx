@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 const faqs = [
@@ -60,39 +60,37 @@ export default function FAQ() {
   const toggle = (i: number) => setOpenIndex(openIndex === i ? null : i);
 
   return (
-    <section data-testid="faq-section" className="py-24">
-      <div className="max-w-3xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            Frequently Asked Questions
-          </h2>
+    <section data-testid="faq-section" className="lp-faq">
+      <div className="mx-auto max-w-3xl px-6">
+        <div className="mb-12 text-center">
+          <span className="lp-section-eyebrow">FAQ</span>
+          <h2 className="lp-faq-title font-display mt-4">Questions, answered.</h2>
         </div>
 
-        <div className="divide-y divide-border">
+        <div className="lp-faq-list">
           {faqs.map((faq, i) => {
             const isOpen = openIndex === i;
             return (
-              <div key={i} className="py-4">
+              <div key={i} className={`lp-faq-item${isOpen ? ' lp-faq-item--open' : ''}`}>
                 <button
                   data-testid={`faq-question-${i}`}
                   onClick={() => toggle(i)}
                   aria-expanded={isOpen}
                   aria-controls={`faq-answer-${i}`}
-                  className="flex w-full items-center justify-between text-left font-semibold"
+                  className="lp-faq-q"
                 >
                   <span>{faq.q}</span>
                   <ChevronDown
-                    className="w-5 h-5 shrink-0 transition-transform duration-200"
+                    className="h-4 w-4 shrink-0 transition-transform duration-300"
                     style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
                   />
                 </button>
-
                 <div
                   data-testid={`faq-answer-${i}`}
                   id={`faq-answer-${i}`}
                   data-state={isOpen ? 'open' : 'closed'}
                   hidden={!isOpen}
-                  className="pt-2 text-muted-foreground text-sm"
+                  className="lp-faq-a"
                 >
                   {faq.a}
                 </div>
