@@ -86,7 +86,10 @@ def execute(execution_id: int, db: Session) -> dict:
                                    action_log=[])
 
     # Execute each action, collecting outcomes
-    action_log = _run_actions(playbook.action_sequence or [], execution.customer_email, health, db)
+    action_log = _run_actions(
+        playbook.action_sequence or [], execution.customer_email, health, db,
+        execution_id=execution.id,
+    )
 
     # Determine final status
     any_ok = any(entry.get("ok") for entry in action_log)
@@ -124,6 +127,7 @@ def _run_actions(
     customer_email: str,
     health: CustomerHealth,
     db: Session,
+    execution_id: int = None,
 ) -> list:
     """
     Execute each action dict in sequence. Continues past failures.
@@ -134,7 +138,10 @@ def _run_actions(
         action_type: str = action.get("type", "")
         action_config: dict = action.get("config", {})
         try:
-            outcome = _dispatch_action(action_type, action_config, customer_email, health, db)
+            outcome = _dispatch_action(
+                action_type, action_config, customer_email, health, db,
+                execution_id=execution_id,
+            )
             log.append({
                 "type": action_type,
                 "ok": outcome.get("ok", True),
@@ -156,6 +163,7 @@ def _dispatch_action(
     customer_email: str,
     health: CustomerHealth,
     db: Session,
+    execution_id: int = None,
 ) -> dict:
     """
     Dispatch an action to the appropriate handler.
@@ -165,7 +173,7 @@ def _dispatch_action(
     importable from the worker).
 
     Supported types: assign, change_status, send_notification, draft_response,
-    send_email.
+    send_email, tag, notify, create_task, schedule_task, trigger_automation.
     Unknown types return ok=False with an 'unsupported action type' error.
     """
     if action_type == "assign":
@@ -178,6 +186,20 @@ def _dispatch_action(
         return _handle_draft_response(action_config, customer_email, health, db)
     elif action_type == "send_email":
         return _handle_send_email(action_config, customer_email, health, db)
+    elif action_type == "tag":
+        return _handle_tag(action_config, customer_email, health, db)
+    elif action_type == "notify":
+        return _handle_notify(action_config, customer_email, health, db)
+    elif action_type == "create_task":
+        return _handle_create_task(
+            action_config, customer_email, health, db, execution_id=execution_id,
+        )
+    elif action_type == "schedule_task":
+        return _handle_schedule_task(
+            action_config, customer_email, health, db, execution_id=execution_id,
+        )
+    elif action_type == "trigger_automation":
+        return _handle_trigger_automation(action_config, customer_email, health, db)
     else:
         return {
             "ok": False,
@@ -495,6 +517,480 @@ def _handle_send_email(
             "reason": result.get("reason"),
             "to": to_email,
             "template": template,
+        },
+        "error": None,
+    }
+
+
+def _handle_tag(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Add a tag to the customer's `health.tags` (JSON array).
+
+    Mirrors the backend bulk-tag constraints (`customers.py` BulkTagRequest):
+    tags are trimmed, must be non-empty and ≤50 chars, and a customer may
+    hold at most 20 tags. Over-cap / invalid tags are loud `ok: False` with
+    the row left unchanged; re-tagging an existing tag is an idempotent
+    success. The array is kept sorted and deduped.
+    """
+    _TAG_MAX_LENGTH = 50
+    _TAG_CAP_PER_CUSTOMER = 20
+
+    raw = config.get("tag")
+    if not isinstance(raw, str):
+        return {"ok": False, "result": None, "error": "tag must be a non-empty string"}
+    tag = raw.strip()
+    if not tag:
+        return {"ok": False, "result": None, "error": "tag must be a non-empty string"}
+    if len(tag) > _TAG_MAX_LENGTH:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"tag exceeds the {_TAG_MAX_LENGTH}-character limit",
+        }
+
+    existing = list(health.tags or [])
+    if tag in existing:
+        return {"ok": True, "result": {"tag": tag, "tags": existing}}
+    if len(existing) >= _TAG_CAP_PER_CUSTOMER:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"tag cap ({_TAG_CAP_PER_CUSTOMER}) reached",
+        }
+
+    new_tags = sorted(existing + [tag])
+    try:
+        health.tags = new_tags
+        db.flush()
+    except Exception as exc:
+        logger.warning(
+            "playbook_engine: tag persist failed for %s: %s", customer_email, exc,
+        )
+        db.rollback()
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"failed to persist tags: {exc}",
+        }
+    return {"ok": True, "result": {"tag": tag, "tags": new_tags}}
+
+
+def _handle_notify(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Deliver a message over the requested channel.
+
+    channel:
+      "slack"    → post to every active `Integration` row of type "slack"
+                   for the org, via the tasks.alerts webhook sender (which
+                   RAISES — wrapped here so a failing send is a loud
+                   `ok: False`, never a crash). `target` is advisory: it is
+                   recorded in the result, not resolved to a channel.
+      "discord"  → same shape via the Discord webhook sender.
+      "dashboard"→ create in-app `Notification` rows via the
+                   `notification_dispatch.dispatch_alert` seam (honors
+                   UserAlertPreference), reporting `{notifications_created: N}`.
+
+    Integration selection follows the `send_notification` precedent in
+    automation_feedback_trigger.py: active rows only, webhook_url from
+    `config.webhook_url`, per-integration send wrapped in try/except.
+    """
+    from src.models import Integration
+    from src.tasks.alerts import (
+        send_discord_message_webhook,
+        send_slack_message_webhook,
+    )
+    from src.notification_dispatch import dispatch_alert
+
+    message = config.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return {
+            "ok": False,
+            "result": None,
+            "error": "notify step missing 'message' in config",
+        }
+    channel = (config.get("channel") or "").strip().lower()
+    if not channel:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "notify step missing 'channel' in config",
+        }
+
+    org_id = health.organization_id
+    title = f"Playbook notification for {customer_email}"
+
+    if channel == "slack":
+        integrations = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org_id,
+                Integration.type == "slack",
+                Integration.is_active.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            return {
+                "ok": False,
+                "result": None,
+                "error": "no slack integration connected",
+            }
+        blocks = [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{title}*\n{message}"},
+            }
+        ]
+        sent, errors = _dispatch_external_notify(
+            integrations,
+            send_slack_message_webhook,
+            lambda integration: {"blocks": blocks, "text": title},
+        )
+        result = {
+            "channel": "slack",
+            "integrations_sent": sent,
+            "target": config.get("target"),
+        }
+        if errors:
+            return {"ok": False, "result": result, "error": "; ".join(errors)}
+        return {"ok": True, "result": result, "error": None}
+
+    if channel == "discord":
+        integrations = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org_id,
+                Integration.type == "discord",
+                Integration.is_active.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            return {
+                "ok": False,
+                "result": None,
+                "error": "no discord integration connected",
+            }
+        embeds = [{"title": title, "description": message}]
+        sent, errors = _dispatch_external_notify(
+            integrations,
+            send_discord_message_webhook,
+            lambda integration: {"embeds": embeds, "content": message},
+        )
+        result = {
+            "channel": "discord",
+            "integrations_sent": sent,
+            "target": config.get("target"),
+        }
+        if errors:
+            return {"ok": False, "result": result, "error": "; ".join(errors)}
+        return {"ok": True, "result": result, "error": None}
+
+    if channel == "dashboard":
+        try:
+            counts = dispatch_alert(
+                org_id,
+                "churn_risk",
+                title,
+                message,
+                link=f"/customers/{customer_email}",
+            )
+        except Exception as exc:
+            logger.warning(
+                "playbook_engine: dashboard notify failed for org %s: %s",
+                org_id, exc,
+            )
+            return {
+                "ok": False,
+                "result": None,
+                "error": f"dashboard notify failed: {exc}",
+            }
+        return {
+            "ok": True,
+            "result": {"notifications_created": counts.get("inapp", 0)},
+            "error": None,
+        }
+
+    return {
+        "ok": False,
+        "result": None,
+        "error": f"unknown notify channel: '{channel}'",
+    }
+
+
+def _dispatch_external_notify(integrations, send, build_kwargs) -> tuple:
+    """
+    Send one message per integration via `send`, wrapping the sender's RAISE
+    contract per-integration (a failing webhook must not abort the others).
+    Returns (sent_count, error_strings).
+    """
+    sent = 0
+    errors = []
+    for integration in integrations:
+        webhook_url = (integration.config or {}).get("webhook_url")
+        if not webhook_url:
+            errors.append(f"integration {integration.id} has no webhook_url")
+            continue
+        try:
+            send(webhook_url=webhook_url, **build_kwargs(integration))
+            sent += 1
+        except Exception as exc:
+            logger.warning(
+                "playbook_engine: notify send failed for integration %s: %s",
+                integration.id, exc,
+            )
+            errors.append(f"integration {integration.id}: {exc}")
+    return sent, errors
+
+
+def _handle_create_task(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session,
+    execution_id: int = None,
+) -> dict:
+    """Persist a follow-up task from the playbook run (playbook-tasks M3)."""
+    return _persist_task(
+        config, customer_email, health, db,
+        execution_id=execution_id, allow_priority=True,
+    )
+
+
+def _handle_schedule_task(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session,
+    execution_id: int = None,
+) -> dict:
+    """
+    Same as create_task but priority is not configurable (PRD M3): an
+    explicit priority is refused loudly — honest config, no silent ignore —
+    and the row is forced to 'medium'.
+    """
+    if config.get("priority") is not None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "schedule_task does not accept 'priority' in config",
+        }
+    return _persist_task(
+        config, customer_email, health, db,
+        execution_id=execution_id, allow_priority=False,
+    )
+
+
+def _persist_task(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session,
+    *,
+    execution_id: int = None,
+    allow_priority: bool = True,
+) -> dict:
+    """
+    Shared persistence for create_task / schedule_task.
+
+    Config: {description (required), due_in_days? (int >= 0), priority?
+    ("low"|"medium"|"high", default "medium"), due_at? (ISO datetime)}.
+    `due_at` precedence: explicit `due_at` > `due_in_days` > NULL.
+    Row: org from the run's health row, status "open", linked to the run's
+    execution. Persistence is wrapped — a DB failure rolls back and returns
+    `ok: False` so the session stays usable for sibling actions.
+    """
+    from src.models import PlaybookTask
+
+    description = config.get("description")
+    if not isinstance(description, str) or not description.strip():
+        return {
+            "ok": False,
+            "result": None,
+            "error": "task action missing 'description' in config",
+        }
+    description = description.strip()
+
+    due_at = None
+    raw_due_at = config.get("due_at")
+    if raw_due_at:
+        try:
+            due_at = datetime.fromisoformat(str(raw_due_at))
+        except ValueError:
+            return {
+                "ok": False,
+                "result": None,
+                "error": f"invalid due_at: '{raw_due_at}'",
+            }
+    else:
+        raw_due_in_days = config.get("due_in_days")
+        if raw_due_in_days is not None:
+            if (
+                isinstance(raw_due_in_days, bool)
+                or not isinstance(raw_due_in_days, int)
+                or raw_due_in_days < 0
+            ):
+                return {
+                    "ok": False,
+                    "result": None,
+                    "error": "due_in_days must be an integer >= 0",
+                }
+            due_at = datetime.utcnow() + timedelta(days=raw_due_in_days)
+
+    priority = config.get("priority", "medium")
+    if priority not in ("low", "medium", "high"):
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"invalid priority: '{priority}'",
+        }
+    if not allow_priority:
+        priority = "medium"
+
+    task = PlaybookTask(
+        organization_id=health.organization_id,
+        customer_email=customer_email,
+        description=description,
+        due_at=due_at,
+        priority=priority,
+        status="open",
+        playbook_execution_id=execution_id,
+    )
+    try:
+        db.add(task)
+        db.flush()
+    except Exception as exc:
+        logger.warning(
+            "playbook_engine: task persist failed for %s: %s", customer_email, exc,
+        )
+        db.rollback()
+        return {"ok": False, "result": None, "error": f"failed to persist task: {exc}"}
+
+    return {
+        "ok": True,
+        "result": {
+            "task_id": task.id,
+            "description": description,
+            "due_at": due_at.isoformat() if due_at else None,
+        },
+        "error": None,
+    }
+
+
+def _handle_trigger_automation(
+    config: dict, customer_email: str, health: CustomerHealth, db: Session
+) -> dict:
+    """
+    Fire a named `churn_probability_threshold` automation rule for the
+    customer (trigger-automation aspect, M4).
+
+    The fire itself is DELEGATED to the existing single-rule evaluator
+    `automation_churn_trigger._evaluate_rule` — its threshold check, shared
+    Redis cooldown, AutomationExecution write and playbook enqueue are
+    authoritative; this handler never duplicates them. It only guards the
+    loud preconditions (name, mode, trigger type, cooldown_hours, available
+    probability) and reports what the seam did (fired vs not, and why not).
+
+    `_evaluate_rule` commits the session mid-run; the engine's finalization
+    handles that (pinned by test_execute_finalizes_done_when_handler_commits_mid_run).
+    """
+    from src.models.automation_rule import AutomationRule
+    from src.services import automation_churn_trigger
+
+    name = (config.get("automation_name") or "").strip()
+    if not name:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "trigger_automation step missing 'automation_name' in config",
+        }
+
+    rule = (
+        db.query(AutomationRule)
+        .filter(
+            AutomationRule.organization_id == health.organization_id,
+            AutomationRule.name == name,
+        )
+        .order_by(AutomationRule.created_at, AutomationRule.id)
+        .first()
+    )
+    if rule is None:
+        return {"ok": False, "result": None, "error": f"no rule named '{name}'"}
+
+    if rule.mode != "active":
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"rule '{name}' found but mode={rule.mode} — not fired",
+        }
+
+    if rule.trigger_type != "churn_probability_threshold":
+        if rule.trigger_type == "usage_trend":
+            return {
+                "ok": False,
+                "result": None,
+                "error": (
+                    "trigger type 'usage_trend' fires only from the daily recompute seam"
+                ),
+            }
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"trigger type '{rule.trigger_type}' fires only from its native evaluator",
+        }
+
+    if rule.cooldown_hours < 1:
+        return {
+            "ok": False,
+            "result": None,
+            "error": f"rule '{name}' has cooldown_hours < 1 — refused",
+        }
+
+    if health.churn_probability is None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": "no churn probability available for customer",
+        }
+
+    try:
+        before_count = rule.execution_count or 0
+        automation_churn_trigger._evaluate_rule(
+            rule,
+            rule.organization_id,
+            customer_email,
+            float(health.churn_probability),
+            db,
+        )
+        fired = (rule.execution_count or 0) > before_count
+    except Exception as exc:
+        logger.warning(
+            "playbook_engine: trigger_automation failed for rule %s: %s",
+            rule.id, exc,
+        )
+        return {"ok": False, "result": None, "error": f"trigger_automation failed: {exc}"}
+
+    if fired:
+        return {
+            "ok": True,
+            "result": {"fired": True, "rule_id": rule.id, "automation_name": name},
+            "error": None,
+        }
+
+    # The seam ran but did not fire — report why, from its own observables.
+    if automation_churn_trigger._check_cooldown(rule.id, customer_email):
+        return {
+            "ok": True,
+            "result": {
+                "fired": False,
+                "rule_id": rule.id,
+                "automation_name": name,
+                "reason": "rule in cooldown for customer",
+            },
+            "error": None,
+        }
+    return {
+        "ok": True,
+        "result": {
+            "fired": False,
+            "rule_id": rule.id,
+            "automation_name": name,
+            "reason": "probability below rule threshold",
         },
         "error": None,
     }

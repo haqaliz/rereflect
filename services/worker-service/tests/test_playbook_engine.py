@@ -11,7 +11,7 @@ Action handlers are monkeypatched to isolate engine logic.
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import Integer, String, create_engine
+from sqlalchemy import JSON, Integer, String, create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -154,6 +154,31 @@ def test_worker_customer_health_mirrors_cs_owner_user_id_column():
     assert isinstance(col.type, Integer)
 
 
+def test_worker_customer_health_mirrors_tags_column(db):
+    """Mirror parity: backend CustomerHealth.tags (JSON, nullable, default=list)
+    has a JSON mirror column whose default is the `list` callable (never a shared
+    [] literal) and which round-trips a list through the DB."""
+    cols = {c.name: c for c in CustomerHealth.__table__.columns}
+    assert "tags" in cols
+    col = cols["tags"]
+    assert col.nullable is True
+    assert isinstance(col.type, JSON)
+    # SQLAlchemy 2.x wraps callable defaults in a lambda (schema.py
+    # util.wrap_callable), so assert callability — NOT `arg is list` — to
+    # guard the mutable-default trap (a shared [] literal is not callable).
+    assert callable(col.default.arg)
+
+    health = CustomerHealth(
+        organization_id=1,
+        customer_email="tags@example.com",
+        tags=["beta", "alpha"],
+    )
+    db.add(health)
+    db.commit()
+    db.refresh(health)
+    assert health.tags == ["beta", "alpha"]
+
+
 def test_worker_organization_mirrors_product_name_display_column():
     """Mirror parity: backend Organization.product_name_display (String(200)) has a
     nullable String(200) mirror column for send_email template rendering."""
@@ -163,6 +188,52 @@ def test_worker_organization_mirrors_product_name_display_column():
     assert col.nullable is True
     assert isinstance(col.type, String)
     assert col.type.length == 200
+
+
+def test_worker_playbook_task_mirror_matches_backend_columns():
+    """Mirror parity: the worker PlaybookTask mirror columns must exactly
+    match the backend-api model (playbook-action-types aspect). A drift here
+    is silent: the worker would read/write a column under a different name,
+    or miss one entirely, and fail at runtime rather than in a test.
+
+    Same sys.path/sys.modules swap technique as
+    test_zendesk_adapter.py::TestModelsAndMigration.
+    """
+    import os
+    import sys
+
+    from src.models import PlaybookTask as WorkerModel
+
+    worker_cols = {c.name for c in WorkerModel.__table__.columns}
+
+    worktree = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    backend_src = os.path.join(worktree, "services", "backend-api")
+
+    saved_mods = {
+        k: v for k, v in sys.modules.items() if k == "src" or k.startswith("src.")
+    }
+    for k in saved_mods:
+        del sys.modules[k]
+
+    sys.path.insert(0, backend_src)
+    try:
+        from src.models.playbook_task import PlaybookTask as BackendModel
+
+        backend_cols = {c.name for c in BackendModel.__table__.columns}
+    finally:
+        sys.path.remove(backend_src)
+        for k in list(sys.modules.keys()):
+            if k == "src" or k.startswith("src."):
+                del sys.modules[k]
+        sys.modules.update(saved_mods)
+
+    assert worker_cols == backend_cols, (
+        f"Column mismatch!\n"
+        f"  Worker only:  {worker_cols - backend_cols}\n"
+        f"  Backend only: {backend_cols - worker_cols}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -696,7 +767,7 @@ def test_execute_runs_all_actions_in_sequence(db, monkeypatch):
 
     dispatched = []
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         dispatched.append(action_type)
         return {"ok": True, "result": {}}
 
@@ -719,7 +790,7 @@ def test_execute_continues_after_action_failure(db, monkeypatch):
 
     dispatched = []
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         dispatched.append(action_type)
         if action_type == "assign":
             raise RuntimeError("assign exploded")
@@ -743,7 +814,7 @@ def test_execute_action_log_records_each_outcome(db, monkeypatch):
     _make_health(db, org.id)
     exe = _make_execution(db, pb.id, org.id, status="queued")
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         return {"ok": True, "result": {"done": True}}
 
     monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
@@ -771,7 +842,7 @@ def test_execute_marks_done_when_any_action_succeeds(db, monkeypatch):
 
     call_count = [0]
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         call_count[0] += 1
         if call_count[0] == 1:
             raise RuntimeError("first action fails")
@@ -796,7 +867,7 @@ def test_execute_marks_failed_when_all_actions_fail(db, monkeypatch):
     _make_health(db, org.id)
     exe = _make_execution(db, pb.id, org.id, status="queued")
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
@@ -889,7 +960,7 @@ def test_execute_persists_started_at_and_completed_at(db, monkeypatch):
     _make_health(db, org.id)
     exe = _make_execution(db, pb.id, org.id, status="queued")
 
-    def fake_handler(action_type, action_config, customer_email, health, db):
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
         return {"ok": True, "result": {}}
 
     monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
@@ -904,3 +975,49 @@ def test_execute_persists_started_at_and_completed_at(db, monkeypatch):
     assert updated.completed_at is not None
     assert before <= updated.started_at <= after
     assert updated.started_at <= updated.completed_at
+
+
+# ---------------------------------------------------------------------------
+# Mid-run commit finalization (trigger-automation AC6 characterization pin)
+# ---------------------------------------------------------------------------
+
+def test_execute_finalizes_done_when_handler_commits_mid_run(db, monkeypatch):
+    """
+    Characterization pin (trigger-automation AC6): `_evaluate_rule` calls
+    `db.commit()` INSIDE the playbook run's session. The engine must still
+    finalize correctly afterwards — status `done` with the FULL action_log
+    intact (every entry, nothing lost to the mid-run commit).
+    """
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=[
+        {"type": "commits", "config": {}},
+        {"type": "after_commit", "config": {}},
+    ])
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
+        db.commit()  # mid-run commit, like automation_churn_trigger._evaluate_rule
+        return {"ok": True, "result": {"handled": action_type}}
+
+    monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
+
+    playbook_engine.execute(exe.id, db)
+
+    db.expire_all()
+    updated = db.query(ChurnPlaybookExecution).filter_by(id=exe.id).first()
+    assert updated.status == "done"
+    assert updated.completed_at is not None
+    assert len(updated.action_log) == 2
+    assert updated.action_log[0] == {
+        "type": "commits",
+        "ok": True,
+        "result": {"handled": "commits"},
+        "error": None,
+    }
+    assert updated.action_log[1] == {
+        "type": "after_commit",
+        "ok": True,
+        "result": {"handled": "after_commit"},
+        "error": None,
+    }

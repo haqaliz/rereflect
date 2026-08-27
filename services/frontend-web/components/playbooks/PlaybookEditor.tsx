@@ -21,6 +21,64 @@ import {
   BUILTIN_OUTREACH_TEMPLATES,
   type OutreachTemplateSummary,
 } from '@/lib/api/outreach';
+import {
+  automationsAPI,
+  TRIGGER_TYPE_LABELS,
+  type AutomationRule,
+} from '@/lib/api/automations';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const NOTIFY_CHANNELS = ['slack', 'discord', 'dashboard'] as const;
+
+const NOTIFY_CHANNEL_LABELS: Record<string, string> = {
+  slack: 'Slack',
+  discord: 'Discord',
+  dashboard: 'Dashboard',
+};
+
+const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
+
+/**
+ * Types whose config is reset to the type defaults on switch. send_email is
+ * deliberately excluded — switching away and back preserves its config
+ * (pinned behavior). The worker reads type-specific keys, so a stale config
+ * from another type must never leak into the save payload.
+ */
+const RESET_ON_SWITCH_TYPES = new Set([
+  'notify',
+  'tag',
+  'create_task',
+  'schedule_task',
+  'trigger_automation',
+]);
+
+function toStr(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+
+function isNonEmpty(v: unknown): boolean {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+function defaultConfigFor(type: string): Record<string, unknown> | undefined {
+  switch (type) {
+    case 'send_email':
+      return { template: BUILTIN_OUTREACH_TEMPLATES[0].key, recipient: 'customer' };
+    case 'notify':
+      return { channel: 'slack', message: '' };
+    case 'tag':
+      return { tag: '' };
+    case 'create_task':
+      return { description: '', priority: 'medium' };
+    case 'schedule_task':
+      return { description: '' };
+    case 'trigger_automation':
+      return { automation_name: '' };
+    default:
+      return undefined;
+  }
+}
 
 // ─── ActionCard ───────────────────────────────────────────────────────────────
 
@@ -29,11 +87,24 @@ interface ActionCardProps {
   index: number;
   readOnly: boolean;
   templateOptions: OutreachTemplateSummary[];
+  automations: AutomationRule[];
+  automationsLoading: boolean;
+  error?: string;
   onChange: (index: number, action: PlaybookAction) => void;
   onRemove: (index: number) => void;
 }
 
-function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemove }: ActionCardProps) {
+function ActionCard({
+  action,
+  index,
+  readOnly,
+  templateOptions,
+  automations,
+  automationsLoading,
+  error,
+  onChange,
+  onRemove,
+}: ActionCardProps) {
   const actionTypes = Object.keys(ACTION_TYPE_LABELS);
   const isSendEmail = action.type === 'send_email';
   const config = (action.config ?? {}) as Record<string, unknown>;
@@ -43,6 +114,48 @@ function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemo
   const templateLabel =
     templateOptions.find((t) => t.key === templateKey)?.label ?? templateKey;
   const recipientLabel = SEND_EMAIL_RECIPIENT_LABELS[recipient] ?? recipient;
+
+  const channel = toStr(config.channel);
+  const message = toStr(config.message);
+  const target = toStr(config.target);
+  const tag = toStr(config.tag);
+  const description = toStr(config.description);
+  const dueInDays =
+    config.due_in_days === undefined || config.due_in_days === null
+      ? ''
+      : String(config.due_in_days);
+  const priority = toStr(config.priority);
+  const automationName = toStr(config.automation_name);
+
+  const handleTypeChange = (val: string) => {
+    if (val === 'send_email' && !action.config) {
+      const defaultTemplate =
+        templateOptions[0]?.key ?? BUILTIN_OUTREACH_TEMPLATES[0].key;
+      onChange(index, {
+        ...action,
+        type: val,
+        config: { template: defaultTemplate, recipient: 'customer' },
+      });
+    } else if (RESET_ON_SWITCH_TYPES.has(val)) {
+      onChange(index, { ...action, type: val, config: defaultConfigFor(val) });
+    } else {
+      onChange(index, { ...action, type: val });
+    }
+  };
+
+  const setConfigField = (key: string, value: unknown) => {
+    onChange(index, { ...action, config: { ...config, [key]: value } });
+  };
+
+  const setDueInDays = (value: string) => {
+    const nextConfig: Record<string, unknown> = { ...config };
+    if (value === '') {
+      delete nextConfig.due_in_days;
+    } else {
+      nextConfig.due_in_days = Number(value);
+    }
+    onChange(index, { ...action, config: nextConfig });
+  };
 
   return (
     <div
@@ -57,23 +170,7 @@ function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemo
         {readOnly ? (
           <span className="flex-1 text-sm">{ACTION_TYPE_LABELS[action.type] ?? action.type}</span>
         ) : (
-          <Select
-            value={action.type}
-            onValueChange={(val) => {
-              if (val === 'send_email' && !action.config) {
-                const defaultTemplate =
-                  templateOptions[0]?.key ?? BUILTIN_OUTREACH_TEMPLATES[0].key;
-                onChange(index, {
-                  ...action,
-                  type: val,
-                  config: { template: defaultTemplate, recipient: 'customer' },
-                });
-              } else {
-                onChange(index, { ...action, type: val });
-              }
-            }}
-            disabled={readOnly}
-          >
+          <Select value={action.type} onValueChange={handleTypeChange} disabled={readOnly}>
             <SelectTrigger aria-label="Action type" className="flex-1 h-8 text-xs">
               <SelectValue placeholder="Select action type" />
             </SelectTrigger>
@@ -113,9 +210,7 @@ function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemo
                 <span className="text-xs text-muted-foreground shrink-0">Template</span>
                 <Select
                   value={templateKey}
-                  onValueChange={(val) =>
-                    onChange(index, { ...action, config: { ...config, template: val } })
-                  }
+                  onValueChange={(val) => setConfigField('template', val)}
                 >
                   <SelectTrigger aria-label="Email template" className="flex-1 h-8 text-xs">
                     <SelectValue placeholder="Select template" />
@@ -139,9 +234,7 @@ function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemo
                 <span className="text-xs text-muted-foreground shrink-0">Recipient</span>
                 <Select
                   value={SEND_EMAIL_RECIPIENTS.includes(recipient as (typeof SEND_EMAIL_RECIPIENTS)[number]) ? recipient : ''}
-                  onValueChange={(val) =>
-                    onChange(index, { ...action, config: { ...config, recipient: val } })
-                  }
+                  onValueChange={(val) => setConfigField('recipient', val)}
                 >
                   <SelectTrigger aria-label="Email recipient" className="flex-1 h-8 text-xs">
                     <SelectValue placeholder="Select recipient" />
@@ -164,6 +257,174 @@ function ActionCard({ action, index, readOnly, templateOptions, onChange, onRemo
             )}
           </>
         ))}
+
+      {action.type === 'notify' &&
+        (readOnly ? (
+          <p className="pl-8 text-xs text-muted-foreground">
+            Notify via {NOTIFY_CHANNEL_LABELS[channel] ?? channel} → {message}
+            {target && ` (target: ${target})`}
+          </p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-3 pl-8">
+              <div className="flex items-center gap-2 min-w-[180px]">
+                <span className="text-xs text-muted-foreground shrink-0">Channel</span>
+                <Select
+                  value={NOTIFY_CHANNELS.includes(channel as (typeof NOTIFY_CHANNELS)[number]) ? channel : ''}
+                  onValueChange={(val) => setConfigField('channel', val)}
+                >
+                  <SelectTrigger aria-label="Notify channel" className="flex-1 h-8 text-xs">
+                    <SelectValue placeholder="Select channel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {NOTIFY_CHANNELS.map((c) => (
+                      <SelectItem key={c} value={c} className="text-xs">
+                        {NOTIFY_CHANNEL_LABELS[c]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                <span className="text-xs text-muted-foreground shrink-0">Message</span>
+                <Input
+                  aria-label="Notify message"
+                  value={message}
+                  onChange={(e) => setConfigField('message', e.target.value)}
+                  placeholder="Message to send"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                <span className="text-xs text-muted-foreground shrink-0">Target</span>
+                <Input
+                  aria-label="Notify target"
+                  value={target}
+                  onChange={(e) => setConfigField('target', e.target.value)}
+                  placeholder="e.g. #sales (optional)"
+                />
+              </div>
+            </div>
+            <p className="pl-8 text-xs text-muted-foreground">
+              Target is advisory — the integration&apos;s configured channel is used.
+            </p>
+          </>
+        ))}
+
+      {action.type === 'tag' &&
+        (readOnly ? (
+          <p className="pl-8 text-xs text-muted-foreground">Tag: {tag}</p>
+        ) : (
+          <div className="flex items-center gap-2 pl-8">
+            <span className="text-xs text-muted-foreground shrink-0">Tag</span>
+            <Input
+              aria-label="Tag"
+              value={tag}
+              onChange={(e) => setConfigField('tag', e.target.value)}
+              placeholder="e.g. at-risk"
+              className="max-w-[280px]"
+            />
+          </div>
+        ))}
+
+      {(action.type === 'create_task' || action.type === 'schedule_task') &&
+        (readOnly ? (
+          <p className="pl-8 text-xs text-muted-foreground">
+            {action.type === 'create_task' ? 'Create task' : 'Schedule task'}: {description}
+            {dueInDays !== '' && ` (due in ${dueInDays} days`}
+            {action.type === 'create_task' && priority && `, ${priority}`}
+            {dueInDays !== '' && ')'}
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3 pl-8">
+            <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+              <span className="text-xs text-muted-foreground shrink-0">Description</span>
+              <Input
+                aria-label="Task description"
+                value={description}
+                onChange={(e) => setConfigField('description', e.target.value)}
+                placeholder="What needs doing?"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground shrink-0">Due in</span>
+              <Input
+                aria-label="Due in days"
+                type="number"
+                min={0}
+                value={dueInDays}
+                onChange={(e) => setDueInDays(e.target.value)}
+                className="w-24"
+              />
+              <span className="text-xs text-muted-foreground">days</span>
+            </div>
+
+            {action.type === 'create_task' && (
+              <div className="flex items-center gap-2 min-w-[180px]">
+                <span className="text-xs text-muted-foreground shrink-0">Priority</span>
+                <Select
+                  value={TASK_PRIORITIES.includes(priority as (typeof TASK_PRIORITIES)[number]) ? priority : 'medium'}
+                  onValueChange={(val) => setConfigField('priority', val)}
+                >
+                  <SelectTrigger aria-label="Task priority" className="flex-1 h-8 text-xs">
+                    <SelectValue placeholder="Select priority" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TASK_PRIORITIES.map((p) => (
+                      <SelectItem key={p} value={p} className="text-xs">
+                        {p[0].toUpperCase() + p.slice(1)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+        ))}
+
+      {action.type === 'trigger_automation' &&
+        (readOnly ? (
+          <p className="pl-8 text-xs text-muted-foreground">
+            Trigger automation: {automationName}
+          </p>
+        ) : (
+          <div className="flex items-center gap-2 pl-8">
+            <span className="text-xs text-muted-foreground shrink-0">Automation</span>
+            <Select
+              value={automationName}
+              onValueChange={(val) => setConfigField('automation_name', val)}
+              disabled={automationsLoading || automations.length === 0}
+            >
+              <SelectTrigger aria-label="Automation" className="flex-1 h-8 text-xs">
+                <SelectValue
+                  placeholder={
+                    automationsLoading
+                      ? 'Loading automations…'
+                      : automations.length === 0
+                        ? 'No automations'
+                        : 'Select automation'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {automations.map((rule) => (
+                  <SelectItem key={rule.id} value={rule.name} className="text-xs">
+                    {rule.name} ({rule.mode ?? 'off'} ·{' '}
+                    {TRIGGER_TYPE_LABELS[rule.trigger_type] ?? rule.trigger_type})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ))}
+
+      {error && (
+        <p className="pl-8 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -184,11 +445,8 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
   const [probMax, setProbMax] = useState(String(playbook?.probability_max ?? 0.7));
   const [actions, setActions] = useState<PlaybookAction[]>(() =>
     (playbook?.action_sequence ?? []).map((action) => {
-      if (action.type === 'send_email' && !action.config) {
-        return {
-          ...action,
-          config: { template: BUILTIN_OUTREACH_TEMPLATES[0].key, recipient: 'customer' },
-        };
+      if (!action.config && defaultConfigFor(action.type)) {
+        return { ...action, config: defaultConfigFor(action.type) };
       }
       return action;
     })
@@ -198,6 +456,7 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
   const [outreachTemplates, setOutreachTemplates] = useState<OutreachTemplateSummary[] | null>(
     null
   );
+  const [automations, setAutomations] = useState<AutomationRule[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +474,23 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    automationsAPI
+      .list()
+      .then((res) => {
+        if (!cancelled) setAutomations(res.rules);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAutomations([]);
+        toast.error('Could not load automations.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const templateOptions = outreachTemplates ?? BUILTIN_OUTREACH_TEMPLATES;
 
   const validate = (): boolean => {
@@ -226,6 +502,21 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
     if (!isNaN(min) && !isNaN(max) && min >= max) {
       errs.probability = 'Min must be less than max';
     }
+    actions.forEach((action, i) => {
+      const cfg = (action.config ?? {}) as Record<string, unknown>;
+      if (action.type === 'tag' && !isNonEmpty(cfg.tag)) {
+        errs[`action-${i}`] = 'Tag is required';
+      } else if (action.type === 'notify' && !isNonEmpty(cfg.message)) {
+        errs[`action-${i}`] = 'Message is required';
+      } else if (
+        (action.type === 'create_task' || action.type === 'schedule_task') &&
+        !isNonEmpty(cfg.description)
+      ) {
+        errs[`action-${i}`] = 'Description is required';
+      } else if (action.type === 'trigger_automation' && !isNonEmpty(cfg.automation_name)) {
+        errs[`action-${i}`] = 'Automation is required';
+      }
+    });
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -347,6 +638,9 @@ export function PlaybookEditor({ playbook, onSave, onCancel, readOnly = false }:
                 index={i}
                 readOnly={readOnly}
                 templateOptions={templateOptions}
+                automations={automations ?? []}
+                automationsLoading={automations === null}
+                error={errors[`action-${i}`]}
                 onChange={handleChangeAction}
                 onRemove={handleRemoveAction}
               />

@@ -490,6 +490,11 @@ class CustomerHealth(Base):
     # customer_health.py — plain Integer, no FK, worker mirror style).
     cs_owner_user_id = Column(Integer, nullable=True)
 
+    # segment-actions: operator-managed tags (bulk tag action) — mirror of
+    # backend-api customer_health.py. default MUST be the `list` callable,
+    # never a shared `[]` literal (SQLAlchemy mutable-default trap).
+    tags = Column(JSON, nullable=True, default=list)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -977,6 +982,30 @@ class ChurnPlaybookExecution(Base):
         Index("ix_playbook_exec_org_created", "organization_id", "created_at"),
         Index("ix_playbook_exec_playbook_created", "playbook_id", "created_at"),
         Index("ix_playbook_exec_email_created", "customer_email", "created_at"),
+    )
+
+
+class PlaybookTask(Base):
+    """Follow-up task created by a playbook run — mirrors backend-api model
+    (playbook-action-types). Plain Integers for the org/execution FKs — the
+    worker mirror convention skips FK constraints."""
+    __tablename__ = "playbook_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    organization_id = Column(Integer, nullable=False)
+    customer_email = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    due_at = Column(DateTime, nullable=True)
+    priority = Column(String(10), nullable=False, default="medium")
+    status = Column(String(10), nullable=False, default="open")
+    playbook_execution_id = Column(Integer, nullable=True)  # FK to churn_playbook_executions (no FK constraint in worker)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_playbook_tasks_org", "organization_id"),
+        Index("ix_playbook_tasks_org_email", "organization_id", "customer_email"),
+        Index("ix_playbook_tasks_org_status", "organization_id", "status"),
     )
 
 

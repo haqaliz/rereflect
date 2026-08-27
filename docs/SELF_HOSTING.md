@@ -1000,6 +1000,21 @@ a bulk action against it:
   blocks the run if the resolved cohort exceeds the **500-customer batch cap** (a real run
   returns `422` for the same reason if you bypass the UI).
 
+**Playbook action types.** Playbook steps can be `assign`, `change_status`,
+`send_notification`, `draft_response`, `send_email`, `notify`, `tag`, `create_task`,
+`schedule_task`, or `trigger_automation`. `notify` sends to your connected Slack/Discord
+integration (or in-app notifications for admins) — its `target` is advisory, the
+integration's configured channel is used. `tag` adds an operator tag (same 50-char /
+20-tag caps as the bulk-tag action). `create_task`/`schedule_task` persist an internal
+follow-up task (`playbook_tasks`) with a due date and priority — no provider needed.
+`trigger_automation` fires a named automation rule for the customer, but only rules of
+type `churn_probability_threshold` that are **active** with `cooldown_hours >= 1` — other
+rules are refused loudly (usage-trend and per-feedback triggers only fire from their own
+seams), which also guarantees a rule → playbook → rule cycle can never loop. The 7
+built-in templates all use these actions; on startup the seeder converges pristine
+template rows whose step definitions changed (cloned or org-owned playbooks are never
+touched).
+
 Tags and the assigned CS owner are visible as chips/badges on both the customer list and the
 Customer 360 profile page.
 
