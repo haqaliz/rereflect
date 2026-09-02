@@ -242,6 +242,15 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 - [ ] Deliberately not refactored during the Discord work — a provider abstraction would
       touch every Slack path at once, and that scope was explicitly declined. Deferred debt,
       not avoided debt.
+- [ ] **Teams shipped via sibling senders (2026-09-02)** — the bounded-sender decision:
+      `feat/teams-notifications` added Teams as another sibling sender (backend
+      `send_teams_message` / worker `send_teams_message_webhook`, MessageCard shape) plus a
+      mirror `teams` block in each dispatch seam (`automation_engine.py`,
+      `automation_feedback_trigger.py`, `playbook_engine._handle_notify`,
+      `notification_dispatch.py` health-drop + generic alert paths), with **no
+      provider-abstraction refactor** — the duplication count is now 5×/3×-plus, refactor
+      still deferred. The next provider should make the abstraction decision, not add
+      another sibling.
 
 ### ~~P2 (original entry)~~ — superseded, kept for the reasoning
 - [ ] Discord is not supported. Its webhook API requires a `{content}` or `{embeds}` body;

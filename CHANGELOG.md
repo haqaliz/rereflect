@@ -7,6 +7,26 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — Microsoft Teams alert notifications
+
+- **Alerts can now reach Microsoft Teams.** Connect a Teams **Incoming Webhook** (classic
+  `outlook.office.com/webhook/…` or Power Automate Workflows
+  `webhook.office.com/webhookb2/…` URL) from Settings → Integrations, and Rereflect posts
+  alerts to the channel as Microsoft **MessageCards** (title, text, summary, `#6264A7`
+  accent) — urgent feedback, sentiment spikes, churn risk, volume spikes, and customer
+  health-drop/recovery alerts, once per organization per alert.
+- **Per-user, per-type toggle.** Settings → Notifications gains a **Teams** channel switch
+  for each alert type, defaulting to **on**; Slack, Discord and Teams are routed
+  independently, and any user switching Teams off does not mute the other channels.
+- **Automations and playbooks.** The automation `send_notification` action supports the
+  `teams` channel (both the backend engine and the worker mirror), and the playbook
+  editor's `notify` action offers **Teams** as a destination alongside Slack and Discord.
+- **Honest limits.** Teams is **webhook-only** — no OAuth, no bot registration. It is an
+  **outbound destination only** — no inbound Teams feedback source. MessageCards only (no
+  Adaptive Cards). Digests remain email-only. The automations UI has no channel editor, so
+  a `send_notification` rule reaching Teams must be created via the API
+  (`channels: ["teams"]`); playbook `notify` steps pick Teams directly in the editor.
+
 ### Added — Complete playbook action types
 
 - **All 7 seeded playbook templates now execute end-to-end.** The churn-playbook engine
