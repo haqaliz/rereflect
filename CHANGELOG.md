@@ -7,6 +7,36 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Changed — Landing site rebuilt as a schematic system
+
+- **The marketing site (`rereflect.ca`) has a new visual language.** The previous
+  treatment — a WebGL galaxy hero, smooth-scroll hijacking, a full-height pinned
+  scroll-scrub section, gradient-filled headlines, pill buttons and glass panels — is
+  replaced by a precision-instrument layout: a ruled 12-column grid, hairline-divided
+  cells instead of cards, monospace uppercase figure captions (`FIG. 01 — …`), 2px
+  corner radii and light-weight display type.
+- **The palette is unchanged; its application is inverted.** The same coral/amber values
+  are now used surgically — hairlines, mono labels, state dots and meter fills — rather
+  than as gradient text and glow shadows.
+- **New sections.** A processing-stages diagram (ingest → analyse → cluster → act), a
+  prior-art comparison (manual triage vs hosted feedback SaaS vs Rereflect), and a
+  console section that draws the feedback table as real UI rather than a screenshot. The
+  CTA gains a three-command deploy strip (`git clone` → `docker compose up` →
+  `alembic upgrade head`).
+- **Typography.** Geist and Geist Mono replace Montserrat, Merriweather, Ubuntu Mono and
+  Inter Tight. Fonts are overridden in `services/landing-web`'s own Tailwind config, so
+  the shared `@rereflect/ui` config used by the dashboard is untouched.
+- **Motion is restrained and centralised** in `lib/landing/motion.ts`: short
+  expo-eased reveals, hairlines that draw themselves, flat meter fills and tabular
+  count-ups. Every one of them is a no-op under `prefers-reduced-motion`, and the
+  scroll-hijacking is gone entirely.
+- **Lighter bundle.** Drops `three`, `@react-three/fiber`, `@react-three/drei`,
+  `@react-three/postprocessing`, `postprocessing` and `lenis` — the landing site's only
+  remaining runtime dependencies are Next, React, GSAP and lucide-react.
+- Carried across every page: the integrations index and all ten detail pages, the blog
+  index and post template, privacy and terms.
+- No backend, worker or dashboard code was touched.
+
 ### Added — Microsoft Teams alert notifications
 
 - **Alerts can now reach Microsoft Teams.** Connect a Teams **Incoming Webhook** (classic
