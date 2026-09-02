@@ -33,9 +33,10 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { DiscordIcon } from '@/components/icons/DiscordIcon';
+import { TeamsIcon } from '@/components/icons/TeamsIcon';
 import { useAuth } from '@/contexts/AuthContext';
 
-type IntegrationType = 'slack' | 'intercom' | 'discord';
+type IntegrationType = 'slack' | 'intercom' | 'discord' | 'teams';
 type ConnectionMethod = 'oauth' | 'webhook';
 
 // Discord is webhook-only — the backend validator accepts only these two hosts
@@ -48,6 +49,30 @@ const DISCORD_WEBHOOK_URL_PREFIXES = [
 
 function isValidDiscordWebhookUrl(url: string): boolean {
   return DISCORD_WEBHOOK_URL_PREFIXES.some(prefix => url.startsWith(prefix));
+}
+
+// Teams is webhook-only. Classic URLs live on outlook.office.com; Workflows
+// URLs always carry a tenant subdomain (https://<tenant>.webhook.office.com/
+// webhookb2/…), so the Workflows host is matched on its suffix, not a fixed
+// prefix — this mirrors the backend TeamsWebhookCreateRequest validator
+// exactly, so front and back agree on what a valid URL is.
+const TEAMS_WEBHOOK_URL_PREFIXES = [
+  'https://outlook.office.com/webhook/',
+  'https://webhook.office.com/webhookb2/',
+];
+
+function isValidTeamsWebhookUrl(url: string): boolean {
+  if (TEAMS_WEBHOOK_URL_PREFIXES.some(prefix => url.startsWith(prefix))) {
+    return true;
+  }
+  if (!url.startsWith('https://')) {
+    return false;
+  }
+  const rest = url.slice('https://'.length);
+  const slash = rest.indexOf('/');
+  const host = slash === -1 ? rest : rest.slice(0, slash);
+  const path = slash === -1 ? '' : rest.slice(slash + 1);
+  return host.endsWith('webhook.office.com') && path.startsWith('webhookb2/');
 }
 
 function NewIntegrationContent() {
@@ -147,6 +172,11 @@ function NewIntegrationContent() {
       return;
     }
 
+    if (integrationType === 'teams' && !isValidTeamsWebhookUrl(form.webhook_url)) {
+      setError('Invalid Teams webhook URL. Must start with https://outlook.office.com/webhook/ or https://<tenant>.webhook.office.com/webhookb2/');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -159,6 +189,8 @@ function NewIntegrationContent() {
       };
       if (integrationType === 'discord') {
         await integrationsAPI.createDiscordWebhook(payload);
+      } else if (integrationType === 'teams') {
+        await integrationsAPI.createTeamsWebhook(payload);
       } else {
         await integrationsAPI.createSlackWebhook(payload);
       }
@@ -207,12 +239,16 @@ function NewIntegrationContent() {
       ? 'bg-[#1F8DED]/10'
       : integrationType === 'discord'
       ? 'bg-[#5865F2]/10'
+      : integrationType === 'teams'
+      ? 'bg-[#6264A7]/10'
       : 'bg-secondary';
   const headerIcon =
     integrationType === 'intercom' ? (
       <IntercomIcon className="w-8 h-8" />
     ) : integrationType === 'discord' ? (
       <DiscordIcon className="w-8 h-8" />
+    ) : integrationType === 'teams' ? (
+      <TeamsIcon className="w-8 h-8" />
     ) : (
       <SlackIcon className="w-8 h-8" />
     );
@@ -221,12 +257,16 @@ function NewIntegrationContent() {
       ? 'New Intercom Integration'
       : integrationType === 'discord'
       ? 'New Discord Integration'
+      : integrationType === 'teams'
+      ? 'New Teams Integration'
       : 'New Slack Integration';
   const headerDescription =
     integrationType === 'intercom'
       ? 'Connect Rereflect to your Intercom workspace'
       : integrationType === 'discord'
       ? 'Connect Rereflect to a Discord channel via webhook'
+      : integrationType === 'teams'
+      ? 'Connect Rereflect to a Teams channel via webhook'
       : 'Connect Rereflect to a Slack channel';
 
   return (
@@ -316,6 +356,26 @@ function NewIntegrationContent() {
                   <div>
                     <h4 className="font-semibold">Discord</h4>
                     <p className="text-xs text-muted-foreground">Get feedback alerts in your Discord server</p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setIntegrationType('teams'); setConnectionMethod('webhook'); setError(null); }}
+                className={`p-4 rounded-lg border-2 text-left transition-all ${
+                  integrationType === 'teams'
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${integrationType === 'teams' ? 'bg-[#6264A7]/10' : 'bg-secondary'}`}>
+                    <TeamsIcon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">Microsoft Teams</h4>
+                    <p className="text-xs text-muted-foreground">Get feedback alerts in your Teams channels</p>
                   </div>
                 </div>
               </button>
@@ -485,8 +545,8 @@ function NewIntegrationContent() {
           </Card>
         )}
 
-        {/* Webhook Flow (Slack webhook, or Discord — Discord is webhook-only) */}
-        {((integrationType === 'slack' && connectionMethod === 'webhook') || integrationType === 'discord') && (
+        {/* Webhook Flow (Slack webhook, Discord, or Teams — both are webhook-only) */}
+        {((integrationType === 'slack' && connectionMethod === 'webhook') || integrationType === 'discord' || integrationType === 'teams') && (
           <form onSubmit={handleWebhookSubmit} className="space-y-6">
             {/* Webhook URL */}
             <Card className="animate-slide-up stagger-2">
@@ -495,6 +555,8 @@ function NewIntegrationContent() {
                 <CardDescription>
                   {integrationType === 'discord'
                     ? 'Enter your Discord Incoming Webhook URL'
+                    : integrationType === 'teams'
+                    ? 'Enter your Teams webhook URL'
                     : 'Enter your Slack Incoming Webhook URL'}
                 </CardDescription>
               </CardHeader>
@@ -507,6 +569,8 @@ function NewIntegrationContent() {
                     placeholder={
                       integrationType === 'discord'
                         ? 'https://discord.com/api/webhooks/...'
+                        : integrationType === 'teams'
+                        ? 'https://outlook.office.com/webhook/...'
                         : 'https://hooks.slack.com/services/...'
                     }
                     value={form.webhook_url}
@@ -516,6 +580,8 @@ function NewIntegrationContent() {
                   <p className="text-xs text-muted-foreground">
                     {integrationType === 'discord'
                       ? 'Get this from Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy Webhook URL'
+                      : integrationType === 'teams'
+                      ? 'Get this from Teams: channel → ⋯ → Connectors → Incoming Webhook, or from a Power Automate Workflows connector'
                       : 'Get this from Slack: App Settings → Incoming Webhooks → Add New Webhook'}
                   </p>
                 </div>
@@ -579,6 +645,8 @@ function NewIntegrationContent() {
                 <CardDescription>
                   {integrationType === 'discord'
                     ? 'Customize the message sent to Discord'
+                    : integrationType === 'teams'
+                    ? 'Customize the message sent to Teams'
                     : 'Customize the message sent to Slack'}
                 </CardDescription>
               </CardHeader>
@@ -638,6 +706,8 @@ function NewIntegrationContent() {
                     <p className="text-xs text-muted-foreground">
                       {integrationType === 'discord'
                         ? 'Discord markdown: **bold**, *italic*, `code`, > quote'
+                        : integrationType === 'teams'
+                        ? 'Teams MessageCard text: plain text (links auto-link; markdown not supported)'
                         : 'Slack mrkdwn: *bold*, _italic_, `code`, > quote'}
                     </p>
                     <Button
