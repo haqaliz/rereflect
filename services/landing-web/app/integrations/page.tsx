@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import { SlackIcon } from '@/components/icons/SlackIcon';
+import { TeamsIcon } from '@/components/icons/TeamsIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { EmailIcon } from '@/components/icons/EmailIcon';
 import { ZendeskIcon } from '@/components/icons/ZendeskIcon';
@@ -26,6 +27,7 @@ export default function IntegrationsPage() {
 
   const iconMap: Record<string, React.ReactNode> = {
     slack: <SlackIcon size={28} />,
+    teams: <TeamsIcon size={28} />,
     intercom: <IntercomIcon size={28} />,
     email: <EmailIcon size={28} />,
     linear: <LinearIcon size={28} />,
