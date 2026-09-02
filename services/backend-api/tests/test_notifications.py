@@ -59,6 +59,23 @@ def _seed_default_prefs(db: Session, user_id: int):
     db.commit()
 
 
+# ── UserAlertPreference model ────────────────────────────────────────────────
+
+class TestUserAlertPreferenceModel:
+    """Model-level tests for UserAlertPreference."""
+
+    def test_channel_teams_column_exists_and_defaults_true(self, db: Session, test_user: User):
+        """channel_teams should exist on the model and default to True."""
+        pref = UserAlertPreference(
+            user_id=test_user.id,
+            alert_type="urgent_feedback",
+        )
+        db.add(pref)
+        db.commit()
+        db.refresh(pref)
+        assert pref.channel_teams is True
+
+
 # ── List Notifications ───────────────────────────────────────────────────────
 
 class TestListNotifications:
