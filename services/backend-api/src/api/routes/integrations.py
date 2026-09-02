@@ -676,6 +676,63 @@ def test_discord_integration(
     )
 
 
+@router.post("/teams/test", response_model=SlackTestResponse, dependencies=[Depends(require_admin_or_owner)])
+def test_teams_integration(
+    data: TeamsTestRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db)
+):
+    """Send a test message to verify a Teams integration.
+
+    A separate route rather than a generalised one: `/slack/test` filters
+    `type == "slack"` and branches on webhook-vs-OAuth, neither of which
+    applies here — Teams is webhook-only, like Discord.
+    """
+    integration = db.query(Integration).filter(
+        Integration.id == data.integration_id,
+        Integration.organization_id == current_org.id,
+        Integration.type == "teams"
+    ).first()
+
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Teams integration not found"
+        )
+
+    config = integration.config or {}
+    webhook_url = config.get('webhook_url')
+    if not webhook_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Integration has no webhook_url configured."
+        )
+
+    result = send_teams_message(
+        webhook_url=webhook_url,
+        title="Rereflect test message",
+        text=(
+            f"Your Teams integration {integration.name} is working correctly.\n\n"
+            "Alerts for urgent feedback, sentiment spikes, churn risk and volume "
+            "spikes will arrive here."
+        ),
+        summary="Rereflect test message",
+    )
+
+    if result.get("success"):
+        integration.last_used_at = datetime.utcnow()
+        db.commit()
+        return SlackTestResponse(success=True, message="Test message sent to Teams.")
+
+    integration.error_count = (integration.error_count or 0) + 1
+    integration.last_error = str(result.get("error"))
+    db.commit()
+    return SlackTestResponse(
+        success=False,
+        message=f"Teams test failed: {result.get('error')}"
+    )
+
+
 @router.get("/{integration_id}", response_model=IntegrationResponse, dependencies=[Depends(require_admin_or_owner)])
 def get_integration(
     integration_id: int,

@@ -256,3 +256,203 @@ class TestTeamsMessageCard:
 
         assert result["success"] is False
         assert "boom" in result["error"]
+
+
+def _make_teams_integration(
+    db: Session, org: Organization, *, with_webhook_url: bool = True
+) -> Integration:
+    """Create a Teams integration, optionally without a webhook URL."""
+    integration = Integration(
+        organization_id=org.id,
+        type="teams",
+        name="Teams Alerts",
+        config={
+            **({"webhook_url": CLASSIC_WEBHOOK_URL} if with_webhook_url else {}),
+            "integration_type": "webhook",
+        },
+        triggers=["urgent"],
+        included_fields=["text", "sentiment"],
+        is_active=True,
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+
+class TestTeamsTestRoute:
+    """POST /api/v1/integrations/teams/test endpoint."""
+
+    def test_teams_test_success_sets_last_used_at(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization,
+    ):
+        from unittest.mock import patch
+
+        integration = _make_teams_integration(db, test_organization)
+
+        with patch("src.api.routes.integrations.send_teams_message") as mock_send:
+            mock_send.return_value = {"success": True, "response": "ok"}
+            response = client.post(
+                "/api/v1/integrations/teams/test",
+                headers=auth_headers,
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert "Test message sent to Teams" in data["message"]
+
+        mock_send.assert_called_once()
+        kwargs = mock_send.call_args.kwargs
+        assert kwargs["webhook_url"] == CLASSIC_WEBHOOK_URL
+        assert kwargs["title"] == "Rereflect test message"
+
+        db.refresh(integration)
+        assert integration.last_used_at is not None
+
+    def test_teams_test_failure_increments_error_count(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization,
+    ):
+        from unittest.mock import patch
+
+        integration = _make_teams_integration(db, test_organization)
+
+        with patch("src.api.routes.integrations.send_teams_message") as mock_send:
+            mock_send.return_value = {"success": False, "error": "boom"}
+            response = client.post(
+                "/api/v1/integrations/teams/test",
+                headers=auth_headers,
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "boom" in data["message"]
+
+        db.refresh(integration)
+        assert integration.error_count == 1
+        assert integration.last_error == "boom"
+
+    def test_teams_test_404_for_other_type(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization,
+    ):
+        integration = Integration(
+            organization_id=test_organization.id,
+            type="discord",
+            name="Discord Target",
+            config={
+                "webhook_url": "https://discord.com/api/webhooks/123/abcXYZ",
+                "integration_type": "webhook",
+            },
+            triggers=["urgent"],
+            is_active=True,
+        )
+        db.add(integration)
+        db.commit()
+        db.refresh(integration)
+
+        response = client.post(
+            "/api/v1/integrations/teams/test",
+            headers=auth_headers,
+            json={"integration_id": integration.id},
+        )
+
+        assert response.status_code == 404
+
+    def test_teams_test_404_for_other_org(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization,
+    ):
+        other_org = Organization(name="Other Company")
+        db.add(other_org)
+        db.commit()
+        integration = _make_teams_integration(db, other_org)
+
+        response = client.post(
+            "/api/v1/integrations/teams/test",
+            headers=auth_headers,
+            json={"integration_id": integration.id},
+        )
+
+        assert response.status_code == 404
+
+    def test_teams_test_400_when_no_webhook_url(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization,
+    ):
+        from unittest.mock import patch
+
+        integration = _make_teams_integration(
+            db, test_organization, with_webhook_url=False
+        )
+
+        with patch("src.api.routes.integrations.send_teams_message") as mock_send:
+            response = client.post(
+                "/api/v1/integrations/teams/test",
+                headers=auth_headers,
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 400
+        mock_send.assert_not_called()
+
+    def test_member_cannot_test_teams_integration(
+        self, client: TestClient, db: Session, test_organization: Organization
+    ):
+        from unittest.mock import patch
+        from src.api.auth import hash_password, create_access_token
+        from src.models.user import User
+
+        member = User(
+            email="teams-test-member@example.com",
+            password_hash=hash_password("password123"),
+            organization_id=test_organization.id,
+            role="member",
+        )
+        db.add(member)
+        db.commit()
+        integration = _make_teams_integration(db, test_organization)
+        token = create_access_token({
+            "user_id": member.id,
+            "organization_id": member.organization_id,
+            "role": member.role,
+        })
+
+        with patch("src.api.routes.integrations.send_teams_message") as mock_send:
+            mock_send.return_value = {"success": True, "response": "ok"}
+            response = client.post(
+                "/api/v1/integrations/teams/test",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"integration_id": integration.id},
+            )
+
+        assert response.status_code == 403
+        mock_send.assert_not_called()
+
+
+class TestTeamsResponseShape:
+    """integration_to_response must never emit blank channel_name/team_name.
+
+    Teams config has neither key, so the response must carry nulls (or omit
+    the fields entirely) — never empty strings.
+    """
+
+    def test_teams_integration_response_has_no_blank_channel_or_team_name(
+        self, client: TestClient, auth_headers: dict, db: Session,
+        test_organization: Organization,
+    ):
+        integration = _make_teams_integration(db, test_organization)
+
+        response = client.get(
+            f"/api/v1/integrations/{integration.id}", headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("channel_name") is None
+        assert data.get("team_name") is None
