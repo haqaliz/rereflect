@@ -642,11 +642,11 @@ def dispatch_alert(
         metadata: Optional metadata dict
 
     Returns:
-        dict with counts: {inapp, slack, discord, email}
+        dict with counts: {inapp, slack, discord, teams, email}
     """
     from src.models import User, UserAlertPreference
 
-    counts = {"inapp": 0, "slack": 0, "discord": 0, "email": 0}
+    counts = {"inapp": 0, "slack": 0, "discord": 0, "teams": 0, "email": 0}
 
     with get_db_session() as db:
         users = db.query(User).filter(User.organization_id == org_id).all()
@@ -664,6 +664,8 @@ def dispatch_alert(
 
         pref_by_user = {p.user_id: p for p in prefs}
 
+        any_teams = False
+
         for user in users:
             pref = pref_by_user.get(user.id)
 
@@ -675,6 +677,7 @@ def dispatch_alert(
             channel_inapp = pref.channel_inapp if pref else True
             channel_slack = pref.channel_slack if pref else True
             channel_discord = pref.channel_discord if pref else True
+            channel_teams = pref.channel_teams if pref else True
             channel_email = pref.channel_email if pref else False
 
             # In-app notification
@@ -699,6 +702,11 @@ def dispatch_alert(
             if channel_discord:
                 counts["discord"] += 1
 
+            # Teams alert (queued per-org, not per-user)
+            if channel_teams:
+                counts["teams"] += 1
+                any_teams = True
+
             # Email (flagged for daily digest, not sent immediately)
             if channel_email:
                 counts["email"] += 1
@@ -710,6 +718,8 @@ def dispatch_alert(
             _dispatch_slack_alert(org_id, alert_type, title, message, link)
         if counts["discord"] > 0:
             _dispatch_discord_alert(org_id, alert_type, title, message, link)
+        if any_teams:
+            _dispatch_teams_alert(org_id, alert_type, title, message, link)
 
     return counts
 
@@ -865,6 +875,63 @@ def _dispatch_discord_alert(
 
             except Exception as e:
                 logger.error(f"Failed to send Discord alert for integration {integration.id}: {e}")
+                integration.error_count = (integration.error_count or 0) + 1
+                integration.last_error = str(e)
+
+        db.commit()
+
+
+def _dispatch_teams_alert(
+    org_id: int,
+    alert_type: str,
+    title: str,
+    message: str,
+    link: Optional[str] = None,
+) -> None:
+    """Send a Teams alert for the organization using active Teams webhook integrations.
+
+    Mirrors _dispatch_discord_alert above: writes back last_used_at / error_count /
+    last_error per integration exactly the same way, or the integration-health UI
+    silently goes stale. A raising send is caught per-integration so one bad webhook
+    doesn't abort the rest.
+    """
+    from src.models import Integration
+    import os
+
+    app_url = os.getenv("APP_URL", "http://localhost:3000")
+
+    with get_db_session() as db:
+        integrations = db.query(Integration).filter(
+            Integration.organization_id == org_id,
+            Integration.type == "teams",
+            Integration.is_active == True,
+        ).all()
+
+        if not integrations:
+            return
+
+        full_link = f"{app_url}{link}" if link else app_url
+
+        text = f"{message}\nView: {full_link}"
+
+        for integration in integrations:
+            try:
+                config = integration.config or {}
+                webhook_url = config.get("webhook_url")
+
+                if webhook_url:
+                    send_teams_message_webhook(
+                        webhook_url=webhook_url,
+                        title=title,
+                        text=text,
+                    )
+
+                integration.last_used_at = datetime.utcnow()
+                integration.error_count = 0
+                integration.last_error = None
+
+            except Exception as e:
+                logger.error(f"Failed to send Teams alert for integration {integration.id}: {e}")
                 integration.error_count = (integration.error_count or 0) + 1
                 integration.last_error = str(e)
 
