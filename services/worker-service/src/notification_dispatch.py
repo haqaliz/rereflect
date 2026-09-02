@@ -13,7 +13,7 @@ from urllib.parse import quote
 from cryptography.fernet import InvalidToken
 
 from src.database import get_db_session
-from src.tasks.alerts import send_discord_message_webhook
+from src.tasks.alerts import send_discord_message_webhook, send_teams_message_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,38 @@ def _dispatch_discord_health_alert(
                     )
             except Exception as e:
                 logger.error(f"Failed to send Discord health alert for integration {integration.id}: {e}")
+
+        db.commit()
+
+
+def _dispatch_teams_health_alert(
+    org_id: int,
+    title: str,
+    text: str,
+) -> None:
+    """Send Teams health alert using org's active Teams webhook integrations."""
+    from src.models import Integration
+
+    with get_db_session() as db:
+        integrations = db.query(Integration).filter(
+            Integration.organization_id == org_id,
+            Integration.type == "teams",
+            Integration.is_active == True,
+        ).all()
+
+        for integration in integrations:
+            try:
+                config = integration.config or {}
+                webhook_url = config.get("webhook_url")
+
+                if webhook_url:
+                    send_teams_message_webhook(
+                        webhook_url=webhook_url,
+                        title=title,
+                        text=text,
+                    )
+            except Exception as e:
+                logger.error(f"Failed to send Teams health alert for integration {integration.id}: {e}")
 
         db.commit()
 
@@ -354,11 +386,11 @@ def dispatch_health_drop_alert(
     6. Set Redis cooldown key
     7. Auto-trigger LLM analysis if stale (drop alerts only)
 
-    Returns dict with counts: {inapp, slack, discord, email}
+    Returns dict with counts: {inapp, slack, discord, teams, email}
     """
     from src.models import User, UserAlertPreference, CustomerHealth
 
-    counts = {"inapp": 0, "slack": 0, "discord": 0, "email": 0}
+    counts = {"inapp": 0, "slack": 0, "discord": 0, "teams": 0, "email": 0}
 
     # Determine if risk level changed (for dedup bypass)
     old_order = RISK_LEVEL_ORDER.get(old_risk_level, 0)
@@ -435,6 +467,7 @@ def dispatch_health_drop_alert(
 
         any_slack = False
         any_discord = False
+        any_teams = False
         for user in users:
             pref = pref_by_user.get(user.id)
 
@@ -445,6 +478,7 @@ def dispatch_health_drop_alert(
             channel_inapp = pref.channel_inapp if pref else True
             channel_slack = pref.channel_slack if pref else True
             channel_discord = pref.channel_discord if pref else True
+            channel_teams = pref.channel_teams if pref else True
             channel_email = pref.channel_email if pref else False
 
             if channel_inapp:
@@ -468,6 +502,10 @@ def dispatch_health_drop_alert(
             if channel_discord:
                 counts["discord"] += 1
                 any_discord = True
+
+            if channel_teams:
+                counts["teams"] += 1
+                any_teams = True
 
             if channel_email:
                 counts["email"] += 1
@@ -502,6 +540,10 @@ def dispatch_health_drop_alert(
                 is_recovery=is_recovery,
             )
             _dispatch_discord_health_alert(org_id, discord_embeds, title)
+
+        # 5b. Send Teams alert once per org
+        if any_teams:
+            _dispatch_teams_health_alert(org_id, title, title)
 
         # 6. Set Redis cooldown key
         if not is_recovery:
