@@ -72,13 +72,13 @@ const mockUserPrefs = {
 };
 
 const basePreferences = [
-  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
-  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
-  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
-  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'urgent_feedback', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'sentiment_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: 50, retention_days: 30 },
+  { alert_type: 'churn_risk', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'volume_spike', is_enabled: true, channel_email: false, channel_slack: true, channel_discord: true, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: 2.0, retention_days: 30 },
+  { alert_type: 'feedback_assigned', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'status_changed', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
+  { alert_type: 'note_added', is_enabled: true, channel_email: false, channel_slack: false, channel_discord: false, channel_teams: true, channel_inapp: true, channel_intercom: false, threshold_value: null, retention_days: 30 },
 ];
 
 const customerHealthDropPref = {
@@ -87,6 +87,7 @@ const customerHealthDropPref = {
   channel_email: false,
   channel_slack: true,
   channel_discord: true,
+  channel_teams: true,
   channel_inapp: true,
   channel_intercom: false,
   threshold_value: 50,
@@ -347,6 +348,59 @@ describe('NotificationsSettingsPage - Discord channel toggle', () => {
 
     const row = getAlertPreferencesRow('urgent_feedback')!;
     expect(row.querySelector('[title="Discord"]')).toBeInTheDocument();
+  });
+});
+
+describe('NotificationsSettingsPage - Teams channel toggle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupLocalStorage();
+    setupMocks('pro');
+  });
+
+  it('renders a Teams channel switch in the customize dialog', async () => {
+    render(<NotificationsSettingsPage />);
+    await openCustomizeDialog('urgent_feedback');
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Teams')).toBeInTheDocument();
+    const teamsRow = within(dialog).getByText('Teams').closest('.flex.items-center.justify-between');
+    expect(teamsRow).not.toBeNull();
+    expect(within(teamsRow as HTMLElement).getByRole('switch')).toBeInTheDocument();
+  });
+
+  it('saves channel_teams in the update payload (Teams toggled off)', async () => {
+    render(<NotificationsSettingsPage />);
+    await openCustomizeDialog('feedback_assigned');
+
+    const dialog = screen.getByRole('dialog');
+    const teamsRow = within(dialog).getByText('Teams').closest('.flex.items-center.justify-between');
+    const teamsSwitch = within(teamsRow as HTMLElement).getByRole('switch');
+    fireEvent.click(teamsSwitch);
+
+    await waitFor(() => {
+      expect(screen.getByText('Save Changes')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Save Changes'));
+
+    await waitFor(() => {
+      expect(notificationsAPI.updatePreferences).toHaveBeenCalled();
+      const callArgs = (notificationsAPI.updatePreferences as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      const pref = callArgs.find((p: { alert_type: string }) => p.alert_type === 'feedback_assigned');
+      expect(pref).toBeDefined();
+      expect(pref.channel_teams).toBe(false);
+    });
+  });
+
+  it('shows Teams in the active channel indicators when on', async () => {
+    render(<NotificationsSettingsPage />);
+
+    await waitFor(() => {
+      expect(getAlertPreferencesRow('urgent_feedback')).toBeInTheDocument();
+    });
+
+    const row = getAlertPreferencesRow('urgent_feedback')!;
+    expect(row.querySelector('[title="Teams"]')).toBeInTheDocument();
   });
 });
 
