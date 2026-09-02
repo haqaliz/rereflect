@@ -197,6 +197,73 @@ class DiscordTestRequest(BaseModel):
     integration_id: int
 
 
+TEAMS_WEBHOOK_HOSTS = ("https://outlook.office.com/webhook/", "https://webhook.office.com/webhookb2/")
+
+
+class TeamsWebhookCreateRequest(BaseModel):
+    """Request to create a Teams webhook integration.
+
+    Teams is webhook-only, like Discord — the webhook URL carries its own
+    credential, so there is no OAuth flow to configure.
+    """
+    name: str
+    webhook_url: str
+    triggers: List[str] = ["urgent"]
+    included_fields: List[str] = ["text", "sentiment"]
+    digest_time: Optional[str] = "09:00"
+    message_template: Optional[str] = None
+
+    @field_validator('webhook_url')
+    @classmethod
+    def validate_webhook_url(cls, v):
+        # Classic URLs live on outlook.office.com; Workflows URLs always carry
+        # a tenant subdomain (https://<tenant>.webhook.office.com/webhookb2/…),
+        # so the Workflows host is matched on its suffix, not a fixed prefix.
+        if not v.startswith(TEAMS_WEBHOOK_HOSTS):
+            rest = v.partition('://')[2]
+            host, _, path = rest.partition('/')
+            if not (
+                v.startswith('https://')
+                and host.endswith('webhook.office.com')
+                and path.startswith('webhookb2/')
+            ):
+                raise ValueError('Invalid Teams webhook URL. Must start with '
+                                 'https://outlook.office.com/webhook/ or '
+                                 'https://<tenant>.webhook.office.com/webhookb2/')
+        return v
+
+    # The trigger/field vocabularies below are provider-neutral and duplicated
+    # from DiscordWebhookCreateRequest. Kept explicit rather than inherited:
+    # the request models are independent API contracts, and a shared base
+    # would couple Teams' schema to provider-specific fields if either grows.
+    @field_validator('triggers')
+    @classmethod
+    def validate_triggers(cls, v):
+        valid_triggers = {'urgent', 'negative', 'all', 'daily_digest', 'weekly_digest'}
+        for trigger in v:
+            if trigger not in valid_triggers:
+                raise ValueError(f'Invalid trigger: {trigger}. Valid options: {valid_triggers}')
+        return v
+
+    @field_validator('included_fields')
+    @classmethod
+    def validate_fields(cls, v):
+        valid_fields = {
+            'text', 'sentiment', 'sentiment_score', 'pain_point_category',
+            'pain_point_severity', 'feature_request_category', 'feature_request_priority',
+            'urgent_category', 'urgent_response_time', 'source', 'link'
+        }
+        for field in v:
+            if field not in valid_fields:
+                raise ValueError(f'Invalid field: {field}. Valid options: {valid_fields}')
+        return v
+
+
+class TeamsTestRequest(BaseModel):
+    """Request to send a test Teams message."""
+    integration_id: int
+
+
 class SlackTestRequest(BaseModel):
     """Request to send a test Slack message."""
     integration_id: int
