@@ -860,6 +860,168 @@ def test_notify_slack_not_multiplied_by_recipients(db: Session, test_organizatio
     assert result["error"] is None
 
 
+# ---------------------------------------------------------------------------
+# Phase 4 (teams-channel) — failing tests for Teams delivery + result key.
+# Encodes the automations-notify ACs: one MessageCard per active Teams
+# integration, org-wide; `teams_sent` result key (slack_sent untouched);
+# loud error when no Teams integration is configured.
+# ---------------------------------------------------------------------------
+
+def _make_teams_integration(
+    db: Session,
+    org_id: int,
+    *,
+    is_active: bool = True,
+    webhook_url: str = "https://example.webhook.office.com/webhookb2/abc",
+) -> Integration:
+    integration = Integration(
+        organization_id=org_id,
+        type="teams",
+        is_active=is_active,
+        config={"webhook_url": webhook_url},
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+
+def test_notify_teams_posts_once_per_rule(db: Session, test_organization: Organization):
+    """One active Teams integration → send_teams_message called once; teams_sent == 1."""
+    from src.services.automation_engine import AutomationEngine
+
+    _make_teams_integration(db, test_organization.id)
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Teams Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["teams"]}
+
+    with patch(
+        "src.api.routes.integrations.send_teams_message",
+        return_value={"success": True},
+    ) as mock_teams:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_teams.assert_called_once()
+    assert result["result"] == {
+        "notifications_created": 0,
+        "slack_sent": 0,
+        "teams_sent": 1,
+    }
+    assert result["error"] is None
+
+
+def test_notify_teams_posts_to_all_integrations(db: Session, test_organization: Organization):
+    """Two active Teams integrations → send_teams_message called twice."""
+    from src.services.automation_engine import AutomationEngine
+
+    _make_teams_integration(
+        db, test_organization.id,
+        webhook_url="https://example.webhook.office.com/webhookb2/1",
+    )
+    _make_teams_integration(
+        db, test_organization.id,
+        webhook_url="https://example.webhook.office.com/webhookb2/2",
+    )
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Teams Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["teams"]}
+
+    with patch(
+        "src.api.routes.integrations.send_teams_message",
+        return_value={"success": True},
+    ) as mock_teams:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    assert mock_teams.call_count == 2
+    assert result["result"]["teams_sent"] == 2
+    assert result["error"] is None
+
+
+def test_notify_teams_no_integration_sets_error(db: Session, test_organization: Organization):
+    """No active Teams integration configured → loud error; sender never called."""
+    from src.services.automation_engine import AutomationEngine
+
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Teams Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["teams"]}
+
+    with patch(
+        "src.api.routes.integrations.send_teams_message",
+        return_value={"success": True},
+    ) as mock_teams:
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    mock_teams.assert_not_called()
+    assert "teams: no active Teams integration configured" in (result["error"] or "")
+
+
+def test_notify_teams_failure_sets_error_preserves_dashboard(db: Session, test_organization: Organization):
+    """Teams send failure must not prevent the dashboard Notification; teams_sent stays 0."""
+    from src.services.automation_engine import AutomationEngine
+    from src.models.notification import Notification
+
+    admin = User(
+        email="admin@test.com", password_hash="hashed",
+        organization_id=test_organization.id, role="admin",
+    )
+    db.add(admin)
+    db.commit()
+
+    _make_teams_integration(db, test_organization.id)
+    fb = _make_feedback(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        trigger_type="health_score_threshold",
+        trigger_config={"threshold": 30},
+        actions=[],
+        name="Teams Rule",
+    )
+
+    engine = AutomationEngine(db)
+    config = {"recipients": "admins", "channels": ["dashboard", "teams"]}
+
+    with patch(
+        "src.api.routes.integrations.send_teams_message",
+        return_value={"success": False, "error": "webhook rejected"},
+    ):
+        result = engine._execute_notify(config, fb, rule)
+        db.commit()
+
+    notifications = db.query(Notification).filter(
+        Notification.user_id == admin.id,
+    ).all()
+    assert len(notifications) >= 1
+    assert result["result"]["teams_sent"] == 0
+    assert result["error"] is not None
+
+
 def test_execution_status_partial_failure_on_channel_error(db: Session, test_organization: Organization):
     """A rule with an undeliverable slack channel alongside a succeeding action logs partial_failure."""
     from src.services.automation_engine import AutomationEngine
