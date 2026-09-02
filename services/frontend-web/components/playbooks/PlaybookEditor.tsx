@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Plus, Trash2 } from 'lucide-react';
+import { TeamsIcon } from '@/components/icons/TeamsIcon';
 import {
   type Playbook,
   type PlaybookAction,
@@ -29,11 +30,12 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NOTIFY_CHANNELS = ['slack', 'discord', 'dashboard'] as const;
+const NOTIFY_CHANNELS = ['slack', 'discord', 'teams', 'dashboard'] as const;
 
 const NOTIFY_CHANNEL_LABELS: Record<string, string> = {
   slack: 'Slack',
   discord: 'Discord',
+  teams: 'Teams',
   dashboard: 'Dashboard',
 };
 
@@ -279,7 +281,14 @@ function ActionCard({
                   <SelectContent>
                     {NOTIFY_CHANNELS.map((c) => (
                       <SelectItem key={c} value={c} className="text-xs">
-                        {NOTIFY_CHANNEL_LABELS[c]}
+                        {c === 'teams' ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <TeamsIcon className="w-3.5 h-3.5" />
+                            {NOTIFY_CHANNEL_LABELS[c]}
+                          </span>
+                        ) : (
+                          NOTIFY_CHANNEL_LABELS[c]
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -14,7 +14,7 @@ export interface SendEmailConfig {
  * result, not resolved to a channel), `message`.
  */
 export interface NotifyActionConfig {
-  channel: 'slack' | 'discord' | 'dashboard';
+  channel: 'slack' | 'discord' | 'teams' | 'dashboard';
   target?: string;
   message: string;
 }

@@ -59,6 +59,23 @@ def _seed_default_prefs(db: Session, user_id: int):
     db.commit()
 
 
+# ── UserAlertPreference model ────────────────────────────────────────────────
+
+class TestUserAlertPreferenceModel:
+    """Model-level tests for UserAlertPreference."""
+
+    def test_channel_teams_column_exists_and_defaults_true(self, db: Session, test_user: User):
+        """channel_teams should exist on the model and default to True."""
+        pref = UserAlertPreference(
+            user_id=test_user.id,
+            alert_type="urgent_feedback",
+        )
+        db.add(pref)
+        db.commit()
+        db.refresh(pref)
+        assert pref.channel_teams is True
+
+
 # ── List Notifications ───────────────────────────────────────────────────────
 
 class TestListNotifications:
@@ -277,6 +294,16 @@ class TestGetPreferences:
         for pref in response.json()["preferences"]:
             assert pref["channel_discord"] is True
 
+    def test_get_preferences_returns_channel_teams_true(self, client: TestClient, db: Session, test_user: User, auth_headers: dict):
+        """GET should return channel_teams: true for every type on a fresh DB (column default)."""
+        _seed_default_prefs(db, test_user.id)
+
+        response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
+
+        assert response.status_code == 200
+        for pref in response.json()["preferences"]:
+            assert pref["channel_teams"] is True
+
 
 class TestUpdatePreferences:
     """Tests for PUT /api/v1/notifications/preferences"""
@@ -409,6 +436,102 @@ class TestUpdatePreferences:
         get_response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
         volume = next(p for p in get_response.json()["preferences"] if p["alert_type"] == "volume_spike")
         assert volume["channel_discord"] is True
+
+    def test_put_channel_teams_false_round_trips(self, client: TestClient, db: Session, test_user: User, auth_headers: dict):
+        """PUT channel_teams: false for a type -> GET returns false."""
+        payload = {
+            "preferences": [
+                {"alert_type": "churn_risk", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": None, "channel_teams": False},
+            ]
+        }
+
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=payload)
+
+        assert response.status_code == 200
+        get_response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
+        churn = next(p for p in get_response.json()["preferences"] if p["alert_type"] == "churn_risk")
+        assert churn["channel_teams"] is False
+
+    def test_put_without_channel_teams_preserves_stored_false(self, client: TestClient, db: Session, test_user: User, auth_headers: dict):
+        """PUT omitting channel_teams must not flip a stored false to true (absent-field sentinel)."""
+        seed = {
+            "preferences": [
+                {"alert_type": "urgent_feedback", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": None, "channel_teams": False},
+            ]
+        }
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=seed)
+        assert response.status_code == 200
+
+        omit = {
+            "preferences": [
+                {"alert_type": "urgent_feedback", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": None},
+            ]
+        }
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=omit)
+
+        assert response.status_code == 200
+        get_response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
+        urgent = next(p for p in get_response.json()["preferences"] if p["alert_type"] == "urgent_feedback")
+        assert urgent["channel_teams"] is False
+
+    def test_put_without_channel_teams_preserves_stored_true(self, client: TestClient, db: Session, test_user: User, auth_headers: dict):
+        """PUT omitting channel_teams must not flip a stored true to false (absent-field sentinel)."""
+        seed = {
+            "preferences": [
+                {"alert_type": "sentiment_spike", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": 50.0, "channel_teams": True},
+            ]
+        }
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=seed)
+        assert response.status_code == 200
+
+        omit = {
+            "preferences": [
+                {"alert_type": "sentiment_spike", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": 50.0},
+            ]
+        }
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=omit)
+
+        assert response.status_code == 200
+        get_response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
+        sentiment = next(p for p in get_response.json()["preferences"] if p["alert_type"] == "sentiment_spike")
+        assert sentiment["channel_teams"] is True
+
+    def test_put_channel_teams_null_preserves_stored_false(self, client: TestClient, db: Session, test_user: User, auth_headers: dict):
+        """PUT with explicit channel_teams: null must leave the stored value unchanged (None = unchanged sentinel)."""
+        seed = {
+            "preferences": [
+                {"alert_type": "churn_risk", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": None, "channel_teams": False},
+            ]
+        }
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=seed)
+        assert response.status_code == 200
+
+        null_payload = {
+            "preferences": [
+                {"alert_type": "churn_risk", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": None, "channel_teams": None},
+            ]
+        }
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=null_payload)
+
+        assert response.status_code == 200
+        get_response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
+        churn = next(p for p in get_response.json()["preferences"] if p["alert_type"] == "churn_risk")
+        assert churn["channel_teams"] is False
+
+    def test_put_new_row_without_channel_teams_defaults_true(self, client: TestClient, db: Session, test_user: User, auth_headers: dict):
+        """PUT creating a brand-new row without channel_teams -> GET returns true (DB default parity)."""
+        payload = {
+            "preferences": [
+                {"alert_type": "volume_spike", "is_enabled": True, "channel_email": False, "channel_slack": True, "channel_inapp": True, "channel_intercom": False, "threshold_value": 2.0},
+            ]
+        }
+
+        response = client.put("/api/v1/notifications/preferences", headers=auth_headers, json=payload)
+
+        assert response.status_code == 200
+        get_response = client.get("/api/v1/notifications/preferences", headers=auth_headers)
+        volume = next(p for p in get_response.json()["preferences"] if p["alert_type"] == "volume_spike")
+        assert volume["channel_teams"] is True
 
 
 # ── Retention ────────────────────────────────────────────────────────────────

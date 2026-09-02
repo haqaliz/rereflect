@@ -26,7 +26,7 @@ const faqs = [
   },
   {
     q: 'What integrations are included?',
-    a: 'Inbound feedback sources: Slack, Intercom, Zendesk, email forwarding, CSV import, and custom webhooks. Outbound issue trackers: Jira, Linear, and Asana. CRM: HubSpot and Salesforce. Alerts and digests go out via Slack and Discord — Discord is available as an alert destination, not yet as a feedback source. All integrations are configured in your self-hosted instance — no hosted service required.',
+    a: 'Inbound feedback sources: Slack, Intercom, Zendesk, email forwarding, CSV import, and custom webhooks. Outbound issue trackers: Jira, Linear, and Asana. CRM: HubSpot and Salesforce. Alerts and digests go out via Slack, Discord and Teams — Discord and Teams are available as alert destinations, not yet as feedback sources. All integrations are configured in your self-hosted instance — no hosted service required.',
   },
   {
     q: 'Does it support single sign-on (SSO)?',
@@ -50,7 +50,7 @@ const faqs = [
   },
   {
     q: 'Can I automate actions based on feedback events?',
-    a: 'Yes. Create IF/THEN automation rules that trigger when specific conditions are met — like a health score dropping below a threshold or multiple negative feedbacks arriving. Rules can auto-assign team members, change workflow status, send Slack notifications, draft AI responses, and email the customer directly (bring your own Resend key). Pre-built templates are included, and every rule can run in shadow mode first.',
+    a: 'Yes. Create IF/THEN automation rules that trigger when specific conditions are met — like a health score dropping below a threshold or multiple negative feedbacks arriving. Rules can auto-assign team members, change workflow status, send Slack or Teams notifications, draft AI responses, and email the customer directly (bring your own Resend key). Pre-built templates are included, and every rule can run in shadow mode first.',
   },
 ];
 

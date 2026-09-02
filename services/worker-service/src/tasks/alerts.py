@@ -258,6 +258,35 @@ def send_discord_message_webhook(webhook_url: str, embeds: list, content: str) -
         return {"success": True, "status_code": response.status_code}
 
 
+def send_teams_message_webhook(webhook_url: str, title: str, text: str, summary: str = "") -> Dict:
+    """Send a MessageCard to a Teams webhook.
+
+    Sender contract (worker-service, THE CONTRACT): RAISES on failure
+    (response.raise_for_status(), nothing caught here) — mirrors
+    send_discord_message_webhook. Callers catch per-integration.
+
+    The MessageCard body deliberately duplicates the backend's
+    build_teams_message_card shape (worker cannot import backend-api); the shape
+    is pinned by the same test expectations in both services.
+    """
+    import httpx
+
+    with httpx.Client(timeout=10) as client:
+        response = client.post(
+            webhook_url,
+            json={
+                "@type": "MessageCard",
+                "@context": "http://schema.org/extensions",
+                "summary": summary or title,
+                "title": title,
+                "text": text,
+                "themeColor": "6264A7",
+            },
+        )
+        response.raise_for_status()
+        return {"success": True, "status_code": response.status_code}
+
+
 def send_slack_message_oauth(access_token: str, channel_id: str, blocks: list, text: str) -> Dict:
     """Send a message to Slack via OAuth token (Bot API)."""
     import httpx

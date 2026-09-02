@@ -606,6 +606,114 @@ def test_send_notification_slack_no_active_integration_records_error(mock_redis,
 
 
 # ---------------------------------------------------------------------------
+# send_notification — teams channel (mirror parity with the backend engine:
+# same result shape, same loud-error wording)
+# ---------------------------------------------------------------------------
+
+
+@patch("src.services.automation_feedback_trigger.send_teams_message_webhook")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_notification_teams_is_org_wide_once_per_integration(
+    mock_redis, mock_teams, db
+):
+    mock_teams.return_value = {"success": True}
+    fb = _make_feedback(db, pain_point_category="billing")
+    _make_user(db, role="admin", email="admin1@example.com")
+    _make_user(db, role="admin", email="admin2@example.com")
+
+    integration = Integration(
+        organization_id=1,
+        type="teams",
+        name="General",
+        config={"webhook_url": "https://example.webhook.office.com/abc"},
+        is_active=True,
+    )
+    db.add(integration)
+    db.commit()
+
+    rule = _make_rule(
+        db,
+        trigger_config={"categories": ["billing"]},
+        actions=[{"type": "send_notification", "config": {"recipients": "admins", "channels": ["teams"]}}],
+    )
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    evaluate_feedback_triggers(db, 1, context)
+
+    # One Teams post per active integration, NOT one per resolved recipient.
+    mock_teams.assert_called_once()
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    assert log.status == "success"
+    send_notification_result = next(
+        a for a in log.actions_executed if a["type"] == "send_notification"
+    )
+    # Same result shape as the backend engine — the mirror-parity guard.
+    assert send_notification_result["result"] == {
+        "notifications_created": 0,
+        "slack_sent": 0,
+        "teams_sent": 1,
+    }
+
+
+@patch("src.services.automation_feedback_trigger.send_teams_message_webhook")
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_notification_teams_send_failure_raises_are_caught(
+    mock_redis, mock_teams, db
+):
+    """Worker's Teams sender RAISES on failure (opposite contract to backend's) — must be caught."""
+    mock_teams.side_effect = Exception("teams webhook 500")
+    fb = _make_feedback(db, pain_point_category="billing")
+
+    integration = Integration(
+        organization_id=1,
+        type="teams",
+        config={"webhook_url": "https://example.webhook.office.com/abc"},
+        is_active=True,
+    )
+    db.add(integration)
+    db.commit()
+
+    rule = _make_rule(
+        db,
+        trigger_config={"categories": ["billing"]},
+        actions=[{"type": "send_notification", "config": {"recipients": "admins", "channels": ["teams"]}}],
+    )
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    # Must not raise.
+    evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    assert log.status == "failed"
+    send_notification_result = next(
+        a for a in log.actions_executed if a["type"] == "send_notification"
+    )
+    assert "teams webhook 500" in send_notification_result["error"]
+    assert send_notification_result["result"]["teams_sent"] == 0
+
+
+@patch("src.services.automation_feedback_trigger._get_redis", return_value=None)
+def test_send_notification_teams_no_active_integration_records_error(mock_redis, db):
+    fb = _make_feedback(db, pain_point_category="billing")
+    rule = _make_rule(
+        db,
+        trigger_config={"categories": ["billing"]},
+        actions=[{"type": "send_notification", "config": {"recipients": "admins", "channels": ["teams"]}}],
+    )
+
+    context = {"customer_email": fb.customer_email, "feedback_id": fb.id}
+    evaluate_feedback_triggers(db, 1, context)
+
+    log = db.query(AutomationExecution).filter_by(rule_id=rule.id).first()
+    assert log.status == "failed"
+    send_notification_result = next(
+        a for a in log.actions_executed if a["type"] == "send_notification"
+    )
+    assert "teams: no active Teams integration configured" in send_notification_result["error"]
+
+
+# ---------------------------------------------------------------------------
 # One bad rule must not block others
 # ---------------------------------------------------------------------------
 

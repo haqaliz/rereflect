@@ -250,6 +250,7 @@ class TestDispatchAlertTriggersDiscord:
             channel_email=False,
         )
         pref.channel_discord = channel_discord
+        pref.channel_teams = False
         db.add(pref)
         db.commit()
         db.refresh(pref)
@@ -331,7 +332,7 @@ class TestDispatchAlertTriggersDiscord:
                         link="/feedbacks/1",
                     )
 
-        assert counts == {"inapp": 0, "slack": 1, "discord": 1, "email": 0}
+        assert counts == {"inapp": 0, "slack": 1, "discord": 1, "teams": 0, "email": 0}
 
 
 # ---------------------------------------------------------------------------

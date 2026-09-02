@@ -1,50 +1,60 @@
-# Card: Complete the seeded playbook action types
+# Card: Microsoft Teams notification integration
 
 **Type:** feat (freeform, no GitHub issue)
-**Slug:** `playbook-action-types`
-**Branch:** `feat/playbook-action-types`
-**Source:** `rereflect-next` recommendation (2026-08-26), verified against code
+**Slug:** `teams-notifications`
+**Branch:** `feat/teams-notifications`
+**Source:** `rereflect-next` recommendation (2026-09-02), verified against code
 
 ## Brief
 
-The churn-playbook executor implements only 5 of the 11 action types the seeder declares valid.
-6 of the 7 seeded playbook templates therefore contain actions that fail with
-`"unsupported action type"` on every execution — the same inert-template disease class as the
-P0 `automation-worker-triggers-dead` fix, but for the playbook engine.
+Build the Microsoft Teams notification integration — the only provider still
+named-but-missing in the codebase. `Integration.type` reserves `'teams'` alongside
+`'slack'`/`'discord'` (`services/backend-api/src/models/integration.py:13`), and
+`feedback_source.py:16` also names Teams as a source type — neither exists anywhere in
+the shipped surface. Outbound alerts today are Slack + Discord + email + dashboard;
+Teams is the gap for Microsoft-365-heavy orgs and fits the OSS/BYOK model (paste an
+Incoming Webhook URL — no vendor lock-in, no OAuth).
 
 ## Verified facts (from code)
 
-- `services/backend-api/src/services/playbook_seeder.py:24-36` — `VALID_ACTION_TYPES` includes
-  `assign, notify, draft_response, send_email, tag, schedule_task, create_task, trigger_automation,
-  auto_assign, change_status, send_notification`.
-- `services/worker-service/src/services/playbook_engine.py:171-186` — `_dispatch_action` supports
-  only `assign, change_status, send_notification, draft_response, send_email`. Everything else
-  returns `ok=False, error="unsupported action type: '<type>'"`.
-- Seeded templates with unsupported actions (`playbook_seeder.py`):
-  - **Critical Save** — `notify` (line 57) → fails
-  - **Churn Prevention** — `schedule_task` (line 96) → fails
-  - **At-Risk Outreach** — `tag` (line 115) → fails
-  - **Light-Touch Nudge** — `tag` + `create_task` (lines 138, 142) → fail
-  - **Power-User Recovery** — `notify` + `create_task` (lines 161, 173) → fail
-  - **New-Customer Save** — `trigger_automation` (line 192) → fails
-  - **Silent-Churn Watch** — `create_task` (line 219) → fails (send_email part works)
-- Executions complete `status="done"` with failed actions buried in `action_log`
-  (`worker-service/tests/test_playbook_engine.py:574-600` pins this "loud entry" behavior).
-- The repo names this as the next card: `docs/planning/customer-outreach-email-actions/prd.md:247-255`
-  — "Fixing the other 5 unimplemented seeded playbook action types (`notify`, `tag`, `schedule_task`,
-  `create_task`, `trigger_automation`) — separate card; noted."
+- `services/backend-api/src/models/integration.py:13` — `type = Column(String(50))` with
+  comment `# 'slack', 'discord', 'teams'` — Teams named, never implemented.
+- `services/backend-api/src/models/feedback_source.py:16` — `# Source type: slack, discord, teams, email, webhook, api` — Teams also named as a source type, never implemented.
+- DEV-TRACKING.md:237-244 (P7) — integration-selection loop duplicated 4×, low-level
+  sender 3× across the two processes; "Adding a fifth provider (Teams is already named in
+  the `Integration.type` comment) means another full round." Refactor explicitly declined
+  once (Discord work, 2026-07-29) — scope discipline, not avoidance.
+- DEV-TRACKING.md P2 (2026-07-29) — the Discord slice is the pattern to mirror: provider
+  CRUD + test route, a sender per process (backend returns a status dict, worker raises),
+  dispatch on the main alert pipe and the health-drop path.
+- DEV-TRACKING.md P2/P5 — the automations engine `_execute_notify` channel list remains
+  dashboard/email/slack (Discord excluded twice, "no channels editor"); Teams should be
+  wired into the automations notify branch **and** its worker mirrors.
 
-## Shipped seams to reuse
+## Proposed scope (slice 1)
 
-- `tag` → `customer_health_scores.tags` (segment-actions, `AI-TRACKING.md:345`)
-- `notify` → `notification_dispatch` (Slack/Discord/dashboard channels)
-- `create_task` / `schedule_task` → Jira / Asana / Linear integration clients already shipped
-- `trigger_automation` → M4.4 `AutomationEngine` (`backend-api/src/services/automation_engine.py:416-432`)
+1. Teams connector: Incoming-Webhook URL connect (Settings → Integrations tile + token-paste
+   page + CRUD + test route, Fernet-encrypted, mirroring the Discord/Zendesk/Jira/Asana
+   BYO-token precedent).
+2. `send_teams_message` sender per process — backend returns a status dict, worker raises —
+   matching the existing Slack/Discord contract.
+3. Dispatch wiring: main alert pipe + health-drop path, plus the automations
+   `_execute_notify` branch and its worker mirrors.
+4. README + landing integration row update in the same PR so the claim is honest on day one.
 
-## Known caveats (must be resolved in PRD/plan)
+## Known caveat (P7)
 
-1. `trigger_automation` needs a recursion guard (rule → playbook → rule loops) and a cooldown story.
-2. `create_task` needs a decided target-provider policy — seeded configs name no provider
-   (Jira vs Asana vs Linear vs internal queue).
-3. Consider surfacing failed actions in the playbook-run UI, since executions currently
-   complete "done" with failures only in the action log.
+The integration-selection/sender logic is duplicated 4×/3× (DEV-TRACKING.md P7). Prefer a
+**bounded shared sender** for the new Teams path + automations branch over a full provider
+abstraction (that refactor touches every Slack path and was explicitly declined once).
+Record the P7 decision in the planning docs.
+
+## Open questions (for the dig / interview)
+
+- Teams webhook flavor: classic Incoming Webhook vs Power Automate Workflows URL — accept
+  both? Validate by URL shape?
+- Payload format: simple `messageCard`/adaptive card vs plain text — what does the existing
+  Slack Block Kit formatter pattern imply?
+- `feedback_source` Teams source type: in scope or explicitly out (outbound only)?
+- Automations channels editor: still out of scope, or does Teams land on a hardcoded
+  `channels` list like Slack did?

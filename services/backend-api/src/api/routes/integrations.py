@@ -197,6 +197,73 @@ class DiscordTestRequest(BaseModel):
     integration_id: int
 
 
+TEAMS_WEBHOOK_HOSTS = ("https://outlook.office.com/webhook/", "https://webhook.office.com/webhookb2/")
+
+
+class TeamsWebhookCreateRequest(BaseModel):
+    """Request to create a Teams webhook integration.
+
+    Teams is webhook-only, like Discord — the webhook URL carries its own
+    credential, so there is no OAuth flow to configure.
+    """
+    name: str
+    webhook_url: str
+    triggers: List[str] = ["urgent"]
+    included_fields: List[str] = ["text", "sentiment"]
+    digest_time: Optional[str] = "09:00"
+    message_template: Optional[str] = None
+
+    @field_validator('webhook_url')
+    @classmethod
+    def validate_webhook_url(cls, v):
+        # Classic URLs live on outlook.office.com; Workflows URLs always carry
+        # a tenant subdomain (https://<tenant>.webhook.office.com/webhookb2/…),
+        # so the Workflows host is matched on its suffix, not a fixed prefix.
+        if not v.startswith(TEAMS_WEBHOOK_HOSTS):
+            rest = v.partition('://')[2]
+            host, _, path = rest.partition('/')
+            if not (
+                v.startswith('https://')
+                and host.endswith('webhook.office.com')
+                and path.startswith('webhookb2/')
+            ):
+                raise ValueError('Invalid Teams webhook URL. Must start with '
+                                 'https://outlook.office.com/webhook/ or '
+                                 'https://<tenant>.webhook.office.com/webhookb2/')
+        return v
+
+    # The trigger/field vocabularies below are provider-neutral and duplicated
+    # from DiscordWebhookCreateRequest. Kept explicit rather than inherited:
+    # the request models are independent API contracts, and a shared base
+    # would couple Teams' schema to provider-specific fields if either grows.
+    @field_validator('triggers')
+    @classmethod
+    def validate_triggers(cls, v):
+        valid_triggers = {'urgent', 'negative', 'all', 'daily_digest', 'weekly_digest'}
+        for trigger in v:
+            if trigger not in valid_triggers:
+                raise ValueError(f'Invalid trigger: {trigger}. Valid options: {valid_triggers}')
+        return v
+
+    @field_validator('included_fields')
+    @classmethod
+    def validate_fields(cls, v):
+        valid_fields = {
+            'text', 'sentiment', 'sentiment_score', 'pain_point_category',
+            'pain_point_severity', 'feature_request_category', 'feature_request_priority',
+            'urgent_category', 'urgent_response_time', 'source', 'link'
+        }
+        for field in v:
+            if field not in valid_fields:
+                raise ValueError(f'Invalid field: {field}. Valid options: {valid_fields}')
+        return v
+
+
+class TeamsTestRequest(BaseModel):
+    """Request to send a test Teams message."""
+    integration_id: int
+
+
 class SlackTestRequest(BaseModel):
     """Request to send a test Slack message."""
     integration_id: int
@@ -326,6 +393,44 @@ def send_discord_message(
             return {"success": True, "response": response.text}
     except httpx.HTTPError as e:
         logger.error(f"Discord webhook failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# Teams MessageCard accent — Microsoft's "Communication" brand colour, kept as
+# the card's themeColor so Teams renders alerts with Rereflect's accent.
+TEAMS_THEME_COLOR = "6264A7"
+
+
+def build_teams_message_card(title, text, summary=None):
+    """Build a Microsoft MessageCard payload for a Teams webhook."""
+    return {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": summary or title,
+        "title": title,
+        "text": text,
+        "themeColor": TEAMS_THEME_COLOR,
+    }
+
+
+def send_teams_message(webhook_url, title, text, summary=None) -> dict:
+    """Send a MessageCard to a Teams webhook.
+
+    CONTRACT: returns {"success": bool, ...} and NEVER raises — mirroring
+    `send_discord_message`. The worker's future sender must not swap these
+    semantics either: call sites that count a send as delivered whenever the
+    call does not raise would make every failure look like a success.
+    """
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                webhook_url,
+                json=build_teams_message_card(title, text, summary=summary),
+            )
+            response.raise_for_status()
+            return {"success": True, "response": response.text}
+    except httpx.HTTPError as e:
+        logger.error(f"Teams webhook failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -461,6 +566,54 @@ def create_discord_webhook(
     return integration_to_response(integration)
 
 
+@router.post("/teams/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_or_owner)])
+def create_teams_webhook(
+    data: TeamsWebhookCreateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db)
+):
+    """Create a new Teams webhook integration.
+
+    Webhook-only by design, like Discord: the Teams webhook URL carries its
+    own credential, so there is no OAuth flow to mirror from the Slack routes.
+    """
+    from datetime import time
+
+    digest_time_obj = None
+    if data.digest_time:
+        try:
+            hours, minutes = map(int, data.digest_time.split(':'))
+            digest_time_obj = time(hours, minutes)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid digest_time format. Use HH:MM (e.g., 09:00)"
+            )
+
+    integration = Integration(
+        organization_id=current_org.id,
+        type="teams",
+        name=data.name,
+        config={
+            "webhook_url": data.webhook_url,
+            "integration_type": "webhook"
+        },
+        triggers=data.triggers,
+        included_fields=data.included_fields,
+        digest_time=digest_time_obj,
+        message_template=data.message_template,
+        is_active=True,
+    )
+
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+
+    logger.info(f"Created Teams integration {integration.id} for org {current_org.id}")
+
+    return integration_to_response(integration)
+
+
 @router.post("/discord/test", response_model=SlackTestResponse, dependencies=[Depends(require_admin_or_owner)])
 def test_discord_integration(
     data: DiscordTestRequest,
@@ -520,6 +673,63 @@ def test_discord_integration(
     return SlackTestResponse(
         success=False,
         message=f"Discord test failed: {result.get('error')}"
+    )
+
+
+@router.post("/teams/test", response_model=SlackTestResponse, dependencies=[Depends(require_admin_or_owner)])
+def test_teams_integration(
+    data: TeamsTestRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db)
+):
+    """Send a test message to verify a Teams integration.
+
+    A separate route rather than a generalised one: `/slack/test` filters
+    `type == "slack"` and branches on webhook-vs-OAuth, neither of which
+    applies here — Teams is webhook-only, like Discord.
+    """
+    integration = db.query(Integration).filter(
+        Integration.id == data.integration_id,
+        Integration.organization_id == current_org.id,
+        Integration.type == "teams"
+    ).first()
+
+    if not integration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Teams integration not found"
+        )
+
+    config = integration.config or {}
+    webhook_url = config.get('webhook_url')
+    if not webhook_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Integration has no webhook_url configured."
+        )
+
+    result = send_teams_message(
+        webhook_url=webhook_url,
+        title="Rereflect test message",
+        text=(
+            f"Your Teams integration {integration.name} is working correctly.\n\n"
+            "Alerts for urgent feedback, sentiment spikes, churn risk and volume "
+            "spikes will arrive here."
+        ),
+        summary="Rereflect test message",
+    )
+
+    if result.get("success"):
+        integration.last_used_at = datetime.utcnow()
+        db.commit()
+        return SlackTestResponse(success=True, message="Test message sent to Teams.")
+
+    integration.error_count = (integration.error_count or 0) + 1
+    integration.last_error = str(result.get("error"))
+    db.commit()
+    return SlackTestResponse(
+        success=False,
+        message=f"Teams test failed: {result.get('error')}"
     )
 
 

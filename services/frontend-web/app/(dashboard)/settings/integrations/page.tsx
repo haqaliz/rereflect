@@ -24,7 +24,6 @@ import {
   Link as LinkIcon,
   Webhook,
   Settings as SettingsIcon,
-  Users,
   Activity,
   ShieldAlert,
 } from 'lucide-react';
@@ -39,6 +38,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { DiscordIcon } from '@/components/icons/DiscordIcon';
+import { TeamsIcon } from '@/components/icons/TeamsIcon';
 import { LinearIcon } from '@/components/icons/LinearIcon';
 import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
@@ -177,6 +177,8 @@ function IntegrationsContent() {
     try {
       const result = integration.type === 'discord'
         ? await integrationsAPI.testDiscord(integration.id)
+        : integration.type === 'teams'
+        ? await integrationsAPI.testTeams(integration.id)
         : await integrationsAPI.testSlack(integration.id);
       setTestResult({ id: integration.id, success: result.success, message: result.message });
       await fetchData();
@@ -304,6 +306,8 @@ function IntegrationsContent() {
                               ? 'bg-[#1F8DED]/10'
                               : integration.type === 'discord'
                               ? 'bg-[#5865F2]/10'
+                              : integration.type === 'teams'
+                              ? 'bg-[#6264A7]/10'
                               : 'bg-secondary'
                           }`}
                         >
@@ -311,6 +315,8 @@ function IntegrationsContent() {
                             <IntercomIcon className="w-6 h-6" />
                           ) : integration.type === 'discord' ? (
                             <DiscordIcon className="w-6 h-6" />
+                          ) : integration.type === 'teams' ? (
+                            <TeamsIcon className="w-6 h-6" />
                           ) : (
                             <SlackIcon className="w-6 h-6" />
                           )}
@@ -1444,25 +1450,28 @@ function IntegrationsContent() {
                 </div>
               </Link>
 
-              {/* Microsoft Teams - Coming Soon */}
-              <div className="p-4 border border-border rounded-xl bg-muted/30 opacity-60 cursor-not-allowed">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-[#6264A7]/10 rounded-lg">
-                    <Users className="w-6 h-6 text-[#6264A7]" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-foreground">Microsoft Teams</span>
-                      <Badge variant="secondary" className="text-xs">
-                        Coming Soon
-                      </Badge>
+              {/* Microsoft Teams - Available */}
+              <Link href="/settings/integrations/new?type=teams">
+                <div className="p-4 border border-border rounded-xl hover:border-primary/50 hover:bg-secondary/30 transition-all cursor-pointer group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-[#6264A7]/10 rounded-lg">
+                      <TeamsIcon className="w-6 h-6" />
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      Receive feedback alerts in Teams channels
-                    </p>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground group-hover:text-primary transition-colors">Microsoft Teams</span>
+                        <Badge variant="outline" className="text-green-600 border-green-600/30 bg-green-50 dark:bg-green-950 text-xs">
+                          Available
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Get feedback alerts in your Teams channels
+                      </p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                   </div>
                 </div>
-              </div>
+              </Link>
             </div>
           </CardContent>
         </Card>

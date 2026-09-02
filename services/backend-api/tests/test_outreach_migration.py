@@ -314,7 +314,7 @@ class TestAlembicSingleHead:
             f"expected exactly one alembic head, got {len(lines)}: {lines}"
         )
         # The head moves with every new migration; update this pin when you add
-        # one (currently 0bf182dad44d — playbook_tasks_table).
-        assert "0bf182dad44d" in lines[0], (
-            f"the single head must be the newest revision 0bf182dad44d, got: {lines[0]}"
+        # one (currently ad76527a185e — add channel_teams to user alert preferences).
+        assert "ad76527a185e" in lines[0], (
+            f"the single head must be the newest revision ad76527a185e, got: {lines[0]}"
         )

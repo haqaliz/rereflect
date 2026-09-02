@@ -139,7 +139,7 @@ The only outbound calls a Rereflect instance ever makes are ones you configure y
 |---|---|
 | Your LLM provider (OpenAI / Anthropic / Google) | Only if you add a BYOK key **and** set `ai_analysis_enabled=true`. Omit the key and nothing is contacted. |
 | Your local model endpoint (Ollama, etc.) | Only if you point Settings → AI at one. Stays on your network. |
-| Integrations (Slack, Discord, Jira, Zendesk, Asana, Intercom, Linear, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
+| Integrations (Slack, Discord, Teams, Jira, Zendesk, Asana, Intercom, Linear, HubSpot, Salesforce) | Only for integrations you explicitly connect and authorize. |
 | Your Sentry project | Only if you set `SENTRY_DSN` — see below. |
 
 ### Optional error tracking (Sentry), off by default
@@ -780,17 +780,17 @@ churn risk, volume spike — plus customer health-drop and recovery alerts.
 
 **Per-type Discord channel switch.** Settings → Notifications now has a **Discord** channel
 switch for each alert type, defaulting to **on** — so existing installs keep delivering to
-Discord exactly as before without any action. Slack and Discord are routed independently:
-you can have a type be Discord-only (Slack off), Slack-only (Discord off), both, or neither.
-Discord delivery still requires an active Discord integration; the switch alone does not
-deliver anything.
+Discord exactly as before without any action. Slack, Discord and Teams are routed
+independently: you can have a type be Discord-only (Slack/Teams off), Slack-only
+(Discord/Teams off), both, or neither. Discord delivery still requires an active Discord
+integration; the switch alone does not deliver anything.
 
 Two consequences worth knowing:
 
-- If you turn **both** the Slack and Discord switches off for a type, no chat-channel
+- If you turn **all** the Slack, Discord and Teams switches off for a type, no chat-channel
   delivery happens for it — the alert still lands in-app and by email if those are enabled.
-- The Slack and Discord switches are independent, so turning one off does not mute the
-  other.
+- The Slack, Discord and Teams switches are independent, so turning one off does not mute
+  the others.
 
 **Not covered by Discord in this release:**
 
@@ -806,6 +806,63 @@ Two consequences worth knowing:
 - **Rate limiting.** Discord throttles webhooks (roughly 5 requests per 2 seconds) and
   replies `429`. Rereflect does not currently retry on `429`, exactly as it does not for
   Slack. In a very high-volume org some alerts may be dropped.
+
+### Teams alerts
+
+Rereflect can post alerts to a Microsoft Teams channel. Settings → Integrations →
+Microsoft Teams, then paste an incoming webhook URL. Two URL shapes are accepted: the
+classic Incoming Webhook connector URL (`https://outlook.office.com/webhook/…`) and a
+Power Automate **Workflows** URL (`https://<your-tenant>.webhook.office.com/webhookb2/…`)
+— anything else is rejected when you save rather than failing silently on the first alert.
+There is no OAuth app to create — a Teams webhook URL carries its own credential, exactly
+like Discord.
+
+**Why you cannot just point a custom webhook at Teams.** The generic Settings → Webhooks
+feature accepts any `https://` URL, so a Teams URL *saves* there — it just never works.
+Teams webhook endpoints accept Microsoft **MessageCard** (or Adaptive Card) JSON only, and
+the generic dispatcher posts Rereflect's own JSON envelope, so Teams rejects it and the
+failure only appears in the delivery log. Use a Teams *integration*, not a custom webhook.
+
+**What reaches Teams.** The four main alert types — urgent feedback, sentiment spike,
+churn risk, volume spike — plus customer health-drop and recovery alerts. Automation-rule
+notifications (`send_notification`) and playbook `notify` steps also support Teams (see
+below). What does **not** reach Teams: digests (they are email-only) and the legacy
+custom-template alert path (Slack-only).
+
+**Per-type Teams channel switch.** Settings → Notifications has a **Teams** channel switch
+for each alert type, defaulting to **on** — so existing installs keep delivering to Teams
+exactly as before without any action. Slack, Discord and Teams are routed independently:
+you can have a type be Teams-only (Slack/Discord off), Slack-only (Teams off), both, or
+neither. Teams delivery still requires an active Teams integration; the switch alone does
+not deliver anything. Delivery is once per organization per alert — one card to every
+active Teams integration, not one per user.
+
+**Message format.** Teams alerts are sent as Microsoft **MessageCards** (title, text,
+summary and Rereflect's `#6264A7` accent as the card color) — not Adaptive Cards. There
+is no OAuth, no bot registration, and no per-channel targeting: every active Teams
+integration row receives every org-level Teams alert for the types that are enabled.
+
+**Not covered by Teams in this release:**
+
+- **Inbound feedback.** Teams is outbound-only: an alert destination, not a feedback
+  source. (The `FeedbackSource.source_type` vocabulary names `teams`, but no inbound
+  Teams ingestion exists.)
+- **Digests.** Daily/weekly digests are email-only; the per-integration `daily_digest` /
+  `weekly_digest` trigger vocabulary exists on the request models, but digests are not
+  sent to Teams webhooks in this release.
+- **Custom message templates.** The per-integration template feature is authored in Slack
+  `mrkdwn`; Teams alerts use built-in card formatting.
+- **Automation-channel editing.** An automation's `send_notification` action **can**
+  target `teams` (it is in `KNOWN_NOTIFY_CHANNELS` in both the backend engine and the
+  worker mirror), but the automations UI has no channel editor today — the channel list
+  comes from the built-in templates, which use `dashboard`/`email`/`slack`. A rule that
+  posts to Teams must be created via the API with `channels: ["teams"]`, or — for
+  playbooks — by picking **Teams** in the playbook editor's `notify` action, which offers
+  Teams directly.
+- **The alert log.** Settings → Integrations → *(your Teams integration)* → logs will be
+  **empty**. Only the legacy custom-template path writes those rows, and it is Slack-only.
+  This is a pre-existing gap — the Slack, Discord and Teams health and dispatch paths do
+  not log either.
 
 ### Batch sentiment threshold trigger (`batch_sentiment_threshold`)
 
@@ -1002,9 +1059,9 @@ a bulk action against it:
 
 **Playbook action types.** Playbook steps can be `assign`, `change_status`,
 `send_notification`, `draft_response`, `send_email`, `notify`, `tag`, `create_task`,
-`schedule_task`, or `trigger_automation`. `notify` sends to your connected Slack/Discord
-integration (or in-app notifications for admins) — its `target` is advisory, the
-integration's configured channel is used. `tag` adds an operator tag (same 50-char /
+`schedule_task`, or `trigger_automation`. `notify` sends to your connected
+Slack/Discord/Teams integration (or in-app notifications for admins) — its `target` is
+advisory, the integration's configured channel is used. `tag` adds an operator tag (same 50-char /
 20-tag caps as the bulk-tag action). `create_task`/`schedule_task` persist an internal
 follow-up task (`playbook_tasks`) with a due date and priority — no provider needed.
 `trigger_automation` fires a named automation rule for the customer, but only rules of

@@ -50,6 +50,7 @@ import {
 import { SlackIcon } from '@/components/icons/SlackIcon';
 import { IntercomIcon } from '@/components/icons/IntercomIcon';
 import { DiscordIcon } from '@/components/icons/DiscordIcon';
+import { TeamsIcon } from '@/components/icons/TeamsIcon';
 import {
   Dialog,
   DialogContent,
@@ -166,6 +167,8 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
     try {
       const result = integration?.type === 'discord'
         ? await integrationsAPI.testDiscord(parseInt(id))
+        : integration?.type === 'teams'
+        ? await integrationsAPI.testTeams(parseInt(id))
         : await integrationsAPI.testSlack(parseInt(id));
       setTestResult(result);
       // Refresh logs
@@ -283,6 +286,8 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                     ? 'bg-[#1F8DED]/10'
                     : integration.type === 'discord'
                     ? 'bg-[#5865F2]/10'
+                    : integration.type === 'teams'
+                    ? 'bg-[#6264A7]/10'
                     : 'bg-secondary'
                 }`}
               >
@@ -290,6 +295,8 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                   <IntercomIcon className="w-8 h-8" />
                 ) : integration.type === 'discord' ? (
                   <DiscordIcon className="w-8 h-8" />
+                ) : integration.type === 'teams' ? (
+                  <TeamsIcon className="w-8 h-8" />
                 ) : (
                   <SlackIcon className="w-8 h-8" />
                 )}
@@ -312,6 +319,8 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                     ? 'Configure your Intercom integration'
                     : integration.type === 'discord'
                     ? 'Configure your Discord integration'
+                    : integration.type === 'teams'
+                    ? 'Configure your Teams integration'
                     : 'Configure your Slack integration'}
                 </p>
               </div>
@@ -370,6 +379,8 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                           ? ''
                           : integration?.type === 'discord'
                           ? ' and sending alerts to Discord'
+                          : integration?.type === 'teams'
+                          ? ' and sending alerts to Teams'
                           : ' and sending alerts to Slack'
                       }`
                     : 'Integration is paused'}
@@ -517,6 +528,8 @@ export default function IntegrationDetailPage({ params }: { params: Promise<{ id
                 <p className="text-xs text-muted-foreground">
                   {integration.type === 'discord'
                     ? 'Discord markdown: **bold**, *italic*, `code`, > quote'
+                    : integration.type === 'teams'
+                    ? 'Teams MessageCard text: plain text (links auto-link; markdown not supported)'
                     : 'Slack mrkdwn: *bold*, _italic_, `code`, > quote'}
                 </p>
                 <Button
