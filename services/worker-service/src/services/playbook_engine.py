@@ -590,6 +590,7 @@ def _handle_notify(
                    `ok: False`, never a crash). `target` is advisory: it is
                    recorded in the result, not resolved to a channel.
       "discord"  → same shape via the Discord webhook sender.
+      "teams"    → same shape via the Teams webhook sender.
       "dashboard"→ create in-app `Notification` rows via the
                    `notification_dispatch.dispatch_alert` seam (honors
                    UserAlertPreference), reporting `{notifications_created: N}`.
@@ -683,6 +684,38 @@ def _handle_notify(
         )
         result = {
             "channel": "discord",
+            "integrations_sent": sent,
+            "target": config.get("target"),
+        }
+        if errors:
+            return {"ok": False, "result": result, "error": "; ".join(errors)}
+        return {"ok": True, "result": result, "error": None}
+
+    if channel == "teams":
+        integrations = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org_id,
+                Integration.type == "teams",
+                Integration.is_active.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            return {
+                "ok": False,
+                "result": None,
+                "error": "no teams integration connected",
+            }
+        from src.tasks.alerts import send_teams_message_webhook
+
+        sent, errors = _dispatch_external_notify(
+            integrations,
+            send_teams_message_webhook,
+            lambda integration: {"title": title, "text": message},
+        )
+        result = {
+            "channel": "teams",
             "integrations_sent": sent,
             "target": config.get("target"),
         }

@@ -297,6 +297,113 @@ def test_notify_discord_no_integration_is_loud_failure(db, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# AC — teams
+# ---------------------------------------------------------------------------
+
+def test_notify_teams_sends_to_active_teams_integrations(db, monkeypatch):
+    """AC: the Teams sender is called with title + text per active Teams
+    integration; result records the channel and the advisory target."""
+    org = _make_org(db)
+    _make_integration(db, org.id, "teams", {"webhook_url": "https://teams.webhook.one"})
+    _make_integration(db, org.id, "teams", {"webhook_url": "https://teams.webhook.two"})
+    calls = []
+
+    def fake(webhook_url=None, title=None, text=None, **kwargs):
+        calls.append({"webhook_url": webhook_url, "title": title, "text": text})
+        return {"success": True}
+
+    monkeypatch.setattr("src.tasks.alerts.send_teams_message_webhook", fake)
+
+    exe = _build_run(db, org.id, {
+        "channel": "teams", "target": "#cs-war-room", "message": "Customer at risk.",
+    })
+    updated = _execute(db, exe)
+
+    assert len(calls) == 2
+    assert {c["webhook_url"] for c in calls} == {
+        "https://teams.webhook.one", "https://teams.webhook.two",
+    }
+    assert all(c["text"] == "Customer at risk." for c in calls)
+    assert all("customer@example.com" in c["title"] for c in calls)
+    entry = updated.action_log[0]
+    assert entry["ok"] is True
+    assert entry["result"] == {
+        "channel": "teams",
+        "integrations_sent": 2,
+        "target": "#cs-war-room",
+    }
+    assert updated.status == "done"
+
+
+def test_notify_teams_no_integration_is_loud_failure(db, monkeypatch):
+    """AC: no active Teams integration → ok=False with a specific reason."""
+    org = _make_org(db)
+    calls = []
+
+    def fake(webhook_url=None, title=None, text=None, **kwargs):
+        calls.append(webhook_url)
+        return {"success": True}
+
+    monkeypatch.setattr("src.tasks.alerts.send_teams_message_webhook", fake)
+
+    exe = _build_run(db, org.id, {"channel": "teams", "message": "hi"})
+    updated = _execute(db, exe)
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["error"] == "no teams integration connected"
+    assert entry["result"] is None
+
+
+def test_notify_teams_raising_sender_is_ok_false_run_completes(db, monkeypatch):
+    """AC: the Teams sender RAISES → ok=False with the exception message;
+    the run still finalizes (no crash)."""
+    org = _make_org(db)
+    _make_integration(db, org.id, "teams", {"webhook_url": "https://teams.webhook.one"})
+
+    def boom(**kwargs):
+        raise RuntimeError("teams exploded")
+
+    monkeypatch.setattr("src.tasks.alerts.send_teams_message_webhook", boom)
+
+    exe = _build_run(db, org.id, {"channel": "teams", "message": "hi"})
+    updated = _execute(db, exe)
+
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert "teams exploded" in entry["error"]
+    assert entry["result"]["channel"] == "teams"
+    assert entry["result"]["integrations_sent"] == 0
+    assert updated.completed_at is not None
+
+
+def test_notify_teams_ignores_inactive_integrations(db, monkeypatch):
+    """AC: inactive Teams integrations are not sent to; none active → ok=False."""
+    org = _make_org(db)
+    _make_integration(db, org.id, "teams", {"webhook_url": "https://teams.webhook.one"})
+    db.query(Integration).filter_by(organization_id=org.id).update(
+        {Integration.is_active: False}
+    )
+    db.commit()
+    calls = []
+
+    def fake(webhook_url=None, title=None, text=None, **kwargs):
+        calls.append(webhook_url)
+        return {"success": True}
+
+    monkeypatch.setattr("src.tasks.alerts.send_teams_message_webhook", fake)
+
+    exe = _build_run(db, org.id, {"channel": "teams", "message": "hi"})
+    updated = _execute(db, exe)
+
+    assert calls == []
+    entry = updated.action_log[0]
+    assert entry["ok"] is False
+    assert entry["error"] == "no teams integration connected"
+
+
+# ---------------------------------------------------------------------------
 # AC6 — dashboard (dispatch_alert seam, preferences honored)
 # ---------------------------------------------------------------------------
 
