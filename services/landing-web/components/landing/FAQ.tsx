@@ -50,7 +50,7 @@ const faqs = [
   },
   {
     q: 'Can I automate actions based on feedback events?',
-    a: 'Yes. Create IF/THEN automation rules that trigger when specific conditions are met — like a health score dropping below a threshold or multiple negative feedbacks arriving. Rules can auto-assign team members, change workflow status, send Slack notifications, draft AI responses, and email the customer directly (bring your own Resend key). Pre-built templates are included, and every rule can run in shadow mode first.',
+    a: 'Yes. Create IF/THEN automation rules that trigger when specific conditions are met — like a health score dropping below a threshold or multiple negative feedbacks arriving. Rules can auto-assign team members, change workflow status, send Slack or Teams notifications, draft AI responses, and email the customer directly (bring your own Resend key). Pre-built templates are included, and every rule can run in shadow mode first.',
   },
 ];
 
