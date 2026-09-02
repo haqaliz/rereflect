@@ -60,7 +60,7 @@ from src.services.automation_email_delivery import execute_send_customer_email
 from src.models import FeedbackItem, Integration, Notification, User
 from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
-from src.tasks.alerts import send_slack_message_webhook
+from src.tasks.alerts import send_slack_message_webhook, send_teams_message_webhook
 from src.tasks.intercom_writeback import push_resolved_writeback
 
 logger = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ FEEDBACK_TRIGGER_TYPES = (
 # Channels _execute_notify knows how to deliver. Any other string in a
 # rule's `channels` config is recorded as a loud error instead of being
 # silently dropped — mirrors backend-api's KNOWN_NOTIFY_CHANNELS.
-KNOWN_NOTIFY_CHANNELS = {"dashboard", "email", "slack"}
+KNOWN_NOTIFY_CHANNELS = {"dashboard", "email", "slack", "teams"}
 
 # Same Resend template used by backend-api's send_alert_email
 # (services/backend-api/src/services/email_service.py) — sharing the env var
@@ -670,11 +670,11 @@ def _execute_notify(
     db: Session,
 ) -> Dict:
     """
-    Create in-app / email / Slack notifications for the configured recipients.
+    Create in-app / email / Slack / Teams notifications for the configured recipients.
 
     recipients: "assignee" | "admins" | "owner" | "user:{id}"
     channels:   any non-empty subset of KNOWN_NOTIFY_CHANNELS =
-                {"dashboard", "email", "slack"}.
+                {"dashboard", "email", "slack", "teams"}.
 
     "dashboard" and "email" are per-recipient (one Notification / email per
     resolved user id). "slack" is org-wide: it posts once per rule firing to
@@ -810,6 +810,43 @@ def _execute_notify(
                 )
                 channel_errors.append(f"slack: integration {integration.id}: {exc}")
 
+    # Teams is org-wide and fires once per rule firing, mirroring the slack
+    # block above and the backend engine's teams block.
+    teams_sent = 0
+    if "teams" in channels:
+        integrations = (
+            db.query(Integration)
+            .filter(
+                Integration.organization_id == org_id,
+                Integration.type == "teams",
+                Integration.is_active.is_(True),
+            )
+            .all()
+        )
+        if not integrations:
+            channel_errors.append("teams: no active Teams integration configured")
+
+        title = f"Automation: {rule.name}"
+        for integration in integrations:
+            webhook_url = (integration.config or {}).get("webhook_url")
+            if not webhook_url:
+                channel_errors.append(
+                    f"teams: integration {integration.id} has no webhook_url"
+                )
+                continue
+
+            try:
+                send_teams_message_webhook(
+                    webhook_url=webhook_url, title=title, text=message_template
+                )
+                teams_sent += 1
+            except Exception as exc:
+                logger.warning(
+                    "automation_feedback_trigger: teams notify failed for integration %s: %s",
+                    integration.id, exc,
+                )
+                channel_errors.append(f"teams: integration {integration.id}: {exc}")
+
     # Loudness: any channel string outside the known set is a silent drop
     # unless we log and record it here.
     for ch in channels:
@@ -822,7 +859,11 @@ def _execute_notify(
 
     return {
         "type": "send_notification",
-        "result": {"notifications_created": created_count, "slack_sent": slack_sent},
+        "result": {
+            "notifications_created": created_count,
+            "slack_sent": slack_sent,
+            "teams_sent": teams_sent,
+        },
         "error": "; ".join(channel_errors) if channel_errors else None,
     }
 
