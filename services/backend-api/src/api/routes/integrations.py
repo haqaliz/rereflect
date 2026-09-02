@@ -396,6 +396,44 @@ def send_discord_message(
         return {"success": False, "error": str(e)}
 
 
+# Teams MessageCard accent — Microsoft's "Communication" brand colour, kept as
+# the card's themeColor so Teams renders alerts with Rereflect's accent.
+TEAMS_THEME_COLOR = "6264A7"
+
+
+def build_teams_message_card(title, text, summary=None):
+    """Build a Microsoft MessageCard payload for a Teams webhook."""
+    return {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "summary": summary or title,
+        "title": title,
+        "text": text,
+        "themeColor": TEAMS_THEME_COLOR,
+    }
+
+
+def send_teams_message(webhook_url, title, text, summary=None) -> dict:
+    """Send a MessageCard to a Teams webhook.
+
+    CONTRACT: returns {"success": bool, ...} and NEVER raises — mirroring
+    `send_discord_message`. The worker's future sender must not swap these
+    semantics either: call sites that count a send as delivered whenever the
+    call does not raise would make every failure look like a success.
+    """
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.post(
+                webhook_url,
+                json=build_teams_message_card(title, text, summary=summary),
+            )
+            response.raise_for_status()
+            return {"success": True, "response": response.text}
+    except httpx.HTTPError as e:
+        logger.error(f"Teams webhook failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
 def send_slack_message(webhook_url: str, blocks: list, text: str = "Rereflect Alert") -> dict:
     """Send a message to Slack via webhook."""
     try:
@@ -524,6 +562,54 @@ def create_discord_webhook(
     db.refresh(integration)
 
     logger.info(f"Created Discord integration {integration.id} for org {current_org.id}")
+
+    return integration_to_response(integration)
+
+
+@router.post("/teams/webhook", response_model=IntegrationResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_or_owner)])
+def create_teams_webhook(
+    data: TeamsWebhookCreateRequest,
+    current_org: Organization = Depends(get_current_org),
+    db: Session = Depends(get_db)
+):
+    """Create a new Teams webhook integration.
+
+    Webhook-only by design, like Discord: the Teams webhook URL carries its
+    own credential, so there is no OAuth flow to mirror from the Slack routes.
+    """
+    from datetime import time
+
+    digest_time_obj = None
+    if data.digest_time:
+        try:
+            hours, minutes = map(int, data.digest_time.split(':'))
+            digest_time_obj = time(hours, minutes)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid digest_time format. Use HH:MM (e.g., 09:00)"
+            )
+
+    integration = Integration(
+        organization_id=current_org.id,
+        type="teams",
+        name=data.name,
+        config={
+            "webhook_url": data.webhook_url,
+            "integration_type": "webhook"
+        },
+        triggers=data.triggers,
+        included_fields=data.included_fields,
+        digest_time=digest_time_obj,
+        message_template=data.message_template,
+        is_active=True,
+    )
+
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+
+    logger.info(f"Created Teams integration {integration.id} for org {current_org.id}")
 
     return integration_to_response(integration)
 
