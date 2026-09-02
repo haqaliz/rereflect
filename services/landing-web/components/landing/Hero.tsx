@@ -1,143 +1,149 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useRef } from 'react';
+import { ArrowRight, Github } from 'lucide-react';
 import { gsap, useGSAP } from '@/lib/landing/gsap';
-import { galaxyState } from '@/lib/landing/scrollState';
-import Galaxy from './Galaxy';
+import { EASE, countUp } from '@/lib/landing/motion';
 
-const HEADLINE = {
-  plain: ['Your', 'customers', 'are'],
-  gradient: ['already', 'telling', 'you'],
-  rest: ['what', 'to', 'build.'],
-};
+const GITHUB_URL = 'https://github.com/haqaliz/rereflect';
+const SELFHOST_URL = 'https://github.com/haqaliz/rereflect#self-hosting';
 
-function SignalTicker() {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setN((v) => v + 1 + Math.floor(Math.random() * 4)), 2200);
-    return () => clearInterval(id);
-  }, []);
-  return <span className="lp-ticker">live · +{n} signals this session</span>;
-}
+/** The specimen record shown in FIG. 01 — one feedback item, fully classified. */
+const RECORD = [
+  ['source', 'intercom', ''],
+  ['customer', 'maya.chen@acme.io', ''],
+  ['sentiment', 'negative · −0.82', 'is-red'],
+  ['pain_point', 'billing · conf 0.94', 'is-amber'],
+  ['feature_req', 'invoice_export', 'is-accent'],
+  ['churn_risk', 'high · 92%', 'is-red'],
+  ['playbook', 'save_the_customer', 'is-accent'],
+] as const;
+
+const SPECS = [
+  { label: 'License', value: 'MIT', note: 'Fork it, ship it, sell it.', count: null },
+  { label: 'Feature gates', value: 0, note: 'No tiers, no seats, no SSO tax.', count: 0 },
+  { label: 'Integrations', value: 10, note: 'Slack, Intercom, Zendesk, Jira…', count: 10 },
+  { label: 'Data leaving your box', value: 'NONE', note: 'VADER runs fully offline.', count: null },
+];
 
 export default function Hero() {
   const sectionRef = useRef<HTMLElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
 
   useGSAP(
     () => {
-      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
-      tl.to(galaxyState, { intro: 1, duration: 1.8 }, 0).fromTo(
-        '[data-hero]',
-        { y: 28, autoAlpha: 0, filter: 'blur(10px)' },
-        { y: 0, autoAlpha: 1, filter: 'blur(0px)', duration: 1, stagger: 0.05 },
-        0.1,
-      );
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      gsap.to(contentRef.current, {
-        y: -90,
-        autoAlpha: 0,
-        ease: 'none',
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: 'top top',
-          end: '72% top',
-          scrub: 1,
-        },
-      });
+      if (!reduced) {
+        gsap
+          .timeline({ defaults: { ease: EASE } })
+          .fromTo(
+            '[data-hero]',
+            { y: 12, autoAlpha: 0 },
+            { y: 0, autoAlpha: 1, duration: 0.8, stagger: 0.06 },
+            0,
+          )
+          .fromTo(
+            '[data-hero-panel]',
+            { y: 16, autoAlpha: 0 },
+            { y: 0, autoAlpha: 1, duration: 0.9 },
+            0.24,
+          )
+          .fromTo(
+            '.lp-kv dd',
+            { autoAlpha: 0, x: -6 },
+            { autoAlpha: 1, x: 0, duration: 0.4, stagger: 0.07 },
+            0.55,
+          );
+      }
 
-      gsap.to(galaxyState, {
-        t: 1,
-        ease: 'none',
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: 'top top',
-          end: 'bottom top',
-          scrub: 1.2,
-        },
+      gsap.utils.toArray<HTMLElement>('[data-count]').forEach((el) => {
+        countUp(el, Number(el.dataset.count));
       });
     },
     { scope: sectionRef },
   );
 
   return (
-    <section ref={sectionRef} className="relative h-[100svh] min-h-[620px] overflow-hidden">
-      <div className="lp-hero-glow absolute inset-0" />
-      <Galaxy />
+    <section ref={sectionRef} className="lp-hero">
+      <div className="lp-hero-mesh" aria-hidden="true" />
 
-      <div className="lp-hero-rings" aria-hidden="true">
-        <div className="lp-hero-ring lp-hero-ring--3" />
-        <div className="lp-hero-ring lp-hero-ring--1" />
-        <div className="lp-hero-ring lp-hero-ring--2" />
+      <div className="lp-hero-body lp-grid">
+        <div className="col-span-12 lg:col-span-7">
+          <span data-hero className="lp-fig lp-fig--accent">
+            Fig. 01 — Feedback analysis pipeline
+          </span>
+
+          <h1 data-hero className="lp-display-1 lp-hero-title">
+            Your customers are already telling you <span className="lp-accent">what to build</span>.
+          </h1>
+
+          <p data-hero className="lp-lede mt-7">
+            Rereflect reads every review, ticket and chat you receive and returns structured
+            signal: sentiment, pain points, ranked feature requests and churn risk. Self-hosted,
+            MIT licensed, every feature unlocked.
+          </p>
+
+          <div data-hero className="lp-hero-actions">
+            <a
+              href={SELFHOST_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="lp-btn lp-btn-primary"
+            >
+              Self-host guide
+              <ArrowRight className="h-3.5 w-3.5" />
+            </a>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="lp-btn lp-btn-ghost"
+            >
+              <Github className="h-3.5 w-3.5" />
+              View source
+            </a>
+          </div>
+        </div>
+
+        <div data-hero-panel className="col-span-12 mt-4 lg:col-span-5 lg:mt-0">
+          <div className="lp-panel">
+            <div className="lp-panel-bar">
+              <span className="lp-dot" />
+              <span className="lp-mono-10">analysis · 48,213</span>
+              <span className="lp-mono-10 ml-auto">0.4s</span>
+            </div>
+            <div className="lp-panel-body">
+              <p className="lp-quote">
+                “The new billing page is confusing — I was charged twice and couldn&rsquo;t find my
+                invoices anywhere. If this happens again next month we&rsquo;re switching.”
+              </p>
+              <dl className="lp-kv">
+                {RECORD.map(([k, v, tone]) => (
+                  <div key={k} className="contents">
+                    <dt>{k}</dt>
+                    <dd className={tone}>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="relative z-10 mx-auto flex h-full max-w-5xl flex-col items-center justify-center px-6 text-center">
-        <span data-hero className="lp-eyebrow">
-          <span className="dot" />
-          AI-powered feedback analysis · free & self-hosted
-        </span>
-
-        <h1 data-hero className="lp-hero-title font-display mt-8" aria-label="Your customers are already telling you what to build.">
-          <span className="block">
-            {HEADLINE.plain.map((w) => (
-              <span key={w} className="lp-word">
-                {w}{' '}
-              </span>
-            ))}
-          </span>
-          <span className="block">
-            {HEADLINE.gradient.map((w) => (
-              <span key={w} className="lp-word lp-gradient-text">
-                {w}{' '}
-              </span>
-            ))}
-          </span>
-          <span className="block">
-            {HEADLINE.rest.map((w) => (
-              <span key={w} className="lp-word">
-                {w}{' '}
-              </span>
-            ))}
-          </span>
-        </h1>
-
-        <p data-hero className="lp-hero-sub mt-7">
-          Rereflect reads every review, chat, and support ticket — then shows you the
-          sentiment, the pain points, and the features people actually want. Before a
-          problem becomes a churn.
-        </p>
-
-        <div data-hero className="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <Link href="/integrations" className="lp-btn lp-btn-primary">
-            Browse integrations
-          </Link>
-          <Link href="/blog" className="lp-btn lp-btn-ghost">
-            Read the blog
-          </Link>
-        </div>
-
-        <div data-hero className="lp-legend mt-12">
-          <span className="lp-legend-item">
-            <span className="lp-legend-dot lp-legend-dot--coral" /> positive
-          </span>
-          <span className="lp-legend-item">
-            <span className="lp-legend-dot lp-legend-dot--amber" /> neutral
-          </span>
-          <span className="lp-legend-item">
-            <span className="lp-legend-dot lp-legend-dot--red" /> at risk
-          </span>
-          <span className="hidden text-white/30 sm:inline">·</span>
-          <span className="hidden sm:inline">each dot is a piece of feedback</span>
-        </div>
-
-        <div data-hero className="mt-5">
-          <SignalTicker />
-        </div>
-
-        <div data-hero className="lp-scroll-cue">
-          Scroll
-        </div>
+      <div className="lp-spec">
+        {SPECS.map((spec) => (
+          <div key={spec.label} className="lp-spec-cell">
+            <span className="lp-label">{spec.label}</span>
+            <span className="lp-spec-value">
+              {spec.count === null ? (
+                spec.value
+              ) : (
+                <span data-count={spec.count}>0</span>
+              )}
+            </span>
+            <span className="lp-spec-note">{spec.note}</span>
+          </div>
+        ))}
       </div>
     </section>
   );

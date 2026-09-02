@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import Nav from '@/components/landing/Nav';
 import Hero from '@/components/landing/Hero';
-import LiveClassification from '@/components/landing/LiveClassification';
+import Pipeline from '@/components/landing/Pipeline';
+import Comparison from '@/components/landing/Comparison';
+import Console from '@/components/landing/Console';
 import Features from '@/components/landing/Features';
 import FAQ from '@/components/landing/FAQ';
 import CTA from '@/components/landing/CTA';
@@ -27,13 +29,14 @@ export default function Home() {
       <Nav />
       <main>
         <Hero />
-        <LiveClassification />
+        <Pipeline />
+        <Comparison />
         <Features />
+        <Console />
         <FAQ />
         <CTA />
       </main>
       <Footer />
-      <div className="lp-noise" aria-hidden="true" />
     </>
   );
 }

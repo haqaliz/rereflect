@@ -12,7 +12,8 @@ import { SalesforceIcon } from '@/components/icons/SalesforceIcon';
 import { JiraIcon } from '@/components/icons/JiraIcon';
 import { AsanaIcon } from '@/components/icons/AsanaIcon';
 import { getAvailableIntegrations, getComingSoonIntegrations } from '@/lib/integrations';
-import { gsap, useGSAP } from '@/lib/landing/gsap';
+import { useGSAP } from '@/lib/landing/gsap';
+import { revealOnScroll, revealGroup } from '@/lib/landing/motion';
 import Nav from '@/components/landing/Nav';
 import Footer from '@/components/landing/Footer';
 import PageHero from '@/components/landing/PageHero';
@@ -40,19 +41,8 @@ export default function IntegrationsPage() {
 
   useGSAP(
     () => {
-      gsap.fromTo(
-        '.lp-tile',
-        { y: 40, autoAlpha: 0 },
-        {
-          y: 0,
-          autoAlpha: 1,
-          duration: 0.8,
-          stagger: 0.08,
-          ease: 'power3.out',
-          immediateRender: false,
-          scrollTrigger: { trigger: '.lp-tile-grid', start: 'top 88%', toggleActions: 'play none none reverse' },
-        },
-      );
+      revealOnScroll();
+      revealGroup('.lp-tile', '.lp-tile-grid', 0.04);
     },
     { scope: containerRef },
   );
@@ -71,8 +61,8 @@ export default function IntegrationsPage() {
 
           <div className="lp-section-block">
             <div className="lp-section-head">
-              <span className="lp-section-eyebrow">Available now</span>
-              <h2 className="lp-section-title font-display">Ready to connect today.</h2>
+              <span data-reveal className="lp-fig">Fig. 01 — Available now</span>
+              <h2 data-reveal className="lp-display-2 mt-6 text-raise">Ready to connect today.</h2>
             </div>
             <div className="lp-tile-grid">
               {availableIntegrations.map((integration) => (
@@ -88,8 +78,8 @@ export default function IntegrationsPage() {
           {comingSoonIntegrations.length > 0 && (
             <div className="lp-section-block">
               <div className="lp-section-head">
-                <span className="lp-section-eyebrow">Coming soon</span>
-                <h2 className="lp-section-title font-display">More integrations on the way.</h2>
+                <span data-reveal className="lp-fig">Fig. 02 — Coming soon</span>
+                <h2 data-reveal className="lp-display-2 mt-6 text-raise">More integrations on the way.</h2>
               </div>
               <div className="lp-tile-grid">
                 {comingSoonIntegrations.map((integration) => (

@@ -22,9 +22,9 @@ export default function LegalPage({ title, updated, sections }: LegalPageProps) 
       <main>
         <div className="lp-page">
           <div className="lp-page-hero">
-            <span className="lp-section-eyebrow">Legal</span>
-            <h1 className="lp-page-hero-title font-display">{title}</h1>
-            <p className="lp-page-hero-sub">Last updated: {updated}</p>
+            <span className="lp-fig">Legal</span>
+            <h1 className="lp-display-1 lp-page-hero-title">{title}</h1>
+            <p className="lp-lede lp-page-hero-sub">Last updated: {updated}</p>
           </div>
 
           <article className="lp-prose">
@@ -46,7 +46,7 @@ export default function LegalPage({ title, updated, sections }: LegalPageProps) 
 
             <div className="pt-6">
               <Link href="/" className="lp-back-link">
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-3.5 w-3.5" />
                 Back to home
               </Link>
             </div>

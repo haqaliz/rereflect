@@ -726,6 +726,46 @@ was left by a branch that shipped the fix and did not update the row.
 
 ---
 
+## Landing site
+
+### `landing-schematic-redesign` — **SHIPPED** (2026-09-03)
+> Freeform design work, not a backlog item. The landing site was rebuilt on a new
+> visual system modelled on oxide.computer: a ruled 12-column grid, hairline-divided
+> cells instead of cards, monospace uppercase figure captions, 2px radii and
+> light-weight display type. The coral/amber palette is unchanged — only its
+> application inverted, from gradient fills and glow to surgical accents on hairlines,
+> labels, state dots and meter fills.
+>
+> `app/landing.css` was rewritten as a token system (`--surface-*`, `--content-*`,
+> `--stroke-*`, `lp-display-*`, `lp-mono-*`, `lp-band`, `lp-cell`, `lp-fig`,
+> `lp-panel`, `lp-table`, `lp-kv`, `lp-meter`). Three new sections: `Pipeline.tsx`
+> (processing stages), `Comparison.tsx` (prior art) and `Console.tsx` (the feedback
+> table drawn as real UI). Motion moved into `lib/landing/motion.ts` — short
+> expo-eased reveals, self-drawing hairlines, flat fills, tabular count-ups, all
+> no-ops under `prefers-reduced-motion`.
+>
+> **Deleted:** `Galaxy.tsx`, `GalaxyScene.tsx`, `LandingSmoothScroll.tsx`,
+> `LiveClassification.tsx` (the 280vh pinned scrub), `lib/landing/lenis.ts` and
+> `lib/landing/scrollState.ts`. **Dependencies dropped:** `three`,
+> `@react-three/fiber`, `@react-three/drei`, `@react-three/postprocessing`,
+> `postprocessing`, `lenis`. Fonts moved to Geist / Geist Mono, overridden in
+> landing-web's own `tailwind.config.ts` so the shared `@rereflect/ui` config used by
+> the dashboard is untouched.
+>
+> Subpages carried across: integrations index + 10 detail pages, blog index + post,
+> privacy, terms. Backend, worker and dashboard untouched.
+>
+> Verified: 27/27 landing tests passed, `tsc` clean, production build exported 60
+> static pages, output rendered and checked in Chromium at 1440px and 390px.
+> Merged as `<merge-sha>` on 2026-09-03.
+
+> **Caveat carried forward:** `services/landing-web` still has **no ESLint config and
+> is not in CI** (`.github/workflows/ci.yml` covers backend, worker and
+> `frontend-web` only). Its 27 tests only run when someone runs them locally, so this
+> suite can rot silently. Wiring landing-web into CI is an open chore.
+
+---
+
 ## Phase 1: MVP SaaS (Months 1-3)
 
 ### Authentication & Multi-tenancy - COMPLETE
