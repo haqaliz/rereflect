@@ -58,8 +58,8 @@ export default async function BlogPostPage({
       <main>
         <div className="lp-page">
           <div className="lp-post-header">
-            <span className="lp-section-eyebrow">Blog</span>
-            <h1 className="lp-page-hero-title font-display">{post.title}</h1>
+            <span className="lp-fig">Article</span>
+            <h1 className="lp-display-1 lp-page-hero-title">{post.title}</h1>
             <div className="lp-post-meta-row">
               <span className="lp-meta">
                 <Calendar className="h-3.5 w-3.5" />
@@ -125,7 +125,7 @@ export default async function BlogPostPage({
 
             <div className="pt-4">
               <Link href="/blog" className="lp-back-link">
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-3.5 w-3.5" />
                 All articles
               </Link>
             </div>
@@ -134,8 +134,8 @@ export default async function BlogPostPage({
           {relatedPosts.length > 0 && (
             <div className="lp-section-block">
               <div className="lp-section-head">
-                <span className="lp-section-eyebrow">Keep reading</span>
-                <h2 className="lp-section-title font-display">Related articles.</h2>
+                <span className="lp-fig">Keep reading</span>
+                <h2 className="lp-display-2 mt-6 text-raise">Related articles.</h2>
               </div>
               <div className="lp-tile-grid">
                 {relatedPosts.map((related) => (

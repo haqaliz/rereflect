@@ -22,7 +22,7 @@ export default function IntegrationTile({
       <p className="lp-tile-tagline">{integration.tagline}</p>
       <span className="lp-tile-link">
         {comingSoon ? 'Request on GitHub' : 'Learn more'}
-        <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
+        <ArrowRight className="h-3 w-3" />
       </span>
     </>
   );

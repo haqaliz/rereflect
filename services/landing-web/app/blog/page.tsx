@@ -65,7 +65,7 @@ export default function BlogPage() {
                     </div>
                     <span className="lp-tile-link">
                       Read article
-                      <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
+                      <ArrowRight className="h-3 w-3" />
                     </span>
                   </Link>
                 ))}

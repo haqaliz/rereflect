@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 const faqs = [
   {
@@ -60,44 +60,45 @@ export default function FAQ() {
   const toggle = (i: number) => setOpenIndex(openIndex === i ? null : i);
 
   return (
-    <section data-testid="faq-section" className="lp-faq">
-      <div className="mx-auto max-w-3xl px-6">
-        <div className="mb-12 text-center">
-          <span className="lp-section-eyebrow">FAQ</span>
-          <h2 className="lp-faq-title font-display mt-4">Questions, answered.</h2>
-        </div>
+    <section data-testid="faq-section" className="lp-band">
+      <div className="lp-section-head">
+        <span className="lp-fig">Fig. 07 — Common questions</span>
+        <h2 className="lp-display-2 mt-6 max-w-[18ch] text-raise">Questions, answered.</h2>
+      </div>
 
-        <div className="lp-faq-list">
-          {faqs.map((faq, i) => {
-            const isOpen = openIndex === i;
-            return (
-              <div key={i} className={`lp-faq-item${isOpen ? ' lp-faq-item--open' : ''}`}>
-                <button
-                  data-testid={`faq-question-${i}`}
-                  onClick={() => toggle(i)}
-                  aria-expanded={isOpen}
-                  aria-controls={`faq-answer-${i}`}
-                  className="lp-faq-q"
-                >
+      <div className="lp-faq-list">
+        {faqs.map((faq, i) => {
+          const isOpen = openIndex === i;
+          return (
+            <div key={i} className={`lp-faq-item${isOpen ? ' lp-faq-item--open' : ''}`}>
+              <button
+                data-testid={`faq-question-${i}`}
+                onClick={() => toggle(i)}
+                aria-expanded={isOpen}
+                aria-controls={`faq-answer-${i}`}
+                className="lp-faq-q"
+              >
+                <span className="flex items-baseline">
+                  <span className="lp-faq-index">{String(i + 1).padStart(2, '0')}</span>
                   <span>{faq.q}</span>
-                  <ChevronDown
-                    className="h-4 w-4 shrink-0 transition-transform duration-300"
-                    style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                  />
-                </button>
-                <div
-                  data-testid={`faq-answer-${i}`}
-                  id={`faq-answer-${i}`}
-                  data-state={isOpen ? 'open' : 'closed'}
-                  hidden={!isOpen}
-                  className="lp-faq-a"
-                >
-                  {faq.a}
-                </div>
+                </span>
+                <Plus
+                  className="h-3.5 w-3.5 shrink-0 text-[var(--content-tertiary)] transition-transform duration-300"
+                  style={{ transform: isOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
+                />
+              </button>
+              <div
+                data-testid={`faq-answer-${i}`}
+                id={`faq-answer-${i}`}
+                data-state={isOpen ? 'open' : 'closed'}
+                hidden={!isOpen}
+                className="lp-faq-a"
+              >
+                {faq.a}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

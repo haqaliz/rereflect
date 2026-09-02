@@ -1,32 +1,21 @@
 import type { Metadata } from "next";
-import { Montserrat, Merriweather, Ubuntu_Mono, Inter_Tight } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./landing.css";
-import LandingSmoothScroll from "@/components/landing/LandingSmoothScroll";
 
-const montserrat = Montserrat({
+// Geist / Geist Mono are the closest freely-licensed analogues to the
+// neo-grotesque + technical-mono pairing the schematic layout is built on.
+const geist = Geist({
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600"],
   variable: "--font-sans",
   display: "swap",
 });
 
-const merriweather = Merriweather({
+const geistMono = Geist_Mono({
   subsets: ["latin"],
-  weight: ["300", "400", "700", "900"],
-  variable: "--font-serif",
-  display: "swap",
-});
-
-const ubuntuMono = Ubuntu_Mono({
-  subsets: ["latin"],
-  weight: ["400", "700"],
+  weight: ["400", "500"],
   variable: "--font-mono",
-  display: "swap",
-});
-
-const interTight = Inter_Tight({
-  subsets: ["latin"],
-  variable: "--font-display",
   display: "swap",
 });
 
@@ -92,10 +81,8 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className={`${montserrat.variable} ${merriweather.variable} ${ubuntuMono.variable} ${interTight.variable} antialiased font-sans`}>
-        <LandingSmoothScroll>
-          <div className="landing-dark min-h-screen">{children}</div>
-        </LandingSmoothScroll>
+      <body className={`${geist.variable} ${geistMono.variable} antialiased font-sans`}>
+        <div className="landing-dark min-h-screen">{children}</div>
       </body>
     </html>
   );
