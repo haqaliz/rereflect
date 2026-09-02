@@ -24,6 +24,10 @@ describe('playbook action types — tag / notify / tasks / trigger-automation', 
       target: '#ops',
       message: 'High-risk customer detected',
     };
+    const teamsNotifyConfig: NotifyActionConfig = {
+      channel: 'teams',
+      message: 'High-risk customer detected',
+    };
     const tagConfig: TagActionConfig = { tag: 'at-risk' };
     const createTaskConfig: TaskActionConfig = {
       description: 'Call the customer',
@@ -40,6 +44,7 @@ describe('playbook action types — tag / notify / tasks / trigger-automation', 
 
     const actions: PlaybookAction[] = [
       { type: 'notify', config: notifyConfig },
+      { type: 'notify', config: teamsNotifyConfig },
       { type: 'tag', config: tagConfig },
       { type: 'create_task', config: createTaskConfig },
       { type: 'schedule_task', config: scheduleTaskConfig },

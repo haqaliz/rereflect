@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 
 const mockCreatePlaybook = vi.fn();
@@ -23,9 +24,17 @@ vi.mock('@/lib/api/playbooks', () => ({
     send_notification: 'Send Notification',
     draft_response: 'Draft AI Response',
     send_email: 'Send Email',
+    notify: 'Notify',
   },
   SEND_EMAIL_RECIPIENTS: ['customer', 'cs_assignee'],
   SEND_EMAIL_RECIPIENT_LABELS: { customer: 'Customer', cs_assignee: 'CS Assignee' },
+}));
+
+vi.mock('@/lib/api/automations', () => ({
+  automationsAPI: {
+    list: vi.fn().mockResolvedValue({ rules: [], count: 0, limit: 5 }),
+  },
+  TRIGGER_TYPE_LABELS: {},
 }));
 
 vi.mock('@/lib/api/outreach', () => ({
@@ -161,5 +170,58 @@ describe('PlaybookEditor', () => {
     expect(screen.getByLabelText(/name/i)).toBeDisabled();
     expect(screen.getByLabelText(/description/i)).toBeDisabled();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('PlaybookEditor — notify channel select', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders "Teams" as a notify-channel option', async () => {
+    const user = userEvent.setup();
+    render(<PlaybookEditor onSave={mockCreatePlaybook} onCancel={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', { name: /add action/i }));
+    await user.click(screen.getByRole('combobox', { name: /action type/i }));
+    await user.click(await screen.findByText('Notify'));
+
+    await user.click(screen.getByRole('combobox', { name: /notify channel/i }));
+    expect(await screen.findByText('Teams')).toBeInTheDocument();
+  });
+
+  it('saves channel: "teams" when Teams is selected', async () => {
+    const user = userEvent.setup();
+    mockCreatePlaybook.mockResolvedValue({ id: 99 });
+    render(<PlaybookEditor onSave={mockCreatePlaybook} onCancel={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/name/i), 'My Playbook');
+
+    await user.click(screen.getByRole('button', { name: /add action/i }));
+    await user.click(screen.getByRole('combobox', { name: /action type/i }));
+    await user.click(await screen.findByText('Notify'));
+
+    await user.click(screen.getByRole('combobox', { name: /notify channel/i }));
+    await user.click(await screen.findByText('Teams'));
+
+    await user.type(
+      screen.getByRole('textbox', { name: /notify message/i }),
+      'Customer at risk.'
+    );
+
+    await user.click(screen.getByRole('button', { name: /save playbook/i }));
+
+    await waitFor(() => {
+      expect(mockCreatePlaybook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action_sequence: [
+            expect.objectContaining({
+              type: 'notify',
+              config: expect.objectContaining({ channel: 'teams' }),
+            }),
+          ],
+        })
+      );
+    });
   });
 });
