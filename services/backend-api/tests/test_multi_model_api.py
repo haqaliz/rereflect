@@ -317,6 +317,20 @@ def llm_usage_logs(db: Session, test_organization: Organization):
     """Create sample usage logs for current month."""
     from src.models.llm_usage_log import LLMUsageLog
     now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # The /settings/ai/usage endpoints aggregate the *current calendar month*,
+    # so every row here has to sit inside it. A naive `now - 2 days` crosses the
+    # month edge whenever the suite runs on the 1st or 2nd, dropping a row out
+    # of the summary and failing TestUsageSummary two days a month. When there
+    # is no room to reach two days back, spread the rows across month-to-date
+    # instead, preserving their oldest -> newest order.
+    if now - timedelta(days=2) >= month_start:
+        ts_old, ts_mid, ts_new = (now - timedelta(days=d) for d in (2, 1, 0))
+    else:
+        step = (now - month_start) / 3
+        ts_old, ts_mid, ts_new = (month_start + step * i for i in (0, 1, 2))
+
     logs = [
         LLMUsageLog(
             organization_id=test_organization.id,
@@ -329,7 +343,7 @@ def llm_usage_logs(db: Session, test_organization: Organization):
             estimated_cost_cents=0.5,
             latency_ms=300,
             was_fallback=False,
-            created_at=now - timedelta(days=2),
+            created_at=ts_old,
         ),
         LLMUsageLog(
             organization_id=test_organization.id,
@@ -343,7 +357,7 @@ def llm_usage_logs(db: Session, test_organization: Organization):
             latency_ms=450,
             was_fallback=True,
             fallback_reason="rate_limit",
-            created_at=now - timedelta(days=1),
+            created_at=ts_mid,
         ),
         LLMUsageLog(
             organization_id=test_organization.id,
@@ -356,7 +370,7 @@ def llm_usage_logs(db: Session, test_organization: Organization):
             estimated_cost_cents=2.0,
             latency_ms=600,
             was_fallback=False,
-            created_at=now,
+            created_at=ts_new,
         ),
     ]
     for log in logs:
