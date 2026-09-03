@@ -759,7 +759,7 @@ was left by a branch that shipped the fix and did not update the row.
 > static pages, output rendered and checked in Chromium at 1440px and 390px.
 > Merged as `7e09ec8e` (PR #27) on 2026-09-03.
 
-### `usage-summary-tests-month-boundary` — **OPEN** (found 2026-09-02)
+### `usage-summary-tests-month-boundary` — **FIXED** on `bug/usage-summary-month-boundary` (found 2026-09-02)
 > **Two backend tests fail on the 1st and 2nd of every month**, and master is red
 > because of it right now (run `33687183095`, a docs-only commit — so it is provably
 > not caused by any code change).
@@ -775,10 +775,23 @@ was left by a branch that shipped the fix and did not update the row.
 > month and drops out of the summary — which is exactly the two deltas observed
 > (1130 − 150 = 980; openai 2 − 1 = 1).
 >
-> **Fix:** pin the fixture inside the current month (e.g. clamp the offsets so all
-> three rows land on or after the 1st), rather than relaxing the assertions — the
-> endpoint's month-scoping is correct and worth keeping under test. Self-clearing
-> from the 3rd of each month, which is why it has gone unnoticed.
+> **Fixed in the fixture, not the assertions** — the endpoint's month-scoping is
+> correct behaviour and worth keeping under test. The rows keep their `now / -1d /
+> -2d` spacing whenever it fits inside the month, and otherwise fan out across
+> month-to-date, preserving oldest -> newest order and staying within
+> `[month_start, now]`.
+>
+> Verified by simulating the fixture against the endpoint's month filter for every
+> hour of a year: the old form failed 576 hours (24 days — the 1st and 2nd of each
+> month), the new form fails 0 of 8760, with ordering and in-window invariants
+> asserted at every step. Note this is **self-clearing from the 3rd**, which is both
+> why it went unnoticed and why a green CI run on the fix PR does not by itself
+> prove the fix — the simulation covers the two days a month CI cannot reach.
+>
+> **Also worth knowing:** `services/backend-api/venv` in the primary checkout is a
+> stale **Python 3.9.6** Xcode-shim venv while the project requires 3.12, so the
+> backend suite cannot be run there without rebuilding it (`python3.12 -m venv`).
+> Same class of trap as the worker venv.
 
 > **Caveat carried forward:** `services/landing-web` still has **no ESLint config and
 > is not in CI** (`.github/workflows/ci.yml` covers backend, worker and
