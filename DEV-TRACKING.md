@@ -759,7 +759,7 @@ was left by a branch that shipped the fix and did not update the row.
 > static pages, output rendered and checked in Chromium at 1440px and 390px.
 > Merged as `7e09ec8e` (PR #27) on 2026-09-03.
 
-### `usage-summary-tests-month-boundary` — **FIXED** on `bug/usage-summary-month-boundary` (found 2026-09-02)
+### `usage-summary-tests-month-boundary` — **FIXED**, merged `cd310e20` (PR #28, 2026-09-03)
 > **Two backend tests fail on the 1st and 2nd of every month**, and master is red
 > because of it right now (run `33687183095`, a docs-only commit — so it is provably
 > not caused by any code change).
