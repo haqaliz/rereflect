@@ -757,7 +757,28 @@ was left by a branch that shipped the fix and did not update the row.
 >
 > Verified: 27/27 landing tests passed, `tsc` clean, production build exported 60
 > static pages, output rendered and checked in Chromium at 1440px and 390px.
-> Merged as `<merge-sha>` on 2026-09-03.
+> Merged as `7e09ec8e` (PR #27) on 2026-09-03.
+
+### `usage-summary-tests-month-boundary` — **OPEN** (found 2026-09-02)
+> **Two backend tests fail on the 1st and 2nd of every month**, and master is red
+> because of it right now (run `33687183095`, a docs-only commit — so it is provably
+> not caused by any code change).
+>
+> `tests/test_multi_model_api.py::TestUsageSummary::test_aggregates_tokens_correctly`
+> (`assert 980 == 1130`) and `::test_by_provider_breakdown` (`assert 1 == 2`).
+>
+> **Cause:** the `llm_usage_logs` fixture
+> (`services/backend-api/tests/test_multi_model_api.py:316`) creates three logs at
+> `now`, `now - 1 day` and `now - 2 days`, but `GET /api/v1/settings/ai/usage`
+> aggregates **the current calendar month**. Whenever the run happens on the 1st or
+> 2nd, the `now - 2 days` log (150 tokens, provider `openai`) falls into the previous
+> month and drops out of the summary — which is exactly the two deltas observed
+> (1130 − 150 = 980; openai 2 − 1 = 1).
+>
+> **Fix:** pin the fixture inside the current month (e.g. clamp the offsets so all
+> three rows land on or after the 1st), rather than relaxing the assertions — the
+> endpoint's month-scoping is correct and worth keeping under test. Self-clearing
+> from the 3rd of each month, which is why it has gone unnoticed.
 
 > **Caveat carried forward:** `services/landing-web` still has **no ESLint config and
 > is not in CI** (`.github/workflows/ci.yml` covers backend, worker and
