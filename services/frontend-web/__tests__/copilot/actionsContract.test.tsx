@@ -12,6 +12,12 @@
 // start failing loudly (i.e. `it.fails` itself reports a failure) the moment
 // the frontend-actions-ui aspect lands; that failure is the signal to flip
 // this back to a normal `it`.
+//
+// Note on `it.fails`: it accepts ANY throw from the test body, including a
+// render() crash unrelated to actions rendering at all — a weaker signal
+// than a named assertion failure under a normal `it`. Accepted for now; flip
+// to `it` (per the acceptance criteria in frontend-actions-ui/spec.md) rather
+// than trying to make the negative case more precise while it's still red.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,21 +46,37 @@ const goldenActionsItem = JSON.parse(fs.readFileSync(FIXTURE, 'utf-8'));
 
 describe('copilot actions contract (frontend)', () => {
   it.fails('renders one button per action from the golden actions item', () => {
+    // F4: the golden fixture has exactly one action, which makes "one button
+    // per action" vacuous — a renderer emitting one button per *item* (not
+    // per action) would also pass against a single-action fixture. Duplicate
+    // the action locally so the assertion actually distinguishes the two.
+    // The SHARED fixture (copilot_actions_item.json) stays single-action on
+    // purpose: the backend's contract test asserts an exact match against
+    // it, and a second action there would break that test.
+    const actions = [
+      goldenActionsItem.data.actions[0],
+      { ...goldenActionsItem.data.actions[0], action: 'tag_customers_2' },
+    ];
+    const twoActionItem = {
+      ...goldenActionsItem,
+      data: { ...goldenActionsItem.data, actions },
+    };
+
     const message: ChatMessage = {
       id: 'golden-actions',
       role: 'assistant',
       content: 'Here is what I found:',
       // New-pipeline format: structured_data is an array of {data_type, data}
-      // items. Wrap the golden fixture the same way the real pipeline would.
-      structured_data: [goldenActionsItem] as unknown as ChatMessage['structured_data'],
+      // items. Wrap the fixture the same way the real pipeline would.
+      structured_data: [twoActionItem] as unknown as ChatMessage['structured_data'],
       created_at: new Date().toISOString(),
     };
 
     render(<MessageBubble message={message} />);
 
-    const label = goldenActionsItem.data.actions[0].label as string;
+    const label = actions[0].label as string;
     const actionButtons = screen.getAllByRole('button', { name: label });
-    expect(actionButtons).toHaveLength(goldenActionsItem.data.actions.length);
+    expect(actionButtons).toHaveLength(actions.length);
   });
 
   it('renders nothing and does not throw for an unrecognised data_type', () => {
