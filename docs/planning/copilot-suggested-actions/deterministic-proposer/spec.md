@@ -52,6 +52,13 @@ that set is right there.
   change for clients.
 - Emitted output equals the golden fixture (the `action-contract` test).
 - No LLM call is made during proposal — assert via the fake-LLM fixture.
+- **The assertion crosses the seam, not just the proposer's return value:** the test must
+  check the emitted `structured_data` payload (`copilot_ws.py:631-638` / the WS frame at
+  `:775-783`), not only what the proposer function returns in isolation. A correct proposer
+  whose output `copilot_ws` never appends must fail this test.
+- **The contract test is not done while it is inverted:** remove the `xfail(strict=True)`
+  marker on `test_copilot_actions_contract.py` once the proposer is implemented — the aspect
+  is not complete while the guard test still passes by failing.
 
 ## Dependencies and sequencing
 

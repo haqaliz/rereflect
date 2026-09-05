@@ -201,12 +201,24 @@ exactly one head.
 **Open questions:**
 1. Should the execute route live under `/api/v1/copilot/...` or `/api/v1/conversations/...`?
    (Leaning copilot; `copilot.py` currently holds only `GET /usage`.)
-2. **How is M9's one-shot guard stored?** Two migration-free options: (a) derive it from
-   `AuditLog` — write `target_type="copilot_action"`, `target_id=<message id>`,
-   `details.proposal_id`, and check for a prior successful row before executing; or (b) write
-   an `executed` flag back into the item's JSON, which makes `structured_data` mutable and
-   racy under concurrent clicks. **Leaning (a)** — append-only, no mutation, and it makes the
-   audit trail the source of truth. The `details->>'proposal_id'` lookup is the cost.
+2. **How is M9's one-shot guard stored — and which `message_id` is it keyed on?** The WS
+   `message_id` (`copilot_ws.py:913`, `message.get("message_id", str(uuid.uuid4()))`) is a
+   **client-supplied streaming-turn id**, not `ConversationMessage.id`: the row id is assigned
+   at commit in step 12 (`:785-810`), *after* the structured-data frame carrying that
+   `message_id` is already emitted in step 11 (`:775-783`). It is caller-controllable — a
+   client can send any string, or omit it and get a fresh UUID every time. The golden fixture's
+   `proposal_id` (`"msg-42:tag_customers:3f9a1c"`) bakes in exactly this ambiguous id, though
+   the contract itself is unaffected since `proposal_id` is opaque there.
+   Two migration-free storage options: (a) derive the guard from `AuditLog` — write
+   `target_type="copilot_action"`, `target_id=<?>`, `details.proposal_id`, and check for a
+   prior successful row before executing; or (b) write an `executed` flag back into the item's
+   JSON, which makes `structured_data` mutable and racy under concurrent clicks. **Leaning
+   (a)**, but option (a) must NOT set `target_id` to the WS `message_id` — it references no
+   `ConversationMessage` row and is chosen by the caller, which would let a client mint a fresh
+   one-shot slot at will by resending a different `message_id`. Key the guard on
+   `proposal_id` alone (already embeds the server-derived cohort hash) or on the persisted
+   `ConversationMessage.id` looked up after commit, never on the raw wire `message_id`.
+   `action-registry` must not inherit this ambiguity silently.
 3. Does the proposer offer the action when the result has a customer-email column but only one
    row, or require ≥2? (`include_table` already gates at `row_count >= 2`.)
 4. What is M9's email cap — the 50-row `MAX_TABLE_ROWS` the table formatter already uses, or a

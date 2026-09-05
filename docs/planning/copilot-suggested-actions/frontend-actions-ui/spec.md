@@ -58,6 +58,9 @@ tag, confirms, and sees what changed.
 - A 403 (member) surfaces a clear message rather than a generic failure.
 - After success the button shows an executed state and cannot re-fire.
 - Existing table and chart rendering tests stay green.
+- **The contract test is not done while it is inverted:** change `it.fails` back to a normal
+  `it` in `actionsContract.test.tsx` once `MessageBubble` renders the `actions` data_type —
+  the aspect is not complete while the guard test still passes by failing.
 
 ## Dependencies and sequencing
 
