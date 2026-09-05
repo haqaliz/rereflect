@@ -1,0 +1,16 @@
+{
+  "data_type": "actions",
+  "data": {
+    "proposal_id": "msg-42:tag_customers:3f9a1c",
+    "actions": [
+      {
+        "action": "tag_customers",
+        "label": "Tag these 3 customers…",
+        "params": {
+          "emails": ["ada@example.com", "grace@example.com", "alan@example.com"]
+        },
+        "requires_input": ["tag"]
+      }
+    ]
+  }
+}
