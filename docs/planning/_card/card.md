@@ -1,60 +1,78 @@
-# Card: Microsoft Teams notification integration
+# Card: AI Copilot suggested actions
 
 **Type:** feat (freeform, no GitHub issue)
-**Slug:** `teams-notifications`
-**Branch:** `feat/teams-notifications`
-**Source:** `rereflect-next` recommendation (2026-09-02), verified against code
+**Slug:** `copilot-suggested-actions`
+**Branch:** `feat/copilot-suggested-actions`
+**Source:** `rereflect-next` recommendation (2026-09-06), verified against code + tracking
 
 ## Brief
 
-Build the Microsoft Teams notification integration — the only provider still
-named-but-missing in the codebase. `Integration.type` reserves `'teams'` alongside
-`'slack'`/`'discord'` (`services/backend-api/src/models/integration.py:13`), and
-`feedback_source.py:16` also names Teams as a source type — neither exists anywhere in
-the shipped surface. Outbound alerts today are Slack + Discord + email + dashboard;
-Teams is the gap for Microsoft-365-heavy orgs and fits the OSS/BYOK model (paste an
-Incoming Webhook URL — no vendor lock-in, no OAuth).
+Build AI Copilot **suggested actions**: the copilot proposes concrete, executable actions
+alongside its answer, and the user clicks to execute. This is the shape already locked as a
+strategic decision, and explicitly deferred as a V1 non-goal — never built.
 
-## Verified facts (from code)
+## Verified facts (from the docs)
 
-- `services/backend-api/src/models/integration.py:13` — `type = Column(String(50))` with
-  comment `# 'slack', 'discord', 'teams'` — Teams named, never implemented.
-- `services/backend-api/src/models/feedback_source.py:16` — `# Source type: slack, discord, teams, email, webhook, api` — Teams also named as a source type, never implemented.
-- DEV-TRACKING.md:237-244 (P7) — integration-selection loop duplicated 4×, low-level
-  sender 3× across the two processes; "Adding a fifth provider (Teams is already named in
-  the `Integration.type` comment) means another full round." Refactor explicitly declined
-  once (Discord work, 2026-07-29) — scope discipline, not avoidance.
-- DEV-TRACKING.md P2 (2026-07-29) — the Discord slice is the pattern to mirror: provider
-  CRUD + test route, a sender per process (backend returns a status dict, worker raises),
-  dispatch on the main alert pipe and the health-drop path.
-- DEV-TRACKING.md P2/P5 — the automations engine `_execute_notify` channel list remains
-  dashboard/email/slack (Discord excluded twice, "no channels editor"); Teams should be
-  wired into the automations notify branch **and** its worker mirrors.
+- `AI-TRACKING.md:25` — Strategic Decisions table: **"Copilot actions | Read + suggest
+  actions (user clicks to execute)"**. The intended shape is locked; only the read half shipped.
+- `docs/archive/prd/PRD-AI-COPILOT.md:33` — V1 Non-Goals: **"No action execution (read-only —
+  no mutations, no status changes, no assignments)"**. Deferred by scope, not by a blocker.
+- `AI-TRACKING.md:144-158` — M2.2 AI Copilot COMPLETE. The checklist has no action item;
+  everything shipped is read/answer/report.
+- `services/backend-api/src/services/copilot/intent_classifier.py:115` — intents are
+  `"data" | "analysis" | "general" | "report"`. No `action` intent.
+- `services/backend-api/src/services/copilot/` — no executor/registry module
+  (context_resolver, intent_classifier, llm_resolver, report_generator, response_formatter,
+  schema_whitelist, sql_executor, sql_generator, sql_validator, template_matcher,
+  template_saver).
 
-## Proposed scope (slice 1)
+## Why now (moat)
 
-1. Teams connector: Incoming-Webhook URL connect (Settings → Integrations tile + token-paste
-   page + CRUD + test route, Fernet-encrypted, mirroring the Discord/Zendesk/Jira/Asana
-   BYO-token precedent).
-2. `send_teams_message` sender per process — backend returns a status dict, worker raises —
-   matching the existing Slack/Discord contract.
-3. Dispatch wiring: main alert pipe + health-drop path, plus the automations
-   `_execute_notify` branch and its worker mirrors.
-4. README + landing integration row update in the same PR so the claim is honest on day one.
+The execution side is already shipped and tested — this slice only adds proposal + confirm +
+dispatch:
 
-## Known caveat (P7)
+- Playbooks with the full action set — `feat/playbook-action-types` (merged `9d4d5792`);
+  churn-triggered auto-execution `AI-TRACKING.md:381` (M4.1.5 COMPLETE).
+- Bulk cohort actions on the shared `Cohort` contract — `AI-TRACKING.md:346`
+  (`segment-actions`): CSV export, bulk tag, bulk assign-owner, run-playbook-on-cohort.
+- Status changes via the shared `apply_status_change` helper; tags / `is_urgent` edits —
+  `AI-TRACKING.md:456` (public API write scope).
 
-The integration-selection/sender logic is duplicated 4×/3× (DEV-TRACKING.md P7). Prefer a
-**bounded shared sender** for the new Teams path + automations branch over a full provider
-abstraction (that refactor touches every Slack path and was explicitly declined once).
-Record the P7 decision in the planning docs.
+The copilot currently sits outside the churn → health → playbook → automations loop as a
+read-only surface. This is the seam that joins them, and it improves as base models improve
+(BYOK / local LLM — the M5 framing at `AI-TRACKING.md:463`).
 
-## Open questions (for the dig / interview)
+## Hard constraints (settled before the interview)
 
-- Teams webhook flavor: classic Incoming Webhook vs Power Automate Workflows URL — accept
-  both? Validate by URL shape?
-- Payload format: simple `messageCard`/adaptive card vs plain text — what does the existing
-  Slack Block Kit formatter pattern imply?
-- `feedback_source` Teams source type: in scope or explicitly out (outbound only)?
-- Automations channels editor: still out of scope, or does Teams land on a hardcoded
-  `channels` list like Slack did?
+1. **Whitelisted server-side action registry — never free-form LLM tool calls.** Mirror the
+   read path's precedent: `sql_validator.py` + `schema_whitelist.py`.
+2. **RBAC re-checked server-side at execute time**, via the existing
+   `require_admin_or_owner` / `require_owner` dependencies (`src/api/dependencies.py`).
+   A member can view analytics but cannot run playbooks or manage integrations
+   (CLAUDE.md permission matrix). The copilot must never become an RBAC bypass — hiding a
+   chip in the UI is not enforcement.
+3. **Honest degrade with no LLM.** Gate the proposal step on
+   `resolve_generation_llm().is_configured` and hide the surface entirely when unconfigured —
+   the same precedent as the "✨ Draft with AI" button (AI-Drafted Issue/Task Content row,
+   `AI-TRACKING.md`).
+4. **Confirm before execute.** No auto-execution; the user clicks. Matches the shipped
+   response-suggestion posture ("copy-to-clipboard + edit before sending, no auto-send",
+   `AI-TRACKING.md:165`).
+
+## Known limits to carry into the PRD
+
+- `AI-TRACKING.md:346` — run-playbook on a **whole-filter cohort** currently requires a
+  `segment` (or explicit emails); a risk/search-only cohort can be exported/tagged/assigned
+  but not playbook-run. Any cohort-scoped action suggestion inherits this.
+- Small/local models are weakest at structured action selection — the registry must constrain
+  the model, not trust it.
+- Start with one narrow, testable first slice (suggest + execute a single action type
+  end-to-end) rather than the full registry.
+
+## Open questions for the interview
+
+- Which action type is the first slice?
+- Where does the proposal surface — Cmd+K modal, /conversations, or both?
+- Are proposals model-generated then validated against the registry, or deterministically
+  derived from the query result + intent?
+- Does an executed action get an audit record / timeline event?
