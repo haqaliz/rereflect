@@ -22,7 +22,7 @@
 | **AI moat** | All four: historical intelligence + workflow integration + custom models + network effects |
 | **CRM enrichment** | HubSpot first, then Salesforce |
 | **Usage enrichment** | Segment first (CDP covers Mixpanel/Amplitude/GA) |
-| **Copilot actions** | Read + suggest actions (user clicks to execute) |
+| **Copilot actions** | Read + suggest actions (user clicks to execute) — **NOT delivered.** Planned only: see `docs/planning/copilot-suggested-actions/` |
 | **Benchmarks** | Industry benchmarks only (opt-in, anonymized, grouped by industry) |
 | **Custom models** | Enterprise: custom categories/weights + fine-tuned classification |
 | **AI reports** | On-demand report generation via copilot |
@@ -156,6 +156,17 @@
 - [x] Conversations page: ChatGPT-style with folder organization, persistent history, auto-collapsing sidebar, UUID-based shareable URLs
 - [x] Plan gating: Free = 10 queries/day + 50K tokens/mo, Pro = unlimited + 500K tokens, Business = 5M tokens
 - [x] Usage display: copilot usage section in AI Settings, token budget bars, upgrade CTAs
+
+- [ ] **Follow-on in planning (2026-09-06, `feat/copilot-suggested-actions`):** suggested
+      actions on copilot results, to partially close `PRD-AI-COPILOT.md:33`'s "no action
+      execution" non-goal. **That non-goal is still fully open** — this branch landed
+      planning artifacts (PRD + 5 aspect specs) and one aspect, `action-contract`, which is
+      **test-only**: a golden `structured_data` fixture asserted by both the backend and
+      frontend suites, with the proposer test marked `xfail(strict=True)` and the renderer
+      test marked `it.fails` so both flip green when the behaviour lands. No production code,
+      no migration, no protocol change. Four aspects remain unbuilt: `action-registry`,
+      `deterministic-proposer`, `frontend-actions-ui`, `docs-tracking`. See
+      `docs/planning/copilot-suggested-actions/`.
 
 #### M2.3 — AI Response Suggestions (2 weeks) — COMPLETE
 - [x] Response templates library: 8 system templates seeded on startup (Bug Report, Feature Request, Churn Risk, Positive, Complaint, Urgent, Follow-up, Onboarding) with template CRUD and scoring algorithm for best-match suggestion

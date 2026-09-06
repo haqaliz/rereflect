@@ -552,6 +552,31 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
   that pass is this one. Registration-only, no task-body change. See
   `docs/planning/per-org-churn-model/calibration-beat-fix/`.
 
+### Found while doing the copilot-suggested-actions dig (2026-09-06)
+
+Recorded so they are not re-discovered. **None of these is fixed** — the branch
+`feat/copilot-suggested-actions` is planning + a test-only contract guard, no production code.
+All six were verified against the code during the dig, not inferred from docs.
+
+- [ ] **`copilot.py:5` advertises an endpoint that does not exist.** The module docstring lists
+      `POST /api/v1/conversations/suggestions`; no such route is registered. A reader auditing
+      the copilot surface is actively misled — same class as the false
+      `models/integration.py:19` comment. Correct the docstring even if nothing else changes.
+- [ ] **`regenerate` is exposed but not implemented.** `copilot_ws.py:991` returns a hardcoded
+      "not yet implemented" error, while the frontend ships `regenerate()` in the public hook
+      API (`useCopilotWebSocket.ts:35`). Either implement it or drop it from the hook.
+- [ ] **Copilot usage counters are always zero.** `copilot_ws.py:715-717` initialises
+      `tokens_in`/`tokens_out`/`cost_cents` to `0/0/0.0` and never assigns them, so the final
+      WS frame always reports zero usage. The AI Settings token-budget bars are therefore
+      reading a constant, not a measurement.
+- [ ] **Stale plan gate in `RunPlaybookDropdown.tsx:26,47`** — gates on
+      `user?.plan === 'business'`. Harmless today (`/auth/me` reports `enterprise` under
+      `SELF_HOSTED`), but it is exactly the pre-pivot drift that broke ~40 tests before 1.0.0.
+- [ ] **Inconsistent error transport on the report branch.** `copilot_ws.py:471-478` sends its
+      error with a raw `websocket.send_json` and no `message_id`; every other error path goes
+      through `manager.send`. A client correlating errors to turns silently loses this one.
+- [ ] **`AISettings.has_custom_key` is dead on the wire** — zero backend read sites.
+
 ### Deferred v2 — Intercom (opened 2026-08-01; 3 SHIPPED, 1 NOT STARTED)
 
 Recorded here rather than only in `docs/planning/intercom-selfhost-ingestion/` so they are
