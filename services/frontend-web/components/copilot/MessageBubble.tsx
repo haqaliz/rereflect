@@ -243,6 +243,22 @@ interface MessageBubbleProps {
   onRegenerate?: (messageId: number | string) => void;
 }
 
+// One entry in an `actions` structured_data item. The envelope matches the
+// action-contract fixture (copilot_actions_item.json): a stable proposal_id
+// plus a list of offered actions. Emails live inside `params` and must always
+// be rendered as plain text — nothing sanitises structured_data.
+interface SuggestedAction {
+  action: string;
+  label: string;
+  params?: Record<string, unknown>;
+  requires_input?: string[];
+}
+
+interface ActionsItem {
+  proposal_id: string;
+  actions: SuggestedAction[];
+}
+
 export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
   const router = useRouter();
   const isUser = message.role === 'user';
@@ -256,6 +272,9 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
 
   let tableItem: { columns: string[]; rows: (string | number)[][] } | null = null;
   let chartItem: { chartType: string; data: Record<string, unknown>[]; title?: string } | null = null;
+  // Actions accumulate (unlike the last-one-wins table/chart slots): the
+  // fixture can offer several actions and each renders its own button.
+  const actionsItems: ActionsItem[] = [];
 
   if (raw) {
     // New pipeline format: structured_data is array or has .structured_data array
@@ -278,6 +297,14 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
             chartType: (item.chart_type as string) ?? 'bar',
             data: item.data as Record<string, unknown>[],
           };
+        } else if (item.data_type === 'actions' && item.data) {
+          const d = item.data as Record<string, unknown>;
+          if (typeof d.proposal_id === 'string' && Array.isArray(d.actions)) {
+            actionsItems.push({
+              proposal_id: d.proposal_id,
+              actions: d.actions as SuggestedAction[],
+            });
+          }
         }
       }
     } else if (!Array.isArray(raw)) {
@@ -333,6 +360,17 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
                 data={chartItem.data}
                 title={chartItem.title}
               />
+            )}
+            {actionsItems.map((item) =>
+              item.actions.map((a) => (
+                <button
+                  key={`${item.proposal_id}:${a.action}`}
+                  data-testid={`copilot-action-${a.action}`}
+                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                >
+                  {a.label}
+                </button>
+              ))
             )}
             <MessageActions messageId={message.id} content={message.content} onRegenerate={onRegenerate} />
           </div>
