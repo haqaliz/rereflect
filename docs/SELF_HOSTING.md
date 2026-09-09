@@ -189,6 +189,24 @@ a wrong-but-confident answer.
 > needs no separate Ollama/endpoint at all — see
 > [Local embedding model](#local-embedding-model-opt-in-air-gap-capable) below.
 
+### Suggested actions (tagging the customers in an answer)
+
+A `data`/`analysis` answer whose result lists customers (a `customer_email` column) can
+offer one action: **Tag these N customers…**. The proposal is computed **server-side from
+the result shape** — the model is never asked to produce it — so it appears identically
+whether you run a frontier cloud model or a **keyless local one**; this is not a model
+capability. Clicking the button opens a confirm dialog and the **operator types the tag**;
+nothing is sent until confirmed.
+
+The action is offered to **admins and owners only** (enforced server-side — a member
+reaching the endpoint directly gets a 403), and it acts on the **exact, frozen customer
+list from the answer you saw**, capped at 200 — an answer above the cap offers no action
+rather than a silently truncated one. Each proposal is **one-shot**: a second execution
+returns the first run's outcome instead of re-applying the tag. Every execution is
+recorded in the audit log and reported inline as
+`matched / updated / skipped / errors`; customers who have since left the org are counted
+as skipped, never as errors.
+
 ## Embedding model choice on the Ollama path (eval-backed)
 
 The default `nomic-embed-text` above is a reasonable choice, but it isn't the only Ollama
