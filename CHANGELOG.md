@@ -7,6 +7,34 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Added — AI Copilot suggested actions (tag the customers in an answer)
+
+- **A copilot answer can now offer to tag its own customers.** After a `data`/`analysis`
+  query whose result carries a customer-email column, the answer message gains an
+  **actions** item offering **Tag these N customers…** next to the result. Clicking it
+  opens a confirm dialog; the operator types the tag and confirms, and the tag is applied
+  (add-mode) to the customers in that answer.
+- **The proposal is server-derived, never model-authored.** The server inspects the result
+  shape (a customer-email column) and appends the action itself — the proposal path makes
+  no LLM call and involves no tool-call prompt — so the action appears identically when the
+  copilot runs on a keyless local model. The tag value always comes from the operator in
+  the dialog, never from the model or a server guess.
+- **The cohort is the frozen answer set, bounded.** The action embeds the exact deduplicated
+  email list the operator saw, capped at **200**; a result larger than the cap offers **no
+  action** rather than a silently truncated one. Emails that no longer belong to the org
+  are absorbed as `skipped`, never errors.
+- **New route.** `POST /api/v1/copilot/actions/execute` validates the requested action
+  against a whitelist registry, enforces the action's `min_role` at execute time, applies
+  the tag through the org's customer records, and returns the
+  `BulkActionSummary{matched, updated, skipped, errors}` outcome, which is shown inline
+  under the button.
+- **Honest limits.** This slice ships exactly **one** action type (`tag_customers`), and
+  only for `data`/`analysis` queries — never `general` or `report` answers. Execution is
+  **admin/owner only**: members never see the button, and the endpoint refuses them with a
+  403 even on a direct call. Each proposal is **one-shot**: a second execution of the same
+  proposal returns the first run's outcome instead of re-tagging. Every execution writes an
+  `AuditLog` row (`copilot_action_executed`) recording action, tag and outcome.
+
 ### Changed — Landing site rebuilt as a schematic system
 
 - **The marketing site (`rereflect.ca`) has a new visual language.** The previous

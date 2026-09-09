@@ -22,7 +22,7 @@
 | **AI moat** | All four: historical intelligence + workflow integration + custom models + network effects |
 | **CRM enrichment** | HubSpot first, then Salesforce |
 | **Usage enrichment** | Segment first (CDP covers Mixpanel/Amplitude/GA) |
-| **Copilot actions** | Read + suggest actions (user clicks to execute) — **NOT delivered.** Planned only: see `docs/planning/copilot-suggested-actions/` |
+| **Copilot actions** | Read + suggest actions (user clicks to execute) — **partially delivered** (2026-09-09, `feat/copilot-suggested-actions`): read + suggest is live for **one** action type (`tag_customers`) from a deterministic, result-shape proposer (never the LLM), executed on the operator's confirmation by admins/owners. **Not done:** LLM-authored actions and every other action type remain future work. See `docs/planning/copilot-suggested-actions/` |
 | **Benchmarks** | Industry benchmarks only (opt-in, anonymized, grouped by industry) |
 | **Custom models** | Enterprise: custom categories/weights + fine-tuned classification |
 | **AI reports** | On-demand report generation via copilot |
@@ -46,6 +46,7 @@
 | Tag extraction (TF-IDF) | Yes | Feedback detail tags | Free |
 | Multi-model LLM support (OpenAI, Anthropic, Google) | Yes | AI Settings page (providers, usage, budget) | Pro+ (BYOK) |
 | AI Copilot (natural language queries) | Yes | /conversations page, Cmd+K | Tiered by plan |
+| AI Copilot Suggested Actions — **shipped 2026-09-09** (`feat/copilot-suggested-actions`): a `data`/`analysis` answer whose result carries a customer-email column gets one deterministic **actions** item — **Tag these N customers…** — appended server-side to the message's `structured_data`; **no LLM in the proposal path** (pure result-shape inspection, so the action appears identically on a keyless local model) and the cohort is the **frozen, deduped email list the operator saw**, capped at 200 — a larger result offers no action rather than a silently truncated one. An admin/owner clicks the button, types the tag in the confirm dialog (the value always comes from the operator, never the model or a server guess), and `POST /api/v1/copilot/actions/execute` applies it add-mode to the org's matching customers through the registry's `tag_customers` entry (`min_role` admin, enforced server-side at execute time — members 403 even on a direct call, and never see the button). Each proposal is **one-shot per `proposal_id`** — a second execution returns the first run's stored outcome — and every execution writes one `AuditLog` row (`copilot_action_executed`); the `BulkActionSummary{matched, updated, skipped, errors}` is returned to the route and shown inline, with departed customers absorbed as `skipped`. Exactly **one** action type in this slice; proposals ride the existing `structured_data` wire format (`data_type: "actions"`), no new frame type, no migration. | Yes | Yes | Unlocked (OSS) |
 | AI Response Suggestions | Yes | Feedback detail ResponseModal, template browser | Pro+ |
 | Customer sentiment alerts | Yes | Notification center, Slack, email | Pro+ |
 | Microsoft Teams alert notifications — **outbound-only alert destination, shipped 2026-09-02 (PR #26, merged `1756361`)** (`feat/teams-notifications`): connect via classic Incoming Webhook (`outlook.office.com/webhook/…`) or Power Automate Workflows (`<tenant>.webhook.office.com/webhookb2/…`) URL — **no OAuth**; posts Microsoft **MessageCard** JSON (`themeColor #6264A7`) once per org per alert to every active `type="teams"` Integration row, for the four main alert types (urgent feedback, sentiment spike, churn risk, volume spike) + customer health-drop/recovery; per-user per-type `channel_teams` preference (Settings → Notifications, default on) honored by the worker dispatch (`notification_dispatch.py`) and the per-org once-per-alert send; automation `send_notification` supports `teams` in `KNOWN_NOTIFY_CHANNELS` (backend engine + worker mirror, `automation_feedback_trigger.py`) and playbook `notify` supports `teams` (`playbook_engine._handle_notify`; playbook editor channel select); **honest limits**: webhook-only, MessageCard-only (no Adaptive Cards), outbound-only — the `feedback_source.py` `source_type` vocabulary names `teams` but no inbound Teams ingestion exists and none is planned in this slice; digests stay email-only; automations UI has no channel editor, so `channels: ["teams"]` rules must be API-created while playbook notify picks Teams in-editor | Yes | Settings → Integrations (Teams webhook page + tile + detail, test-message button), Settings → Notifications Teams toggle, playbook editor notify-channel select | Unlocked (OSS) |
@@ -157,15 +158,22 @@
 - [x] Plan gating: Free = 10 queries/day + 50K tokens/mo, Pro = unlimited + 500K tokens, Business = 5M tokens
 - [x] Usage display: copilot usage section in AI Settings, token budget bars, upgrade CTAs
 
-- [ ] **Follow-on in planning (2026-09-06, `feat/copilot-suggested-actions`):** suggested
-      actions on copilot results, to partially close `PRD-AI-COPILOT.md:33`'s "no action
-      execution" non-goal. **That non-goal is still fully open** — this branch landed
-      planning artifacts (PRD + 5 aspect specs) and one aspect, `action-contract`, which is
-      **test-only**: a golden `structured_data` fixture asserted by both the backend and
-      frontend suites, with the proposer test marked `xfail(strict=True)` and the renderer
-      test marked `it.fails` so both flip green when the behaviour lands. No production code,
-      no migration, no protocol change. Four aspects remain unbuilt: `action-registry`,
-      `deterministic-proposer`, `frontend-actions-ui`, `docs-tracking`. See
+- [x] **Follow-on — shipped (2026-09-06 → 2026-09-09, `feat/copilot-suggested-actions`):**
+      suggested actions on copilot results, partially closing `PRD-AI-COPILOT.md:33`'s "no
+      action execution" non-goal. The branch first landed planning artifacts (PRD + 5 aspect
+      specs) and the test-only `action-contract` aspect — a golden `structured_data` fixture
+      asserted by both the backend and frontend suites, with the proposer test marked
+      `xfail(strict=True)` and the renderer test marked `it.fails` so both flip green when
+      the behaviour lands. On 2026-09-09 the remaining four aspects (`action-registry`,
+      `deterministic-proposer`, `frontend-actions-ui`, and this tracking pass) all shipped
+      on the same branch: a `data`/`analysis` answer whose result carries a customer-email
+      column now appends a deterministic **Tag these N customers…** proposal (frozen
+      cohort ≤ 200) that an admin/owner executes from a confirm dialog via
+      `POST /api/v1/copilot/actions/execute` — one-shot per `proposal_id`, audited, outcome
+      returned as `BulkActionSummary{matched, updated, skipped, errors}`. **The non-goal is
+      now partially closed, not fully**: exactly one action type (`tag_customers`), and only
+      from the deterministic result-shape proposer — no LLM authors a proposal and none
+      supplies the tag; the operator types it. See
       `docs/planning/copilot-suggested-actions/`.
 
 #### M2.3 — AI Response Suggestions (2 weeks) — COMPLETE
