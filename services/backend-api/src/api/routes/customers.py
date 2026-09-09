@@ -32,6 +32,7 @@ from src.models.user import User
 from src.config.plans import has_feature
 from src.schemas.cohort import Cohort, BulkActionSummary
 from src.services.cohort_service import resolve_cohort
+from src.services.customer_tags import TAG_MAX_LENGTH, TAG_CAP_PER_CUSTOMER, apply_tags
 from src.services.segment_service import SEGMENT_SLUGS
 from src.services.outreach_drafter import (
     LLMNotConfiguredError,
@@ -652,10 +653,6 @@ def export_customers(
 # Bulk tag + assign-owner  (segment-actions / bulk-actions-api, Phase 4)
 # ---------------------------------------------------------------------------
 
-_TAG_MAX_LENGTH = 50
-_TAG_CAP_PER_CUSTOMER = 20
-
-
 class BulkTagRequest(BaseModel):
     cohort: Cohort
     tags: List[str]
@@ -671,9 +668,9 @@ class BulkTagRequest(BaseModel):
             tag = raw.strip()
             if not tag:
                 continue
-            if len(tag) > _TAG_MAX_LENGTH:
+            if len(tag) > TAG_MAX_LENGTH:
                 raise ValueError(
-                    f"Tag '{tag[:20]}...' exceeds the {_TAG_MAX_LENGTH}-character limit"
+                    f"Tag '{tag[:20]}...' exceeds the {TAG_MAX_LENGTH}-character limit"
                 )
             if tag not in seen:
                 seen.add(tag)
@@ -706,23 +703,7 @@ def bulk_tag_customers(
     truncated, and not counted toward `updated`).
     """
     rows, skipped = resolve_cohort(db, current_org, body.cohort)
-    change_set = set(body.tags)
-    updated = 0
-    errors: List[str] = []
-
-    for record in rows:
-        existing = set(record.tags or [])
-        new_tags = (existing | change_set) if body.mode == "add" else (existing - change_set)
-
-        if len(new_tags) > _TAG_CAP_PER_CUSTOMER:
-            errors.append(
-                f"{record.customer_email}: would exceed the {_TAG_CAP_PER_CUSTOMER}-tag "
-                f"limit ({len(new_tags)} after applying) — not updated"
-            )
-            continue
-
-        record.tags = sorted(new_tags)
-        updated += 1
+    updated, errors = apply_tags(rows, body.tags, body.mode)
 
     db.commit()
 
