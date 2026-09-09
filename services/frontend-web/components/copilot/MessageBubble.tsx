@@ -19,6 +19,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { MessageActions } from './MessageActions';
+import { CopilotActionButton } from './CopilotActionButton';
 import type { ChatMessage } from './ChatArea';
 
 // Chart colors — use CSS variables to match dashboard theme
@@ -241,9 +242,28 @@ function makeMarkdownComponents(messageId: number | string, onLinkClick: (href: 
 interface MessageBubbleProps {
   message: ChatMessage;
   onRegenerate?: (messageId: number | string) => void;
+  /** Persisted conversation id for suggested-action execution (numeric DB id,
+   *  not the WS turn message id). Absent → action buttons render disabled. */
+  conversationId?: number;
 }
 
-export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
+// One entry in an `actions` structured_data item. The envelope matches the
+// action-contract fixture (copilot_actions_item.json): a stable proposal_id
+// plus a list of offered actions. Emails live inside `params` and must always
+// be rendered as plain text — nothing sanitises structured_data.
+interface SuggestedAction {
+  action: string;
+  label: string;
+  params?: Record<string, unknown>;
+  requires_input?: string[];
+}
+
+interface ActionsItem {
+  proposal_id: string;
+  actions: SuggestedAction[];
+}
+
+export function MessageBubble({ message, onRegenerate, conversationId }: MessageBubbleProps) {
   const router = useRouter();
   const isUser = message.role === 'user';
 
@@ -256,6 +276,9 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
 
   let tableItem: { columns: string[]; rows: (string | number)[][] } | null = null;
   let chartItem: { chartType: string; data: Record<string, unknown>[]; title?: string } | null = null;
+  // Actions accumulate (unlike the last-one-wins table/chart slots): the
+  // fixture can offer several actions and each renders its own button.
+  const actionsItems: ActionsItem[] = [];
 
   if (raw) {
     // New pipeline format: structured_data is array or has .structured_data array
@@ -278,6 +301,14 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
             chartType: (item.chart_type as string) ?? 'bar',
             data: item.data as Record<string, unknown>[],
           };
+        } else if (item.data_type === 'actions' && item.data) {
+          const d = item.data as Record<string, unknown>;
+          if (typeof d.proposal_id === 'string' && Array.isArray(d.actions)) {
+            actionsItems.push({
+              proposal_id: d.proposal_id,
+              actions: d.actions as SuggestedAction[],
+            });
+          }
         }
       }
     } else if (!Array.isArray(raw)) {
@@ -333,6 +364,21 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
                 data={chartItem.data}
                 title={chartItem.title}
               />
+            )}
+            {actionsItems.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {actionsItems.map((item) =>
+                  item.actions.map((a) => (
+                    <CopilotActionButton
+                      key={`${item.proposal_id}:${a.action}`}
+                      conversationId={conversationId}
+                      proposalId={item.proposal_id}
+                      action={a.action}
+                      label={a.label}
+                    />
+                  ))
+                )}
+              </div>
             )}
             <MessageActions messageId={message.id} content={message.content} onRegenerate={onRegenerate} />
           </div>

@@ -207,7 +207,7 @@ exactly one head.
    at commit in step 12 (`:785-810`), *after* the structured-data frame carrying that
    `message_id` is already emitted in step 11 (`:775-783`). It is caller-controllable — a
    client can send any string, or omit it and get a fresh UUID every time. The golden fixture's
-   `proposal_id` (`"msg-42:tag_customers:3f9a1c"`) bakes in exactly this ambiguous id, though
+   `proposal_id` (`"msg-42:tag_customers:4a72f4"`) bakes in exactly this ambiguous id, though
    the contract itself is unaffected since `proposal_id` is opaque there.
    Two migration-free storage options: (a) derive the guard from `AuditLog` — write
    `target_type="copilot_action"`, `target_id=<?>`, `details.proposal_id`, and check for a

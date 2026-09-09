@@ -555,7 +555,9 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 ### Found while doing the copilot-suggested-actions dig (2026-09-06)
 
 Recorded so they are not re-discovered. **None of these is fixed** — the branch
-`feat/copilot-suggested-actions` is planning + a test-only contract guard, no production code.
+`feat/copilot-suggested-actions` was planning + a test-only contract guard when this was
+recorded; the feature shipped 2026-09-09 (action-registry, deterministic-proposer,
+frontend-actions-ui, docs-tracking all merged) and these six defects remain unfixed.
 All six were verified against the code during the dig, not inferred from docs.
 
 - [ ] **`copilot.py:5` advertises an endpoint that does not exist.** The module docstring lists

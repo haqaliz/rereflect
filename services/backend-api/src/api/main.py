@@ -9,6 +9,7 @@ from src.api.routes import categories, ai_settings, anomalies, insights, changel
 from src.api.routes import customer_health, activity_feed, dashboard_layout, admin_users, admin_orgs
 from src.api.routes import customers, admin_backtest, admin_ai_models
 from src.api.routes import conversation_folders, conversations, copilot_ws, copilot
+from src.api.routes import copilot_actions  # noqa: E402 — copilot-suggested-actions: action-registry
 from src.api.routes import events_ws
 from src.api.routes import linear_integration, linear_webhook
 from src.api.routes import hubspot_integration as hubspot_integration_router
@@ -389,6 +390,7 @@ app.include_router(conversation_folders.router)
 app.include_router(conversations.router)
 app.include_router(copilot_ws.router)
 app.include_router(copilot.router)
+app.include_router(copilot_actions.router)
 app.include_router(events_ws.router)
 app.include_router(linear_integration.router)
 app.include_router(linear_webhook.router)

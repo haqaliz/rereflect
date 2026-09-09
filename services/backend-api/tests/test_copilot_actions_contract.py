@@ -15,8 +15,6 @@ See docs/planning/copilot-suggested-actions/action-contract/plan_20260906.md.
 import json
 import pathlib
 
-import pytest
-
 GOLDEN_ACTIONS_PATH = (
     pathlib.Path(__file__).resolve().parent / "fixtures" / "copilot_actions_item.json"
 )
@@ -93,20 +91,15 @@ class TestGoldenActionsItemStructure:
 
 
 # ============================================================================
-# RED -- the backend does not propose actions yet.
+# The proposer emits the golden fixture (deterministic-proposer aspect).
 # ============================================================================
 
 
-@pytest.mark.xfail(
-    reason="RED until deterministic-proposer lands; do not delete this marker "
-    "without deleting the xfail",
-    strict=True,
-)
 def test_proposer_emits_the_golden_actions_item():
-    """The (not yet built) proposer must emit exactly the golden fixture.
+    """The proposer must emit exactly the golden fixture.
 
-    Imported inside the test body, not at module scope, so its absence fails
-    only this test instead of erroring collection of the whole module.
+    Imported inside the test body, not at module scope, so a missing proposer
+    fails only this test instead of erroring collection of the whole module.
     """
     from src.services.copilot.action_proposer import propose_actions
 

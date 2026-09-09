@@ -43,6 +43,11 @@ from src.services.copilot.sql_generator import SQLGenerator
 from src.services.copilot.sql_executor import SQLExecutor, QueryTimeoutError, QueryExecutionError
 from src.services.copilot.template_matcher import TemplateMatcher
 from src.services.copilot.template_saver import TemplateSaver
+from src.services.copilot.action_proposer import (
+    ACTION_EMAIL_CAP,
+    extract_customer_emails,
+    propose_actions,
+)
 from src.services.copilot.response_formatter import format_response
 from src.services.copilot.report_generator import ReportGenerator
 from src.models.subscription import Subscription
@@ -636,6 +641,16 @@ async def _handle_query(
                     include_chart=include_chart,
                 )
                 structured_data_payload = formatted["structured_data"] or None
+
+                if sql_columns is not None and sql_rows is not None:
+                    emails = extract_customer_emails(sql_columns, sql_rows)
+                    if 0 < len(emails) <= ACTION_EMAIL_CAP:
+                        actions_item = propose_actions(
+                            message_id=message_id,
+                            customer_emails=emails,
+                        )
+                        structured_data_payload = structured_data_payload or []
+                        structured_data_payload.append(actions_item)
 
         # 8. Build LLM messages based on pipeline results
         if sql_columns is not None and sql_rows is not None and len(sql_rows) > 0:

@@ -6,18 +6,12 @@
 // would catch a seam between the two ends (a renamed data_type, a renamed
 // field) — only running both against the same fixture does.
 //
-// The render-N-buttons test below is written as `it.fails(...)` because
-// MessageBubble does not implement the "actions" data_type yet — it only
-// branches on 'table' and 'chart' (MessageBubble.tsx). It is expected to
-// start failing loudly (i.e. `it.fails` itself reports a failure) the moment
-// the frontend-actions-ui aspect lands; that failure is the signal to flip
-// this back to a normal `it`.
-//
-// Note on `it.fails`: it accepts ANY throw from the test body, including a
-// render() crash unrelated to actions rendering at all — a weaker signal
-// than a named assertion failure under a normal `it`. Accepted for now; flip
-// to `it` (per the acceptance criteria in frontend-actions-ui/spec.md) rather
-// than trying to make the negative case more precise while it's still red.
+// The render-N-buttons test below was written as `it.fails(...)` while
+// MessageBubble did not implement the "actions" data_type yet — it only
+// branched on 'table' and 'chart' (MessageBubble.tsx). Once the
+// frontend-actions-ui aspect landed, it was flipped back to a normal `it`
+// (per the acceptance criteria in frontend-actions-ui/spec.md: the aspect is
+// not complete while the guard test passes by failing).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +26,13 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// CopilotActionButton hides for non-admin roles; the contract test renders
+// with an owner so the buttons are visible.
+const mockUseAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}));
+
 import { MessageBubble } from '@/components/copilot/MessageBubble';
 import type { ChatMessage } from '@/components/copilot/ChatArea';
 
@@ -45,7 +46,12 @@ const FIXTURE = path.resolve(
 const goldenActionsItem = JSON.parse(fs.readFileSync(FIXTURE, 'utf-8'));
 
 describe('copilot actions contract (frontend)', () => {
-  it.fails('renders one button per action from the golden actions item', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'owner@test.com', organization_id: 1, role: 'owner', plan: 'enterprise' },
+    });
+  });
+  it('renders one button per action from the golden actions item', () => {
     // F4: the golden fixture has exactly one action, which makes "one button
     // per action" vacuous — a renderer emitting one button per *item* (not
     // per action) would also pass against a single-action fixture. Duplicate
