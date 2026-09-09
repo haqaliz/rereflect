@@ -101,6 +101,7 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
     copilotUsage.tokens_used_month >= copilotUsage.tokens_budget_month;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [conversationDbId, setConversationDbId] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [contextScopes, setContextScopes] = useState<ContextScope[]>([]);
   const [pendingStopMessageId, setPendingStopMessageId] = useState<number | string | null>(null);
@@ -145,6 +146,9 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
     conversationsAPI
       .getConversation(conversationId)
       .then((conv) => {
+        // Numeric DB id — the execute route resolves a proposal by
+        // conversation_id + proposal_id, so action buttons need this id.
+        setConversationDbId(conv.id);
         const apiMessages = conv.messages.map(fromConversationMessage);
         // Merge: keep optimistic messages (negative ids) that haven't been
         // persisted yet, so they don't flash away during loading.
@@ -314,6 +318,7 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
           <MessageBubble
             key={msg.id}
             message={msg}
+            conversationId={conversationDbId ?? undefined}
             onRegenerate={(id) => {
               setPendingStopMessageId(id);
               regenerate(id);

@@ -26,6 +26,13 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// CopilotActionButton hides for non-admin roles; the contract test renders
+// with an owner so the buttons are visible.
+const mockUseAuth = vi.fn();
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => mockUseAuth(),
+}));
+
 import { MessageBubble } from '@/components/copilot/MessageBubble';
 import type { ChatMessage } from '@/components/copilot/ChatArea';
 
@@ -39,6 +46,11 @@ const FIXTURE = path.resolve(
 const goldenActionsItem = JSON.parse(fs.readFileSync(FIXTURE, 'utf-8'));
 
 describe('copilot actions contract (frontend)', () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'owner@test.com', organization_id: 1, role: 'owner', plan: 'enterprise' },
+    });
+  });
   it('renders one button per action from the golden actions item', () => {
     // F4: the golden fixture has exactly one action, which makes "one button
     // per action" vacuous — a renderer emitting one button per *item* (not

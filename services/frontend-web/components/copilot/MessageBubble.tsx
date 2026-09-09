@@ -19,6 +19,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { MessageActions } from './MessageActions';
+import { CopilotActionButton } from './CopilotActionButton';
 import type { ChatMessage } from './ChatArea';
 
 // Chart colors — use CSS variables to match dashboard theme
@@ -241,6 +242,9 @@ function makeMarkdownComponents(messageId: number | string, onLinkClick: (href: 
 interface MessageBubbleProps {
   message: ChatMessage;
   onRegenerate?: (messageId: number | string) => void;
+  /** Persisted conversation id for suggested-action execution (numeric DB id,
+   *  not the WS turn message id). Absent → action buttons render disabled. */
+  conversationId?: number;
 }
 
 // One entry in an `actions` structured_data item. The envelope matches the
@@ -259,7 +263,7 @@ interface ActionsItem {
   actions: SuggestedAction[];
 }
 
-export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
+export function MessageBubble({ message, onRegenerate, conversationId }: MessageBubbleProps) {
   const router = useRouter();
   const isUser = message.role === 'user';
 
@@ -361,16 +365,20 @@ export function MessageBubble({ message, onRegenerate }: MessageBubbleProps) {
                 title={chartItem.title}
               />
             )}
-            {actionsItems.map((item) =>
-              item.actions.map((a) => (
-                <button
-                  key={`${item.proposal_id}:${a.action}`}
-                  data-testid={`copilot-action-${a.action}`}
-                  className="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                >
-                  {a.label}
-                </button>
-              ))
+            {actionsItems.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {actionsItems.map((item) =>
+                  item.actions.map((a) => (
+                    <CopilotActionButton
+                      key={`${item.proposal_id}:${a.action}`}
+                      conversationId={conversationId}
+                      proposalId={item.proposal_id}
+                      action={a.action}
+                      label={a.label}
+                    />
+                  ))
+                )}
+              </div>
             )}
             <MessageActions messageId={message.id} content={message.content} onRegenerate={onRegenerate} />
           </div>
