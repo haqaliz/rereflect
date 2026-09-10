@@ -396,3 +396,5 @@ services/analysis-engine/models/
 
 # Claude Code worktree scratch
 .claire/
+
+.serena/
