@@ -824,7 +824,12 @@ class AutomationEngine:
             status="queued",
         )
         self.db.add(exec_row)
-        self.db.flush()
+        # COMMIT BEFORE PUBLISH. The worker loads this execution by id; if it
+        # is only flushed, the commit lands later (end of _evaluate_rule) and
+        # the worker finds nothing, leaving the row `queued` forever. A flush
+        # is not enough — the row has to be visible to other connections
+        # before its id is handed to another process.
+        self.db.commit()
 
         from src.background.celery_client import get_celery_app
 
