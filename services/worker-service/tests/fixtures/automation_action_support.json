@@ -1,0 +1,9 @@
+{
+  "feedback_category_match": ["auto_assign", "change_status", "send_notification", "draft_response", "send_customer_email"],
+  "sentiment_pattern": ["auto_assign", "change_status", "send_notification", "draft_response", "send_customer_email"],
+  "batch_sentiment_threshold": ["auto_assign", "change_status", "send_notification", "draft_response", "send_customer_email"],
+  "health_score_threshold": ["send_notification", "run_playbook", "send_customer_email"],
+  "churn_risk_level_change": ["send_notification", "run_playbook", "send_customer_email"],
+  "churn_probability_threshold": ["send_notification", "run_playbook", "send_customer_email"],
+  "usage_trend": ["send_notification", "run_playbook", "send_customer_email"]
+}
