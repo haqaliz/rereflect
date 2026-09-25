@@ -1021,3 +1021,94 @@ def test_execute_finalizes_done_when_handler_commits_mid_run(db, monkeypatch):
         "result": {"handled": "after_commit"},
         "error": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# R1 — atomic claim (playbook-execution-reaper)
+# ---------------------------------------------------------------------------
+
+def test_execute_second_delivery_of_same_id_skips_and_does_not_rerun_actions(db, monkeypatch):
+    """A reaper re-publish can deliver one id twice; the second must skip."""
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=[{"type": "assign", "config": {}}])
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+
+    calls = []
+
+    def fake_handler(action_type, action_config, customer_email, health, db, execution_id=None):
+        calls.append(action_type)
+        return {"ok": True, "result": {}}
+
+    monkeypatch.setattr(playbook_engine, "_dispatch_action", fake_handler)
+
+    first = playbook_engine.execute(exe.id, db)
+    second = playbook_engine.execute(exe.id, db)
+
+    assert first["status"] == "done"
+    assert second["skipped"] is True
+    assert "done" in second["reason"]
+    assert calls == ["assign"]
+
+
+def test_execute_claim_is_conditional_update_not_read_then_write(db, monkeypatch):
+    """Pins atomicity: another worker claims the row between our read and our
+    claim. A read-then-write guard would overwrite it and run the actions a
+    second time; a conditional UPDATE ... WHERE status='queued' must skip."""
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=[{"type": "assign", "config": {}}])
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    exe_id = exe.id
+
+    def competing_claim(execution, session):
+        # Simulate another worker's claim landing directly in the DB.
+        with _engine.begin() as conn:
+            conn.exec_driver_sql(
+                "UPDATE churn_playbook_executions SET status='running' WHERE id=?",
+                (exe_id,),
+            )
+        return False
+
+    calls = []
+    monkeypatch.setattr(playbook_engine, "_is_rate_limited", competing_claim)
+    monkeypatch.setattr(
+        playbook_engine, "_dispatch_action",
+        lambda *a, **k: calls.append(1) or {"ok": True, "result": {}},
+    )
+
+    result = playbook_engine.execute(exe_id, db)
+
+    assert result.get("skipped") is True
+    assert "running" in result["reason"]
+    assert calls == []
+    db.expire_all()
+    assert db.query(ChurnPlaybookExecution).filter_by(id=exe_id).first().status == "running"
+
+
+def test_execute_rate_limit_cancel_is_conditional_on_queued(db, monkeypatch):
+    """If another worker claims the row while we evaluate the rate limit, the
+    cancel must not clobber its 'running' status."""
+    org = _make_org(db)
+    pb = _make_playbook(db, org.id, action_sequence=[{"type": "assign", "config": {}}])
+    _make_health(db, org.id)
+    exe = _make_execution(db, pb.id, org.id, status="queued")
+    exe_id = exe.id
+
+    def claimed_then_limited(execution, session):
+        with _engine.begin() as conn:
+            conn.exec_driver_sql(
+                "UPDATE churn_playbook_executions SET status='running' WHERE id=?",
+                (exe_id,),
+            )
+        return True
+
+    monkeypatch.setattr(playbook_engine, "_is_rate_limited", claimed_then_limited)
+
+    result = playbook_engine.execute(exe_id, db)
+
+    assert result.get("skipped") is True
+    db.expire_all()
+    row = db.query(ChurnPlaybookExecution).filter_by(id=exe_id).first()
+    assert row.status == "running"
+    assert row.error_message is None

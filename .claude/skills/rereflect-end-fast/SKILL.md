@@ -31,7 +31,8 @@ Before removing anything:
 Resolve the **primary** checkout (not the worktree). The first line of `git worktree list` is the primary:
 
 ```bash
-PRIMARY=$(git worktree list | head -1 | awk '{print $1}')
+# No `$N` tokens here: the skill loader substitutes them with the invocation args.
+PRIMARY=$(git worktree list --porcelain | head -1 | cut -d' ' -f2-)
 ```
 
 Switch and pull, fast-forward only:
