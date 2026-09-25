@@ -160,6 +160,15 @@ export const automationsAPI = {
     const response = await apiClient.post(`/api/v1/automations/templates/${templateId}/enable`);
     return response.data;
   },
+
+  /**
+   * Which action types each trigger type can actually execute, keyed by
+   * trigger type (same matrix the backend validates saves against).
+   */
+  getActionSupport: async (): Promise<Record<string, ActionType[]>> => {
+    const response = await apiClient.get('/api/v1/automations/action-support');
+    return response.data;
+  },
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────

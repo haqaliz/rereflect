@@ -349,6 +349,8 @@ interface ActionRowProps {
   onRemove: () => void;
   playbooks: Playbook[];
   templateOptions: OutreachTemplateSummary[];
+  /** Action types the rule's trigger supports (see allowedActionTypes). */
+  allowedTypes: ActionType[];
 }
 
 /**
@@ -390,7 +392,41 @@ const ACTION_TYPES: ActionType[] = [
   'send_customer_email',
 ];
 
-function ActionRow({ index, action, onChange, onRemove, playbooks, templateOptions }: ActionRowProps) {
+/**
+ * Action types the given trigger can actually execute, per the backend's
+ * action-support matrix. Falls back to every type when the matrix is not
+ * loaded (endpoint failed) or no trigger is chosen yet — the editor must
+ * never be blocked on that endpoint.
+ */
+function allowedActionTypes(
+  support: Record<string, ActionType[]> | null,
+  triggerType: string
+): ActionType[] {
+  return (triggerType && support?.[triggerType]) || ACTION_TYPES;
+}
+
+function actionTypeLabel(type: string): string {
+  return ACTION_TYPE_LABELS[type as ActionType] ?? type;
+}
+
+function unsupportedActionMessage(type: string): string {
+  return `${actionTypeLabel(type)} isn’t supported for this trigger — change or remove it.`;
+}
+
+function ActionRow({
+  index,
+  action,
+  onChange,
+  onRemove,
+  playbooks,
+  templateOptions,
+  allowedTypes,
+}: ActionRowProps) {
+  // An action the trigger can't run (trigger switched, or a rule saved before
+  // the matrix existed) is kept and flagged — never silently dropped. Its
+  // current type stays in the list (disabled) so the select still shows it.
+  const unsupported = !allowedTypes.includes(action.type as ActionType);
+  const options = unsupported ? [...allowedTypes, action.type as ActionType] : allowedTypes;
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/20">
       <div className="flex-1 space-y-3">
@@ -412,13 +448,21 @@ function ActionRow({ index, action, onChange, onRemove, playbooks, templateOptio
             <SelectValue placeholder="Select action type" />
           </SelectTrigger>
           <SelectContent>
-            {ACTION_TYPES.map(t => (
-              <SelectItem key={t} value={t}>
-                {ACTION_TYPE_LABELS[t]}
+            {options.map(t => (
+              <SelectItem key={t} value={t} disabled={!allowedTypes.includes(t)}>
+                {actionTypeLabel(t)}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
+        {unsupported && (
+          <p
+            data-testid={`action-unsupported-warning-${index}`}
+            className="text-xs text-destructive"
+          >
+            {unsupportedActionMessage(action.type)}
+          </p>
+        )}
 
         {/* Inline config for change_status */}
         {action.type === 'change_status' && (
@@ -557,6 +601,7 @@ export default function NewAutomationPage() {
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [outreachTemplates, setOutreachTemplates] = useState<OutreachTemplateSummary[] | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [actionSupport, setActionSupport] = useState<Record<string, ActionType[]> | null>(null);
 
   useEffect(() => {
     listPlaybooks()
@@ -574,6 +619,14 @@ export default function NewAutomationPage() {
   }, []);
 
   const templateOptions = outreachTemplates ?? BUILTIN_OUTREACH_TEMPLATES;
+
+  useEffect(() => {
+    // Promise.resolve().then(...) so even a synchronous throw falls back.
+    Promise.resolve()
+      .then(() => automationsAPI.getActionSupport())
+      .then(setActionSupport)
+      .catch(() => setActionSupport(null));
+  }, []);
 
   const addAction = () => {
     setActions(prev => [...prev, { type: 'send_notification', config: { recipients: 'admins', channels: ['dashboard'] } }]);
@@ -622,6 +675,13 @@ export default function NewAutomationPage() {
       return;
     }
 
+    const allowed = allowedActionTypes(actionSupport, triggerType);
+    const unsupportedAction = actions.find(a => !allowed.includes(a.type as ActionType));
+    if (unsupportedAction) {
+      toast.error(unsupportedActionMessage(unsupportedAction.type));
+      return;
+    }
+
     setSubmitting(true);
     try {
       const created = await automationsAPI.create({
@@ -641,7 +701,7 @@ export default function NewAutomationPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [name, description, triggerType, triggerConfig, actions, cooldownHours, mode, router]);
+  }, [name, description, triggerType, triggerConfig, actions, cooldownHours, mode, actionSupport, router]);
 
   return (
     <div className="min-h-screen pattern-bg">
@@ -770,6 +830,7 @@ export default function NewAutomationPage() {
                   onRemove={() => removeAction(i)}
                   playbooks={playbooks}
                   templateOptions={templateOptions}
+                  allowedTypes={allowedActionTypes(actionSupport, triggerType)}
                 />
               ))
             )}
