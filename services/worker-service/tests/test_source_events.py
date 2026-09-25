@@ -430,3 +430,76 @@ class TestProcessEventForSourceDecrypt:
 
         assert result == {"source_id": source.id, "status": "context_fetch_error"}
         adapter.fetch_context.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# process_source_event -- durable-then-publish for auto_import sources
+# (automation-playbook-dispatch-commit / source-events-dispatch)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_import_commits_before_enqueueing_analysis(db, monkeypatch):
+    """The FeedbackItem must be committed before its id is published.
+
+    With only a flush, analyze_single_feedback (another connection) can run
+    before the row is visible, find nothing, and leave the item unanalyzed.
+    Mirrors test_automation_email_delivery's ordering test.
+    """
+    from contextlib import contextmanager
+
+    import src.cache as cache_mod
+    import src.tasks.source_events as task_mod
+    from src.models import FeedbackItem
+
+    org = _make_org(db, name="Webhook Co")
+    source = _make_source(db, org.id, "webhook")  # auto_import=True
+
+    @contextmanager
+    def fake_get_db():
+        yield db
+
+    monkeypatch.setattr(task_mod, "get_db_session", fake_get_db)
+    monkeypatch.setattr(cache_mod, "cache_invalidate", MagicMock())
+
+    adapter = MagicMock()
+    adapter.check_triggers.return_value = "always"
+    adapter.get_external_ids.return_value = ("ext-1", "msg-1")
+    adapter.extract_content.return_value = {
+        "text": "Checkout keeps failing on the payment step",
+        "metadata": {},
+    }
+    monkeypatch.setattr(task_mod, "get_adapter", lambda _t: adapter)
+
+    calls = []
+    delayed_ids = []
+
+    def spy_delay(*a, **k):
+        calls.append("delay")
+        delayed_ids.append(a[0])
+
+    real_commit = db.commit
+
+    def spy_commit():
+        calls.append("commit")
+        real_commit()
+
+    with patch("src.tasks.analysis.analyze_single_feedback") as mock_task, \
+            patch.object(db, "commit", side_effect=spy_commit):
+        mock_task.delay.side_effect = spy_delay
+        result = task_mod.process_source_event(
+            source_type="webhook",
+            external_event_id="evt-1",
+            event_type="webhook",
+            event_data={"text": "Checkout keeps failing on the payment step"},
+            provider_context={"source_id": source.id},
+        )
+
+    assert "delay" in calls, "analysis was never enqueued"
+    assert "commit" in calls, "the feedback row was never committed"
+    assert calls.index("commit") < calls.index("delay"), (
+        f"the row must be committed before the message is published; got {calls}"
+    )
+    item = db.query(FeedbackItem).one()
+    assert delayed_ids == [item.id]
+    assert result["results"][0]["status"] == "feedback_created"
+    assert result["results"][0]["feedback_id"] == item.id

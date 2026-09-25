@@ -153,7 +153,9 @@ def _sync_org(org_id: int, db, client: ZendeskClient, integ) -> Dict[str, Any]:
 
     Returns
     -------
-    dict with keys: tickets_seen, tickets_ingested, no_source_match, end_time
+    dict with keys: tickets_seen, tickets_ingested, no_source_match, end_time,
+    created_feedback_ids (deduped, ordered). Analysis is NOT dispatched here —
+    the rows are only flushed; the caller publishes after its commit.
     """
     from src.adapters import get_adapter
     from src.tasks.source_events import _find_matching_sources, _process_event_for_source
@@ -186,10 +188,12 @@ def _sync_org(org_id: int, db, client: ZendeskClient, integ) -> Dict[str, Any]:
             "tickets_ingested": 0,
             "no_source_match": True,
             "end_time": end_time,
+            "created_feedback_ids": [],
         }
 
     adapter = get_adapter("zendesk")
     tickets_ingested = 0
+    created_feedback_ids: list = []
 
     for ticket in tickets:
         ticket_id = ticket.get("id")
@@ -206,6 +210,8 @@ def _sync_org(org_id: int, db, client: ZendeskClient, integ) -> Dict[str, Any]:
             )
             if proc_result.get("status") == "feedback_created":
                 tickets_ingested += 1
+                if proc_result.get("feedback_id"):
+                    created_feedback_ids.append(proc_result["feedback_id"])
 
     integ.last_synced_at = datetime.utcfromtimestamp(end_time)
 
@@ -214,7 +220,33 @@ def _sync_org(org_id: int, db, client: ZendeskClient, integ) -> Dict[str, Any]:
         "tickets_ingested": tickets_ingested,
         "no_source_match": False,
         "end_time": end_time,
+        "created_feedback_ids": list(dict.fromkeys(created_feedback_ids)),
     }
+
+
+def _dispatch_analysis(feedback_ids, integration_id: int) -> None:
+    """Publish analysis for committed feedback ids — call only AFTER commit.
+
+    analyze_single_feedback loads the row on another connection, so a
+    pre-commit publish can find nothing. Guarded per id: a broker failure never
+    fails the sync; the 30s process_unanalyzed_feedback beat sweeper recovers
+    anything missed.
+    """
+    if not feedback_ids:
+        return
+    from src.tasks.analysis import analyze_single_feedback
+
+    for feedback_id in feedback_ids:
+        try:
+            analyze_single_feedback.delay(feedback_id)
+        except Exception as exc:
+            logger.warning(
+                "zendesk_sync: failed to enqueue analysis for feedback %s "
+                "(integration_id=%s): %s",
+                feedback_id,
+                integration_id,
+                exc,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +306,8 @@ def _sync_zendesk_org_body(task_self, integration_id: int) -> Dict[str, Any]:
                 integ.last_sync_status = "success"
                 integ.last_error = None
 
-            db.flush()
+            db.commit()
+            _dispatch_analysis(result.get("created_feedback_ids", []), integration_id)
             return {"status": "success", **result}
 
         except ZendeskAuthError as exc:
