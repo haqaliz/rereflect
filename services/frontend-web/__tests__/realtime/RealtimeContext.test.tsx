@@ -272,4 +272,24 @@ describe('RealtimeContext', () => {
     });
     expect(handler).not.toHaveBeenCalled();
   });
+  // 14. deferred close after unmount must not touch React state
+  it('test_deferred_close_after_unmount_does_not_run_handlers — the 100ms post-unmount close detaches handlers first', () => {
+    const { unmount } = renderHook(() => useRealtime(), { wrapper });
+    const ws = wsInstances[0];
+    act(() => { ws.simulateOpen(); });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    unmount();
+    act(() => { vi.advanceTimersByTime(150); });
+
+    // The socket is still closed…
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+    // …but the provider's onclose (which calls setConnected on an unmounted
+    // tree, and in CI once ran after jsdom teardown) never fired.
+    expect(logSpy).not.toHaveBeenCalledWith(
+      '[Realtime] WS closed, code:', expect.anything(), expect.anything()
+    );
+    expect(ws.onclose).toBeNull();
+    logSpy.mockRestore();
+  });
 });
