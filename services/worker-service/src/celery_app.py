@@ -211,6 +211,11 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.churn_playbooks.purge_old_executions",
         "schedule": crontab(hour=3, minute=0, day_of_week=0),
     },
+    # Re-publish playbook executions stranded at queued; fail stale queued/running rows
+    "reap-stale-playbook-executions": {
+        "task": "src.tasks.churn_playbooks.reap_stale_executions",
+        "schedule": 600.0,
+    },
     # Refit per-org churn calibration models — Mondays 07:45 UTC
     "refit-churn-calibration-weekly": {
         "task": "src.tasks.churn_calibration.refit_all_orgs",

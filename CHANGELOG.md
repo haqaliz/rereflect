@@ -19,8 +19,18 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 - The same ordering fix applies to feedback arriving from webhooks and from the Zendesk/Intercom
   pull syncs. Those items were always analyzed eventually, by the 30-second catch-up job, but can
   now be analyzed immediately.
-- Executions already stuck at **queued** from before this fix are not re-run automatically. Run
-  the playbook again from the customer page if it still applies.
+- **Stuck playbook executions now recover or close out on their own.** A new worker job runs
+  every 10 minutes:
+  - An execution still **queued** after 15 minutes is sent to the worker again. This covers a
+    lost message or a broker outage at dispatch time.
+  - One still **queued** after 24 hours is marked **failed**, with a reason saying it was never
+    picked up. This includes executions orphaned before the fix above. They are not re-run,
+    because acting on a customer's state from days ago could do the wrong thing. Run the playbook
+    again if it still applies.
+  - One stuck **running** for over an hour (the worker stopped mid-run) is marked **failed**, with
+    a note that some actions may already have been applied.
+  - A playbook run can no longer execute twice if its message is delivered twice. Claiming the run
+    is now a single atomic step.
 
 ### Added — AI Copilot suggested actions (tag the customers in an answer)
 

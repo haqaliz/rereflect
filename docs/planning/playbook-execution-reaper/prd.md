@@ -43,3 +43,22 @@ reasons (existing execution list already shows status + error_message); restrict
 - The 1 h `running` cutoff could fail a legitimately slow run — playbook actions are DB writes, Slack/
   email sends and one optional LLM call; none approach 1 h.
 - No migration (status is free-text `String(20)`, no check constraint; `failed` already used).
+
+## Build notes + live evidence (2026-09-25)
+
+- Implemented TDD: 15 new tests (3 engine claim, 12 reaper), RED first. Two of the engine tests failed
+  on the old read-then-write claim (actions ran over another worker's `running`; rate-limit cancel
+  overwrote it). Worker suite 2018 passed.
+- Integrator refinement: reaper failed-marking uses conditional `UPDATE … WHERE id IN (…) AND
+  status=<selected>`, so a row finished/claimed between select and update is never overwritten.
+- **Live** (scratch Postgres, real worker, `--pool=threads`, Redis DB 9), seeded rows:
+
+| Row | Seeded | After reaper + worker |
+|---|---|---|
+| 101 | queued, 20 min old | re-published → `done` |
+| 102 | queued, 30 h old | `failed` "never picked up by a worker…" |
+| 103 | running, started 2 h ago | `failed` "worker stopped mid-run…" |
+| 104 | queued, 5 min old | untouched (`queued`) |
+| 105 | queued, published **twice** | one delivery `done`, the other `{"skipped": true, "reason": "status is already 'running'"}` |
+
+Reaper returned `{'redispatched': 1, 'expired_queued': 1, 'failed_running': 1}`. Scratch DB dropped.

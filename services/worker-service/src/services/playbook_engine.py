@@ -52,18 +52,29 @@ def execute(execution_id: int, db: Session) -> dict:
     if execution.status != "queued":
         return {"skipped": True, "reason": f"status is already '{execution.status}'"}
 
-    # Per-(playbook, customer) rate-limit: 60-minute window
+    # Per-(playbook, customer) rate-limit: 60-minute window. The cancel is
+    # conditional on status='queued' so it never clobbers another worker's claim.
     if _is_rate_limited(execution, db):
-        execution.status = "cancelled"
-        execution.error_message = "rate-limited: same playbook ran for this customer within 60 minutes"
-        execution.completed_at = datetime.utcnow()
-        db.commit()
+        cancelled = _transition_from_queued(db, execution_id, {
+            "status": "cancelled",
+            "error_message": "rate-limited: same playbook ran for this customer within 60 minutes",
+            "completed_at": datetime.utcnow(),
+        })
+        if not cancelled:
+            return _skipped_current_status(execution, db)
+        db.refresh(execution)
         return {"status": "cancelled", "action_log": []}
 
-    # Mark running
-    execution.status = "running"
-    execution.started_at = datetime.utcnow()
-    db.commit()
+    # Atomic claim: UPDATE ... SET status='running' WHERE id=:id AND status='queued'.
+    # A read-then-write guard would let two deliveries of one id (e.g. a reaper
+    # re-publish racing the original message) both run the actions.
+    claimed = _transition_from_queued(db, execution_id, {
+        "status": "running",
+        "started_at": datetime.utcnow(),
+    })
+    if not claimed:
+        return _skipped_current_status(execution, db)
+    db.refresh(execution)
 
     # Load playbook
     playbook = db.query(ChurnPlaybook).filter_by(id=execution.playbook_id).first()
@@ -101,6 +112,26 @@ def execute(execution_id: int, db: Session) -> dict:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _transition_from_queued(db: Session, execution_id: int, values: dict) -> bool:
+    """Conditionally move a row out of 'queued' and commit. True if this caller won."""
+    rowcount = (
+        db.query(ChurnPlaybookExecution)
+        .filter(
+            ChurnPlaybookExecution.id == execution_id,
+            ChurnPlaybookExecution.status == "queued",
+        )
+        .update(values, synchronize_session=False)
+    )
+    db.commit()
+    return rowcount == 1
+
+
+def _skipped_current_status(execution: ChurnPlaybookExecution, db: Session) -> dict:
+    """Skip result for a row another delivery already moved out of 'queued'."""
+    db.refresh(execution)
+    return {"skipped": True, "reason": f"status is already '{execution.status}'"}
+
 
 def _is_rate_limited(execution: ChurnPlaybookExecution, db: Session) -> bool:
     """

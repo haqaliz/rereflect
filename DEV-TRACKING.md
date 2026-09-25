@@ -66,11 +66,17 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 > **Review rule:** in any code that hands a row id to another process, `grep` for `flush()`
 > followed by `send_task` / `.delay` / `.apply_async`. That shape is this bug.
 >
-> **Follow-ups (NOT STARTED):**
-> - [ ] If the publish itself fails *after* the commit (broker down), the execution stays
->       `queued`. The manual route has the same gap (`playbooks.py`, log-and-continue). Needs a
->       stale-`queued` reaper or mark-failed-on-publish-error.
-> - [ ] The rule API lets `run_playbook` sit on any trigger, including `health_score_threshold` /
+> **Follow-ups:**
+> - [x] If the publish itself fails *after* the commit (broker down), the execution stays
+>       `queued`. The manual route has the same gap (`playbooks.py`, log-and-continue).
+>       **FIXED on `feat/playbook-execution-reaper` (2026-09-25):**
+>       `churn_playbooks.reap_stale_executions` runs on beat every 10 min. It re-publishes `queued`
+>       rows aged 15 min–24 h and marks older `queued` rows `failed` ("never picked up", which also
+>       closes out pre-fix orphans). It marks `running` rows older than 1 h `failed` ("worker
+>       stopped mid-run"), never re-running them. `playbook_engine.execute` now claims with a
+>       conditional `UPDATE … WHERE status='queued'`, so a re-published or doubly delivered id
+>       cannot run twice. See `docs/planning/playbook-execution-reaper/prd.md`.
+> - [ ] (NOT STARTED) The rule API lets `run_playbook` sit on any trigger, including `health_score_threshold` /
 >       `churn_risk_level_change`. Intended? Undocumented either way.
 
 ### P0 — `automation-worker-triggers-dead` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
