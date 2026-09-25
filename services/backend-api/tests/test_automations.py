@@ -122,9 +122,11 @@ def test_create_rule_with_sentiment_pattern_trigger(client: TestClient, db: Sess
 def test_create_rule_with_multiple_actions(client: TestClient, db: Session, test_organization: Organization, auth_headers: dict):
     payload = {
         "name": "Multi-Action Rule",
+        # Feedback trigger: the only trigger family that can run all four of
+        # these actions (see SUPPORTED_ACTIONS_BY_TRIGGER).
         "trigger": {
-            "type": "churn_risk_level_change",
-            "config": {"target_level": "critical"},
+            "type": "feedback_category_match",
+            "config": {"categories": ["critical_bug"]},
         },
         "actions": [
             {"type": "auto_assign", "config": {"assign_to": "role:admin"}},
