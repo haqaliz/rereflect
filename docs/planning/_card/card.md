@@ -1,78 +1,43 @@
-# Card: AI Copilot suggested actions
+# Card — feat/automation-playbook-dispatch-commit
 
-**Type:** feat (freeform, no GitHub issue)
-**Slug:** `copilot-suggested-actions`
-**Branch:** `feat/copilot-suggested-actions`
-**Source:** `rereflect-next` recommendation (2026-09-06), verified against code + tracking
+**Source:** freeform (no GitHub issue). Picked by `rereflect-next` on 2026-09-25.
 
 ## Brief
 
-Build AI Copilot **suggested actions**: the copilot proposes concrete, executable actions
-alongside its answer, and the user clicks to execute. This is the shape already locked as a
-strategic decision, and explicitly deferred as a V1 non-goal — never built.
+Automation `run_playbook` actions create a `ChurnPlaybookExecution` row, `flush()` it to get
+an id, and publish that id to Celery **before the row is committed**:
 
-## Verified facts (from the docs)
+- `services/backend-api/src/services/automation_engine.py:827-831` (`_execute_run_playbook`,
+  `send_task("tasks.churn_playbooks.run_playbook", ...)`)
+- `services/worker-service/src/services/automation_churn_trigger.py:290-293`
+  (`run_playbook.delay(exec_row.id)`)
+- `services/worker-service/src/services/automation_usage_trend_trigger.py:333-336`
+  (`run_playbook.delay(exec_row.id)`)
 
-- `AI-TRACKING.md:25` — Strategic Decisions table: **"Copilot actions | Read + suggest
-  actions (user clicks to execute)"**. The intended shape is locked; only the read half shipped.
-- `docs/archive/prd/PRD-AI-COPILOT.md:33` — V1 Non-Goals: **"No action execution (read-only —
-  no mutations, no status changes, no assignments)"**. Deferred by scope, not by a blocker.
-- `AI-TRACKING.md:144-158` — M2.2 AI Copilot COMPLETE. The checklist has no action item;
-  everything shipped is read/answer/report.
-- `services/backend-api/src/services/copilot/intent_classifier.py:115` — intents are
-  `"data" | "analysis" | "general" | "report"`. No `action` intent.
-- `services/backend-api/src/services/copilot/` — no executor/registry module
-  (context_resolver, intent_classifier, llm_resolver, report_generator, response_formatter,
-  schema_whitelist, sql_executor, sql_generator, sql_validator, template_matcher,
-  template_saver).
+Postgres exposes nothing to other connections until COMMIT. The worker can consume the message
+before the publisher commits, looks the row up, gets nothing, and `playbook_engine.py:49`
+returns `{"skipped": True, "reason": "execution not found"}` with no retry. The row stays
+`queued` forever and the playbook never runs.
 
-## Why now (moat)
+The manual routes (`playbooks.py`) commit before dispatch, which is why a human-triggered run
+works and a rule-triggered one silently no-ops.
 
-The execution side is already shipped and tested — this slice only adds proposal + confirm +
-dispatch:
+Consequence: M4.1.5 (churn-triggered playbook auto-execution, `AI-TRACKING.md:400`) and the
+M3.2c `usage_trend` → `run_playbook` path are marked COMPLETE but are not delivered.
 
-- Playbooks with the full action set — `feat/playbook-action-types` (merged `9d4d5792`);
-  churn-triggered auto-execution `AI-TRACKING.md:381` (M4.1.5 COMPLETE).
-- Bulk cohort actions on the shared `Cohort` contract — `AI-TRACKING.md:346`
-  (`segment-actions`): CSV export, bulk tag, bulk assign-owner, run-playbook-on-cohort.
-- Status changes via the shared `apply_status_change` helper; tags / `is_urgent` edits —
-  `AI-TRACKING.md:456` (public API write scope).
+## Asks
 
-The copilot currently sits outside the churn → health → playbook → automations loop as a
-read-only surface. This is the seam that joins them, and it improves as base models improve
-(BYOK / local LLM — the M5 framing at `AI-TRACKING.md:463`).
+1. Commit before publish at all three sites (durable-then-publish), pinned by ordering tests
+   in the style of `send_customer_email` (spy on `db.commit` vs `send_task`/`.delay`).
+2. Decide deliberately what a mid-rule commit means for the backend engine's single
+   end-of-`_evaluate_rule` commit (partial-failure / rollback semantics).
+3. Acceptance needs a **live** run — scratch Postgres DB + real Celery worker — showing
+   `queued → completed`. Unit suites cannot see this (one in-memory session, mocked Celery).
+4. Record the defect in `DEV-TRACKING.md` and correct the M4.1.5 / M3.2c markers in the same
+   branch.
 
-## Hard constraints (settled before the interview)
+## Provenance / honesty
 
-1. **Whitelisted server-side action registry — never free-form LLM tool calls.** Mirror the
-   read path's precedent: `sql_validator.py` + `schema_whitelist.py`.
-2. **RBAC re-checked server-side at execute time**, via the existing
-   `require_admin_or_owner` / `require_owner` dependencies (`src/api/dependencies.py`).
-   A member can view analytics but cannot run playbooks or manage integrations
-   (CLAUDE.md permission matrix). The copilot must never become an RBAC bypass — hiding a
-   chip in the UI is not enforcement.
-3. **Honest degrade with no LLM.** Gate the proposal step on
-   `resolve_generation_llm().is_configured` and hide the surface entirely when unconfigured —
-   the same precedent as the "✨ Draft with AI" button (AI-Drafted Issue/Task Content row,
-   `AI-TRACKING.md`).
-4. **Confirm before execute.** No auto-execution; the user clicks. Matches the shipped
-   response-suggestion posture ("copy-to-clipboard + edit before sending, no auto-send",
-   `AI-TRACKING.md:165`).
-
-## Known limits to carry into the PRD
-
-- `AI-TRACKING.md:346` — run-playbook on a **whole-filter cohort** currently requires a
-  `segment` (or explicit emails); a risk/search-only cohort can be exported/tagged/assigned
-  but not playbook-run. Any cohort-scoped action suggestion inherits this.
-- Small/local models are weakest at structured action selection — the registry must constrain
-  the model, not trust it.
-- Start with one narrow, testable first slice (suggest + execute a single action type
-  end-to-end) rather than the full registry.
-
-## Open questions for the interview
-
-- Which action type is the first slice?
-- Where does the proposal surface — Cmd+K modal, /conversations, or both?
-- Are proposals model-generated then validated against the registry, or deterministically
-  derived from the query result + intent?
-- Does an executed action get an audit record / timeline event?
+This defect was not recorded in any tracked repo file as of 2026-09-25. Evidence: a live
+repro on 2026-08-21 (session memory) plus the current code, which still has flush-then-publish
+at all three sites.
