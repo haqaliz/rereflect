@@ -76,8 +76,22 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 >       stopped mid-run"), never re-running them. `playbook_engine.execute` now claims with a
 >       conditional `UPDATE … WHERE status='queued'`, so a re-published or doubly delivered id
 >       cannot run twice. See `docs/planning/playbook-execution-reaper/prd.md`.
-> - [ ] (NOT STARTED) The rule API lets `run_playbook` sit on any trigger, including `health_score_threshold` /
->       `churn_risk_level_change`. Intended? Undocumented either way.
+> - [x] The rule API let any action sit on any trigger. **FIXED on `feat/automation-action-support`
+>       (2026-09-26).** Investigating it found real inert behaviour: the churn and usage-trend mirrors
+>       *silently* skipped every action but run_playbook / send_customer_email while logging `success`.
+>       That made the shipped `usage_decline_outreach` template (usage_trend → send_notification)
+>       fully inert. Health triggers never carry a feedback item, so `churn_prevention`'s auto_assign
+>       and draft_response failed on every fire. The fix:
+>       - one `SUPPORTED_ACTIONS_BY_TRIGGER` matrix, enforced with a 422 on create and on update when
+>         the trigger or actions change, and served at `GET /api/v1/automations/action-support`
+>       - the worker mirrors now execute `send_notification` (delegating to the feedback mirror's
+>         notifier) and log an explicit error for anything else
+>       - `churn_prevention` is now notify-only, and its description says so
+>       - the rule editors offer only supported actions and warn on legacy rows
+>
+>       A golden fixture (`worker-service/tests/fixtures/automation_action_support.json`) is read
+>       by the backend, worker and frontend suites, so the matrix and the executors can't drift.
+>       See `docs/planning/automation-action-support/prd.md`.
 
 ### P0 — `automation-worker-triggers-dead` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
 > Shipped: worker-side mirror `automation_feedback_trigger.py` (two triggers, four actions,

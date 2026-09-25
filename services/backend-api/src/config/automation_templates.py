@@ -33,20 +33,19 @@ AUTOMATION_TEMPLATES: list[dict[str, Any]] = [
         "id": "churn_prevention",
         "name": "Churn Prevention",
         "description": (
-            "Automatically escalate customers whose health score drops below 30. "
-            "Assigns to an admin, notifies via dashboard and email, and drafts an empathetic response."
+            "Notify admins via dashboard and email when a customer's health score drops below 30."
         ),
         "trigger": {
             "type": "health_score_threshold",
             "config": {"threshold": 30, "direction": "below"},
         },
+        # A health trigger has no feedback item, so it cannot assign or draft a
+        # reply — notify only (see SUPPORTED_ACTIONS_BY_TRIGGER).
         "actions": [
-            {"type": "auto_assign", "config": {"assign_to": "round_robin"}},
             {
                 "type": "send_notification",
                 "config": {"recipients": "admins", "channels": ["dashboard", "email"]},
             },
-            {"type": "draft_response", "config": {"tone": "empathetic"}},
         ],
         "cooldown_hours": 48,
     },

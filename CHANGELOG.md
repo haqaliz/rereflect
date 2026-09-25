@@ -7,6 +7,23 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Fixed — automation rules could be saved with actions their trigger never runs
+
+- **The "Usage Decline Outreach" template now actually notifies.** Usage-trend and
+  churn-probability rules silently skipped every action except running a playbook or emailing the
+  customer, and still logged the rule as **success**. So this template, whose only action is a
+  notification, never notified anyone. Those two triggers can now send notifications.
+- **Unsupported actions can no longer be saved.** Each trigger lists the actions it can run. The
+  rule editor only offers those, and the API rejects anything else with a message naming the
+  unsupported action. Triggers based on a customer's health, churn probability or usage have no
+  single feedback item, so they cannot assign, change the status of, or draft a reply to one.
+- **The "Churn Prevention" template is now honest.** It promised to assign the customer and draft a
+  reply, but health-score rules have no feedback item to do either with, so those two steps failed
+  on every run. It now notifies admins, which is the part that always worked.
+- **Existing rules:** a rule saved earlier with an unsupported action now records a clear error for
+  that action in its execution log, instead of a silent **success**. You can still rename or pause
+  it. Editing its trigger or actions requires removing the unsupported action first.
+
 ### Fixed — automation-triggered playbooks could silently never run
 
 - **Automation rules that run a churn playbook now actually run it.** A rule's `run_playbook`

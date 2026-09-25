@@ -451,30 +451,163 @@ def test_nonexistent_playbook_records_error_no_execution(mock_redis, mock_task, 
 
 @patch("src.services.automation_usage_trend_trigger.run_playbook")
 @patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
-def test_non_run_playbook_actions_are_ignored(mock_redis, mock_task, db):
-    """Non-run_playbook action types are ignored — matching M4.1.5's
-    deliberately narrow mirror (spec 'Out of scope')."""
+def test_unsupported_action_types_are_loud_not_silently_skipped(mock_redis, mock_task, db):
+    """R2 (automation-action-support): an action type this mirror cannot run
+    is recorded as an explicit error entry, so the rule is `failed` — never
+    silently dropped with a false `success`. REWRITTEN from the former
+    test_non_run_playbook_actions_are_ignored, which pinned the silent skip."""
     _make_rule(
         db,
         mode="active",
-        actions=[{"type": "send_notification", "config": {"recipients": "admins"}}],
+        actions=[{"type": "auto_assign", "config": {"user_id": 1}}],
     )
 
     evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
 
-    assert db.query(ChurnPlaybookExecution).count() == 0
     mock_task.delay.assert_not_called()
-
     logs = db.query(AutomationExecution).all()
     assert len(logs) == 1
-    assert logs[0].status == "success"
-    assert logs[0].actions_executed == []
+    assert logs[0].status == "failed"
+    entries = logs[0].actions_executed
+    assert len(entries) == 1
+    assert entries[0]["type"] == "auto_assign"
+    assert entries[0]["result"] is None
+    assert "auto_assign" in entries[0]["error"]
+    assert "usage_trend" in entries[0]["error"]
+
+
+@pytest.mark.parametrize("bad_type", ["change_status", "draft_response"])
+@patch("src.services.automation_usage_trend_trigger.run_playbook")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_unsupported_action_mixed_with_working_action_is_partial_failure(
+    mock_redis, mock_task, db, bad_type
+):
+    playbook = _make_playbook(db)
+    _make_rule(
+        db,
+        mode="active",
+        actions=[
+            {"type": "run_playbook", "config": {"playbook_id": playbook.id}},
+            {"type": bad_type, "config": {}},
+        ],
+    )
+
+    evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    mock_task.delay.assert_called_once()
+    log = db.query(AutomationExecution).one()
+    assert log.status == "partial_failure"
+    bad = [e for e in log.actions_executed if e["type"] == bad_type]
+    assert len(bad) == 1 and bad[0]["error"] and bad_type in bad[0]["error"]
+
+
+def _make_admin(db, org_id=1, email="admin@acme.test"):
+    from src.models import User
+
+    user = User(email=email, organization_id=org_id, role="admin")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@patch("src.services.automation_usage_trend_trigger.run_playbook")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_send_notification_creates_dashboard_notification(mock_redis, mock_task, db):
+    """R1: send_notification now executes (via the feedback mirror's
+    _execute_notify, feedback=None) and names the customer."""
+    from src.models import Notification
+
+    admin = _make_admin(db)
+    _make_rule(
+        db,
+        mode="active",
+        actions=[{
+            "type": "send_notification",
+            "config": {"recipients": "admins", "channels": ["dashboard"]},
+        }],
+    )
+
+    evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    notes = db.query(Notification).filter_by(user_id=admin.id).all()
+    assert len(notes) == 1
+    assert "cust@example.com" in notes[0].message
+    assert notes[0].link is None
+
+    log = db.query(AutomationExecution).one()
+    assert log.status == "success"
+    entries = [e for e in log.actions_executed if e["type"] == "send_notification"]
+    assert len(entries) == 1
+    assert entries[0]["error"] is None
+    assert entries[0]["result"]["notifications_created"] == 1
+
+
+@patch("src.services.automation_usage_trend_trigger.run_playbook")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_send_notification_respects_configured_message_template(mock_redis, mock_task, db):
+    from src.models import Notification
+
+    admin = _make_admin(db)
+    _make_rule(
+        db,
+        mode="active",
+        actions=[{
+            "type": "send_notification",
+            "config": {"recipients": "admins", "channels": ["dashboard"],
+                       "message_template": "Custom text"},
+        }],
+    )
+
+    evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    note = db.query(Notification).filter_by(user_id=admin.id).one()
+    assert note.message == "Custom text"
+
+
+@patch("src.services.automation_usage_trend_trigger.run_playbook")
+@patch("src.services.automation_usage_trend_trigger._get_redis", return_value=None)
+def test_send_notification_assignee_without_feedback_is_loud(mock_redis, mock_task, db):
+    """`assignee` needs a feedback item this trigger never has -> explicit
+    error entry, not a crash and not a silent zero-recipient success."""
+    from src.models import Notification
+
+    _make_admin(db)
+    _make_rule(
+        db,
+        mode="active",
+        actions=[{
+            "type": "send_notification",
+            "config": {"recipients": "assignee", "channels": ["dashboard"]},
+        }],
+    )
+
+    evaluate_usage_trend_triggers(1, "cust@example.com", "stable", "declining", db)
+
+    assert db.query(Notification).count() == 0
+    log = db.query(AutomationExecution).one()
+    assert log.status == "failed"
+    entry = log.actions_executed[0]
+    assert entry["type"] == "send_notification"
+    assert "assignee" in entry["error"]
+
+
+def test_handled_action_types_match_golden_support_matrix():
+    """Pins this mirror's executed set to the shared golden fixture that the
+    backend's SUPPORTED_ACTIONS_BY_TRIGGER is also checked against."""
+    import json
+    from pathlib import Path
+
+    golden = json.loads(
+        (Path(__file__).parent / "fixtures" / "automation_action_support.json").read_text()
+    )
+    assert set(automation_usage_trend_trigger.HANDLED_ACTION_TYPES) == set(golden["usage_trend"])
 
 
 # ---------------------------------------------------------------------------
 # send_customer_email (automation-send-customer-email, worker-mirrors Phase 4)
 # This mirror now executes send_customer_email in addition to run_playbook.
-# Every OTHER action type still silently skips (pinned above).
+# Every OTHER unsupported action type is recorded as a loud error (above).
 # ---------------------------------------------------------------------------
 
 

@@ -158,7 +158,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         clearTimeout(reconnectTimerRef.current);
       }
       closeTimerRef.current = setTimeout(() => {
-        wsRef.current?.close(1000);
+        // The provider is gone by now (a remount would have cleared this
+        // timer), so detach the handlers first: onclose would otherwise set
+        // state on an unmounted tree — in tests, sometimes after jsdom teardown.
+        const ws = wsRef.current;
+        if (!ws) return;
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.close(1000);
       }, 100);
     };
   }, [connect, getWsUrl]);

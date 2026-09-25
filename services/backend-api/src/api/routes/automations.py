@@ -68,6 +68,32 @@ VALID_ACTION_TYPES = frozenset({
     "send_customer_email",
 })
 
+# Which actions each trigger can actually execute. A trigger that has no
+# feedback item (health / churn / usage triggers) cannot assign, change the
+# status of, or draft a reply to one; the worker's usage/churn mirrors and the
+# backend health engine run only the actions listed here. Order is the golden
+# order shared with the worker suite via
+# services/worker-service/tests/fixtures/automation_action_support.json —
+# change that fixture and every executor together.
+_FEEDBACK_ACTIONS = (
+    "auto_assign",
+    "change_status",
+    "send_notification",
+    "draft_response",
+    "send_customer_email",
+)
+_CUSTOMER_ACTIONS = ("send_notification", "run_playbook", "send_customer_email")
+
+SUPPORTED_ACTIONS_BY_TRIGGER: dict[str, tuple[str, ...]] = {
+    "feedback_category_match": _FEEDBACK_ACTIONS,
+    "sentiment_pattern": _FEEDBACK_ACTIONS,
+    "batch_sentiment_threshold": _FEEDBACK_ACTIONS,
+    "health_score_threshold": _CUSTOMER_ACTIONS,
+    "churn_risk_level_change": _CUSTOMER_ACTIONS,
+    "churn_probability_threshold": _CUSTOMER_ACTIONS,
+    "usage_trend": _CUSTOMER_ACTIONS,
+}
+
 VALID_WORKFLOW_STATUSES = frozenset({"new", "in_review", "resolved", "closed"})
 VALID_CHURN_LEVELS = frozenset({"at_risk", "critical"})
 VALID_DRAFT_TONES = frozenset({"professional", "empathetic", "friendly", "concise"})
@@ -534,6 +560,25 @@ def _check_rule_limit(org: Organization, db: Session) -> None:
             )
 
 
+def _validate_actions_for_trigger(trigger_type: str, action_types: List[str]) -> None:
+    """Raise 422 if any action cannot be executed for this trigger type.
+
+    Names the trigger and every unsupported action so the client can tell the
+    user exactly what to remove.
+    """
+    supported = SUPPORTED_ACTIONS_BY_TRIGGER.get(trigger_type, ())
+    unsupported = [a for a in action_types if a not in supported]
+    if unsupported:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Trigger '{trigger_type}' does not support action(s): "
+                f"{', '.join(sorted(set(unsupported)))}. "
+                f"Supported actions: {', '.join(supported)}."
+            ),
+        )
+
+
 def _validate_run_playbook_actions(
     actions: List[ActionSchema], org_id: int, db: Session
 ) -> None:
@@ -586,6 +631,15 @@ def _get_rule_or_404(rule_id: int, org_id: int, db: Session) -> AutomationRule:
 # ---------------------------------------------------------------------------
 # Routes — NOTE: static sub-paths (/templates) MUST come before /{id}
 # ---------------------------------------------------------------------------
+
+@router.get("/action-support", response_model=dict[str, List[str]])
+def get_action_support(
+    current_user: User = Depends(get_current_user),
+    current_org: Organization = Depends(get_current_org),
+):
+    """Which action types each trigger type can execute."""
+    return {t: list(actions) for t, actions in SUPPORTED_ACTIONS_BY_TRIGGER.items()}
+
 
 @router.get("/templates", response_model=List[TemplateResponse])
 def list_templates(
@@ -693,6 +747,9 @@ def create_rule(
     """Create a new automation rule. Requires Admin or Owner role."""
     _check_automation_access(current_org)
     _check_rule_limit(current_org, db)
+    _validate_actions_for_trigger(
+        payload.trigger.type, [a.type for a in payload.actions]
+    )
     _validate_run_playbook_actions(payload.actions, current_org.id, db)
 
     now = datetime.utcnow()
@@ -762,6 +819,21 @@ def update_rule(
     """Update an existing automation rule. Requires Admin or Owner role."""
     rule = _get_rule_or_404(rule_id, current_org.id, db)
     old_mode = rule.mode  # captured BEFORE the update is applied
+
+    # Validate the EFFECTIVE (trigger, actions) pair whenever either changes: a
+    # trigger-only change is still checked against the rule's existing actions.
+    # An edit touching neither (rename, mode) is allowed even on a rule saved
+    # before this check existed, so a broken legacy rule can still be paused.
+    if payload.trigger is not None or payload.actions is not None:
+        effective_trigger = (
+            payload.trigger.type if payload.trigger is not None else rule.trigger_type
+        )
+        effective_action_types = (
+            [a.type for a in payload.actions]
+            if payload.actions is not None
+            else [a.get("type") for a in (rule.actions or [])]
+        )
+        _validate_actions_for_trigger(effective_trigger, effective_action_types)
 
     if payload.actions is not None:
         _validate_run_playbook_actions(payload.actions, current_org.id, db)
