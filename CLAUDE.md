@@ -174,9 +174,16 @@ The automations engine exists **twice**, on purpose, and the two must stay in ag
   dispatched **only** from the worker's analysis task, so in production this mirror — not
   the backend engine — is what evaluates them.
 
-Plus two narrower mirrors that handle one trigger and `run_playbook` only:
+Plus two narrower mirrors that each handle one trigger and three actions (`run_playbook`,
+`send_customer_email`, `send_notification`), recording an explicit error for anything else:
 `automation_churn_trigger.py` (`churn_probability_threshold`) and
 `automation_usage_trend_trigger.py` (`usage_trend`).
+
+Which actions each trigger can run is one matrix, `SUPPORTED_ACTIONS_BY_TRIGGER` in
+`routes/automations.py`, enforced by the API and served at `GET /api/v1/automations/action-support`.
+It is pinned by the golden fixture `worker-service/tests/fixtures/automation_action_support.json`,
+which the backend, worker and frontend suites all read. **Adding an action to an executor means
+updating that fixture and the matrix together.**
 
 **Why the duplication:** worker-service cannot import backend-api. The worker image copies
 only `worker-service/src` and `analysis-engine/src/analyzer` under `PYTHONPATH=/app`. There
