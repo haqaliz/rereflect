@@ -15,10 +15,9 @@ This module is a SMALL, ISOLATED mirror of just the `usage_trend` trigger +
 on the sibling `src.services.automation_churn_trigger` module written for
 the `churn_probability_threshold` trigger.
 
-It deliberately does NOT mirror the whole engine, and does NOT grow beyond
-`run_playbook` — same warning as `automation_churn_trigger.py`: doing so
-would silently activate trigger types / action types that are meant to
-remain backend-only.
+It deliberately does NOT mirror the whole engine. Its action set is exactly
+`HANDLED_ACTION_TYPES` (pinned to the backend support matrix); anything else
+is recorded as an explicit error.
 
 Edge-triggered semantics (PRD M2): this evaluator fires ONLY on a STRICTLY
 WORSENING transition (`stable < declining < sharp_decline`), determined by
@@ -55,15 +54,19 @@ from src.models.automation_execution import AutomationExecution
 from src.models.automation_rule import AutomationRule
 from src.services.usage_trend_severity import is_worsening_transition
 from src.services.automation_email_delivery import execute_send_customer_email
+from src.services.automation_feedback_trigger import _execute_notify
 from src.tasks.churn_playbooks import run_playbook
 
 logger = logging.getLogger(__name__)
 
-# Action types this mirror executes. Everything else is silently skipped (the
-# narrow-mirror contract this module shipped with); `send_customer_email` was
-# added by automation-send-customer-email so a churn/usage rule can actually
-# email the at-risk customer.
-HANDLED_ACTION_TYPES = ("run_playbook", "send_customer_email")
+# Action types this mirror executes. Must equal the backend's
+# SUPPORTED_ACTIONS_BY_TRIGGER["usage_trend"] — pinned by
+# test_handled_action_types_match_golden_support_matrix against
+# tests/fixtures/automation_action_support.json. Any other type is recorded
+# as an explicit error (never silently skipped), so the rule's status is
+# `partial_failure` / `failed` rather than a false `success`.
+HANDLED_ACTION_TYPES = ("run_playbook", "send_customer_email", "send_notification")
+TRIGGER_TYPE = "usage_trend"
 
 # `ChurnPlaybookExecution.triggered_by` value for auto-runs fired by this
 # evaluator — distinct from "auto_probability" (M4.1.5). Must stay exactly
@@ -269,10 +272,10 @@ def _execute_run_playbook_actions(
 ) -> List[Dict[str, Any]]:
     """
     Execute the action types this mirror handles (`HANDLED_ACTION_TYPES`):
-    `run_playbook` and `send_customer_email` — same narrow scope as
-    `automation_churn_trigger._execute_run_playbook_actions`, and the same
-    shared `send_customer_email` handler. Every other action type is still
-    silently ignored here.
+    `run_playbook`, `send_customer_email` and `send_notification` — same scope
+    as `automation_churn_trigger._execute_run_playbook_actions`, with the same
+    shared handlers. Every other action type is recorded as an explicit
+    "Unsupported action type" error entry.
     """
     results: List[Dict[str, Any]] = []
     for action in (rule.actions or []):
@@ -281,12 +284,22 @@ def _execute_run_playbook_actions(
 
         action_type = action.get("type")
         if action_type not in HANDLED_ACTION_TYPES:
-            # Every other action type is still silently skipped here — pinned
-            # by test_non_run_playbook_actions_are_ignored. Making them loud is
-            # a separate delivery-integrity change.
+            # Loud, never a silent skip: the rule status must reflect that
+            # this action did not run.
+            results.append(
+                {
+                    "type": action_type,
+                    "result": None,
+                    "error": f"Unsupported action type for {TRIGGER_TYPE}: {action_type}",
+                }
+            )
             continue
 
         config: dict = action.get("config", {}) or {}
+
+        if action_type == "send_notification":
+            results.append(_execute_send_notification(config, rule, customer_email, db))
+            continue
 
         if action_type == "send_customer_email":
             results.append(
@@ -353,3 +366,33 @@ def _execute_run_playbook_actions(
         )
 
     return results
+
+
+def _execute_send_notification(
+    config: dict, rule: AutomationRule, customer_email: str, db: Session
+) -> Dict[str, Any]:
+    """Run `send_notification` via the feedback mirror's `_execute_notify`
+    (same process — no duplicated channel logic), with `feedback=None`.
+
+    This trigger has no feedback item, so the `assignee` recipient cannot be
+    resolved; `_execute_notify` would silently notify nobody and report
+    success, so it is rejected here with an explicit error instead. A default
+    message naming the rule and customer is supplied only when the rule's
+    config does not set its own `message_template`.
+    """
+    if config.get("recipients") == "assignee":
+        return {
+            "type": "send_notification",
+            "result": None,
+            "error": (
+                f"recipients 'assignee' requires a feedback item; "
+                f"{TRIGGER_TYPE} has none"
+            ),
+        }
+
+    notify_config = dict(config)
+    if not notify_config.get("message_template"):
+        notify_config["message_template"] = (
+            f"Automation '{rule.name}' triggered (usage trend) for customer {customer_email}"
+        )
+    return _execute_notify(notify_config, None, rule, db)
