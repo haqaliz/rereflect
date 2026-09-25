@@ -175,7 +175,9 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
 
     Returns
     -------
-    dict: conversations_seen, conversations_ingested, no_source_match, cursor
+    dict: conversations_seen, conversations_ingested, no_source_match, cursor,
+    created_feedback_ids (deduped, ordered). Analysis is NOT dispatched here —
+    the rows are only flushed; the caller publishes after its commit.
     """
     from src.adapters import get_adapter
     from src.adapters.intercom_parts import extract_rating, extract_reply_parts
@@ -195,6 +197,7 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
 
     conversations_seen = 0
     conversations_ingested = 0
+    created_feedback_ids: list = []
     changed_feedback_ids: list = []
     detail_fetches = 0
     dropped_by_cap = 0
@@ -242,6 +245,8 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
                 )
                 if result.get("status") == "feedback_created":
                     conversations_ingested += 1
+                    if result.get("feedback_id"):
+                        created_feedback_ids.append(result["feedback_id"])
 
             # ── Enrichment pass (pull-enrichment) ──────────────────────────
             # Merge new reply parts + the rating into the item the event loop
@@ -326,6 +331,7 @@ def _sync_org(org_id: int, db, client: IntercomClient, integ) -> Dict[str, Any]:
     return {
         "conversations_seen": conversations_seen,
         "conversations_ingested": conversations_ingested,
+        "created_feedback_ids": list(dict.fromkeys(created_feedback_ids)),
         "changed_feedback_ids": changed_feedback_ids,
         "dropped_by_cap": dropped_by_cap,
         "no_source_match": not sources,
@@ -392,7 +398,23 @@ def _sync_intercom_org_body(task_self, integration_id: int) -> Dict[str, Any]:
             # the item's text, so a pre-commit dispatch would analyze stale
             # content (pinned ordering, plan §1.3). Guarded so a failed seam
             # call can never break the sync — the seam's own task retries.
-            from src.tasks.analysis import reanalyze_feedback
+            from src.tasks.analysis import analyze_single_feedback, reanalyze_feedback
+
+            # First analysis of newly created items — same AFTER-commit rule
+            # (analyze_single_feedback reads the row on another connection).
+            # A broker miss is recovered by the 30s process_unanalyzed_feedback
+            # beat sweeper.
+            for feedback_id in result.get("created_feedback_ids", []):
+                try:
+                    analyze_single_feedback.delay(feedback_id)
+                except Exception as exc:
+                    logger.warning(
+                        "Intercom pull: failed to enqueue analysis for feedback "
+                        "%s (integration %s): %s",
+                        feedback_id,
+                        integration_id,
+                        exc,
+                    )
 
             for feedback_id in result.get("changed_feedback_ids", []):
                 try:

@@ -330,7 +330,10 @@ def _execute_run_playbook_actions(
             status="queued",
         )
         db.add(exec_row)
-        db.flush()
+        # COMMIT BEFORE PUBLISH. run_playbook loads this row by id on another
+        # connection; with only a flush it can run before the row is visible
+        # and orphan it at `queued`. The rule-level commit comes too late.
+        db.commit()
 
         try:
             run_playbook.delay(exec_row.id)

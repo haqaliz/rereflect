@@ -464,3 +464,46 @@ def test_send_customer_email_alongside_run_playbook(mock_redis, mock_pb, mock_ta
     types = [a["type"] for a in log.actions_executed]
     # send_notification is still silently skipped in this mirror.
     assert types == ["run_playbook", "send_customer_email"]
+
+
+# ---------------------------------------------------------------------------
+# Durable-then-publish (automation-playbook-dispatch-commit)
+# ---------------------------------------------------------------------------
+
+
+@patch("src.services.automation_churn_trigger.run_playbook")
+@patch("src.services.automation_churn_trigger._get_redis", return_value=None)
+def test_run_playbook_commits_before_enqueueing(mock_redis, mock_task, db):
+    """The execution row must be committed before its id is published.
+
+    With only a flush, the run_playbook worker (another connection) can
+    consume the message before the row is visible, and the row is orphaned
+    at `queued`. Mirrors test_automation_email_delivery's ordering test.
+    """
+    playbook = _make_playbook(db)
+    _make_rule(db, mode="active", threshold=0.7, playbook_id=playbook.id)
+
+    calls = []
+    delayed_ids = []
+
+    def spy_delay(*a, **k):
+        calls.append("delay")
+        delayed_ids.append(a[0])
+
+    mock_task.delay.side_effect = spy_delay
+    real_commit = db.commit
+
+    def spy_commit():
+        calls.append("commit")
+        real_commit()
+
+    with patch.object(db, "commit", side_effect=spy_commit):
+        evaluate_churn_probability_triggers(1, "cust@example.com", 0.85, db)
+
+    assert "delay" in calls, "run_playbook was never enqueued"
+    assert "commit" in calls, "the execution row was never committed"
+    assert calls.index("commit") < calls.index("delay"), (
+        f"the row must be committed before the message is published; got {calls}"
+    )
+    execution = db.query(ChurnPlaybookExecution).one()
+    assert delayed_ids == [execution.id]

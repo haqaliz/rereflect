@@ -247,6 +247,9 @@
 - ~~Deferred (honest): a `usage_trend` automation trigger + timeline event (N1/N2)~~ — **N1 + N2 shipped 2026-07-23** as `usage-trend-automation-trigger` (see M3.2c below). Still deferred: seasonality dampening (N3), per-org thresholds (N4); `usage_event` retention (D2) and swallowed-enqueue (D3) remain open on their own branch.
 
 #### M3.2c — Usage-trend timeline event + automation trigger — COMPLETE (shipped 2026-07-23, as `usage-trend-automation-trigger`)
+> **Delivery fix 2026-09-25 (`automation-playbook-dispatch-commit`):** the `usage_trend → run_playbook`
+> action published the execution id before committing the row, so a worker could orphan it at
+> `queued`. Now commit-before-publish. See the M4.1.5 note below.
 > Closes M3.2b's N1 + N2 (`docs/planning/usage-trend-churn-signal/prd.md:158-160`), which named N2
 > verbatim as "the natural follow-on that reconnects the signal to the action loop". Built on the
 > M4.1.5 `churn-triggered-playbooks` pattern. See `docs/planning/usage-trend-automation-trigger/`.
@@ -402,6 +405,15 @@
 > `PRD-ADVANCED-CHURN-PREDICTION.md:465` ("Real-time playbook execution on probability threshold
 > cross. v1 supports manual trigger + run-batch only. Auto-execution on threshold cross is M4.1.5.").
 > See `docs/planning/churn-triggered-playbooks/`.
+>
+> **Delivery fix 2026-09-25 (`automation-playbook-dispatch-commit`).** Until this date, auto-runs
+> could be silently lost. All three `run_playbook` dispatch sites (the backend engine and the
+> worker churn + usage-trend mirrors) flushed the execution row and published its id *before*
+> committing, so the worker could load nothing and leave the row `queued` forever while the audit
+> row said `success`. This also affected the `trigger_automation` playbook action. The fix commits
+> before publishing, and ordering tests pin it. Live proof on a real Postgres + worker: with 50 ms
+> between publish and commit, master lost 40/40 and the branch completed 40/40. See
+> `docs/planning/automation-playbook-dispatch-commit/live-acceptance-and-tracking/evidence.md`.
 - [x] AutomationEngine (M4.4): new `churn_probability_threshold` trigger + new `run_playbook` action
       (as of 2026-08-20 these rules can also `send_customer_email` — see the M4.4 block)
 - [x] `AutomationRule.mode` — `off` / `shadow` (evaluate + log, don't execute) / `active`

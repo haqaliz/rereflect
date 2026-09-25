@@ -28,11 +28,11 @@ See docs/planning/intercom-selfhost-ingestion/pull-sync/.
 """
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.models import FeedbackSource, IntercomIntegration, Organization
+from src.models import FeedbackItem, FeedbackSource, IntercomIntegration, Organization
 
 WORKSPACE = "ws_pull_test"
 
@@ -644,6 +644,7 @@ class TestSyncOrgEstimate:
         assert set(result.keys()) == {
             "conversations_seen",
             "conversations_ingested",
+            "created_feedback_ids",
             "changed_feedback_ids",
             "dropped_by_cap",
             "no_source_match",
@@ -971,6 +972,54 @@ class TestSyncOrgBodyPersistence:
         assert integ.last_sync_status == "ok"
         assert integ.backlog_remaining == 0
         assert integ.backlog_remaining is not None
+
+
+class TestSyncOrgBodyAnalysisDispatch:
+    def test_commits_before_enqueueing_analysis(self, db, monkeypatch):
+        """Created rows must be committed before their ids are published —
+        analyze_single_feedback reads them on another connection. Mirrors
+        test_source_events::test_auto_import_commits_before_enqueueing_analysis."""
+        import src.cache as cache_mod
+        import src.tasks.intercom_sync as mod
+        from src.tasks.intercom_sync import _sync_intercom_org_body
+
+        org = _make_org(db)
+        integ = _make_integration(db, org.id, access_token=_encrypt("tok"))
+        _make_source(db, org.id)
+        _patch_db_session(monkeypatch, db)
+        monkeypatch.setattr(cache_mod, "cache_invalidate", MagicMock())
+        monkeypatch.setenv("LLM_ENCRYPTION_KEY", ENCRYPTION_KEY)
+        client = _fake_client_with_parts(
+            [([_conversation("c1", "Billing page is broken")], None)]
+        )
+        monkeypatch.setattr(mod, "IntercomClient", lambda *a, **k: client)
+
+        calls = []
+        delayed_ids = []
+
+        def spy_delay(*a, **k):
+            calls.append("delay")
+            delayed_ids.append(a[0])
+
+        real_commit = db.commit
+
+        def spy_commit():
+            calls.append("commit")
+            real_commit()
+
+        with patch("src.tasks.analysis.analyze_single_feedback") as mock_task, \
+                patch.object(db, "commit", side_effect=spy_commit):
+            mock_task.delay.side_effect = spy_delay
+            result = _sync_intercom_org_body(MagicMock(), integ.id)
+
+        assert result["status"] == "ok"
+        assert "delay" in calls, "analysis was never enqueued"
+        assert "commit" in calls, "the feedback row was never committed"
+        assert calls.index("commit") < calls.index("delay"), (
+            f"the row must be committed before the message is published; got {calls}"
+        )
+        item = db.query(FeedbackItem).one()
+        assert delayed_ids == [item.id]
 
 
 class TestSyncErrorResetsBacklog:

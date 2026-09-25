@@ -7,6 +7,21 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Fixed — automation-triggered playbooks could silently never run
+
+- **Automation rules that run a churn playbook now actually run it.** A rule's `run_playbook`
+  action saved the playbook execution but sent it to the worker *before* the save was committed.
+  If the worker picked it up first, it found nothing and gave up. The execution stayed **queued**
+  forever and the playbook never ran, while the rule's execution log reported **success**. This
+  affected churn-probability rules, usage-trend rules, health-score / risk-level rules with a
+  playbook action, and the playbook **Trigger automation** step. Manually running a playbook was
+  never affected.
+- The same ordering fix applies to feedback arriving from webhooks and from the Zendesk/Intercom
+  pull syncs. Those items were always analyzed eventually, by the 30-second catch-up job, but can
+  now be analyzed immediately.
+- Executions already stuck at **queued** from before this fix are not re-run automatically. Run
+  the playbook again from the customer page if it still applies.
+
 ### Added — AI Copilot suggested actions (tag the customers in an answer)
 
 - **A copilot answer can now offer to tag its own customers.** After a `data`/`analysis`

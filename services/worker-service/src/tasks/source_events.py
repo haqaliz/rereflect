@@ -126,6 +126,27 @@ def process_source_event(
 
             db.commit()
 
+            # COMMIT BEFORE PUBLISH. analyze_single_feedback loads the item by id
+            # on another connection; publishing before the commit above let it
+            # run against an invisible row. Guarded per item so a broker failure
+            # never retries (and re-ingests) the delivery — the 30s
+            # process_unanalyzed_feedback beat task recovers anything missed.
+            created_feedback_ids = list(dict.fromkeys(
+                r["feedback_id"] for r in results
+                if r.get("status") == "feedback_created" and r.get("feedback_id")
+            ))
+            if created_feedback_ids:
+                from src.tasks.analysis import analyze_single_feedback
+
+                for feedback_id in created_feedback_ids:
+                    try:
+                        analyze_single_feedback.delay(feedback_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to enqueue analysis for feedback %s (event %s): %s",
+                            feedback_id, external_event_id, exc,
+                        )
+
             # Invalidate dashboard/analytics cache for affected orgs
             from src.cache import cache_invalidate
             org_ids = {s.organization_id for s in sources}
@@ -321,7 +342,12 @@ def _process_event_for_source(
     event_type: str,
     event_data: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Process a single event against a specific source configuration."""
+    """Process a single event against a specific source configuration.
+
+    Never publishes analysis itself: a created row is only flushed here, so
+    every caller dispatches analyze_single_feedback for "feedback_created"
+    results strictly AFTER the commit that makes the row visible.
+    """
     from src.models import FeedbackSourceEvent, FeedbackItem, PendingFeedback, Integration
 
     source_id = source.id
@@ -464,10 +490,6 @@ def _process_event_for_source(
         # Update source stats
         source.last_event_at = datetime.utcnow()
         source.events_processed = (source.events_processed or 0) + 1
-
-        # Queue for analysis
-        from src.tasks.analysis import analyze_single_feedback
-        analyze_single_feedback.delay(feedback.id)
 
         return {
             "source_id": source_id,

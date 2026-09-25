@@ -44,6 +44,35 @@ internal guess. `rereflect-next` should pick from here before the older roadmap 
 comments, added 2026-07-29). Five of the seven needed no build work and are recorded under
 *No build required* so nobody re-litigates them.
 
+### P0 — `automation-playbook-dispatch-commit` — **FIXED** on `feat/automation-playbook-dispatch-commit` (2026-09-25)
+> Same family as the P0 below: marked shipped, did nothing. Every automation-fired
+> `run_playbook` (backend `automation_engine._execute_run_playbook`, worker
+> `automation_churn_trigger` + `automation_usage_trend_trigger`, and therefore the playbook
+> `trigger_automation` action) did `db.flush()` → publish id → commit later. The worker loads the
+> row on another connection, gets nothing, returns `execution not found` (`playbook_engine.py`,
+> no retry), and the row sits at `queued` forever while the audit row says `success`. Manual runs
+> were fine (`playbooks.py` commits first), which is why nobody noticed.
+>
+> Fixed by committing before publishing at all three sites (the `send_customer_email` precedent),
+> with an ordering test per site that was RED first. Same fix for webhook- and pull-ingested
+> feedback → `analyze_single_feedback` (`source_events`, Zendesk/Intercom pull syncs). That one
+> was lower severity because the 30 s `process_unanalyzed_feedback` sweeper recovered it. **Live
+> proof** (scratch Postgres + real Celery worker): with 50 ms between publish and commit, master
+> orphaned 40/40 executions and the fix completed 40/40. With no gap, master happened to win on a
+> quiet machine, so the window is narrow but real, and it is wider under load or when later
+> actions run in the rule. See
+> `docs/planning/automation-playbook-dispatch-commit/live-acceptance-and-tracking/evidence.md`.
+>
+> **Review rule:** in any code that hands a row id to another process, `grep` for `flush()`
+> followed by `send_task` / `.delay` / `.apply_async`. That shape is this bug.
+>
+> **Follow-ups (NOT STARTED):**
+> - [ ] If the publish itself fails *after* the commit (broker down), the execution stays
+>       `queued`. The manual route has the same gap (`playbooks.py`, log-and-continue). Needs a
+>       stale-`queued` reaper or mark-failed-on-publish-error.
+> - [ ] The rule API lets `run_playbook` sit on any trigger, including `health_score_threshold` /
+>       `churn_risk_level_change`. Intended? Undocumented either way.
+
 ### P0 — `automation-worker-triggers-dead` — **FIXED** on `bug/automation-slack-channel` (2026-07-29)
 > Shipped: worker-side mirror `automation_feedback_trigger.py` (two triggers, four actions,
 > cooldown parity with the backend), module-level import in `analysis.py` so a broken import

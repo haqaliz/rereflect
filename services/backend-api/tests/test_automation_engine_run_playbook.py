@@ -349,3 +349,59 @@ def test_run_playbook_shadow_mode_no_execution_row(
     ).first()
     assert execution is not None
     assert execution.status == "shadow"
+
+
+# ---------------------------------------------------------------------------
+# 8. The execution row must be COMMITTED before the task is published
+# ---------------------------------------------------------------------------
+
+@patch("src.background.celery_client.get_celery_app")
+def test_run_playbook_commits_before_send_task(
+    mock_get_celery_app, db: Session, test_organization: Organization
+):
+    """Durable-then-publish.
+
+    The worker loads the ChurnPlaybookExecution by id. If the backend has only
+    flushed the row, the commit comes later (end of _evaluate_rule) and a real
+    worker consuming the message finds nothing — the row sits `queued`
+    forever. A single in-memory session cannot observe cross-connection
+    visibility, so this asserts the ordering that produces it.
+    """
+    from src.services.automation_engine import AutomationEngine
+
+    calls: list[str] = []
+
+    mock_app = MagicMock()
+    mock_app.send_task.side_effect = lambda *a, **k: calls.append("send_task")
+    mock_get_celery_app.return_value = mock_app
+
+    playbook = _make_playbook(db, test_organization.id)
+    rule = _make_rule(
+        db, test_organization.id,
+        actions=[{"type": "run_playbook", "config": {"playbook_id": playbook.id}}],
+    )
+
+    engine = AutomationEngine(db)
+    real_commit = db.commit
+
+    def spy_commit():
+        calls.append("commit")
+        real_commit()
+
+    with patch.object(db, "commit", side_effect=spy_commit):
+        result = engine._execute_run_playbook(
+            {"playbook_id": playbook.id}, {"customer_email": "c@x.com"}, rule
+        )
+
+    assert "send_task" in calls, "the task was never enqueued"
+    assert "commit" in calls, "the execution row was never committed"
+    assert calls.index("commit") < calls.index("send_task"), (
+        f"the row must be committed before the message is published; got {calls}"
+    )
+
+    execution = db.query(ChurnPlaybookExecution).one()
+    assert result["error"] is None
+    assert result["result"]["execution_id"] == execution.id
+    mock_app.send_task.assert_called_once_with(
+        "tasks.churn_playbooks.run_playbook", args=[execution.id]
+    )

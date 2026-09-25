@@ -243,9 +243,14 @@ class TestSyncOrgCore:
         tickets = [_make_ticket(1), _make_ticket(2)]
         client = _make_fake_client(tickets=tickets)
 
-        zs._sync_org(org.id, db, client, integ)
+        result = zs._sync_org(org.id, db, client, integ)
 
-        assert mock_delay.call_count == 2
+        # _sync_org only flushes, so it must NOT publish; it surfaces the ids
+        # for the task body to dispatch after its commit.
+        mock_delay.assert_not_called()
+        ids = [i.id for i in db.query(FeedbackItem).order_by(FeedbackItem.id)]
+        assert len(ids) == 2
+        assert result["created_feedback_ids"] == ids
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +449,64 @@ class TestSyncZendeskOrgBody:
         assert integ.last_sync_status == "success"
         assert integ.last_error is None
         assert integ.last_synced_at == datetime.utcfromtimestamp(1700000100)
+
+
+    def test_commits_before_enqueueing_analysis(self, db, monkeypatch):
+        """Created rows must be committed before their ids are published.
+
+        analyze_single_feedback loads the item on another connection; a
+        publish after only a flush can run against an invisible row.
+        Mirrors test_source_events::test_auto_import_commits_before_enqueueing_analysis.
+        """
+        import src.tasks.zendesk_sync as zs
+        importlib.reload(zs)
+        from contextlib import contextmanager
+
+        org = _make_org(db)
+        integ = _make_zendesk_integration(db, org.id, subdomain="acmeco")
+        _make_zendesk_source(db, org.id)
+
+        @contextmanager
+        def fake_get_db():
+            yield db
+
+        mock_client_instance = MagicMock()
+        mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+        mock_client_instance.__exit__ = MagicMock(return_value=False)
+        mock_client_instance.incremental_tickets.return_value = {
+            "tickets": [_make_ticket(1)],
+            "end_time": 1700000100,
+        }
+
+        calls = []
+        delayed_ids = []
+
+        def spy_delay(*a, **k):
+            calls.append("delay")
+            delayed_ids.append(a[0])
+
+        real_commit = db.commit
+
+        def spy_commit():
+            calls.append("commit")
+            real_commit()
+
+        with patch.object(zs, "get_db_session", fake_get_db), \
+             patch.object(zs, "_decrypt", return_value="plain-token"), \
+             patch.object(zs, "ZendeskClient", return_value=mock_client_instance), \
+             patch("src.tasks.analysis.analyze_single_feedback") as mock_task, \
+             patch.object(db, "commit", side_effect=spy_commit):
+            mock_task.delay.side_effect = spy_delay
+            result = zs._sync_zendesk_org_body(MagicMock(), integ.id)
+
+        assert result["status"] == "success"
+        assert "delay" in calls, "analysis was never enqueued"
+        assert "commit" in calls, "the feedback row was never committed"
+        assert calls.index("commit") < calls.index("delay"), (
+            f"the row must be committed before the message is published; got {calls}"
+        )
+        item = db.query(FeedbackItem).one()
+        assert delayed_ids == [item.id]
 
 
 # ---------------------------------------------------------------------------
