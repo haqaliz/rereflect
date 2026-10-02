@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useRole } from '@/hooks/useRole';
 import { getPlaybook, createPlaybook, type Playbook } from '@/lib/api/playbooks';
 import { PlaybookEditor } from '@/components/playbooks/PlaybookEditor';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,27 +13,26 @@ import { toast } from 'sonner';
 function NewPlaybookInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user } = useAuth();
+  const { isAdminOrOwner, isLoading: roleLoading } = useRole();
 
   const templateId = searchParams.get('template');
   const [sourceTemplate, setSourceTemplate] = useState<Playbook | null>(null);
   const [loadingTemplate, setLoadingTemplate] = useState(!!templateId);
 
   useEffect(() => {
-    if (!templateId) return;
+    if (!templateId || !isAdminOrOwner) return;
     setLoadingTemplate(true);
     getPlaybook(Number(templateId))
       .then((tpl) => setSourceTemplate(tpl))
       .catch(() => toast.error('Failed to load template'))
       .finally(() => setLoadingTemplate(false));
-  }, [templateId]);
+  }, [templateId, isAdminOrOwner]);
 
-  const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
+  useEffect(() => {
+    if (!roleLoading && !isAdminOrOwner) router.replace('/settings/playbooks');
+  }, [roleLoading, isAdminOrOwner, router]);
 
-  if (!isBusiness) {
-    router.replace('/settings/playbooks');
-    return null;
-  }
+  if (!isAdminOrOwner) return null;
 
   const handleSave = async (data: Partial<Playbook>) => {
     const created = await createPlaybook({

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useRole } from '@/hooks/useRole';
 import {
   getPlaybook,
   updatePlaybook,
@@ -30,7 +30,7 @@ import { formatProbabilityRange } from '@/lib/api/playbooks';
 export default function PlaybookDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { user } = useAuth();
+  const { isAdminOrOwner, isLoading: roleLoading } = useRole();
 
   const id = Number(params.id);
   const [detail, setDetail] = useState<PlaybookDetail | null>(null);
@@ -38,10 +38,9 @@ export default function PlaybookDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
-
   useEffect(() => {
-    if (!isBusiness) {
+    if (roleLoading) return;
+    if (!isAdminOrOwner) {
       router.replace('/settings/playbooks');
       return;
     }
@@ -50,7 +49,7 @@ export default function PlaybookDetailPage() {
       .then(setDetail)
       .catch(() => toast.error('Failed to load playbook'))
       .finally(() => setLoading(false));
-  }, [id, isBusiness, router]);
+  }, [id, isAdminOrOwner, roleLoading, router]);
 
   const handleSave = async (data: Partial<Playbook>) => {
     const updated = await updatePlaybook(id, data);
