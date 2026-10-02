@@ -9,7 +9,7 @@ from src.models.feedback import FeedbackItem
 from src.models.feedback_source import FeedbackSource
 from src.models.organization import Organization
 from src.models.user import User
-from src.api.dependencies import get_current_user, get_current_org, check_feedback_limit, track_feedback_usage, get_current_usage
+from src.api.dependencies import get_current_user, get_current_org, require_admin_or_owner, check_feedback_limit, track_feedback_usage, get_current_usage
 from src.models.usage import UsageRecord
 from src.services.event_emitter import emit_event
 from src.services.ai_correction_service import create_ai_correction, urgency_label
@@ -587,7 +587,11 @@ def get_feedback(
     )
 
 
-@router.delete("/{feedback_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{feedback_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 async def delete_feedback(
     feedback_id: int,
     current_user: User = Depends(get_current_user),
@@ -613,7 +617,7 @@ async def delete_feedback(
     return None
 
 
-@router.post("/bulk-delete")
+@router.post("/bulk-delete", dependencies=[Depends(require_admin_or_owner)])
 def bulk_delete_feedback(
     data: dict,
     current_org: Organization = Depends(get_current_org),
