@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { feedbackAPI, FeedbackItem, FeedbackFilters } from '@/lib/api/feedback';
+import { useRole } from '@/hooks/useRole';
 import { Card } from '@/components/ui/card';
 import { AlertTriangle } from 'lucide-react';
 import { DataTable } from '@/components/shared/data-table';
@@ -12,6 +13,7 @@ import { CreateIssueDialog } from '@/components/integrations/CreateIssueDialog';
 
 export default function PainPointsPage() {
   const router = useRouter();
+  const { isAdminOrOwner } = useRole();
   const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -128,7 +130,7 @@ export default function PainPointsPage() {
             onSearchChange={setSearchQuery}
             onRowClick={handleRowClick}
             onAnalyze={handleAnalyze}
-            onBulkDelete={handleBulkDelete}
+            onBulkDelete={isAdminOrOwner ? handleBulkDelete : undefined}
             isSearching={searching}
             searchPlaceholder="Search pain points..."
             emptyIcon={AlertTriangle}
