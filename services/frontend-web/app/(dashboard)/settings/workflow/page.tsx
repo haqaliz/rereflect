@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useRole } from '@/hooks/useRole';
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -50,6 +52,8 @@ interface RuleFormData {
 }
 
 export default function WorkflowPage() {
+  const router = useRouter();
+  const { isAdminOrOwner, isLoading: roleLoading } = useRole();
   const [autoAssignEnabled, setAutoAssignEnabled] = useState(false);
   const [rules, setRules] = useState<AssignmentRule[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -75,8 +79,14 @@ export default function WorkflowPage() {
   });
 
   useEffect(() => {
+    if (roleLoading) return;
+    if (!isAdminOrOwner) {
+      router.replace('/settings/preferences');
+      return;
+    }
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roleLoading, isAdminOrOwner, router]);
 
   const fetchData = async () => {
     setLoading(true);
