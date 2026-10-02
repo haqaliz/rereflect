@@ -44,7 +44,7 @@ internal guess. `rereflect-next` should pick from here before the older roadmap 
 comments, added 2026-07-29). Five of the seven needed no build work and are recorded under
 *No build required* so nobody re-litigates them.
 
-### P0 — `mutation-route-rbac` — **FIXED** on `feat/mutation-route-rbac` (2026-10-02; merge SHA / PR: pending)
+### P0 — `mutation-route-rbac` — **FIXED**, merged `23efe010`, PR #33 (2026-10-02)
 > Most mutation routes carried no role dependency, so any **member** could delete feedback, edit
 > and run churn playbooks, mark/import/recover churn labels, rewrite workflow assignment rules, and
 > queue org-wide LLM analysis. Flagged but deferred by three PRDs
