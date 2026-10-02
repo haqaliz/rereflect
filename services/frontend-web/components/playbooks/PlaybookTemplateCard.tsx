@@ -33,7 +33,7 @@ export function ActionTypeBadge({ type }: { type: string }) {
 
 interface PlaybookTemplateCardProps {
   playbook: Playbook;
-  onUse: (playbook: Playbook) => void;
+  onUse?: (playbook: Playbook) => void;
   onToggleActive?: (newValue: boolean) => void;
 }
 
@@ -86,7 +86,7 @@ export function PlaybookTemplateCard({ playbook, onUse, onToggleActive }: Playbo
           )}
         </div>
 
-        {playbook.is_template && (
+        {playbook.is_template && onUse && (
           <div className="pt-1">
             <Button
               size="sm"
