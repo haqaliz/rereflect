@@ -119,4 +119,21 @@ describe('AppSidebar — Usage Events nav entry', () => {
     render(<AppSidebar />);
     expect(screen.queryByRole('link', { name: /Usage Events/i })).not.toBeInTheDocument();
   });
+
+  it('hides "Workflow" settings link for member users but keeps "Playbooks" (read-only list)', async () => {
+    mockGetMe.mockResolvedValue(makeUser('member'));
+    const { container } = render(<AppSidebar />);
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /Playbooks/i })).toBeInTheDocument();
+    });
+    expect(container.querySelector('a[href="/settings/workflow"]')).toBeNull();
+  });
+
+  it('shows "Workflow" settings link for admin users', async () => {
+    mockGetMe.mockResolvedValue(makeUser('admin'));
+    const { container } = render(<AppSidebar />);
+    await waitFor(() => {
+      expect(container.querySelector('a[href="/settings/workflow"]')).not.toBeNull();
+    });
+  });
 });
