@@ -66,7 +66,7 @@ def test_member_can_still_create_and_update_feedback(client, member_headers, tes
 
 def test_member_can_still_change_status_and_assign(client, member_headers, test_feedback, member_user):
     resp = client.post("/api/v1/workflow/status",
-                       json={"feedback_ids": [test_feedback.id], "new_status": "in_progress"},
+                       json={"feedback_ids": [test_feedback.id], "new_status": "in_review"},
                        headers=member_headers)
     assert resp.status_code == 200, resp.text
     resp = client.post("/api/v1/workflow/assign",
