@@ -374,5 +374,6 @@ Only the existing Settings → AI config read/write grows two fields.
 - **Re-deriving the 500-label gate** — real work, separate branch (R6).
 - **Fixing inherited churn-event route gaps** (no role dependency, inconsistent dedup,
   `RejectRequest.note` accepted but persisted nowhere at `churn_suggestions.py:453-458`). Logged,
-  not fixed here.
+  not fixed here. *(The missing role dependency was resolved 2026-10-02 by
+  `mutation-route-rbac`; the other gaps remain.)*
 - **Any claim of improved churn-prediction accuracy.**

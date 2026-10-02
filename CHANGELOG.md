@@ -7,6 +7,40 @@ Prior work lives in the git history and the tracking files (`AI-TRACKING.md`, `D
 
 ## Unreleased
 
+### Changed — members can no longer run destructive or org-wide actions (admin/owner only)
+
+Several mutation routes had no role check, so any signed-in **member** could call them. They now
+require an **admin or owner**; a member gets `403` ("This action requires admin or owner
+privileges"). **This is a behaviour change for existing members:**
+
+- **Playbooks:** create, edit, delete, run, and bulk run (`run-batch`).
+- **Churn labels:** marking a customer churned (single and bulk), CSV import of churn events, and
+  recovering a churned customer.
+- **Workflow settings:** assignment-rules create/edit/delete and the auto-assignment settings.
+- **Feedback deletion:** delete and bulk-delete.
+- **Analysis:** `POST /api/v1/analyze/batch`, the org-wide "analyze everything unanalyzed" call
+  that spends LLM budget. There is no button for it in the web UI.
+
+Still open to members: creating, editing and flagging feedback, **CSV feedback import**, assigning
+feedback and changing its status and notes, approving and rejecting pending feedback, and
+analyzing a single item (`POST /analyze/`).
+
+- **Churn-event delete is wider, not narrower.** It previously allowed only the author within 24
+  hours, or a system admin. An org admin or owner can now delete any churn event too. The 403
+  message now reads "Only the author within 24 hours, an admin or owner, or a system admin can
+  delete a churn event."
+- **The web UI hides these controls from members** (playbook pages, mark/import/recover churn,
+  bulk run, feedback delete in every list and the detail page, the Workflow settings page and its
+  sidebar link, which now redirect members to a permitted page). The hiding is a convenience; the
+  server check is the enforcement.
+- **Upgrade:** there is no flag or setting. To restore access for someone, promote them to admin
+  on the Team page.
+- **Limits:** the role is read from the user's database row on each request, not trusted from the
+  token. This change gates these routes only; it makes no other claim about the app's security.
+- **New guard test:** `tests/test_mutation_route_rbac_sweep.py` fails if any `POST`/`PUT`/`PATCH`/
+  `DELETE` route has neither a role dependency nor an entry on a reasoned allowlist, so the next
+  ungated mutation route is caught in CI.
+
 ### Fixed — automation rules could be saved with actions their trigger never runs
 
 - **The "Usage Decline Outreach" template now actually notifies.** Usage-trend and

@@ -384,7 +384,8 @@ CHECK** (matches `CHURN_EVENT_SOURCES` / `CHURN_REASON_CODES` at `models/churn_e
   never implemented). Pre-existing; our writes are human-gated and capped per run.
 - **Fixing the pre-existing churn-event route gaps** — no role dependency, inconsistent dedup,
   `recover`/`delete` not invalidating probability, `RecoverRequest.note` silently discarded.
-  Logged in `understanding.md`, not fixed here.
+  Logged in `understanding.md`, not fixed here. *(The missing role dependency was resolved
+  2026-10-02 by `mutation-route-rbac`; the other gaps remain.)*
 - **Historical backfill on first enable**, auto-confirm, lifecycle-stage signal, winback
   reconciliation — all named v2 above.
 - **Claiming churn accuracy improvement.** No metric claims.

@@ -400,6 +400,10 @@
 - [x] Accuracy tracking: precision/recall/F1/AUC metrics on organization + system admin accuracy dashboards, weekly refit Mondays 07:45 UTC
 - [x] Plan gate: Business+ (Pro gets enhanced risk_level + factor breakdown)
 
+> **Access control 2026-10-02 (`mutation-route-rbac`):** playbook create/edit/delete/run/run-batch and
+> churn-label marking/CSV import/recover are now admin/owner only (they were open to any member).
+> See `docs/planning/mutation-route-rbac/prd.md`.
+
 #### M4.1.5 — Churn-triggered playbook auto-execution — COMPLETE (shipped 2026-07-19)
 > Delivered as `churn-triggered-playbooks` (commits `9aa6650`..`f133ccf`). Closes the deferred item at
 > `PRD-ADVANCED-CHURN-PREDICTION.md:465` ("Real-time playbook execution on probability threshold
