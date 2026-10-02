@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from src.api.dependencies import (
     get_current_org,
     get_current_user,
+    require_admin_or_owner,
     require_feature,
 )
 from src.database.session import get_db
@@ -162,7 +163,7 @@ def _has_existing_active_event(db: Session, org_id: int, email: str) -> bool:
 @router.post(
     "/churn-events/bulk",
     response_model=BulkSummary,
-    dependencies=[Depends(require_feature("advanced_churn_prediction"))],
+    dependencies=[Depends(require_feature("advanced_churn_prediction")), Depends(require_admin_or_owner)],
 )
 def bulk_mark_churned(
     body: ChurnEventBulkCreate,
@@ -208,7 +209,7 @@ def bulk_mark_churned(
 @router.post(
     "/churn-events/import",
     response_model=BulkSummary,
-    dependencies=[Depends(require_feature("churn_event_csv_import"))],
+    dependencies=[Depends(require_feature("churn_event_csv_import")), Depends(require_admin_or_owner)],
 )
 async def import_churn_csv(
     file: UploadFile = File(...),
@@ -334,7 +335,7 @@ def list_churn_events(
     "/{email}/churn-event",
     response_model=ChurnEventResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_feature("advanced_churn_prediction"))],
+    dependencies=[Depends(require_feature("advanced_churn_prediction")), Depends(require_admin_or_owner)],
 )
 def create_churn_event(
     email: str,
@@ -376,7 +377,7 @@ def create_churn_event(
 @router.post(
     "/{email}/recover",
     response_model=ChurnEventResponse,
-    dependencies=[Depends(require_feature("advanced_churn_prediction"))],
+    dependencies=[Depends(require_feature("advanced_churn_prediction")), Depends(require_admin_or_owner)],
 )
 def recover_customer(
     email: str,
@@ -426,7 +427,7 @@ def delete_churn_event(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
-    """Soft-undo a churn event. Allowed within 24h for the author; system admin always."""
+    """Soft-undo a churn event. Allowed within 24h for the author; org admin/owner and system admin always."""
     event = (
         db.query(CustomerChurnEvent)
         .filter(
@@ -443,11 +444,12 @@ def delete_churn_event(
         )
 
     is_system_admin = getattr(current_user, "is_system_admin", False)
+    is_org_admin = current_user.role in ("admin", "owner")
     is_author = event.marked_by_user_id == current_user.id
     within_24h = (datetime.utcnow() - event.created_at) <= timedelta(hours=24)
 
-    if is_system_admin:
-        # System admin can delete anytime
+    if is_system_admin or is_org_admin:
+        # System admin and org admin/owner can delete anytime
         pass
     elif is_author and within_24h:
         # Original author within 24h
@@ -455,7 +457,7 @@ def delete_churn_event(
     else:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only delete a churn event you created within 24 hours, or be a system admin.",
+            detail="Only the author within 24 hours, an admin or owner, or a system admin can delete a churn event.",
         )
 
     db.delete(event)

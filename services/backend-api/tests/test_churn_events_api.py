@@ -372,7 +372,7 @@ def test_delete_churn_event_returns_403_for_other_member_within_24h(client: Test
 
 def test_delete_churn_event_returns_403_after_24h_for_non_admin(client: TestClient, db: Session):
     org = _make_org(db, plan="business")
-    user = _make_user(db, org)
+    user = _make_user(db, org, role="member")  # org admins/owners may delete at any age
     event = _make_churn_event(db, org, "nina@example.com", marked_by_user_id=user.id)
     event.created_at = datetime.utcnow() - timedelta(hours=25)
     db.commit()
