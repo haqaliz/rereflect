@@ -25,6 +25,15 @@ vi.mock('@/lib/api/feedback', () => ({
   },
 }));
 
+// ─── Mock auth (page reads the role via useRole) ──────────────────────────────
+
+vi.mock('@/contexts/AuthContext', () => ({
+  useAuth: () => ({
+    user: { id: 1, email: 'u@test.com', role: 'owner', plan: 'free', organization_id: 1 },
+    isLoading: false,
+  }),
+}));
+
 // ─── Mock analytics ───────────────────────────────────────────────────────────
 
 vi.mock('@/lib/analytics', () => ({
