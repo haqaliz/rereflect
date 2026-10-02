@@ -44,6 +44,43 @@ internal guess. `rereflect-next` should pick from here before the older roadmap 
 comments, added 2026-07-29). Five of the seven needed no build work and are recorded under
 *No build required* so nobody re-litigates them.
 
+### P0 — `mutation-route-rbac` — **FIXED** on `feat/mutation-route-rbac` (2026-10-02; merge SHA / PR: pending)
+> Most mutation routes carried no role dependency, so any **member** could delete feedback, edit
+> and run churn playbooks, mark/import/recover churn labels, rewrite workflow assignment rules, and
+> queue org-wide LLM analysis. Flagged but deferred by three PRDs
+> (`copilot-suggested-actions`, `crm-churn-labels`, `usage-decline-churn-labels`).
+>
+> Fixed with `require_admin_or_owner` on: playbook create/update/delete/run/run-batch
+> (`playbooks.py`); churn-event bulk mark/create/CSV import/recover (`churn_events.py`); workflow
+> assignment-rules CRUD + `auto-assignment-settings` (`workflow.py`); feedback delete + bulk-delete
+> (`feedback.py`); `POST /analyze/batch` (`analyze.py`). Churn-event delete keeps its author-24h and
+> system-admin rules and additionally allows org admin/owner (inline check, new 403 message).
+> Deliberately member-open (unchanged): feedback create/update/urgent/CSV import, workflow
+> assign/status/notes, pending-feedback approve/reject, `POST /analyze/`. The frontend gets a
+> `useRole()` hook and hides the gated controls from members (playbook pages, churn marking/import/
+> recover/bulk run, feedback delete everywhere, Workflow settings page + sidebar link).
+>
+> A per-route AST guard, `tests/test_mutation_route_rbac_sweep.py` (213 routes: 141 gated, 72
+> member-open, each on a reasoned allowlist), fails CI on a new ungated mutation route. See
+> `docs/planning/mutation-route-rbac/prd.md` and the CHANGELOG entry for the upgrade note.
+>
+> **Limits / unpinned (worth keeping):**
+> - The guard silently skips routers that are not top-level `router = APIRouter(...)` assignments
+>   (annotated assignments, `add_api_route`, imported routers). None exist in the tree today.
+> - The two inline role checks (churn-event delete, organizations update) are not pinned by the
+>   guard; churn delete is allowlisted rather than verified. Allowlist reasons are checked for
+>   length only.
+> - The manual member-vs-admin check in a real browser was **not** performed; frontend coverage is
+>   component tests only.
+> - Member-open regression is not tested for feedback CSV import, urgent, workflow notes, or
+>   pending-feedback approve/reject.
+>
+> **Follow-ups:**
+> - [ ] **`organizations-patch-rejects-owner`** (NOT STARTED): `organizations.py` `PATCH /me` checks
+>       `current_user.role != "admin"` (`organizations.py:57`), so an **owner** gets 403 while the
+>       docstring says "admin only" and the CLAUDE.md matrix implies owners outrank admins. Likely
+>       should use `require_admin_or_owner`. Found during this work, out of its scope.
+
 ### P0 — `automation-playbook-dispatch-commit` — **FIXED** on `feat/automation-playbook-dispatch-commit` (2026-09-25)
 > Same family as the P0 below: marked shipped, did nothing. Every automation-fired
 > `run_playbook` (backend `automation_engine._execute_run_playbook`, worker

@@ -329,3 +329,29 @@ describe('FeedbackDetailPage – action bar', () => {
     });
   });
 });
+
+describe('FeedbackDetailPage – Delete is admin/owner only', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setup();
+  });
+
+  it('member keeps Respond/Re-analyze/Create Issue but has no Delete item', async () => {
+    mockUseAuth.mockReturnValue({ user: { ...mockUser, role: 'member' }, isLoading: false, isAuthenticated: true });
+    const user = userEvent.setup();
+    await renderAndWait();
+    await user.click(screen.getByRole('button', { name: /actions/i }));
+    await waitFor(() => screen.getByRole('menuitem', { name: /respond/i }));
+    expect(screen.getByRole('menuitem', { name: /re-analyze/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /create issue/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it('admin sees the Delete item', async () => {
+    mockUseAuth.mockReturnValue({ user: { ...mockUser, role: 'admin' }, isLoading: false, isAuthenticated: true });
+    const user = userEvent.setup();
+    await renderAndWait();
+    await user.click(screen.getByRole('button', { name: /actions/i }));
+    expect(await screen.findByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
+  });
+});

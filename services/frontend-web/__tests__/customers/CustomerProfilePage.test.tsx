@@ -575,5 +575,52 @@ describe('CustomerProfilePage - outreach opt-out toggle', () => {
   });
 });
 
+describe('CustomerProfilePage - churn mutation controls are admin/owner only', () => {
+  function setup(role: string) {
+    Object.defineProperty(window, 'localStorage', {
+      value: { getItem: vi.fn(() => 'mock-token'), setItem: vi.fn(), removeItem: vi.fn() },
+      writable: true,
+    });
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'u@test.com', role, plan: 'pro', organization_id: 1, is_system_admin: false },
+      isLoading: false,
+      isAuthenticated: true,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+    (customersAPI.getByEmail as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...mockProfile,
+      has_potential_winback: true,
+    });
+    (customersAPI.getHistory as ReturnType<typeof vi.fn>).mockResolvedValue(mockHistory);
+    (customersAPI.getFeedbacks as ReturnType<typeof vi.fn>).mockResolvedValue(mockFeedbacks);
+    (customersAPI.getActivity as ReturnType<typeof vi.fn>).mockResolvedValue(mockActivity);
+    (customersAPI.getTimeline as ReturnType<typeof vi.fn>).mockResolvedValue({ events: [], next_cursor: null });
+    (customersAPI.getUsage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      rollup: null,
+      time_series: [],
+      period_days: 30,
+    });
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('member sees neither Mark as churned nor the winback Confirm recovery action', async () => {
+    setup('member');
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /mark as churned/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /confirm recovery/i })).not.toBeInTheDocument();
+  });
+
+  it.each(['admin', 'owner'])('%s sees Mark as churned and Confirm recovery', async (role) => {
+    setup(role);
+    renderWithQueryClient(<CustomerProfilePage />);
+    await waitFor(() => expect(screen.getByText('John Doe')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /mark as churned/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm recovery/i })).toBeInTheDocument();
+  });
+});
+
 // Free plan redirect is tested via a component check: when plan=free the page renders null
 // and the useEffect calls router.push('/customers'). The mockPush test is verified above.

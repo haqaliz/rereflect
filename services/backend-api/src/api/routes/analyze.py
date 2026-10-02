@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from src.database.session import get_db
 from src.models.feedback import FeedbackItem
 from src.models.organization import Organization
-from src.api.dependencies import get_current_org
+from src.api.dependencies import get_current_org, require_admin_or_owner
 from pydantic import BaseModel
 from typing import List
 from celery import Celery
@@ -81,7 +81,11 @@ def analyze_feedback(
     )
 
 
-@router.post("/batch", response_model=AnalyzeFeedbackResponse)
+@router.post(
+    "/batch",
+    response_model=AnalyzeFeedbackResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def analyze_all_unanalyzed(
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)

@@ -135,4 +135,24 @@ describe('ChurnSuggestionsPage', () => {
     await user.click(rowCheckboxes[0]);
     expect(screen.queryByRole('button', { name: /bulk actions/i })).not.toBeInTheDocument();
   });
+
+  it('hides per-row Confirm and Reject for a member', async () => {
+    authMock.role = 'member';
+    renderWithQueryClient(<ChurnSuggestionsPage />);
+    await waitFor(() => {
+      expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+  });
+
+  it.each(['admin', 'owner'])('shows per-row Confirm and Reject for %s', async (role) => {
+    authMock.role = role;
+    renderWithQueryClient(<ChurnSuggestionsPage />);
+    await waitFor(() => {
+      expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    });
+    expect(screen.getAllByRole('button', { name: 'Confirm' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Reject' })).toHaveLength(2);
+  });
 });

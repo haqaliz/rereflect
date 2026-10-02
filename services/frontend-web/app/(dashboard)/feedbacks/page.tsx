@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, Suspense, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { feedbackAPI, FeedbackItem, CSVImportResponse, FeedbackFilters } from '@/lib/api/feedback';
+import { useRole } from '@/hooks/useRole';
 import { analytics } from '@/lib/analytics';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ import { createColumns } from './columns';
 
 function FeedbackPageContent() {
   const router = useRouter();
+  const { isAdminOrOwner } = useRole();
   const queryClient = useQueryClient();
   const { searchQuery, sentimentFilter, urgentFilter, churnRiskFilter, customerEmailFilter, currentPage, setSearchQuery, setSentimentFilter, setUrgentFilter, setChurnRiskFilter, setCustomerEmailFilter, setCurrentPage } = useFeedbackPage();
   const [workflowStatusFilter, setWorkflowStatusFilter] = useState('');
@@ -377,12 +379,12 @@ function FeedbackPageContent() {
         {/* Feedback Table */}
         <Card className="animate-slide-up stagger-2 p-6">
           <DataTable
-            columns={createColumns(handleEdit, handleDelete)}
+            columns={createColumns(handleEdit, isAdminOrOwner ? handleDelete : undefined)}
             data={feedbackList}
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
             onAnalyze={handleAnalyze}
-            onBulkDelete={handleBulkDelete}
+            onBulkDelete={isAdminOrOwner ? handleBulkDelete : undefined}
             onRowClick={(item) => router.push(`/feedbacks/${item.id}`)}
             isSearching={searching}
             searchPlaceholder="Search feedback text or issues..."

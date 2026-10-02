@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { feedbackAPI, FeedbackItem, FeedbackFilters } from '@/lib/api/feedback';
+import { useRole } from '@/hooks/useRole';
 import { Card } from '@/components/ui/card';
 import { Tag } from 'lucide-react';
 import { DataTable } from '@/components/shared/data-table';
@@ -12,6 +13,7 @@ import { getTagStyles } from '@/lib/category-utils';
 
 export default function CategoryPage() {
   const router = useRouter();
+  const { isAdminOrOwner } = useRole();
   const params = useParams();
   const category = params.category as string;
 
@@ -126,7 +128,7 @@ export default function CategoryPage() {
             onSearchChange={setSearchQuery}
             onRowClick={handleRowClick}
             onAnalyze={handleAnalyze}
-            onBulkDelete={handleBulkDelete}
+            onBulkDelete={isAdminOrOwner ? handleBulkDelete : undefined}
             isSearching={searching}
             searchPlaceholder="Search feedback..."
             emptyIcon={Tag}

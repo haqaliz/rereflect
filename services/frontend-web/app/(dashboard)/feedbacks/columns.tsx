@@ -86,7 +86,7 @@ const getSourceLabel = (source: string | null) => {
 
 export const createColumns = (
   onEdit: (item: FeedbackItem) => void,
-  onDelete: (item: FeedbackItem) => void
+  onDelete?: (item: FeedbackItem) => void
 ): ColumnDef<FeedbackItem>[] => [
   {
     id: "select",
@@ -405,15 +405,17 @@ export const createColumns = (
           >
             <Edit className="w-4 h-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onDelete(item)}
-            title="Delete feedback"
-            className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
+          {onDelete && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onDelete(item)}
+              title="Delete feedback"
+              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       )
     },

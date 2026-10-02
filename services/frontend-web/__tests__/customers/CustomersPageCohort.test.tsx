@@ -177,7 +177,7 @@ describe('CustomersPage — cohort mode + bulk-actions toolbar', () => {
     expect(screen.getByText('Run playbook')).toBeInTheDocument();
   });
 
-  it('Bulk Actions menu hides Tag/Assign owner for member role', async () => {
+  it('Bulk Actions menu hides Tag/Assign owner/Run playbook for member role', async () => {
     authMock.role = 'member';
     const user = userEvent.setup();
     renderWithQueryClient(<CustomersPage />);
@@ -191,8 +191,8 @@ describe('CustomersPage — cohort mode + bulk-actions toolbar', () => {
     expect(await screen.findByText('Export CSV')).toBeInTheDocument();
     expect(screen.queryByText('Tag')).not.toBeInTheDocument();
     expect(screen.queryByText('Assign owner')).not.toBeInTheDocument();
-    // Run playbook has no role restriction on the backend
-    expect(screen.getByText('Run playbook')).toBeInTheDocument();
+    // Running a playbook is admin/owner only on the backend
+    expect(screen.queryByText('Run playbook')).not.toBeInTheDocument();
   });
 
   it('clicking Export CSV calls customersAPI.exportCustomers with active filters', async () => {

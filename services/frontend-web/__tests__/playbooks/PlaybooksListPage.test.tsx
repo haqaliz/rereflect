@@ -227,3 +227,31 @@ describe('PlaybooksListPage - error state', () => {
     });
   });
 });
+
+describe('PlaybooksListPage - role gating', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListPlaybooks.mockResolvedValue([orgPlaybook, templatePlaybook]);
+  });
+
+  it('member sees the list read-only: no New, no toggle, no Use template, rows not navigable', async () => {
+    mockUseAuth.mockReturnValue({ user: { ...businessUser, role: 'member' }, isLoading: false });
+    render(<PlaybooksPage />);
+    await waitFor(() => screen.getByText('My Prevention'));
+    expect(screen.getByText('Critical Save')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /new playbook/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /use template/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('My Prevention'));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it.each(['admin', 'owner'])('%s sees New, toggle and Use template', async (role) => {
+    mockUseAuth.mockReturnValue({ user: { ...businessUser, role }, isLoading: false });
+    render(<PlaybooksPage />);
+    await waitFor(() => screen.getByText('My Prevention'));
+    expect(screen.getByRole('button', { name: /new playbook/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('switch').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /use template/i }).length).toBeGreaterThan(0);
+  });
+});

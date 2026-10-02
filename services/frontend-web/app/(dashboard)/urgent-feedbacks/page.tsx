@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { feedbackAPI, FeedbackItem, FeedbackFilters } from '@/lib/api/feedback';
+import { useRole } from '@/hooks/useRole';
 import { Card } from '@/components/ui/card';
 import { CircleAlert } from 'lucide-react';
 import { DataTable } from '@/components/shared/data-table';
@@ -11,6 +12,7 @@ import { createColumns } from './columns';
 
 export default function UrgentFeedbackPage() {
   const router = useRouter();
+  const { isAdminOrOwner } = useRole();
   const [feedbackList, setFeedbackList] = useState<FeedbackItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -118,7 +120,7 @@ export default function UrgentFeedbackPage() {
             onSearchChange={setSearchQuery}
             onRowClick={handleRowClick}
             onAnalyze={handleAnalyze}
-            onBulkDelete={handleBulkDelete}
+            onBulkDelete={isAdminOrOwner ? handleBulkDelete : undefined}
             isSearching={searching}
             searchPlaceholder="Search urgent feedback..."
             emptyIcon={CircleAlert}

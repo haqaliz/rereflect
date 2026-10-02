@@ -16,7 +16,7 @@ from src.models.feedback_workflow_event import FeedbackWorkflowEvent
 from src.models.assignment_rule import AssignmentRule
 from src.models.user import User
 from src.models.organization import Organization
-from src.api.dependencies import get_current_user, get_current_org
+from src.api.dependencies import get_current_user, get_current_org, require_admin_or_owner
 from src.services.workflow_service import (
     create_workflow_event,
     apply_status_change,
@@ -650,7 +650,12 @@ def list_assignment_rules(
     ]
 
 
-@router.post("/assignment-rules", response_model=AssignmentRuleResponse, status_code=201)
+@router.post(
+    "/assignment-rules",
+    response_model=AssignmentRuleResponse,
+    status_code=201,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def create_assignment_rule(
     data: AssignmentRuleCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -694,7 +699,11 @@ def create_assignment_rule(
     )
 
 
-@router.patch("/assignment-rules/{rule_id}", response_model=AssignmentRuleResponse)
+@router.patch(
+    "/assignment-rules/{rule_id}",
+    response_model=AssignmentRuleResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def update_assignment_rule(
     rule_id: int,
     data: AssignmentRuleUpdateRequest,
@@ -746,7 +755,11 @@ def update_assignment_rule(
     )
 
 
-@router.delete("/assignment-rules/{rule_id}", status_code=204)
+@router.delete(
+    "/assignment-rules/{rule_id}",
+    status_code=204,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def delete_assignment_rule(
     rule_id: int,
     current_org: Organization = Depends(get_current_org),
@@ -774,7 +787,7 @@ def get_auto_assignment_settings(
     return {"auto_assignment_enabled": current_org.auto_assignment_enabled}
 
 
-@router.patch("/auto-assignment-settings")
+@router.patch("/auto-assignment-settings", dependencies=[Depends(require_admin_or_owner)])
 def update_auto_assignment_settings(
     data: dict,
     current_org: Organization = Depends(get_current_org),

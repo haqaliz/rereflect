@@ -147,7 +147,7 @@ const settingsNavItems = [
   { title: 'API Keys', href: '/settings/api-keys', icon: Key, requiredRole: 'admin' as const },
   { title: 'Automations', href: '/settings/automations', icon: Zap },
   { title: 'Playbooks', href: '/settings/playbooks', icon: ListChecks },
-  { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus },
+  { title: 'Workflow', href: '/settings/workflow', icon: GitBranchPlus, requiredRole: 'admin' as const },
   { title: 'Usage Events', href: '/settings/usage-events', icon: Activity, requiredRole: 'admin' as const },
 ];
 

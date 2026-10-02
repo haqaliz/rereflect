@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAuth } from '@/contexts/AuthContext';
+import { useRole } from '@/hooks/useRole';
 import { listPlaybooks, runPlaybook, type Playbook, formatProbabilityRange } from '@/lib/api/playbooks';
 
 interface RunPlaybookDropdownProps {
@@ -19,14 +19,12 @@ interface RunPlaybookDropdownProps {
 }
 
 export function RunPlaybookDropdown({ customerEmail, churnProbability }: RunPlaybookDropdownProps) {
-  const { user } = useAuth();
+  const { isAdminOrOwner } = useRole();
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [running, setRunning] = useState<number | null>(null);
 
-  const isBusiness = user?.plan === 'business' || user?.plan === 'enterprise';
-
   useEffect(() => {
-    if (!isBusiness || churnProbability == null) return;
+    if (!isAdminOrOwner || churnProbability == null) return;
     listPlaybooks()
       .then((all) => {
         const matching = all.filter(
@@ -41,10 +39,10 @@ export function RunPlaybookDropdown({ customerEmail, churnProbability }: RunPlay
       .catch(() => {
         // silently ignore; dropdown stays empty
       });
-  }, [isBusiness, churnProbability]);
+  }, [isAdminOrOwner, churnProbability]);
 
-  // Not rendered for non-Business plans or when probability is unknown
-  if (!isBusiness || churnProbability == null) return null;
+  // Not rendered for members (playbook runs are admin/owner only) or when probability is unknown
+  if (!isAdminOrOwner || churnProbability == null) return null;
 
   const handleRun = async (playbook: Playbook) => {
     setRunning(playbook.id);

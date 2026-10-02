@@ -252,6 +252,8 @@ the house convention used by `teams-notifications`, `playbook-action-types` and
 - **Fixing the repo-wide RBAC inconsistency.** The dig found most mutation routes carry no role
   dependency (`playbooks.py:496`, `workflow.py:142`, `feedback.py:715`). Real, and a separate
   branch — this feature neither depends on nor worsens it.
+  *(Resolved 2026-10-02 by `mutation-route-rbac`: playbook, workflow, feedback-delete, churn-label
+  and analyze-batch routes now require admin/owner.)*
 - **The P7 provider-abstraction refactor** (`DEV-TRACKING.md:237`).
 - **Surfacing `LLMConfig.is_configured` over HTTP** to retire the duplicated client-side probe
   (`create-issue/page.tsx:236-255`, `BulkOutreachDialog.tsx:71-92`). Adjacent, additive,

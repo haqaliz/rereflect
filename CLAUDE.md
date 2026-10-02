@@ -256,6 +256,23 @@ Owner (level 3) > Admin (level 2) > Member (level 1)
 | Change member roles | ✅ | ✅ | ❌ |
 | Access billing | ✅ | ❌ | ❌ |
 | Transfer ownership | ✅ | ❌ | ❌ |
+| Create/edit/delete/run playbooks (incl. bulk run) | ✅ | ✅ | ❌ |
+| Mark churned (single/bulk), import churn CSV, recover | ✅ | ✅ | ❌ |
+| Workflow assignment rules & auto-assignment settings | ✅ | ✅ | ❌ |
+| Delete feedback (single & bulk) | ✅ | ✅ | ❌ |
+| Queue org-wide analysis (`POST /analyze/batch`) | ✅ | ✅ | ❌ |
+
+Members still create/edit feedback, assign it, change status and notes, approve/reject pending
+feedback, and analyze a single item. Churn-event delete is the exception to "admin only": the
+author within 24h, an org admin/owner, or a system admin.
+
+### Mutation route sweep
+
+`services/backend-api/tests/test_mutation_route_rbac_sweep.py` scans every `POST`/`PUT`/`PATCH`/
+`DELETE` route with `ast`. **A new mutation route needs a role dependency
+(`require_admin_or_owner` / `require_owner` / `require_system_admin`) or an entry in the test's
+`ALLOWLIST` with a one-line reason** (member-open by policy). Stale or already-gated allowlist
+entries also fail. `include_router(..., dependencies=...)` is invisible to the scan and is forbidden.
 
 ### Backend Enforcement
 
@@ -281,6 +298,9 @@ Usage in routes:
 2. **Route Protection** (in page components):
    - `/settings/billing` → redirects non-owners to `/settings/preferences`
    - `/settings/integrations` → redirects members to `/settings/preferences`
+   - `/settings/workflow` → redirects non-admin/owner users to `/settings/preferences`
+   - `/settings/playbooks/new` and `/settings/playbooks/[id]` → redirect non-admin/owner users to `/settings/playbooks` (the list)
+   - New gating uses the `useRole()` hook (`hooks/useRole.ts`: `isAdminOrOwner`, `isLoading`)
 
 3. **Conditional UI** (buttons, actions):
    - `isOwner = user?.role === 'owner'`

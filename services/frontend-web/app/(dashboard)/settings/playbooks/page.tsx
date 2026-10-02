@@ -12,11 +12,13 @@ import { Button } from '@/components/ui/button';
 import { PlaybookTemplateCard } from '@/components/playbooks/PlaybookTemplateCard';
 import { Plus, ListChecks } from 'lucide-react';
 import { toast } from 'sonner';
+import { useRole } from '@/hooks/useRole';
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PlaybooksPage() {
   const router = useRouter();
+  const { isAdminOrOwner } = useRole();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -105,13 +107,15 @@ export default function PlaybooksPage() {
             >
               {orgPlaybooks.length} playbooks
             </span>
-            <Button
-              onClick={() => router.push('/settings/playbooks/new')}
-              className="flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              New playbook
-            </Button>
+            {isAdminOrOwner && (
+              <Button
+                onClick={() => router.push('/settings/playbooks/new')}
+                className="flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                New playbook
+              </Button>
+            )}
           </div>
         </div>
 
@@ -136,14 +140,17 @@ export default function PlaybooksPage() {
               {orgPlaybooks.map((pb) => (
                 <div
                   key={pb.id}
-                  className="cursor-pointer"
-                  onClick={() => router.push(`/settings/playbooks/${pb.id}`)}
+                  className={isAdminOrOwner ? 'cursor-pointer' : undefined}
+                  onClick={
+                    isAdminOrOwner
+                      ? () => router.push(`/settings/playbooks/${pb.id}`)
+                      : undefined
+                  }
                 >
                   <PlaybookTemplateCard
                     playbook={pb}
-                    onUse={() => {}}
                     onToggleActive={
-                      togglingId === pb.id
+                      !isAdminOrOwner || togglingId === pb.id
                         ? undefined
                         : (val) => {
                             handleToggleActive(pb, val);
@@ -172,8 +179,10 @@ export default function PlaybooksPage() {
                 <PlaybookTemplateCard
                   key={tpl.id}
                   playbook={tpl}
-                  onUse={(p) =>
-                    router.push(`/settings/playbooks/new?template=${p.id}`)
+                  onUse={
+                    isAdminOrOwner
+                      ? (p) => router.push(`/settings/playbooks/new?template=${p.id}`)
+                      : undefined
                   }
                 />
               ))}

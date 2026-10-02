@@ -38,8 +38,10 @@ import type { Playbook } from '@/lib/api/playbooks';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const businessUser = { id: 1, email: 'cs@test.com', role: 'admin', plan: 'business', organization_id: 1 };
-const proUser = { ...businessUser, plan: 'pro' };
+// Plan is deliberately 'free' for admin/owner: access is role-based, not plan-based.
+const adminUser = { id: 1, email: 'cs@test.com', role: 'admin', plan: 'free', organization_id: 1 };
+const ownerUser = { ...adminUser, role: 'owner' };
+const memberUser = { ...adminUser, role: 'member', plan: 'enterprise' };
 
 const matchingPlaybook: Playbook = {
   id: 3,
@@ -69,7 +71,7 @@ const nonMatchingPlaybook: Playbook = {
 describe('RunPlaybookDropdown', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseAuth.mockReturnValue({ user: businessUser });
+    mockUseAuth.mockReturnValue({ user: adminUser, isLoading: false });
     mockListPlaybooks.mockResolvedValue([matchingPlaybook, nonMatchingPlaybook]);
   });
 
@@ -167,8 +169,8 @@ describe('RunPlaybookDropdown', () => {
     });
   });
 
-  it('is disabled (renders nothing) for non-Business plan users', async () => {
-    mockUseAuth.mockReturnValue({ user: proUser });
+  it('renders nothing for member and does not fetch playbooks', async () => {
+    mockUseAuth.mockReturnValue({ user: memberUser, isLoading: false });
     const { container } = render(
       <RunPlaybookDropdown
         customerEmail="alice@example.com"
@@ -178,5 +180,27 @@ describe('RunPlaybookDropdown', () => {
     await waitFor(() => {
       expect(container.firstChild).toBeNull();
     });
+    expect(mockListPlaybooks).not.toHaveBeenCalled();
+  });
+
+  it('renders for owner regardless of plan', async () => {
+    mockUseAuth.mockReturnValue({ user: ownerUser, isLoading: false });
+    render(
+      <RunPlaybookDropdown
+        customerEmail="alice@example.com"
+        churnProbability={0.65}
+      />
+    );
+    expect(await screen.findByRole('button', { name: /run playbook/i })).toBeInTheDocument();
+  });
+
+  it('renders for admin regardless of plan', async () => {
+    render(
+      <RunPlaybookDropdown
+        customerEmail="alice@example.com"
+        churnProbability={0.65}
+      />
+    );
+    expect(await screen.findByRole('button', { name: /run playbook/i })).toBeInTheDocument();
   });
 });

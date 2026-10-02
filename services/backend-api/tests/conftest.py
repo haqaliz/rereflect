@@ -157,6 +157,50 @@ def auth_headers(test_user_token: str) -> dict:
     return {"Authorization": f"Bearer {test_user_token}"}
 
 
+def _make_role_user(db: Session, org: Organization, email: str, role: str) -> User:
+    user = User(
+        email=email,
+        password_hash=hash_password("password123"),
+        organization_id=org.id,
+        role=role,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _headers_for(user: User) -> dict:
+    token = create_access_token({
+        "user_id": user.id,
+        "organization_id": user.organization_id,
+        "role": user.role,
+    })
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def member_user(db: Session, test_organization: Organization) -> User:
+    """A member-role user in the test organization (role is read from this DB row)."""
+    return _make_role_user(db, test_organization, "member@example.com", "member")
+
+
+@pytest.fixture
+def member_headers(member_user: User) -> dict:
+    return _headers_for(member_user)
+
+
+@pytest.fixture
+def owner_user(db: Session, test_organization: Organization) -> User:
+    """An owner-role user in the test organization."""
+    return _make_role_user(db, test_organization, "owner@example.com", "owner")
+
+
+@pytest.fixture
+def owner_headers(owner_user: User) -> dict:
+    return _headers_for(owner_user)
+
+
 @pytest.fixture
 def test_feedback(db: Session, test_organization: Organization) -> FeedbackItem:
     """Create test feedback item."""

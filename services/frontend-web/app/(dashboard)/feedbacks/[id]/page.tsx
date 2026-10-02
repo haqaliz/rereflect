@@ -85,6 +85,7 @@ import { WorkflowSection } from '@/components/workflow/WorkflowSection';
 import { FeedbackTimeline } from '@/components/workflow/FeedbackTimeline';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRole } from '@/hooks/useRole';
 import { ChurnFactorBreakdown } from '@/components/feedbacks/ChurnFactorBreakdown';
 import { ConfidenceBadge } from '@/components/feedbacks/ConfidenceBadge';
 import { ChurnProbabilityBadge } from '@/components/customers/ChurnProbabilityBadge';
@@ -139,6 +140,7 @@ export default function FeedbackDetailPage() {
 function FeedbackDetailContent() {
   const router = useRouter();
   const { user } = useAuth();
+  const { isAdminOrOwner } = useRole();
   const params = useParams();
   const searchParams = useSearchParams();
   const feedbackId = Number(params.id);
@@ -491,15 +493,19 @@ function FeedbackDetailContent() {
                   <GitBranch className="w-4 h-4" />
                   Create Issue
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  {deleting ? 'Deleting...' : 'Delete'}
-                </DropdownMenuItem>
+                {isAdminOrOwner && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      {deleting ? 'Deleting...' : 'Delete'}
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

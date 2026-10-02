@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from src.api.dependencies import (
     get_current_org,
     get_current_user,
+    require_admin_or_owner,
     require_feature,
 )
 from src.database.session import get_db
@@ -320,7 +321,12 @@ def list_playbooks(
     return rows
 
 
-@router.post("", response_model=PlaybookResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=PlaybookResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def create_playbook(
     body: PlaybookCreate,
     current_org: Organization = Depends(get_current_org),
@@ -452,7 +458,11 @@ def get_playbook(
     return PlaybookDetailResponse(**pb_dict)
 
 
-@router.put("/{playbook_id}", response_model=PlaybookResponse)
+@router.put(
+    "/{playbook_id}",
+    response_model=PlaybookResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def update_playbook(
     playbook_id: int,
     body: PlaybookUpdate,
@@ -481,7 +491,12 @@ def update_playbook(
     return pb
 
 
-@router.delete("/{playbook_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@router.delete(
+    "/{playbook_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def delete_playbook(
     playbook_id: int,
     current_org: Organization = Depends(get_current_org),
@@ -497,6 +512,7 @@ def delete_playbook(
     "/{playbook_id}/run",
     response_model=PlaybookExecutionResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin_or_owner)],
 )
 def run_playbook(
     playbook_id: int,
@@ -539,7 +555,11 @@ def run_playbook(
     return execution
 
 
-@router.post("/{playbook_id}/run-batch", response_model=RunBatchResponse)
+@router.post(
+    "/{playbook_id}/run-batch",
+    response_model=RunBatchResponse,
+    dependencies=[Depends(require_admin_or_owner)],
+)
 def run_playbook_batch(
     playbook_id: int,
     body: RunBatchRequest,
