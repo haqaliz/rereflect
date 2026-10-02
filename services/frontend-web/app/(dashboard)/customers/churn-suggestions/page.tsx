@@ -265,17 +265,21 @@ export default function ChurnSuggestionsPage() {
                     {new Date(suggestion.suggested_churned_at).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-3 text-right space-x-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleReject(suggestion.id)}
-                      disabled={rejectingId === suggestion.id}
-                    >
-                      Reject
-                    </Button>
-                    <Button size="sm" onClick={() => setConfirmTarget(suggestion)}>
-                      Confirm
-                    </Button>
+                    {isAdminOrOwner && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleReject(suggestion.id)}
+                          disabled={rejectingId === suggestion.id}
+                        >
+                          Reject
+                        </Button>
+                        <Button size="sm" onClick={() => setConfirmTarget(suggestion)}>
+                          Confirm
+                        </Button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
