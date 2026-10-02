@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Brain, Loader2, ExternalLink, CircleAlert, CheckCircle2, Clock, TrendingUp, TrendingDown, Eye, Square, CheckSquare, X, Flag, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRole } from '@/hooks/useRole';
 import { customersAPI, CustomerProfileData, ActionItem } from '@/lib/api/customers';
 import { aiCorrectionsAPI } from '@/lib/api/ai-corrections';
 import { MarkAsChurnedDialog } from '@/components/customers/MarkAsChurnedDialog';
@@ -638,6 +639,7 @@ export default function CustomerProfilePage() {
   const router = useRouter();
   const params = useParams();
   const { user } = useAuth();
+  const { isAdminOrOwner } = useRole();
 
   // Decode the email from URL params
   const emailParam = decodeURIComponent(String(params.email));
@@ -828,14 +830,16 @@ export default function CustomerProfilePage() {
                   customerEmail={profile.customer_email}
                   churnProbability={profile.churn_probability ?? null}
                 />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setMarkChurnedOpen(true)}
-                >
-                  <UserX className="w-3.5 h-3.5 mr-2" />
-                  Mark as churned
-                </Button>
+                {isAdminOrOwner && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setMarkChurnedOpen(true)}
+                  >
+                    <UserX className="w-3.5 h-3.5 mr-2" />
+                    Mark as churned
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" asChild>
                   <Link href={`/feedbacks?customer_email=${encodeURIComponent(profile.customer_email)}`}>
                     <ExternalLink className="w-3.5 h-3.5 mr-2" />
@@ -849,7 +853,10 @@ export default function CustomerProfilePage() {
 
         {/* Potential winback banner */}
         <PotentialWinbackBanner
-          has_potential_winback={(profile as CustomerProfileData & { has_potential_winback?: boolean }).has_potential_winback ?? false}
+          has_potential_winback={
+            isAdminOrOwner &&
+            ((profile as CustomerProfileData & { has_potential_winback?: boolean }).has_potential_winback ?? false)
+          }
           customerEmail={profile.customer_email}
           onRecovered={() => setAnalysisRefetchToken((t) => t + 1)}
         />
