@@ -593,13 +593,15 @@ export default function CustomersPage() {
                         </DropdownMenuItem>
                       </>
                     )}
-                    <DropdownMenuItem
-                      onClick={() => setRunPlaybookDialogOpen(true)}
-                      className="flex items-center gap-2"
-                    >
-                      <PlaySquare className="w-3.5 h-3.5" />
-                      Run playbook
-                    </DropdownMenuItem>
+                    {isAdminOrOwner && (
+                      <DropdownMenuItem
+                        onClick={() => setRunPlaybookDialogOpen(true)}
+                        className="flex items-center gap-2"
+                      >
+                        <PlaySquare className="w-3.5 h-3.5" />
+                        Run playbook
+                      </DropdownMenuItem>
+                    )}
                     {isAdminOrOwner && (
                       <DropdownMenuItem
                         onClick={() => setOutreachDialogOpen(true)}
@@ -612,7 +614,7 @@ export default function CustomersPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              {selectedEmails.length > 0 && (
+              {isAdminOrOwner && selectedEmails.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -623,15 +625,17 @@ export default function CustomersPage() {
                   Mark {selectedEmails.length} as churned
                 </Button>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCsvImportOpen(true)}
-                className="flex items-center gap-2"
-              >
-                <FileUp className="w-4 h-4" />
-                Import CSV
-              </Button>
+              {isAdminOrOwner && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCsvImportOpen(true)}
+                  className="flex items-center gap-2"
+                >
+                  <FileUp className="w-4 h-4" />
+                  Import CSV
+                </Button>
+              )}
               {user?.is_system_admin && (
                 <Button
                   variant="outline"
