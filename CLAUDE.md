@@ -298,6 +298,9 @@ Usage in routes:
 2. **Route Protection** (in page components):
    - `/settings/billing` → redirects non-owners to `/settings/preferences`
    - `/settings/integrations` → redirects members to `/settings/preferences`
+   - `/settings/workflow` → redirects non-admin/owner users to `/settings/preferences`
+   - `/settings/playbooks/new` and `/settings/playbooks/[id]` → redirect non-admin/owner users to `/settings/playbooks` (the list)
+   - New gating uses the `useRole()` hook (`hooks/useRole.ts`: `isAdminOrOwner`, `isLoading`)
 
 3. **Conditional UI** (buttons, actions):
    - `isOwner = user?.role === 'owner'`
