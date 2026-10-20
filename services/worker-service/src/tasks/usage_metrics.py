@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import os
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from celery import shared_task
@@ -68,6 +68,19 @@ _RECOMPUTE_PAGE_SIZE: int = 1000
 # ---------------------------------------------------------------------------
 
 
+def _to_naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalise a datetime to naive UTC.
+
+    tz-aware values are converted to UTC first (an offset is a real instant,
+    not just a label); naive values are assumed to already be UTC. Keeping
+    the rollup entirely naive preserves the existing column semantics while
+    making mixed naive/aware comparisons safe (#43).
+    """
+    if value is not None and value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def _compute_rollup_from_events(
     events: list,
     now: datetime,
@@ -84,22 +97,26 @@ def _compute_rollup_from_events(
     -------
     dict with keys matching CustomerUsage columns.
     """
+    # Normalise once at the boundary: a tz-aware occurred_at (or `now`) would
+    # otherwise raise TypeError on comparison below (#43).
+    now = _to_naive_utc(now)
     cutoff_7d = now - timedelta(days=7)
     cutoff_14d = now - timedelta(days=14)
     cutoff_30d = now - timedelta(days=30)
 
-    events_7d = [e for e in events if e.occurred_at and e.occurred_at >= cutoff_7d]
-    events_14d = [e for e in events if e.occurred_at and e.occurred_at >= cutoff_14d]
-    events_30d = [e for e in events if e.occurred_at and e.occurred_at >= cutoff_30d]
+    timed = [(e, _to_naive_utc(e.occurred_at)) for e in events]
+    events_7d = [(e, ts) for e, ts in timed if ts and ts >= cutoff_7d]
+    events_14d = [(e, ts) for e, ts in timed if ts and ts >= cutoff_14d]
+    events_30d = [(e, ts) for e, ts in timed if ts and ts >= cutoff_30d]
 
     # Distinct calendar days with at least one event
-    active_days_7d = len(set(e.occurred_at.date() for e in events_7d if e.occurred_at))
-    active_days_14d = len(set(e.occurred_at.date() for e in events_14d if e.occurred_at))
-    active_days_30d = len(set(e.occurred_at.date() for e in events_30d if e.occurred_at))
+    active_days_7d = len({ts.date() for _, ts in events_7d})
+    active_days_14d = len({ts.date() for _, ts in events_14d})
+    active_days_30d = len({ts.date() for _, ts in events_30d})
 
     # Login/activity counts: any track or identify event counts as activity
-    login_count_7d = sum(1 for e in events_7d if e.event_type in ("track", "identify"))
-    login_count_30d = sum(1 for e in events_30d if e.event_type in ("track", "identify"))
+    login_count_7d = sum(1 for e, _ in events_7d if e.event_type in ("track", "identify"))
+    login_count_30d = sum(1 for e, _ in events_30d if e.event_type in ("track", "identify"))
 
     # Distinct feature names from ALL history (not window-limited)
     distinct_features: List[str] = sorted(set(
@@ -107,7 +124,7 @@ def _compute_rollup_from_events(
     ))
     distinct_feature_count = len(distinct_features)
 
-    all_occurred = [e.occurred_at for e in events if e.occurred_at]
+    all_occurred = [ts for _, ts in timed if ts]
     last_active_at = max(all_occurred) if all_occurred else None
     first_seen_at = min(all_occurred) if all_occurred else None
 

@@ -18,7 +18,7 @@ wrapper), mirroring how analysis.py tests use ``_analyze_feedback_item``.
 
 import sys
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1316,3 +1316,52 @@ class TestRecomputeUsageScoresPagination:
             "5 rows at page size 2 must be read as 3 pages; a single call means "
             "the scan is still one unbounded .all()"
         )
+
+
+# ---------------------------------------------------------------------------
+# #43 — rollup comparison is tz-safe
+# ---------------------------------------------------------------------------
+
+
+class TestRollupTimezoneNormalisation:
+    @staticmethod
+    def _event(occurred_at, event_name="feat-a", event_type="track"):
+        return UsageEvent(
+            organization_id=1,
+            customer_email="tz@example.com",
+            event_type=event_type,
+            event_name=event_name,
+            external_event_id="tz-evt",
+            occurred_at=occurred_at,
+            received_at=datetime.utcnow(),
+        )
+
+    def test_tz_aware_occurred_at_matches_naive_equivalent(self):
+        import src.tasks.usage_metrics as um
+
+        now = datetime(2026, 10, 21, 12, 0, 0)
+        ages = (timedelta(hours=1), timedelta(days=10), timedelta(days=40))
+        naive_events = [self._event(now - age) for age in ages]
+        aware_events = [
+            self._event((now - age).replace(tzinfo=timezone.utc)) for age in ages
+        ]
+
+        expected = um._compute_rollup_from_events(naive_events, now)
+
+        assert um._compute_rollup_from_events(aware_events, now) == expected
+        # A tz-aware `now` must not raise either.
+        assert um._compute_rollup_from_events(
+            naive_events, now.replace(tzinfo=timezone.utc)
+        ) == expected
+
+    def test_non_utc_offset_is_converted_to_utc(self):
+        import src.tasks.usage_metrics as um
+
+        now = datetime(2026, 10, 21, 12, 0, 0)
+        aware = self._event(
+            datetime(2026, 10, 20, 10, 0, tzinfo=timezone(timedelta(hours=2)))
+        )
+        fields = um._compute_rollup_from_events([aware], now)
+
+        assert fields["last_active_at"] == datetime(2026, 10, 20, 8, 0)
+        assert fields["first_seen_at"] == datetime(2026, 10, 20, 8, 0)
