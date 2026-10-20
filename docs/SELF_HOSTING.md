@@ -117,6 +117,33 @@ annotated list):
 > afterwards invalidates every stored token and webhook secret — already true for
 > all integrations, so pick a key once and keep it.
 
+## Worker-driven health-score refresh (optional)
+
+The Celery worker refreshes a customer's health score after feedback analysis, a
+usage event, or a HubSpot/Salesforce sync. It does that by calling the backend's
+`POST /api/v1/internal/health/recompute` with a shared secret — the scoring logic
+lives in exactly one place (the backend), so worker- and backend-triggered
+recomputes have identical side effects.
+
+Set both variables on both services, with the same secret:
+
+```bash
+# backend + worker
+INTERNAL_API_SECRET=<output of: openssl rand -hex 32>
+# worker only (the bundled compose already sets http://backend:8000)
+INTERNAL_API_URL=http://backend:8000
+```
+
+The backend **fails closed** while `INTERNAL_API_SECRET` is unset: the internal
+endpoint returns `503`, and a wrong or missing `X-Internal-Secret` returns `403`.
+The worker logs one `ERROR` per process and carries on. **Unset means health
+scores only refresh on backend-driven events** (for example new feedback); they
+are not refreshed after worker-driven usage or CRM syncs.
+
+The bundled `docker-compose.prod.yml` passes the secret to both containers and
+already gives the worker `INTERNAL_API_URL: http://backend:8000`. On a custom
+deployment, point `INTERNAL_API_URL` at a backend origin the worker can reach.
+
 ## Running with no API key ($0, fully local)
 
 Out of the box (`ai_analysis_enabled=false`, no LLM key), Rereflect runs the **free

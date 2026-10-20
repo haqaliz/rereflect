@@ -191,8 +191,10 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 > **Sweep result (for whoever picks these up).** Three worker imports resolve to nothing:
 > `src.services.automation_engine` (P0, in flight), `src.models.feedback_workflow_event`
 > (this item), and `src.services.health_score_service` — the third is **already handled**
-> by `src/services/health_recompute.py`, which makes its absence loud (shipped as #3,
-> commit `f5d43234`). A fourth site, `src/tasks/segments.py:115`, imports
+> by `src/services/health_recompute.py`, which now calls the backend's internal
+> `/api/v1/internal/health/recompute` endpoint after the caller commits (GitHub #3,
+> option 1; the earlier seam shipped in `f5d43234` only made the absence loud). A fourth
+> site, `src/tasks/segments.py:115`, imports
 > `health_score_service` inside a try with a comment documenting deliberate degradation —
 > not a bug, but it does mean the segment sentiment-trend signal is permanently absent.
 

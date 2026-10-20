@@ -81,6 +81,10 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ROOT_PATH: ${ROOT_PATH:-}
+      # Shared secret for the worker's internal health-recompute call. Empty ->
+      # the internal endpoint fails closed with 503 (health scores still refresh
+      # on backend-driven events).
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
       # Self-host: unlock all features, no paid tiers/limits.
       SELF_HOSTED: ${SELF_HOSTED:-true}
       # Default off -> runs on the free local VADER pipeline ($0, no key).
@@ -125,6 +129,10 @@ services:
       REDIS_PORT: 6379
       LLM_ENCRYPTION_KEY: ${LLM_ENCRYPTION_KEY}
       SELF_HOSTED: ${SELF_HOSTED:-true}
+      # Worker -> backend health recompute (GitHub #3). Both must match the
+      # backend's INTERNAL_API_SECRET; the worker already depends_on backend.
+      INTERNAL_API_URL: http://backend:8000
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
       ai_analysis_enabled: ${ai_analysis_enabled:-false}
       # OPTIONAL operator-owned BYOK keys (your own keys; never a Rereflect key).
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
