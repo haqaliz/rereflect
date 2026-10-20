@@ -1,110 +1,154 @@
 """
-Pins the real, unmocked state of worker-side health recomputation (GitHub #3).
+Pins worker-side health recomputation through the backend internal endpoint
+(GitHub #3, option 1).
 
-Every other worker test that touches this path injects a fake
-``src.services.health_score_service`` into ``sys.modules`` before importing the
-task under test. That makes the lazy import succeed, so those tests assert the
-recompute is *called* while production cannot call it at all — which is why the
-gap survived so long. These tests deliberately do not mock, so they describe
-what actually happens when the worker runs.
+The worker has no scoring implementation and must not grow one: every recompute
+is one HTTP POST to ``/api/v1/internal/health/recompute`` after the caller's
+transaction commits, so the backend reads committed feedback/usage/CRM rows.
 """
 
 from __future__ import annotations
 
-import importlib
-import sys
+import pathlib
 
+import httpx
 import pytest
+from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.services import health_recompute
+
+URL = "http://backend:8000/api/v1/internal/health/recompute"
+
+_Base = declarative_base()
 
 
-def _purge_health_score_service():
-    """Drop any mock a previously-imported test module left in sys.modules."""
-    sys.modules.pop("src.services.health_score_service", None)
+class _Probe(_Base):
+    __tablename__ = "health_recompute_probe"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(20))
 
 
-class TestHealthScoreServiceIsAbsentFromTheWorker:
-    def test_import_fails_in_the_worker_package(self):
-        """The backend module is not shipped in the worker image.
+@pytest.fixture()
+def session():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    _Base.metadata.create_all(engine)
+    s = sessionmaker(bind=engine)()
+    try:
+        yield s
+    finally:
+        s.close()
 
-        This is the root cause of #3. It is asserted rather than xfailed so the
-        assertion inverts loudly the moment someone makes the module available:
-        this test then fails and must be updated together with the seam.
-        """
-        _purge_health_score_service()
-        with pytest.raises(ImportError):
-            importlib.import_module("src.services.health_score_service")
+
+@pytest.fixture()
+def configured(monkeypatch):
+    monkeypatch.setenv("INTERNAL_API_URL", "http://backend:8000/")
+    monkeypatch.setenv("INTERNAL_API_SECRET", "s3cret")
+    monkeypatch.setattr(health_recompute, "_warned", False)
 
 
-class TestSeamDegradesInsteadOfRaising:
-    def test_request_health_recompute_returns_false_when_unavailable(self):
-        _purge_health_score_service()
-        from src.services import health_recompute
+@pytest.fixture()
+def posts(monkeypatch, configured):
+    calls = []
 
-        health_recompute._warned = False  # reset the once-per-process latch
-        assert health_recompute.request_health_recompute(1, "a@example.com", None) is False
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return httpx.Response(200, json={"status": "ok", "health_score": 50})
 
-    def test_it_logs_once_per_process_at_error_level(self, caplog):
-        _purge_health_score_service()
-        from src.services import health_recompute
+    monkeypatch.setattr(health_recompute.httpx, "post", fake_post)
+    return calls
 
-        health_recompute._warned = False
+
+class TestMissingConfiguration:
+    def test_returns_false_and_logs_once_per_process(self, monkeypatch, caplog):
+        monkeypatch.delenv("INTERNAL_API_URL", raising=False)
+        monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
+        monkeypatch.setattr(health_recompute, "_warned", False)
+
         with caplog.at_level("ERROR"):
-            health_recompute.request_health_recompute(1, "a@example.com", None)
-            health_recompute.request_health_recompute(1, "b@example.com", None)
+            first = health_recompute.request_health_recompute(1, "a@example.com", None)
+            second = health_recompute.request_health_recompute(2, "b@example.com", None)
 
+        assert first is False
+        assert second is False
         matching = [r for r in caplog.records if "recompute is UNAVAILABLE" in r.message]
         assert len(matching) == 1, "expected exactly one report per process"
-        assert "issue #3" in matching[0].message
+        assert "INTERNAL_API_URL" in matching[0].message
+        assert "will not refresh" in matching[0].message
 
-    def test_it_runs_the_recompute_when_the_service_is_available(self, monkeypatch):
-        """The seam is a pass-through, not a permanent stub.
 
-        Proves the fix path works end to end: once the module exists, the seam
-        calls it with the caller's arguments and reports True.
-        """
-        import types
+class TestAfterCommitScheduling:
+    def test_posts_only_after_the_caller_commits(self, session, posts):
+        session.add(_Probe(name="x"))
+        session.flush()
 
-        _purge_health_score_service()
-        calls = []
-        fake = types.ModuleType("src.services.health_score_service")
-        fake.update_customer_health = lambda org_id, email, db: calls.append((org_id, email, db))
-        monkeypatch.setitem(sys.modules, "src.services.health_score_service", fake)
+        assert health_recompute.request_health_recompute(7, "c@example.com", session) is True
+        assert posts == [], "must not POST while the transaction is open"
 
-        from src.services import health_recompute
+        session.commit()
 
-        sentinel = object()
-        assert health_recompute.request_health_recompute(7, "c@example.com", sentinel) is True
-        assert calls == [(7, "c@example.com", sentinel)]
+        assert len(posts) == 1
+        url, kwargs = posts[0]
+        assert url == URL
+        assert kwargs["json"] == {"org_id": 7, "customer_email": "c@example.com"}
+        assert kwargs["headers"] == {"X-Internal-Secret": "s3cret"}
+        assert kwargs["timeout"] == 5.0
 
-    def test_recompute_errors_still_propagate(self, monkeypatch):
-        """Only the unavailable case is swallowed — real failures reach the task."""
-        import types
+    def test_rollback_means_no_post(self, session, posts):
+        session.add(_Probe(name="x"))
+        session.flush()
 
-        _purge_health_score_service()
-        fake = types.ModuleType("src.services.health_score_service")
+        assert health_recompute.request_health_recompute(7, "c@example.com", session) is True
+        session.rollback()
 
-        def _boom(org_id, email, db):
-            raise RuntimeError("db exploded")
+        assert posts == []
 
-        fake.update_customer_health = _boom
-        monkeypatch.setitem(sys.modules, "src.services.health_score_service", fake)
+    def test_idle_session_posts_immediately(self, session, posts):
+        assert health_recompute.request_health_recompute(7, "c@example.com", session) is True
 
-        from src.services import health_recompute
+        assert len(posts) == 1
 
-        with pytest.raises(RuntimeError, match="db exploded"):
-            health_recompute.request_health_recompute(1, "d@example.com", None)
+
+class TestFailuresNeverReachTheTask:
+    def test_connection_error_is_logged_not_raised(self, session, monkeypatch, configured, caplog):
+        def boom(url, **kwargs):
+            raise httpx.ConnectError("backend down")
+
+        monkeypatch.setattr(health_recompute.httpx, "post", boom)
+        session.add(_Probe(name="x"))
+        session.flush()
+        health_recompute.request_health_recompute(9, "d@example.com", session)
+
+        with caplog.at_level("ERROR"):
+            session.commit()  # must not raise
+
+        matching = [r for r in caplog.records if "org=9" in r.message and "d@example.com" in r.message]
+        assert matching, "failure must name the org and email"
+
+    def test_non_2xx_is_logged_not_raised(self, session, posts, monkeypatch, caplog):
+        def failing(url, **kwargs):
+            return httpx.Response(500, request=httpx.Request("POST", url))
+
+        monkeypatch.setattr(health_recompute.httpx, "post", failing)
+        session.add(_Probe(name="x"))
+        session.flush()
+        health_recompute.request_health_recompute(9, "d@example.com", session)
+
+        with caplog.at_level("ERROR"):
+            session.commit()
+
+        assert any("d@example.com" in r.message for r in caplog.records)
 
 
 class TestNoTaskImportsTheBackendServiceDirectly:
     def test_all_recompute_call_sites_go_through_the_seam(self):
-        """Keeps the fix to a single place.
-
-        segments.py is exempt: it needs compute_sentiment_trend rather than
-        update_customer_health and guards its own import, degrading to
-        direction=None so the daily segment recompute still runs.
-        """
-        import pathlib
-
+        """segments.py is exempt: it needs compute_sentiment_trend rather than
+        update_customer_health and guards its own import."""
         tasks_dir = pathlib.Path(__file__).parent.parent / "src" / "tasks"
         offenders = []
         for path in sorted(tasks_dir.glob("*.py")):
@@ -115,6 +159,5 @@ class TestNoTaskImportsTheBackendServiceDirectly:
 
         assert not offenders, (
             f"{offenders} import health_score_service directly; route them "
-            f"through src.services.health_recompute.request_health_recompute "
-            f"so GitHub #3 has one fix site."
+            f"through src.services.health_recompute.request_health_recompute."
         )
