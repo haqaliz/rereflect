@@ -1193,3 +1193,83 @@ class TestWorkerAndBackendUsageHistoryColumnsMatch:
             f"  Worker only:  {worker_cols - backend_cols}\n"
             f"  Backend only: {backend_cols - worker_cols}"
         )
+
+
+# ---------------------------------------------------------------------------
+# #40 — raw usage_events retention purge
+# ---------------------------------------------------------------------------
+
+
+class TestPurgeOldUsageEvents:
+    def test_deletes_rows_older_than_retention_keeps_recent(self, db):
+        import src.tasks.usage_metrics as um
+
+        org = _make_org(db)
+        _make_event(db, org.id, email="old@example.com", external_event_id="old-1",
+                    days_ago=um.USAGE_EVENT_RETENTION_DAYS + 1)
+        _make_event(db, org.id, email="recent@example.com", external_event_id="recent-1",
+                    days_ago=10)
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            result = um.purge_old_usage_events()
+
+        assert result["status"] == "complete"
+        assert result["deleted"] == 1
+        remaining = db.query(UsageEvent).all()
+        assert [e.external_event_id for e in remaining] == ["recent-1"]
+
+    def test_rows_without_occurred_at_are_kept(self, db):
+        import src.tasks.usage_metrics as um
+
+        org = _make_org(db)
+        db.add(UsageEvent(
+            organization_id=org.id, customer_email="null@example.com",
+            event_type="track", event_name="x", external_event_id="null-1",
+            occurred_at=None, received_at=datetime.utcnow(),
+        ))
+        db.commit()
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            result = um.purge_old_usage_events()
+
+        assert result["deleted"] == 0
+        assert db.query(UsageEvent).count() == 1
+
+    def test_second_immediate_run_deletes_zero(self, db):
+        import src.tasks.usage_metrics as um
+
+        org = _make_org(db)
+        _make_event(db, org.id, external_event_id="old-2",
+                    days_ago=um.USAGE_EVENT_RETENTION_DAYS + 5)
+
+        with patch.object(um, "get_db_session", _fake_db_session):
+            first = um.purge_old_usage_events()
+            second = um.purge_old_usage_events()
+
+        assert first["deleted"] == 1
+        assert second["deleted"] == 0
+
+    def test_retention_defaults_to_90_days(self):
+        import src.tasks.usage_metrics as um
+
+        assert um.USAGE_EVENT_RETENTION_DAYS == 90
+
+    def test_is_registered_celery_task(self):
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        from src.celery_app import celery_app
+        assert "src.tasks.usage_metrics.purge_old_usage_events" in celery_app.tasks
+
+    def test_beat_schedule_has_purge_usage_events_entry(self):
+        from src.celery_app import celery_app
+
+        schedule = celery_app.conf.beat_schedule
+        assert "purge-old-usage-events" in schedule
+        entry = schedule["purge-old-usage-events"]
+        assert entry["task"] == "src.tasks.usage_metrics.purge_old_usage_events"
+        cron = entry["schedule"]
+        assert cron.hour == {2}
+        assert cron.minute == {50}
+        assert cron.day_of_week == {0}

@@ -194,6 +194,13 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.usage_metrics.purge_old_usage_history",
         "schedule": crontab(hour=2, minute=45, day_of_week=0),
     },
+    # Purge raw usage_events rows older than USAGE_EVENT_RETENTION_DAYS
+    # (default 90, env-configurable) — weekly on Sunday at 2:50 AM, after the
+    # snapshot purge in the same window (#40).
+    "purge-old-usage-events": {
+        "task": "src.tasks.usage_metrics.purge_old_usage_events",
+        "schedule": crontab(hour=2, minute=50, day_of_week=0),
+    },
     # Purge churn playbook execution logs older than 90 days — Sundays 03:00 UTC
     # NOTE: this entry was missing the `src.` prefix every other task name
     # carries, so it resolved to nothing and the 90-day purge has never run in

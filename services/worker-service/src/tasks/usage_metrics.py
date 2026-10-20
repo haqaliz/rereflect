@@ -13,14 +13,17 @@ Tasks:
                               aspect).
   purge_old_usage_history  — scheduled weekly to delete snapshot rows older
                               than USAGE_HISTORY_RETENTION_DAYS.
+  purge_old_usage_events   — scheduled weekly to delete raw usage_events rows
+                              older than USAGE_EVENT_RETENTION_DAYS.
 
 Beat registration: see celery_app.py (``recompute-usage-scores-daily``,
-``purge-old-usage-history``).
+``purge-old-usage-history``, ``purge-old-usage-events``).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -44,6 +47,11 @@ _HEALTH_RECOMPUTE_DELTA: int = 2
 # trend-detection-and-health aspect will use. Single edit point if an
 # operator ever wants a shorter window; no per-org configurability.
 USAGE_HISTORY_RETENTION_DAYS: int = 180
+
+# Retention window for the raw usage_events log (#40). 90 days comfortably
+# exceeds the 30-day window any rollup reads, so the purge cannot change a
+# rollup. Env-configurable (USAGE_EVENT_RETENTION_DAYS) for operators.
+USAGE_EVENT_RETENTION_DAYS: int = int(os.getenv("USAGE_EVENT_RETENTION_DAYS", "90"))
 
 # Batch size for the daily snapshot write's bulk insert (AC 7 — not N+1: a
 # large first-run population is chunked rather than issued as one
@@ -783,6 +791,45 @@ def purge_old_usage_history() -> Dict[str, Any]:
 
     logger.info(
         "purge_old_usage_history: deleted %d CustomerUsageHistory rows older than %s",
+        deleted, cutoff,
+    )
+
+    return {"status": "complete", "deleted": deleted}
+
+
+# ---------------------------------------------------------------------------
+# usage_events retention purge (#40)
+# ---------------------------------------------------------------------------
+
+
+@shared_task(name="src.tasks.usage_metrics.purge_old_usage_events")
+def purge_old_usage_events() -> Dict[str, Any]:
+    """
+    Delete raw usage_events rows with occurred_at older than
+    USAGE_EVENT_RETENTION_DAYS (default 90, env-configurable) days before now.
+
+    Runs weekly (see celery_app.py ``purge-old-usage-events``). Idempotent: a
+    second immediate run deletes 0. Rows with a NULL occurred_at are kept —
+    the filter never matches them, so un-timestamped events are never silently
+    dropped.
+
+    Returns:
+        dict — {"status": "complete", "deleted": N}
+    """
+    from src.models import UsageEvent
+
+    cutoff = datetime.utcnow() - timedelta(days=USAGE_EVENT_RETENTION_DAYS)
+
+    with get_db_session() as db:
+        deleted = (
+            db.query(UsageEvent)
+            .filter(UsageEvent.occurred_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+
+    logger.info(
+        "purge_old_usage_events: deleted %d UsageEvent rows older than %s",
         deleted, cutoff,
     )
 
