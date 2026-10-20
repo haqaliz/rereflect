@@ -52,7 +52,6 @@ const memberUser = { ...adminUser, role: 'member' };
 
 const mockSettings = {
   ai_analysis_enabled: true,
-  has_custom_key: false,
   default_provider: 'ollama',
   base_url: 'http://localhost:11434/v1',
   model_embeddings: null,

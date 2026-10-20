@@ -10,7 +10,6 @@ export interface AIModels {
 
 export interface AISettings {
   ai_analysis_enabled: boolean;
-  has_custom_key: boolean; // kept for backward compat
   default_provider: string;
   base_url: string | null;
   model_embeddings: string | null;

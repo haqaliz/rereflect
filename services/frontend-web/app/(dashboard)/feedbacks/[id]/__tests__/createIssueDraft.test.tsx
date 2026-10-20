@@ -119,7 +119,6 @@ import CreateIssuePage from '../create-issue/page';
 
 const CONFIGURED_CLOUD_SETTINGS = {
   ai_analysis_enabled: true,
-  has_custom_key: true,
   default_provider: 'openai',
   base_url: null,
   model_embeddings: null,
@@ -128,7 +127,6 @@ const CONFIGURED_CLOUD_SETTINGS = {
 
 const CONFIGURED_LOCAL_SETTINGS = {
   ai_analysis_enabled: true,
-  has_custom_key: false,
   default_provider: 'ollama',
   base_url: 'http://localhost:11434',
   model_embeddings: null,
@@ -137,7 +135,6 @@ const CONFIGURED_LOCAL_SETTINGS = {
 
 const UNCONFIGURED_SETTINGS = {
   ai_analysis_enabled: false,
-  has_custom_key: false,
   default_provider: 'openai',
   base_url: null,
   model_embeddings: null,

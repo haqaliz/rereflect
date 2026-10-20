@@ -39,7 +39,6 @@ const adminUser = {
 
 const mockSettings = {
   ai_analysis_enabled: true,
-  has_custom_key: false,
   default_provider: 'openai',
   base_url: null,
   model_embeddings: null,

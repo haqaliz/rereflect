@@ -18,7 +18,6 @@ import { UsageChurnLabelsCard } from '@/components/settings/UsageChurnLabelsCard
 
 const baseSettings = {
   ai_analysis_enabled: true,
-  has_custom_key: false,
   default_provider: 'openai',
   base_url: null,
   model_embeddings: null,

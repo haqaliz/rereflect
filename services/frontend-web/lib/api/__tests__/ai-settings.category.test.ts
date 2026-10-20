@@ -34,7 +34,6 @@ describe('aiSettingsAPI — category_classifier_mode field (M5.2 category classi
     mockGet.mockResolvedValue({
       data: {
         ai_analysis_enabled: true,
-        has_custom_key: false,
         default_provider: 'openai',
         base_url: null,
         model_embeddings: null,
@@ -48,5 +47,12 @@ describe('aiSettingsAPI — category_classifier_mode field (M5.2 category classi
     const settings: AISettings = await aiSettingsAPI.get();
 
     expect(settings.category_classifier_mode).toBe('off');
+  });
+
+  it('does not expose the dead has_custom_key field', () => {
+    // @ts-expect-error has_custom_key is not part of the backend response
+    const stale: Pick<AISettings, 'has_custom_key'> = { has_custom_key: true };
+
+    expect(stale).toBeDefined();
   });
 });
