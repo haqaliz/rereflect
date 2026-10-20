@@ -2,7 +2,6 @@
 Copilot REST API supplementary endpoints (M2.2).
 
 - GET /api/v1/copilot/usage — User's copilot usage stats
-- POST /api/v1/conversations/suggestions — Dynamic query suggestions
 """
 
 from fastapi import APIRouter, Depends
