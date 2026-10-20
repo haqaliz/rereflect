@@ -186,17 +186,5 @@ describe('MessageBubble', () => {
       render(<MessageBubble message={userMessage} />);
       expect(screen.queryByTestId('copy-btn-1')).not.toBeInTheDocument();
     });
-
-    it('shows regenerate button on completed assistant messages', () => {
-      render(<MessageBubble message={aiMessage} onRegenerate={vi.fn()} />);
-      expect(screen.getByTestId('regenerate-btn-2')).toBeInTheDocument();
-    });
-
-    it('calls onRegenerate with message id when regenerate is clicked', () => {
-      const onRegenerate = vi.fn();
-      render(<MessageBubble message={aiMessage} onRegenerate={onRegenerate} />);
-      fireEvent.click(screen.getByTestId('regenerate-btn-2'));
-      expect(onRegenerate).toHaveBeenCalledWith(2);
-    });
   });
 });

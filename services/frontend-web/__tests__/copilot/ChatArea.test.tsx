@@ -19,7 +19,6 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const mockSendQuery = vi.fn();
 const mockStopGeneration = vi.fn();
-const mockRegenerate = vi.fn();
 
 vi.mock('@/hooks/useCopilotWebSocket', () => ({
   useCopilotWebSocket: vi.fn(() => ({
@@ -31,7 +30,6 @@ vi.mock('@/hooks/useCopilotWebSocket', () => ({
     error: null,
     sendQuery: mockSendQuery,
     stopGeneration: mockStopGeneration,
-    regenerate: mockRegenerate,
   })),
 }));
 
@@ -127,7 +125,6 @@ describe('ChatArea', () => {
       error: null,
       sendQuery: mockSendQuery,
       stopGeneration: mockStopGeneration,
-      regenerate: mockRegenerate,
     });
   });
 
@@ -249,7 +246,6 @@ describe('ChatArea', () => {
         error: null,
         sendQuery: mockSendQuery,
         stopGeneration: mockStopGeneration,
-        regenerate: mockRegenerate,
       });
       render(<ChatArea conversationId={'test-uuid-42'} />);
       await waitFor(() => {
@@ -267,7 +263,6 @@ describe('ChatArea', () => {
         error: null,
         sendQuery: mockSendQuery,
         stopGeneration: mockStopGeneration,
-        regenerate: mockRegenerate,
       });
       render(<ChatArea conversationId={'test-uuid-42'} />);
       await waitFor(() => {
@@ -286,7 +281,6 @@ describe('ChatArea', () => {
         error: null,
         sendQuery: mockSendQuery,
         stopGeneration: mockStopGeneration,
-        regenerate: mockRegenerate,
       });
       render(<ChatArea conversationId={'test-uuid-42'} />);
       await waitFor(() => {
@@ -304,7 +298,6 @@ describe('ChatArea', () => {
         error: null,
         sendQuery: mockSendQuery,
         stopGeneration: mockStopGeneration,
-        regenerate: mockRegenerate,
       });
       render(<ChatArea conversationId={'test-uuid-42'} />);
       await waitFor(() => {
@@ -495,7 +488,6 @@ describe('ChatArea', () => {
         error: null,
         sendQuery: mockSendQuery,
         stopGeneration: mockStopGeneration,
-        regenerate: mockRegenerate,
       });
       render(<ChatArea conversationId={'test-uuid-42'} />);
       await waitFor(() => {

@@ -85,7 +85,6 @@ vi.mock('@/lib/api/conversations', () => ({
 
 const mockSendQuery = vi.fn();
 const mockStopGeneration = vi.fn();
-const mockRegenerate = vi.fn();
 let wsHookState = {
   connected: true,
   streaming: false,
@@ -95,7 +94,6 @@ let wsHookState = {
   error: null as string | null,
   sendQuery: mockSendQuery,
   stopGeneration: mockStopGeneration,
-  regenerate: mockRegenerate,
 };
 let wsOnMessage: ((msg: unknown) => void) | null = null;
 
@@ -182,7 +180,6 @@ describe('Copilot Integration Tests', () => {
       error: null,
       sendQuery: mockSendQuery,
       stopGeneration: mockStopGeneration,
-      regenerate: mockRegenerate,
     };
 
     // Default API responses

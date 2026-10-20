@@ -418,6 +418,22 @@ class TestErrorHandling:
             msg = ws.receive_json()
             assert msg["type"] == "error"
 
+    def test_regenerate_is_not_an_advertised_message_type(
+        self, client: TestClient, valid_token: str
+    ):
+        """#36: regenerate was removed — it must behave like any unknown type."""
+        with client.websocket_connect(f"/ws/copilot?token={valid_token}") as ws:
+            ws.send_json({
+                "type": "regenerate",
+                "message_id": "regen-1",
+            })
+
+            msg = ws.receive_json()
+            assert msg["type"] == "error"
+            assert msg["message_id"] == "regen-1"
+            assert "Unknown message type" in msg["error"]
+            assert not any("regenerate" in s for s in msg.get("suggestions", []))
+
     def test_malformed_json_closes_connection(
         self, client: TestClient, valid_token: str
     ):

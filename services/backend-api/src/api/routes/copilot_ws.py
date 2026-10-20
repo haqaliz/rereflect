@@ -6,7 +6,6 @@ Protocol: wss://{host}/ws/copilot?token={jwt}
 Client -> Server messages:
 - query: Submit a question
 - stop: Cancel ongoing generation
-- regenerate: Regenerate the last AI response
 
 Server -> Client messages:
 - status: Processing status update
@@ -1045,20 +1044,12 @@ async def copilot_ws(
                         "status": "stopped",
                     })
 
-            elif msg_type == "regenerate":
-                await manager.send(websocket, {
-                    "type": "error",
-                    "message_id": message_id,
-                    "error": "Regenerate not yet implemented",
-                    "suggestions": ["Send a new query to continue"],
-                })
-
             else:
                 await manager.send(websocket, {
                     "type": "error",
                     "message_id": message_id,
                     "error": f"Unknown message type: {msg_type!r}",
-                    "suggestions": ["Valid types: query, stop, regenerate"],
+                    "suggestions": ["Valid types: query, stop"],
                 })
 
     except WebSocketDisconnect:

@@ -104,7 +104,6 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
   const [conversationDbId, setConversationDbId] = useState<number | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [contextScopes, setContextScopes] = useState<ContextScope[]>([]);
-  const [pendingStopMessageId, setPendingStopMessageId] = useState<number | string | null>(null);
   const [mentionMatch, setMentionMatch] = useState<MentionMatch | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -113,7 +112,7 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
   const initialQuerySentForConv = useRef<string | null>(null);
 
   // WebSocket
-  const { connected: _connected, streaming, streamingContent, statusText, reconnecting, error: wsError, sendQuery, stopGeneration, regenerate } =
+  const { connected: _connected, streaming, streamingContent, statusText, reconnecting, error: wsError, sendQuery, stopGeneration } =
     useCopilotWebSocket({
       onMessage: useCallback((msg: CopilotMessage) => {
         if (msg.type === 'assistant_message') {
@@ -301,13 +300,7 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
       {/* Stop button header (only when streaming) */}
       {streaming && (
         <div className="flex items-center justify-end px-4 py-2 border-b border-border">
-          <StopButton onStop={() => {
-            if (pendingStopMessageId !== null) {
-              stopGeneration(pendingStopMessageId);
-            } else {
-              stopGeneration(0);
-            }
-          }} />
+          <StopButton onStop={() => stopGeneration(0)} />
         </div>
       )}
 
@@ -319,10 +312,6 @@ export function ChatArea({ conversationId, copilotUsage, initialQuery }: ChatAre
             key={msg.id}
             message={msg}
             conversationId={conversationDbId ?? undefined}
-            onRegenerate={(id) => {
-              setPendingStopMessageId(id);
-              regenerate(id);
-            }}
           />
         ))}
 

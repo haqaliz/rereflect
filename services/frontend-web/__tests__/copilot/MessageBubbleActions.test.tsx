@@ -38,7 +38,6 @@ vi.mock('@/lib/api/copilot-actions', () => ({
 
 const mockSendQuery = vi.fn();
 const mockStopGeneration = vi.fn();
-const mockRegenerate = vi.fn();
 let wsOnMessage: ((msg: unknown) => void) | null = null;
 
 vi.mock('@/hooks/useCopilotWebSocket', () => ({
@@ -55,7 +54,6 @@ vi.mock('@/hooks/useCopilotWebSocket', () => ({
       error: null,
       sendQuery: mockSendQuery,
       stopGeneration: mockStopGeneration,
-      regenerate: mockRegenerate,
     };
   }),
 }));

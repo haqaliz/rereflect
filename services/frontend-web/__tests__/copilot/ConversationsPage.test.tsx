@@ -67,7 +67,6 @@ vi.mock('@/hooks/useCopilotWebSocket', () => ({
     error: null,
     sendQuery: vi.fn(),
     stopGeneration: vi.fn(),
-    regenerate: vi.fn(),
   })),
 }));
 

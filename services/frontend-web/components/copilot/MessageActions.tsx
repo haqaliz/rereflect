@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Copy, Check, RefreshCw, Square, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Copy, Check, Square, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -166,10 +166,9 @@ export function ThumbsRating({ messageId, content }: ThumbsRatingProps) {
 interface MessageActionsProps {
   messageId: number | string;
   content: string;
-  onRegenerate?: (messageId: number | string) => void;
 }
 
-export function MessageActions({ messageId, content, onRegenerate }: MessageActionsProps) {
+export function MessageActions({ messageId, content }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -193,18 +192,6 @@ export function MessageActions({ messageId, content, onRegenerate }: MessageActi
       >
         {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
       </button>
-
-      {/* Regenerate */}
-      {onRegenerate && (
-        <button
-          data-testid={`regenerate-btn-${messageId}`}
-          onClick={() => onRegenerate(messageId)}
-          title="Regenerate response"
-          className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-        </button>
-      )}
 
       {/* Thumbs rating */}
       <ThumbsRating messageId={messageId} content={content} />

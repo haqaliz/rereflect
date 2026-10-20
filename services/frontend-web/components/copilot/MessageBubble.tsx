@@ -241,7 +241,6 @@ function makeMarkdownComponents(messageId: number | string, onLinkClick: (href: 
 // Main component
 interface MessageBubbleProps {
   message: ChatMessage;
-  onRegenerate?: (messageId: number | string) => void;
   /** Persisted conversation id for suggested-action execution (numeric DB id,
    *  not the WS turn message id). Absent → action buttons render disabled. */
   conversationId?: number;
@@ -263,7 +262,7 @@ interface ActionsItem {
   actions: SuggestedAction[];
 }
 
-export function MessageBubble({ message, onRegenerate, conversationId }: MessageBubbleProps) {
+export function MessageBubble({ message, conversationId }: MessageBubbleProps) {
   const router = useRouter();
   const isUser = message.role === 'user';
 
@@ -380,7 +379,7 @@ export function MessageBubble({ message, onRegenerate, conversationId }: Message
                 )}
               </div>
             )}
-            <MessageActions messageId={message.id} content={message.content} onRegenerate={onRegenerate} />
+            <MessageActions messageId={message.id} content={message.content} />
           </div>
         )}
       </div>

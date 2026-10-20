@@ -168,19 +168,11 @@ describe('useCopilotWebSocket', () => {
     });
   });
 
-  // ── regenerate ──────────────────────────────────────────────────────────────
+  // ── regenerate removed (#36) ─────────────────────────────────────────────────
 
-  describe('regenerate', () => {
-    it('sends a regenerate message with the messageId', () => {
-      const { result } = renderHook(() => useCopilotWebSocket());
-      act(() => { instances[0].open(); });
-      act(() => {
-        result.current.regenerate(77);
-      });
-      const sent = JSON.parse(instances[0].sentMessages[0]);
-      expect(sent.type).toBe('regenerate');
-      expect(sent.message_id).toBe(77);
-    });
+  it('does not expose regenerate — the backend never implemented it', () => {
+    const { result } = renderHook(() => useCopilotWebSocket());
+    expect(result.current).not.toHaveProperty('regenerate');
   });
 
   // ── Server message handling ─────────────────────────────────────────────────

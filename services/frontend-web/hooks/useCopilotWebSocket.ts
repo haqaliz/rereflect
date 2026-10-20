@@ -32,7 +32,6 @@ export interface UseCopilotWebSocketReturn {
   error: string | null;
   sendQuery: (conversationId: string, content: string, contextScope: string) => void;
   stopGeneration: (messageId: number | string) => void;
-  regenerate: (messageId: number | string) => void;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -244,13 +243,6 @@ export function useCopilotWebSocket(
     [send]
   );
 
-  const regenerate = useCallback(
-    (messageId: number | string) => {
-      send({ type: 'regenerate', message_id: messageId });
-    },
-    [send]
-  );
-
   return {
     connected,
     streaming,
@@ -260,6 +252,5 @@ export function useCopilotWebSocket(
     error,
     sendQuery,
     stopGeneration,
-    regenerate,
   };
 }
