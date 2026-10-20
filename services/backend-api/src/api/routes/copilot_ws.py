@@ -473,8 +473,9 @@ async def _handle_query(
             # Resolve LLM config (local-capable)
             _llm_cfg = resolve_generation_llm(org.id, db)
             if not _llm_cfg.is_configured:
-                await websocket.send_json({
+                await manager.send(websocket, {
                     "type": "error",
+                    "message_id": message_id,
                     "message": (
                         "No AI model configured. "
                         "Please configure a model in Settings → AI."
@@ -521,8 +522,9 @@ async def _handle_query(
         # 6. Resolve LLM provider/model for org (local-capable)
         llm_cfg = resolve_generation_llm(org.id, db)
         if not llm_cfg.is_configured:
-            await websocket.send_json({
+            await manager.send(websocket, {
                 "type": "error",
+                "message_id": message_id,
                 "message": (
                     "No AI model configured. "
                     "Please configure a model in Settings → AI."

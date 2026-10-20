@@ -1297,3 +1297,64 @@ class TestSystemReportTemplates:
         assert any(word in label_lower for word in ("feature", "priorit", "request")), (
             f"Feature template label should mention 'feature'/'priorit'/'request': {feature_tmpl['label']}"
         )
+
+
+# =============================================================================
+# 7. Report-branch errors use the manager transport (#38)
+# =============================================================================
+
+
+class TestReportBranchErrorTransport:
+    """
+    The report branch's early error (no LLM configured) must go through
+    manager.send and carry message_id, like every other error path — a client
+    correlating errors to turns loses this frame otherwise.
+    """
+
+    def test_no_llm_configured_error_includes_message_id(
+        self,
+        client: TestClient,
+        free_token: str,
+        free_conversation_id: str,
+    ):
+        from src.services.copilot.llm_resolver import LLMConfig
+
+        unconfigured = LLMConfig(
+            provider="openai",
+            model="gpt-4o-mini",
+            api_key=None,
+            base_url=None,
+            is_configured=False,
+        )
+
+        messages = []
+        with patch(
+            "src.api.routes.copilot_ws.IntentClassifier.classify",
+            return_value={"intent": "report", "confidence": 0.95, "parameters": {}},
+        ), patch(
+            "src.api.routes.copilot_ws.resolve_generation_llm",
+            return_value=unconfigured,
+        ):
+            with client.websocket_connect(f"/ws/copilot?token={free_token}") as ws:
+                ws.send_json({
+                    "type": "query",
+                    "conversation_id": free_conversation_id,
+                    "content": "Generate an executive summary",
+                    "context_scope": "all_data",
+                    "message_id": "report-no-llm-1",
+                })
+                for _ in range(10):
+                    msg = ws.receive_json()
+                    messages.append(msg)
+                    if msg.get("type") == "error":
+                        break
+
+        errors = [m for m in messages if m.get("type") == "error"]
+        assert errors, f"Expected an error frame, got: {messages}"
+        err = errors[0]
+        assert err.get("message_id") == "report-no-llm-1", (
+            f"Report-branch error must carry message_id: {err}"
+        )
+        assert "No AI model configured" in err.get("message", ""), (
+            f"Unexpected error text: {err}"
+        )
