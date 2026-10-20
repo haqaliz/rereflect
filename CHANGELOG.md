@@ -47,6 +47,13 @@ analyzing a single item (`POST /analyze/`).
 owners outrank admins. It now uses the same admin-or-owner gate as every other admin-level
 mutation. Members still get 403.
 
+### Fixed — the usage chart no longer skips empty days
+
+`GET /api/v1/customers/{email}/usage` returned only days that had at least one event, so the
+chart could render a discontinuous series or misalign its x-axis. It now returns exactly 30, 60
+or 90 daily buckets (the requested window), ending today in UTC, with `event_count: 0` on days
+without activity.
+
 ### Fixed — automation rules could be saved with actions their trigger never runs
 
 - **The "Usage Decline Outreach" template now actually notifies.** Usage-trend and

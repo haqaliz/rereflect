@@ -286,3 +286,41 @@ class TestCustomerUsageEndpoint:
             assert "date" in bucket
             assert "event_count" in bucket
             assert bucket["event_count"] >= 0
+
+    def test_time_series_is_zero_filled_to_window(
+        self, client, auth_headers, db, org, rollup
+    ):
+        """A 30-day window returns 30 buckets, including days with no events."""
+        _make_events(db, org.id, "alice@example.com", days_back=[1, 5])
+
+        resp = client.get(
+            "/api/v1/customers/alice@example.com/usage?days=30",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        series = resp.json()["time_series"]
+
+        assert len(series) == 30
+        assert sum(b["event_count"] for b in series) == 2
+        assert len([b for b in series if b["event_count"] == 0]) == 28
+
+        dates = [b["date"] for b in series]
+        assert dates == sorted(dates)
+        assert len(set(dates)) == 30
+
+    def test_time_series_window_ends_today(
+        self, client, auth_headers, db, org, rollup
+    ):
+        """The window is the last `days` calendar days, ending today (UTC)."""
+        _make_events(db, org.id, "alice@example.com", days_back=[0, 1])
+
+        resp = client.get(
+            "/api/v1/customers/alice@example.com/usage?days=30",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        series = resp.json()["time_series"]
+
+        today = datetime.utcnow().date()
+        assert series[-1]["date"] == today.isoformat()
+        assert series[0]["date"] == (today - timedelta(days=29)).isoformat()

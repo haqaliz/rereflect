@@ -1676,7 +1676,6 @@ def get_customer_usage(
     """
     from src.models.customer_usage import CustomerUsage as CustomerUsageModel
     from src.models.usage_event import UsageEvent as UsageEventModel
-    from collections import defaultdict
 
     if days not in _VALID_USAGE_DAYS:
         raise HTTPException(
@@ -1696,9 +1695,13 @@ def get_customer_usage(
             detail=f"No usage data found for customer '{email}'.",
         )
 
-    # Build daily time series from raw events within the window
+    # Build daily time series from raw events within the window.
+    # The window is exactly `days` calendar days ending today (UTC), zero-filled
+    # so charts get a continuous baseline.
     now = datetime.utcnow()
-    cutoff = now - timedelta(days=days)
+    today = now.date()
+    window_start = today - timedelta(days=days - 1)
+    cutoff = datetime.combine(window_start, datetime.min.time())
 
     events = (
         db.query(UsageEventModel)
@@ -1710,12 +1713,16 @@ def get_customer_usage(
         .all()
     )
 
-    # Bucket events by calendar day
-    counts: dict = defaultdict(int)
+    # Bucket events by calendar day, pre-seeding every day in the window.
+    counts: dict = {
+        (window_start + timedelta(days=i)).isoformat(): 0
+        for i in range(days)
+    }
     for ev in events:
         if ev.occurred_at:
             day_key = ev.occurred_at.date().isoformat()
-            counts[day_key] += 1
+            if day_key in counts:
+                counts[day_key] += 1
 
     time_series = [
         UsageTimeSeriesBucket(date=day, event_count=cnt)

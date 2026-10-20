@@ -101,9 +101,13 @@ offset-aware datetimes`.  Fix: replace `datetime.utcnow()` with
 `datetime.now(timezone.utc)` and strip tzinfo only when comparing against tz-naive
 columns.
 
-### (h) MINOR OPEN — /usage time series is sparse (no zero-fill between active days)
+### (h) CLOSED — /usage time series is now zero-filled (#44, 2026-10-21)
 
-`GET /api/v1/customers/{email}/usage` returns only days that have at least one event.
-The frontend charts may render discontinuous series or misalign the x-axis.  Consider
-zero-filling the series to cover every calendar day in the requested window, even when
-event_count = 0, so charting libraries can render a continuous baseline.
+`GET /api/v1/customers/{email}/usage` now returns exactly `days` daily buckets (30/60/90),
+oldest → today (UTC), with `event_count: 0` on inactive days. The window starts at midnight of
+the oldest bucket instead of `now - days`, so chart consumers get a continuous baseline.
+Covered by `test_customers_usage.py::test_time_series_is_zero_filled_to_window` and
+`test_time_series_window_ends_today`.
+
+ORIGINAL ENTRY: `GET /api/v1/customers/{email}/usage` returned only days with at least one
+event, so frontend charts could render discontinuous series or misalign the x-axis.
