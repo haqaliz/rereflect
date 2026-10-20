@@ -114,6 +114,39 @@ class TestUpdateOrganization:
         db.refresh(test_organization)
         assert test_organization.name == "Updated Company Name"
 
+    def test_update_organization_owner_allowed(
+        self,
+        client: TestClient,
+        owner_headers: dict,
+        test_organization: Organization,
+        db: Session
+    ):
+        """An owner outranks an admin and may update the organization."""
+        response = client.patch(
+            "/api/v1/organizations/me",
+            headers=owner_headers,
+            json={"name": "Owner Renamed Co"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["name"] == "Owner Renamed Co"
+        db.refresh(test_organization)
+        assert test_organization.name == "Owner Renamed Co"
+
+    def test_update_organization_member_forbidden(
+        self,
+        client: TestClient,
+        member_headers: dict
+    ):
+        """A member may not update organization settings."""
+        response = client.patch(
+            "/api/v1/organizations/me",
+            headers=member_headers,
+            json={"name": "Member Renamed Co"}
+        )
+
+        assert response.status_code == 403
+
     def test_update_organization_empty_name(
         self,
         client: TestClient,

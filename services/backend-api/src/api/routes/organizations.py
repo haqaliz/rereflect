@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from src.database.session import get_db
 from src.models.organization import Organization
 from src.models.user import User
-from src.api.dependencies import get_current_user, get_current_org
+from src.api.dependencies import get_current_org, require_admin_or_owner
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -47,18 +47,11 @@ def get_my_organization(
 @router.patch("/me", response_model=OrganizationResponse)
 def update_my_organization(
     data: OrganizationUpdateRequest,
-    current_user: User = Depends(get_current_user),
+    _: bool = Depends(require_admin_or_owner),
     current_org: Organization = Depends(get_current_org),
     db: Session = Depends(get_db)
 ):
-    """Update current organization (admin only)."""
-
-    # Check if user is admin
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only organization admins can update organization settings"
-        )
+    """Update current organization (admin or owner only)."""
 
     # Update fields
     if data.name is not None:

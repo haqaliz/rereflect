@@ -76,10 +76,10 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 >   pending-feedback approve/reject.
 >
 > **Follow-ups:**
-> - [ ] **`organizations-patch-rejects-owner`** (NOT STARTED): `organizations.py` `PATCH /me` checks
->       `current_user.role != "admin"` (`organizations.py:57`), so an **owner** gets 403 while the
->       docstring says "admin only" and the CLAUDE.md matrix implies owners outrank admins. Likely
->       should use `require_admin_or_owner`. Found during this work, out of its scope.
+> - [x] **`organizations-patch-rejects-owner`** — **FIXED** (#34, `bug/34`, 2026-10-21):
+>       `organizations.py` `PATCH /me` now depends on `require_admin_or_owner`, so an owner is no
+>       longer rejected with 403. The inline `role != "admin"` check (and its RBAC-sweep allowlist
+>       entry) is gone; member still gets 403. Tests cover owner, admin, member.
 
 ### P0 — `automation-playbook-dispatch-commit` — **FIXED** on `feat/automation-playbook-dispatch-commit` (2026-09-25)
 > Same family as the P0 below: marked shipped, did nothing. Every automation-fired

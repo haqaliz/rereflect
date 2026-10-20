@@ -299,8 +299,6 @@ ALLOWLIST = {
     ("notifications", "restore"): "Personal: the user's own notification state",
     ("notifications", "update_preferences"): "Personal: the user's own notification preferences",
     ("notifications", "update_retention"): "Personal: notification retention setting for the user's own inbox",
-    ("organizations", "update_my_organization"): "Deliberately not dependency-gated: inline role != 'admin' check rejects "
-    "owners, a known bug tracked as PRD O4 (out of scope, separate fix)",
     ("pending_feedback", "approve_pending_feedback"): "Member-open per PRD: members triage the pending-feedback queue",
     ("pending_feedback", "reject_pending_feedback"): "Member-open per PRD: members triage the pending-feedback queue",
     ("pending_feedback", "bulk_approve_pending_feedback"): "Member-open per PRD: members triage the pending-feedback queue",
@@ -385,11 +383,6 @@ def test_every_entry_has_a_specific_reason(name, registry):
         assert len(reason.strip()) >= 15, f"{name}{key}: reason too short"
         assert reason.strip().lower() not in _GENERIC_REASONS, f"{name}{key}: generic reason"
         assert " " in reason.strip(), f"{name}{key}: reason must be a sentence"
-
-
-def test_update_my_organization_allowlisted_with_o4_reason():
-    reason = ALLOWLIST[("organizations", "update_my_organization")]
-    assert "O4" in reason
 
 
 def test_gated_playbooks_are_actually_detected_as_gated():

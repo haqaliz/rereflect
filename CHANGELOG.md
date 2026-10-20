@@ -41,6 +41,12 @@ analyzing a single item (`POST /analyze/`).
   `DELETE` route has neither a role dependency nor an entry on a reasoned allowlist, so the next
   ungated mutation route is caught in CI.
 
+### Fixed — an owner can update the organization again
+
+`PATCH /api/v1/organizations/me` checked `role != "admin"`, so an **owner** got a 403 even though
+owners outrank admins. It now uses the same admin-or-owner gate as every other admin-level
+mutation. Members still get 403.
+
 ### Fixed — automation rules could be saved with actions their trigger never runs
 
 - **The "Usage Decline Outreach" template now actually notifies.** Usage-trend and
