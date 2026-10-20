@@ -58,6 +58,10 @@ USAGE_EVENT_RETENTION_DAYS: int = int(os.getenv("USAGE_EVENT_RETENTION_DAYS", "9
 # unboundedly large INSERT).
 _SNAPSHOT_CHUNK_SIZE: int = 1000
 
+# Page size for the daily recompute's customer_usage scan (#41). Bounds the
+# ORM identity map to this many rows instead of every row in every org.
+_RECOMPUTE_PAGE_SIZE: int = 1000
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -340,6 +344,39 @@ def _load_trend_baselines(
     }
 
 
+def _iter_customer_usage_rows(db, today: "date"):
+    """
+    Keyset-paged iteration over customer_usage, ordered by id.
+
+    Yields ``(row, trend_baselines)``: the page's trend baselines are resolved
+    once per page via ``_load_trend_baselines`` (one batched query per page,
+    never per row). Keeps the daily recompute's memory bounded to
+    ``_RECOMPUTE_PAGE_SIZE`` ORM rows (#41) instead of loading every row
+    across every org into one list.
+    """
+    from src.models import CustomerUsage
+
+    last_id = 0
+    while True:
+        page = (
+            db.query(CustomerUsage)
+            .filter(CustomerUsage.id > last_id)
+            .order_by(CustomerUsage.id)
+            .limit(_RECOMPUTE_PAGE_SIZE)
+            .all()
+        )
+        if not page:
+            return
+
+        baselines = _load_trend_baselines(
+            db, [(row.organization_id, row.customer_email) for row in page], today,
+        )
+        for row in page:
+            yield row, baselines
+
+        last_id = page[-1].id
+
+
 def _do_process_usage_event(
     org_id: int,
     customer_email: Optional[str],
@@ -536,19 +573,20 @@ def recompute_usage_scores() -> Dict[str, int]:
     # `db.commit()` below (AC4).
     pending_trend_transitions: List[Tuple[int, str, Optional[str], str]] = []
 
+    # Orgs seen during the paged scan, used to drive the decline detector
+    # after the loop without a second full-table query.
+    scanned_org_ids: set = set()
+
     with get_db_session() as db:
-        rows = db.query(CustomerUsage).all()
         now = datetime.utcnow()
         today = now.date()
 
-        # trend-detection-and-health aspect: ONE batched query resolves every
-        # scanned customer's trend baseline up front (not per-row — see
+        # trend-detection-and-health aspect: trend baselines are resolved once
+        # per page inside the iterator (not per row — see
         # `_load_trend_baselines`'s docstring for the lookback-cost rationale).
-        trend_baselines = _load_trend_baselines(
-            db, [(row.organization_id, row.customer_email) for row in rows], today,
-        )
-
-        for row in rows:
+        # #41: keyset pages keep the scan's memory bounded.
+        for row, trend_baselines in _iter_customer_usage_rows(db, today):
+            scanned_org_ids.add(row.organization_id)
             total += 1
 
             windows = _rederive_windows(db, row.organization_id, row.customer_email, now)
@@ -725,10 +763,10 @@ def recompute_usage_scores() -> Dict[str, int]:
                 detect_usage_decline_labels,
             )
 
-            # `rows` was already loaded (the full customer_usage scan above)
-            # — reusing it here avoids a second query just to enumerate
-            # org_ids. Sorted for deterministic iteration order.
-            org_ids = sorted({row.organization_id for row in rows})
+            # Every page recorded its org_id during the paged scan above, so
+            # enumerating orgs needs no second query. Sorted for deterministic
+            # iteration order.
+            org_ids = sorted(scanned_org_ids)
 
             for detector_org_id in org_ids:
                 try:

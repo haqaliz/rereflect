@@ -1273,3 +1273,46 @@ class TestPurgeOldUsageEvents:
         assert cron.hour == {2}
         assert cron.minute == {50}
         assert cron.day_of_week == {0}
+
+
+# ---------------------------------------------------------------------------
+# #41 — recompute scans customer_usage in bounded pages
+# ---------------------------------------------------------------------------
+
+
+class TestRecomputeUsageScoresPagination:
+    def test_processes_every_row_across_multiple_pages(self, db):
+        import importlib
+        import src.tasks.usage_metrics as um
+        importlib.reload(um)
+
+        org = _make_org(db)
+        for i in range(5):
+            db.add(CustomerUsage(
+                organization_id=org.id,
+                customer_email=f"page{i}@example.com",
+                last_active_at=datetime.utcnow() - timedelta(hours=1),
+                active_days_30d=1,
+                active_days_14d=1,
+                active_days_7d=1,
+                distinct_feature_count=1,
+                distinct_features=["feat-a"],
+                login_count_7d=1,
+                login_count_30d=1,
+                events_total=1,
+                usage_score=50,
+            ))
+        db.commit()
+
+        real_loader = um._load_trend_baselines
+        with patch.object(um, "_RECOMPUTE_PAGE_SIZE", 2), \
+                patch.object(um, "get_db_session", _fake_db_session), \
+                patch.object(um, "_load_trend_baselines", wraps=real_loader) as loader:
+            result = um.recompute_usage_scores()
+
+        assert result["total"] == 5, "every page's rows must be scanned"
+        assert result["snapshot_written"] == 5
+        assert loader.call_count == 3, (
+            "5 rows at page size 2 must be read as 3 pages; a single call means "
+            "the scan is still one unbounded .all()"
+        )
