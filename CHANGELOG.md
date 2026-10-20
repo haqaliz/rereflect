@@ -54,6 +54,13 @@ chart could render a discontinuous series or misalign its x-axis. It now returns
 or 90 daily buckets (the requested window), ending today in UTC, with `event_count: 0` on days
 without activity.
 
+### Added — run a playbook on any customer-list cohort
+
+`POST /api/v1/playbooks/{id}/run-batch` accepted only `emails` or `segment`, so a cohort filtered
+by risk level or search could be exported, tagged or assigned but not playbook-run. It now
+accepts `risk_level`, `search` and `include_archived` too, with the same validation, AND semantics
+against an explicit probability band, 500-customer cap and `count_only` preview.
+
 ### Fixed — automation rules could be saved with actions their trigger never runs
 
 - **The "Usage Decline Outreach" template now actually notifies.** Usage-trend and

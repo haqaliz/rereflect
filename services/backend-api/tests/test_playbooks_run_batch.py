@@ -99,15 +99,19 @@ def _make_customer_health(
     time_to_churn_bucket: str = "2-4w",
     segment: Optional[str] = None,
     is_archived: bool = False,
+    risk_level: Optional[str] = None,
+    customer_name: Optional[str] = None,
 ) -> CustomerHealth:
     ch = CustomerHealth(
         organization_id=org.id,
         customer_email=email,
+        customer_name=customer_name,
         health_score=40,
         churn_probability=churn_probability,
         time_to_churn_bucket=time_to_churn_bucket,
         segment=segment,
         is_archived=is_archived,
+        risk_level=risk_level,
     )
     db.add(ch)
     db.commit()
@@ -638,3 +642,159 @@ class TestRunBatchCountOnly:
         body = resp.json()
         assert body["matched"] == 1
         assert body["queued"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — full customer-list cohort (risk_level / search / include_archived)
+# ---------------------------------------------------------------------------
+
+class TestRunBatchCohortRiskAndSearch:
+    def test_risk_level_only_cohort_ignores_probability_band(
+        self, client: TestClient, db: Session
+    ):
+        """A risk-only cohort selects by risk, not by the playbook's band."""
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.90, prob_max=1.0)
+        _make_customer_health(
+            db, org, "critical@x.com", churn_probability=0.10, risk_level="critical"
+        )
+        _make_customer_health(
+            db, org, "healthy@x.com", churn_probability=0.95, risk_level="healthy"
+        )
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"risk_level": "critical"}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queued"] == 1
+        rows = db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.id.in_(body["execution_ids"])
+        ).all()
+        assert {r.customer_email for r in rows} == {"critical@x.com"}
+
+    def test_search_only_cohort_matches_email_or_name(
+        self, client: TestClient, db: Session
+    ):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.90, prob_max=1.0)
+        _make_customer_health(
+            db, org, "acme@x.com", churn_probability=0.10,
+            risk_level="critical", customer_name="Acme Inc",
+        )
+        _make_customer_health(
+            db, org, "other@x.com", churn_probability=0.95,
+            risk_level="healthy", customer_name="Other Co",
+        )
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"search": "acme"}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queued"] == 1
+        rows = db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.id.in_(body["execution_ids"])
+        ).all()
+        assert {r.customer_email for r in rows} == {"acme@x.com"}
+
+    def test_risk_cohort_excludes_archived_by_default(
+        self, client: TestClient, db: Session
+    ):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(
+            db, org, "live@x.com", churn_probability=0.5,
+            risk_level="critical", is_archived=False,
+        )
+        _make_customer_health(
+            db, org, "archived@x.com", churn_probability=0.5,
+            risk_level="critical", is_archived=True,
+        )
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"risk_level": "critical"}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queued"] == 1
+        rows = db.query(ChurnPlaybookExecution).filter(
+            ChurnPlaybookExecution.id.in_(body["execution_ids"])
+        ).all()
+        assert {r.customer_email for r in rows} == {"live@x.com"}
+
+    def test_include_archived_true_includes_archived(
+        self, client: TestClient, db: Session
+    ):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        _make_customer_health(
+            db, org, "live@x.com", churn_probability=0.5,
+            risk_level="critical", is_archived=False,
+        )
+        _make_customer_health(
+            db, org, "archived@x.com", churn_probability=0.5,
+            risk_level="critical", is_archived=True,
+        )
+
+        with _mock_celery() as mock_get_app:
+            mock_get_app.return_value.send_task.return_value.id = "t"
+            resp = client.post(
+                f"/api/v1/playbooks/{pb.id}/run-batch",
+                json={"filters": {"risk_level": "critical", "include_archived": True}},
+                headers=_headers(user),
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["queued"] == 2
+
+    def test_invalid_risk_level_returns_422(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org)
+
+        resp = client.post(
+            f"/api/v1/playbooks/{pb.id}/run-batch",
+            json={"filters": {"risk_level": "not-a-risk"}},
+            headers=_headers(user),
+        )
+        assert resp.status_code == 422
+
+    def test_risk_level_count_only_preview(self, client: TestClient, db: Session):
+        org = _make_org(db)
+        user = _make_user(db, org)
+        pb = _make_playbook(db, org=org, prob_min=0.0, prob_max=1.0)
+        for email in ("a@x.com", "b@x.com", "c@x.com"):
+            _make_customer_health(
+                db, org, email, churn_probability=0.1, risk_level="critical"
+            )
+
+        resp = client.post(
+            f"/api/v1/playbooks/{pb.id}/run-batch?count_only=true",
+            json={"filters": {"risk_level": "critical"}},
+            headers=_headers(user),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["matched"] == 3
+        assert resp.json()["queued"] == 0
+        assert db.query(ChurnPlaybookExecution).count() == 0

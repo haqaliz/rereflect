@@ -142,14 +142,15 @@ def _apply_run_batch_filters(
 
     Two selection modes:
 
-    - **Cohort mode** (``emails`` and/or ``segment`` present in ``filters``):
-      resolves customers via the shared ``_apply_customer_filters`` (segment)
-      / email-list matching used by ``resolve_cohort`` (bulk-actions-api), so
-      cohort selection never drifts from ``GET /api/v1/customers/``. Unknown
-      emails are simply not matched (skipped). When probability fields are
-      *also* given, they are ANDed on top of the cohort (segment/emails AND
-      probability band). ``time_to_churn_bucket`` is always ANDed if given.
-    - **Probability-only mode** (no ``emails``/``segment``): unchanged
+    - Cohort mode (``emails``, ``segment``, ``risk_level``, ``search`` or
+      ``include_archived`` present in ``filters``): resolves customers via the
+      shared ``_apply_customer_filters`` / email-list matching used by
+      ``resolve_cohort`` (bulk-actions-api), so cohort selection never drifts
+      from ``GET /api/v1/customers/``. Unknown emails are simply not matched
+      (skipped). When probability fields are *also* given, they are ANDed on
+      top of the cohort (segment/emails AND probability band).
+      ``time_to_churn_bucket`` is always ANDed if given.
+    - **Probability-only mode** (none of those cohort fields): unchanged
       behavior — probability band defaults to the playbook's own
       ``probability_min``/``probability_max``, optionally overridden by
       explicit filter values.
@@ -158,21 +159,52 @@ def _apply_run_batch_filters(
 
     cohort_emails = filters.get("emails") if filters else None
     cohort_segment = filters.get("segment") if filters else None
-    has_cohort = cohort_emails is not None or cohort_segment is not None
+    cohort_risk = filters.get("risk_level") if filters else None
+    cohort_search = filters.get("search") if filters else None
+    include_archived = bool(filters.get("include_archived")) if filters else False
+    # Normalise empty strings to "absent" so a client clearing a search box
+    # does not silently switch from probability-only to cohort mode.
+    cohort_segment = cohort_segment or None
+    cohort_risk = cohort_risk or None
+    cohort_search = cohort_search or None
+    has_cohort = (
+        cohort_emails is not None
+        or cohort_segment is not None
+        or cohort_risk is not None
+        or cohort_search is not None
+        or include_archived
+    )
 
     if has_cohort:
+        # Deferred import: avoids a circular import between
+        # src.api.routes.customers <-> src.api.routes.playbooks.
+        from src.api.routes.customers import _apply_customer_filters
+
         if cohort_emails is not None:
             normalized = [e.strip().lower() for e in cohort_emails]
             unique_emails = list(dict.fromkeys(normalized))
             # Empty list (or all-unknown, handled by the `.in_()` itself)
             # simply resolves to zero rows — not an error.
             query = query.filter(CustomerHealth.customer_email.in_(unique_emails))
+            # Other cohort fields, when supplied alongside emails, are ANDed.
+            if cohort_segment or cohort_risk or cohort_search or include_archived:
+                query = _apply_customer_filters(
+                    query,
+                    org,
+                    segment=cohort_segment,
+                    risk_level=cohort_risk,
+                    search=cohort_search,
+                    include_archived=include_archived,
+                )
         else:
-            # Deferred import: avoids a circular import between
-            # src.api.routes.customers <-> src.api.routes.playbooks.
-            from src.api.routes.customers import _apply_customer_filters
-
-            query = _apply_customer_filters(query, org, segment=cohort_segment)
+            query = _apply_customer_filters(
+                query,
+                org,
+                segment=cohort_segment,
+                risk_level=cohort_risk,
+                search=cohort_search,
+                include_archived=include_archived,
+            )
 
         # AND with the probability band ONLY when probability fields are
         # explicitly given alongside the cohort — segment/emails alone do
@@ -245,12 +277,12 @@ class RunBatchFilters(BaseModel):
 
     - Probability band: ``probability_min``/``probability_max`` (defaults to
       the playbook's own band when omitted), plus ``time_to_churn_bucket``.
-    - Cohort: ``emails`` (explicit list) OR ``segment`` (validated against
-      ``SEGMENT_SLUGS``) — resolved via the same shared logic as
-      ``GET /api/v1/customers/`` / bulk actions. When a cohort is combined
-      with probability fields, they are ANDed (customer must match both).
+    - Cohort: ``emails`` (explicit list) OR the same filter vocabulary as
+      ``GET /api/v1/customers/`` — ``segment``, ``risk_level``, ``search``,
+      ``include_archived`` — resolved via the shared filter helper. When a
+      cohort is combined with probability fields, they are ANDed.
 
-    A request with none of ``emails``/``segment`` set behaves exactly as
+    A request with none of those cohort fields set behaves exactly as
     before this extension (back-compat).
     """
 
@@ -259,6 +291,9 @@ class RunBatchFilters(BaseModel):
     time_to_churn_bucket: Optional[str] = None
     emails: Optional[List[str]] = None
     segment: Optional[str] = None
+    risk_level: Optional[str] = None
+    search: Optional[str] = None
+    include_archived: bool = False
 
     @field_validator("segment")
     @classmethod
@@ -267,6 +302,20 @@ class RunBatchFilters(BaseModel):
             raise ValueError(
                 f"Invalid segment '{v}'. Must be one of: {', '.join(SEGMENT_SLUGS)}"
             )
+        return v
+
+    @field_validator("risk_level")
+    @classmethod
+    def validate_risk_level(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            # Deferred import: customers imports playbooks lazily too.
+            from src.api.routes.customers import VALID_RISK_LEVELS
+
+            if v not in VALID_RISK_LEVELS:
+                raise ValueError(
+                    f"Invalid risk_level '{v}'. Must be one of: "
+                    f"{', '.join(sorted(VALID_RISK_LEVELS))}"
+                )
         return v
 
 

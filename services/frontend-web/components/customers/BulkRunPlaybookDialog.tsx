@@ -140,8 +140,8 @@ export function BulkRunPlaybookDialog({
             <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
               <AlertTriangle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
               <p className="text-sm text-destructive">
-                Run playbook only supports a segment- or explicit-selection cohort. Narrow your
-                filter to a single segment, or select customers individually.
+                Run playbook needs at least one customer filter (or a specific selection). Narrow
+                your filter, or select customers individually.
               </p>
             </div>
           ) : (

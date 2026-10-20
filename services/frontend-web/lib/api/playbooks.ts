@@ -151,9 +151,9 @@ export async function runPlaybook(id: number, customer_email: string): Promise<P
  * Filters for `POST /api/v1/playbooks/{id}/run-batch`. Two independent
  * selection axes that can be combined (mirrors backend `RunBatchFilters`):
  * a probability band (`probability_min`/`probability_max`,
- * `time_to_churn_bucket`), and/or a cohort — exactly one of `emails` OR
- * `segment` (the run-batch cohort only supports these two dimensions, not
- * the full `CohortFilter` used by the bulk tag/assign-owner endpoints).
+ * `time_to_churn_bucket`), and/or a cohort — `emails` OR the same filter
+ * vocabulary as the customer list (`segment`, `risk_level`, `search`,
+ * `include_archived`).
  */
 export interface RunBatchFilters {
   probability_min?: number;
@@ -161,23 +161,28 @@ export interface RunBatchFilters {
   time_to_churn_bucket?: string;
   emails?: string[];
   segment?: string;
+  risk_level?: string;
+  search?: string;
+  include_archived?: boolean;
 }
 
 /**
- * Convert a segment-actions `Cohort` (`{emails}` or `{filter}`) into the
- * subset of `RunBatchFilters` the run-batch cohort dimension supports
- * (`emails` OR `segment` — not the full `CohortFilter`). Returns `null`
- * when the cohort is in filter-mode but has no `segment` set (e.g. a
- * risk_level- or search-only filter) — that filter shape has no run-batch
- * equivalent, so the caller should block the run rather than silently
- * falling back to a probability-only selection.
+ * Convert a segment-actions `Cohort` (`{emails}` or `{filter}`) into
+ * `RunBatchFilters`. Returns `null` only when the cohort is in filter-mode
+ * with no usable field — the caller should block the run rather than
+ * silently falling back to a probability-only selection.
  */
-export function cohortToRunBatchFilters(
-  cohort: Cohort
-): Pick<RunBatchFilters, 'emails' | 'segment'> | null {
+export function cohortToRunBatchFilters(cohort: Cohort): RunBatchFilters | null {
   if ('emails' in cohort) return { emails: cohort.emails };
-  if (cohort.filter.segment) return { segment: cohort.filter.segment };
-  return null;
+
+  const { segment, risk_level, search, include_archived } = cohort.filter;
+  const filters: RunBatchFilters = {};
+  if (segment) filters.segment = segment;
+  if (risk_level) filters.risk_level = risk_level;
+  if (search) filters.search = search;
+  if (include_archived) filters.include_archived = true;
+
+  return Object.keys(filters).length > 0 ? filters : null;
 }
 
 export async function runPlaybookBatch(

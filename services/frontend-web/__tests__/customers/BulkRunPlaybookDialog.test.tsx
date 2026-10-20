@@ -115,12 +115,32 @@ describe('BulkRunPlaybookDialog', () => {
     expect(filters).not.toHaveProperty('emails');
   });
 
-  it('blocks the run when the filter has no segment (unsupported cohort shape)', async () => {
+  it('risk-only filter-mode cohort: sends filters.risk_level', async () => {
+    const user = userEvent.setup();
+    (runPlaybookBatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      queued: 0, execution_ids: [], matched: 12,
+    });
     const cohort: Cohort = { filter: { risk_level: 'critical' } };
     renderDialog({ cohort });
 
+    await user.click(screen.getByRole('combobox'));
+    await user.click(await screen.findByText(/Win-back at-risk/));
+
+    await waitFor(() => {
+      expect(runPlaybookBatch).toHaveBeenCalledWith(
+        5,
+        { risk_level: 'critical' },
+        { countOnly: true }
+      );
+    });
+  });
+
+  it('blocks the run when the filter has no usable field', async () => {
+    const cohort: Cohort = { filter: {} };
+    renderDialog({ cohort });
+
     expect(
-      await screen.findByText(/only supports a segment- or explicit-selection cohort/i)
+      await screen.findByText(/needs at least one customer filter/i)
     ).toBeInTheDocument();
     expect(runPlaybookBatch).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /run playbook/i })).toBeDisabled();

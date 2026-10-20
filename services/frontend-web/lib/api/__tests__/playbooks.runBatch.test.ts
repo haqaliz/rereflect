@@ -62,3 +62,43 @@ describe('runPlaybookBatch — cohort/filters payload', () => {
     expect(result.queued).toBe(0);
   });
 });
+
+describe('cohortToRunBatchFilters — full customer-list cohort', () => {
+  it('maps a risk-only cohort', async () => {
+    const { cohortToRunBatchFilters } = await import('@/lib/api/playbooks');
+    expect(cohortToRunBatchFilters({ filter: { risk_level: 'critical' } }))
+      .toEqual({ risk_level: 'critical' });
+  });
+
+  it('maps a search-only cohort', async () => {
+    const { cohortToRunBatchFilters } = await import('@/lib/api/playbooks');
+    expect(cohortToRunBatchFilters({ filter: { search: 'acme' } }))
+      .toEqual({ search: 'acme' });
+  });
+
+  it('maps include_archived', async () => {
+    const { cohortToRunBatchFilters } = await import('@/lib/api/playbooks');
+    expect(cohortToRunBatchFilters({ filter: { include_archived: true } }))
+      .toEqual({ include_archived: true });
+  });
+
+  it('maps segment + risk + search together', async () => {
+    const { cohortToRunBatchFilters } = await import('@/lib/api/playbooks');
+    expect(
+      cohortToRunBatchFilters({
+        filter: { segment: 'at_risk', risk_level: 'critical', search: 'acme' },
+      })
+    ).toEqual({ segment: 'at_risk', risk_level: 'critical', search: 'acme' });
+  });
+
+  it('keeps email mode', async () => {
+    const { cohortToRunBatchFilters } = await import('@/lib/api/playbooks');
+    expect(cohortToRunBatchFilters({ emails: ['a@co.com'] }))
+      .toEqual({ emails: ['a@co.com'] });
+  });
+
+  it('returns null for an empty filter', async () => {
+    const { cohortToRunBatchFilters } = await import('@/lib/api/playbooks');
+    expect(cohortToRunBatchFilters({ filter: {} })).toBeNull();
+  });
+});
