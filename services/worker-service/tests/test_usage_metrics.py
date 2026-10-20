@@ -5,13 +5,13 @@ Acceptance criteria (from spec):
   AC1. process_usage_event upserts customer_usage (events_total increments,
        last_active_at advances, event_name added to distinct_features).
   AC2. Re-processing the same external_event_id does not double-count.
-  AC5. process_usage_event calls update_customer_health exactly once.
+  AC5. process_usage_event requests one health recompute.
   AC4. (Phase 4 test also here) Scheduled recompute lowers usage_score
        for a customer whose last_active_at has aged past recency thresholds.
 
-Strategy: use an in-memory SQLite DB seeded with UsageEvent rows, injecting
-a mock for src.services.health_score_service via sys.modules (matching the
-pattern used by test_analysis_winback_integration.py).  The core logic is
+Strategy: use an in-memory SQLite DB seeded with UsageEvent rows, patching
+src.services.health_recompute.request_health_recompute (the backend HTTP call
+is covered by test_health_recompute_seam.py).  The core logic is
 tested via ``_do_process_usage_event`` (the extracted helper, not the Celery
 wrapper), mirroring how analysis.py tests use ``_analyze_feedback_item``.
 """
@@ -124,31 +124,27 @@ def _run_impl(
     """
     Call _do_process_usage_event with:
       - get_db_session patched to use the test SQLite DB
-      - src.services.health_score_service injected as health_mock
+      - src.services.health_recompute.request_health_recompute patched
     """
     if health_mock is None:
         health_mock = MagicMock()
 
-    sys.modules["src.services.health_score_service"] = health_mock
+    import importlib
+    import src.tasks.usage_metrics as um
+    importlib.reload(um)
 
-    try:
-        import importlib
-        import src.tasks.usage_metrics as um
-        importlib.reload(um)
-
-        with patch.object(um, "get_db_session", _fake_db_session):
-            result = um._do_process_usage_event(
-                org_id=org_id,
-                customer_email=email,
-                event_type=event_type,
-                event_name=event_name,
-                occurred_at_iso=datetime.utcnow().isoformat(),
-                external_event_id=external_event_id,
-                properties=None,
-            )
-        return result, health_mock
-    finally:
-        sys.modules.pop("src.services.health_score_service", None)
+    with patch.object(um, "get_db_session", _fake_db_session), \
+         patch("src.services.health_recompute.request_health_recompute", health_mock):
+        result = um._do_process_usage_event(
+            org_id=org_id,
+            customer_email=email,
+            event_type=event_type,
+            event_name=event_name,
+            occurred_at_iso=datetime.utcnow().isoformat(),
+            external_event_id=external_event_id,
+            properties=None,
+        )
+    return result, health_mock
 
 
 def _get_rollup(db: Session, org_id: int, email: str):
@@ -300,7 +296,7 @@ class TestProcessUsageEventIdempotency:
 
 class TestProcessUsageEventHealthRecompute:
     def test_update_customer_health_called_once(self, db):
-        """update_customer_health is called exactly once per task run."""
+        """The seam is called exactly once per task run."""
         org = _make_org(db)
         _make_event(db, org.id, external_event_id="evt-h", days_ago=1)
 
@@ -308,18 +304,18 @@ class TestProcessUsageEventHealthRecompute:
 
         _run_impl(org.id, "alice@example.com", "evt-h", health_mock=health_mock)
 
-        assert health_mock.update_customer_health.call_count == 1
-        call_args = health_mock.update_customer_health.call_args[0]
+        assert health_mock.call_count == 1
+        call_args = health_mock.call_args[0]
         assert call_args[0] == org.id
         assert call_args[1] == "alice@example.com"
 
-    def test_health_import_error_does_not_fail_task(self, db):
-        """If health_score_service is unavailable, the task still succeeds."""
+    def test_health_recompute_unavailable_does_not_fail_task(self, db, monkeypatch):
+        """Unconfigured recompute is a no-op; the task still succeeds."""
+        monkeypatch.delenv("INTERNAL_API_URL", raising=False)
+        monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
+
         org = _make_org(db)
         _make_event(db, org.id, external_event_id="evt-no-health", days_ago=1)
-
-        # Remove any previously cached module to force ImportError path
-        sys.modules.pop("src.services.health_score_service", None)
 
         import importlib
         import src.tasks.usage_metrics as um
@@ -670,46 +666,21 @@ class TestRecomputeUsageScoresCeleryRegistration:
 
 
 # ---------------------------------------------------------------------------
-# Important 1: SQLAlchemyError from _call_update_health must propagate
+# _call_update_health is a thin delegation to the shared seam
 # ---------------------------------------------------------------------------
 
 
-class TestCallUpdateHealthErrorPropagation:
-    def test_sqlalchemy_error_propagates_not_swallowed(self):
-        """
-        RED before fix: bare except Exception swallows SQLAlchemyError, returns silently.
-        GREEN after fix: only ImportError is swallowed; DB errors propagate for Celery retry.
-        """
-        from sqlalchemy.exc import SQLAlchemyError
+class TestCallUpdateHealthDelegation:
+    def test_delegates_to_the_seam(self):
         import importlib
         import src.tasks.usage_metrics as um
         importlib.reload(um)
 
-        mock_health = MagicMock()
-        mock_health.update_customer_health.side_effect = SQLAlchemyError("transient DB error")
-        sys.modules["src.services.health_score_service"] = mock_health
-
-        try:
-            with pytest.raises(SQLAlchemyError):
-                um._call_update_health(1, "test@example.com", None)
-        finally:
-            sys.modules.pop("src.services.health_score_service", None)
-            importlib.reload(um)  # restore module to clean state
-
-    def test_import_error_still_swallowed(self):
-        """ImportError (partial-deploy) is still tolerated — no exception raised."""
-        import importlib
-        import src.tasks.usage_metrics as um
-        importlib.reload(um)
-
-        # Remove module so the import inside _call_update_health fails
-        sys.modules.pop("src.services.health_score_service", None)
-
-        try:
-            # Should not raise — ImportError path is still swallowed
+        seam = MagicMock()
+        with patch("src.services.health_recompute.request_health_recompute", seam):
             um._call_update_health(1, "test@example.com", None)
-        finally:
-            importlib.reload(um)
+
+        seam.assert_called_once_with(1, "test@example.com", None)
 
 
 # ---------------------------------------------------------------------------

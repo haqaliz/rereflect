@@ -176,9 +176,9 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
     """
     Trigger a health-score recompute for the customer.
 
-    Delegates to the shared seam, like hubspot_sync and usage_metrics. The
-    recompute is unavailable in the worker image today (GitHub #3). Errors
-    raised by the recompute itself still propagate for the retry policy.
+    Delegates to the shared seam, like hubspot_sync and usage_metrics. The seam
+    schedules a backend recompute after the caller's transaction commits, so a
+    CRM upsert refreshes the health score — GitHub #3.
     """
     from src.services.health_recompute import request_health_recompute
 

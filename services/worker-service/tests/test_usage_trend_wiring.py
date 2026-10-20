@@ -11,7 +11,6 @@ engine rather than sharing the module-level conftest one).
 AC references are to docs/planning/usage-trend-churn-signal/
 trend-detection-and-health/spec.md.
 """
-import sys
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -266,12 +265,9 @@ class TestTrendTransitionTriggersHealthRefresh:
         score_before = rollup.usage_score
 
         health_mock = MagicMock()
-        sys.modules["src.services.health_score_service"] = health_mock
-        try:
-            with patch.object(um, "get_db_session", _fake_db_session):
-                um.recompute_usage_scores()
-        finally:
-            sys.modules.pop("src.services.health_score_service", None)
+        with patch.object(um, "get_db_session", _fake_db_session), \
+             patch("src.services.health_recompute.request_health_recompute", health_mock):
+            um.recompute_usage_scores()
 
         db.expire(rollup)
         db.refresh(rollup)
@@ -281,14 +277,14 @@ class TestTrendTransitionTriggersHealthRefresh:
             "trigger is exercised purely by the trend transition"
         )
         assert rollup.usage_trend_state == "declining"
-        assert health_mock.update_customer_health.call_count >= 1
-        call_args = health_mock.update_customer_health.call_args[0]
+        assert health_mock.call_count >= 1
+        call_args = health_mock.call_args[0]
         assert call_args[0] == org.id
         assert call_args[1] == email
 
     def test_no_health_refresh_when_trend_and_score_both_unchanged(self, db):
         """Negative control: a steady customer with an unchanged trend state
-        must NOT trigger update_customer_health from the trend path."""
+        must NOT trigger a health recompute from the trend path."""
         import src.tasks.usage_metrics as um
         _reload(um)
 
@@ -309,14 +305,11 @@ class TestTrendTransitionTriggersHealthRefresh:
         db.commit()
 
         health_mock = MagicMock()
-        sys.modules["src.services.health_score_service"] = health_mock
-        try:
-            with patch.object(um, "get_db_session", _fake_db_session):
-                um.recompute_usage_scores()
-        finally:
-            sys.modules.pop("src.services.health_score_service", None)
+        with patch.object(um, "get_db_session", _fake_db_session), \
+             patch("src.services.health_recompute.request_health_recompute", health_mock):
+            um.recompute_usage_scores()
 
-        assert health_mock.update_customer_health.call_count == 0
+        assert health_mock.call_count == 0
 
 
 # ---------------------------------------------------------------------------
@@ -349,8 +342,7 @@ class TestTrendIdempotency:
         db.commit()
 
         health_mock = MagicMock()
-        sys.modules["src.services.health_score_service"] = health_mock
-        try:
+        with patch("src.services.health_recompute.request_health_recompute", health_mock):
             with patch.object(um, "get_db_session", _fake_db_session):
                 with patch.object(um, "datetime") as mock_dt:
                     mock_dt.utcnow.return_value = fixed_now
@@ -360,14 +352,12 @@ class TestTrendIdempotency:
             db.refresh(rollup)
             state_after_first = rollup.usage_trend_state
             pct_after_first = rollup.usage_trend_pct
-            calls_after_first = health_mock.update_customer_health.call_count
+            calls_after_first = health_mock.call_count
 
             with patch.object(um, "get_db_session", _fake_db_session):
                 with patch.object(um, "datetime") as mock_dt:
                     mock_dt.utcnow.return_value = fixed_now
                     um.recompute_usage_scores()
-        finally:
-            sys.modules.pop("src.services.health_score_service", None)
 
         db.expire(rollup)
         db.refresh(rollup)
@@ -375,4 +365,4 @@ class TestTrendIdempotency:
         assert rollup.usage_trend_state == state_after_first
         assert rollup.usage_trend_pct == pct_after_first
         # No NEW health-refresh call on the second, no-op run.
-        assert health_mock.update_customer_health.call_count == calls_after_first
+        assert health_mock.call_count == calls_after_first

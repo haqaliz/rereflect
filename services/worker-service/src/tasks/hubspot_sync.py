@@ -141,9 +141,9 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
     Trigger a health-score recompute for the customer.
 
     Delegates to the shared seam (see usage_metrics._call_update_health, which
-    does the same). The recompute is currently unavailable in the worker image,
-    which is why an enrichment upsert does not refresh crm_component —
-    GitHub #3. Errors raised by the recompute itself still propagate.
+    does the same). The seam schedules a backend recompute after the caller's
+    transaction commits, so an enrichment upsert does refresh crm_component —
+    GitHub #3.
     """
     from src.services.health_recompute import request_health_recompute
 

@@ -52,6 +52,15 @@ def _make_winback_mock(side_effect=None):
     return m
 
 
+@pytest.fixture(autouse=True)
+def _stub_health_recompute(monkeypatch):
+    """Health recompute goes over HTTP now; never let a test call the backend."""
+    monkeypatch.setattr(
+        "src.services.health_recompute.request_health_recompute",
+        MagicMock(name="request_health_recompute"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -102,6 +111,37 @@ def test_analyze_feedback_calls_winback_detector_after_update_customer_health(
         sys.modules.pop("src.services.winback_detector", None)
 
     mock_winback.check.assert_called_once_with(ai_enabled_org.id, "bob@example.com", db)
+
+
+def test_health_recompute_is_requested_before_probability_update(
+    db, ai_enabled_org, monkeypatch
+):
+    """Ordering: the health recompute is scheduled, then probability runs.
+
+    The POST itself is deferred to after_commit, but the scheduling call must
+    still happen before probability_updater mutates the same session.
+    """
+    order = []
+    monkeypatch.setattr(
+        "src.services.health_recompute.request_health_recompute",
+        lambda *args: order.append("health"),
+    )
+    feedback = _make_feedback(db, ai_enabled_org.id, "erin@example.com", "Ordering.")
+    mock_prob = _make_prob_mock()
+    mock_prob.update.side_effect = lambda *args: order.append("probability")
+    mock_winback = _make_winback_mock()
+    sys.modules["src.services.probability_updater"] = mock_prob
+    sys.modules["src.services.winback_detector"] = mock_winback
+    try:
+        with patch("src.tasks.analysis.categorize_feedback", return_value=None), \
+             patch("src.tasks.analysis._apply_keyword_analysis"):
+            from src.tasks.analysis import _analyze_feedback_item
+            _analyze_feedback_item(feedback, db)
+    finally:
+        sys.modules.pop("src.services.probability_updater", None)
+        sys.modules.pop("src.services.winback_detector", None)
+
+    assert order[:2] == ["health", "probability"]
 
 
 def test_probability_failure_does_not_block_winback_detection(

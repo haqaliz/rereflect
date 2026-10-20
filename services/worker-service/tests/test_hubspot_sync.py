@@ -106,23 +106,19 @@ def _run_sync_org(org_id: int, db: Session, mock_client, health_mock=None):
     """
     Call _sync_org with:
       - get_db_session patched to use test SQLite DB
-      - src.services.health_score_service injected as health_mock
+      - src.services.health_recompute.request_health_recompute patched
     """
     if health_mock is None:
         health_mock = MagicMock()
 
-    sys.modules["src.services.health_score_service"] = health_mock
+    import src.tasks.hubspot_sync as hs
+    importlib.reload(hs)
 
-    try:
-        import src.tasks.hubspot_sync as hs
-        importlib.reload(hs)
+    with patch.object(hs, "get_db_session", _fake_db_session), \
+         patch("src.services.health_recompute.request_health_recompute", health_mock):
+        result = hs._sync_org(org_id, db, mock_client)
 
-        with patch.object(hs, "get_db_session", _fake_db_session):
-            result = hs._sync_org(org_id, db, mock_client)
-
-        return result, health_mock
-    finally:
-        sys.modules.pop("src.services.health_score_service", None)
+    return result, health_mock
 
 
 # ---------------------------------------------------------------------------
@@ -688,13 +684,16 @@ class TestSyncOrgHealthRecompute:
         health_mock = MagicMock()
         _run_sync_org(org.id, db, client, health_mock=health_mock)
 
-        assert health_mock.update_customer_health.call_count == 2
-        called_emails = {call[0][1] for call in health_mock.update_customer_health.call_args_list}
+        assert health_mock.call_count == 2
+        called_emails = {call[0][1] for call in health_mock.call_args_list}
         assert "alice@example.com" in called_emails
         assert "bob@example.com" in called_emails
 
-    def test_health_import_error_tolerated(self, db):
+    def test_health_recompute_unavailable_does_not_abort_sync(self, db, monkeypatch):
         from src.models import CrmEnrichment
+
+        monkeypatch.delenv("INTERNAL_API_URL", raising=False)
+        monkeypatch.delenv("INTERNAL_API_SECRET", raising=False)
 
         org = _make_org(db)
         _make_customer(db, org.id, "alice@example.com")
@@ -712,16 +711,10 @@ class TestSyncOrgHealthRecompute:
             ],
         )
 
-        # Remove the health_score_service from sys.modules to force ImportError path
-        sys.modules["src.services.health_score_service"] = None
-
-        try:
-            import src.tasks.hubspot_sync as hs
-            importlib.reload(hs)
-            with patch.object(hs, "get_db_session", _fake_db_session):
-                result = hs._sync_org(org.id, db, client)
-        finally:
-            sys.modules.pop("src.services.health_score_service", None)
+        import src.tasks.hubspot_sync as hs
+        importlib.reload(hs)
+        with patch.object(hs, "get_db_session", _fake_db_session):
+            result = hs._sync_org(org.id, db, client)
 
         # Should not raise; CrmEnrichment row should still be written
         rows = db.query(CrmEnrichment).all()
@@ -747,7 +740,7 @@ class TestSyncOrgHealthRecompute:
         health_mock = MagicMock()
         _run_sync_org(org.id, db, client, health_mock=health_mock)
 
-        assert health_mock.update_customer_health.call_count == 0
+        assert health_mock.call_count == 0
 
 
 # ---------------------------------------------------------------------------

@@ -44,8 +44,8 @@ def recompute_segments() -> Dict[str, int]:
         (organization_id, customer_email), or ``None`` if no such row exists.
       - Compute the sentiment-trend ``direction`` via
         ``compute_sentiment_trend`` (lazy cross-service import — the module
-        lives in backend-api's ``health_score_service`` but is imported here
-        exactly like ``usage_metrics.py`` imports ``update_customer_health``).
+        lives in backend-api's ``health_score_service`` and, unlike
+        ``update_customer_health``, has no worker-facing endpoint).
       - Call the (worker's own, duplicated) ``classify_segment`` with the
         row's stored fields.
       - If the recomputed slug differs from ``row.segment``, update it and

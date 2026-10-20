@@ -14,12 +14,11 @@ health_recompute.py, ...) and ``src/models/`` packages. Only the enumerated back
 module paths are banned.
 
 Deliberate exemption: imports that sit inside a ``try`` with an ``except ImportError``
-handler are the documented, LOUD degradation seams (health_recompute.py:68,
-segments.py:115 — both log or comment their unavailability and treat a missing service
-as an optional signal, per GitHub issue #3). They are asserted here rather than assumed:
-the AST check proves they are guarded, so the sweep only fails on the harmful cases —
-an unguarded import (crashes the task) or one guarded by a bare/other ``except``
-(swallows the failure silently).
+handler are the documented, LOUD degradation seam (segments.py:115 — logs or comments
+its unavailability and treats a missing service as an optional signal, per GitHub
+issue #3). They are asserted here rather than assumed: the AST check proves they are
+guarded, so the sweep only fails on the harmful cases — an unguarded import (crashes
+the task) or one guarded by a bare/other ``except`` (swallows the failure silently).
 """
 import ast
 from pathlib import Path
@@ -32,8 +31,9 @@ from pathlib import Path
 # - src.services.automation_engine     — the backend's full automations engine; the worker
 #                                        carries its own mirror (automation_feedback_trigger.py)
 #                                        precisely because this one cannot be imported.
-# - src.services.health_score_service  — backend-only; the worker's documented seams
-#                                        (health_recompute.py, segments.py) degrade instead.
+# - src.services.health_score_service  — backend-only; segments.py guards its
+#                                        import and degrades instead. The worker
+#                                        recompute path goes over HTTP (#3).
 # - src.models.feedback_workflow_event — submodule that exists in backend-api's src.models
 #                                        but not in the worker's.
 BACKEND_ONLY_IMPORT_PATHS = [

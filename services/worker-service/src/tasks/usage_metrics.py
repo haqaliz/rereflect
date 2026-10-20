@@ -231,10 +231,9 @@ def _call_update_health(org_id: int, customer_email: str, db) -> None:
     """
     Trigger a health-score recompute for the customer.
 
-    Delegates to the shared seam. The recompute is currently unavailable in the
-    worker image (GitHub #3) — health_recompute logs that once per process and
-    returns False rather than failing this task. Errors raised by the recompute
-    itself still propagate so the Celery retry policy sees them.
+    Delegates to the shared seam. The seam schedules a backend recompute after
+    the caller's transaction commits, so a usage event refreshes the health
+    score — GitHub #3.
     """
     from src.services.health_recompute import request_health_recompute
 
