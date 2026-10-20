@@ -375,26 +375,23 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
       days**, and it is bucketed counts — **not** statistical change detection. Longer
       retention and anomaly flagging are the real follow-ups if asked again.
 
-### P1 — Intercom/Zendesk ingestion: shipped, invisible, and half-documented (batch 2, NOT STARTED)
+### P1 — Intercom/Zendesk ingestion: shipped, invisible, and half-documented — **CLOSED 2026-10-21** (#46)
 > "integrating directly with Intercom or Zendesk so feedback flows in automatically instead
 > of pasting tickets manually. Would save a ton of time on weekly reviews."
 >
 > Triaged 2026-07-29 against the shipped code. **Both integrations already exist.** This is
 > the same class as the P3 analytics-trends item — a user asking for something that shipped —
-> except that here one half of the ask is genuinely unreachable for a self-hoster.
+> except that here one half of the ask was genuinely unreachable for a self-hoster at triage
+> time. **That half was fixed 2026-08-01 and both halves are documented as of 2026-10-21.**
 
 **Part A — discoverability (docs/marketing, no backend work).** Straight repeat of P3.
-- [ ] `README.md:38` says Rereflect "ingests customer feedback from CSV, email, webhooks
-      and Slack", and the Highlights table at `README.md:61` says "CSV import, email,
-      webhooks and Slack in". **Both omit Zendesk, Intercom, Jira, Linear and Asana**, all
-      of which are registered, `available=True` source types in
-      `feedback_sources.py::list_source_types`. The README is the first thing a evaluator
-      reads, and it under-sells the product against the exact ask this user made.
-- [ ] Zendesk is the strongest answer available today and it is fully real: connect with
-      subdomain + agent email + API token, **incremental polling out of the box** plus an
-      optional HMAC-signed webhook for real-time, auto-provisioned feedback source,
-      opt-in status-sync. Documented at `docs/SELF_HOSTING.md#connecting-zendesk`. Nothing
-      to build — just say it exists.
+- [x] **Fixed (verified 2026-10-21, #46).** `README.md:38` now reads "CSV, email, webhooks,
+      Slack, Intercom and Zendesk" and the Highlights table (`README.md:62`) names the support
+      desks plus Jira, Linear, Asana and HubSpot/Salesforce — all five omissions closed.
+- [x] **Fixed (verified 2026-10-21, #46).** Zendesk is documented end to end at
+      `docs/SELF_HOSTING.md#connecting-zendesk`: subdomain + agent email + API token, automatic
+      incremental polling, optional HMAC-signed webhook, auto-provisioned feedback source and
+      opt-in status-sync. Nothing was ever missing but the docs.
 
 > **CLOSED 2026-08-01** on `feat/intercom-selfhost-ingestion`. Part A landed earlier on
 > `chore/intercom-zendesk-docs`. Part B is now done in full: token-paste connect (the
@@ -412,34 +409,41 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 >
 > See `docs/planning/intercom-selfhost-ingestion/`.
 
-**Part B — Intercom is marketed but not operable on a self-host (real gap).**
-- [ ] Intercom connect is **OAuth-only** (`integrations.py:754` → 403
+**Part B — Intercom is marketed but not operable on a self-host (real gap — now fixed; kept as history).**
+> **Superseded 2026-08-01** — the four bullets below are a historical record of the pre-fix
+> state, all answered by the CLOSED note above (token-paste connect, 15-minute pull,
+> per-workspace webhook secret, settings page, `docs/SELF_HOSTING.md#connecting-intercom`).
+> **Not open work** — verified again 2026-10-21 (#46): the landing page now describes the
+> token-paste connect, and `INTERCOM_CLIENT_ID`/`_SECRET`/`_REDIRECT_URI` are documented and
+> present in both `.env` examples.
+- Intercom connect is **OAuth-only** (`integrations.py:754` → 403
       `"Intercom OAuth is not configured. Set INTERCOM_CLIENT_ID environment variable"`).
       `INTERCOM_CLIENT_ID`, `INTERCOM_CLIENT_SECRET` and `INTERCOM_REDIRECT_URI` appear in
       **no** `.env.example`, **no** `.env.prod.example`, **neither** docker-compose file and
       **nowhere** in `docs/SELF_HOSTING.md` (which has a "Connecting Zendesk" section and no
       Intercom counterpart). A self-hoster clicking "Connect to Intercom" in the UI gets an
       error and has no documented way to resolve it short of reading the route source.
-- [ ] Meanwhile `services/landing-web/lib/integrations.ts:147` sells it as
+- Meanwhile `services/landing-web/lib/integrations.ts:147` sold it as
       *"Authorize via OAuth in one click"*. That is a promise the shipped artifact cannot
       keep without undocumented setup.
-- [ ] Intercom ingestion is **webhook-only in practice**:
+- Intercom ingestion is **webhook-only in practice**:
       `worker-service/src/tasks/integrations.py:167` `IntercomConnector.fetch_new_items` is
       a placeholder that logs `"not implemented"` and returns nothing
       (*"TODO: Implement actual Intercom API integration in Month 2"*), while
       `integrations.py:30` still selects `type.in_(["intercom", "zendesk"])` for polling. So
       there is no pull path — if the webhook is not wired, nothing arrives. Note the
       user's phrasing is "flows in automatically", which is exactly the pull path.
-- [ ] **Minimum honest fix:** document the Intercom app + OAuth env vars in
+- **Minimum honest fix:** document the Intercom app + OAuth env vars in
       `SELF_HOSTING.md` and `.env.prod.example` (mirroring the Zendesk section), and state
       plainly that Intercom ingestion is webhook-driven. **Follow-up:** either implement
       `IntercomConnector.fetch_new_items` against the Conversations API, or add a token-paste
       (non-OAuth) connect path following the Zendesk/Jira/Asana BYO-token precedent — OAuth
       was rejected as "awkward for self-host" for *every other* integration, and Intercom is
       the last one still requiring it.
-- **Why P1:** direct user ask; Part A is nearly free and immediately answers them; Part B is
-  a shipped-and-marketed integration that a self-hoster cannot actually turn on, which is the
-  same credibility problem as the P0 automations bugs, just on the acquisition path.
+- **Why P1:** direct user ask; Part A is nearly free and immediately answers them; Part B was
+  a shipped-and-marketed integration that a self-hoster could not actually turn on, which is
+  the same credibility problem as the P0 automations bugs, just on the acquisition path.
+  *(Both are closed — nothing here is work.)*
 
 ### P0 — `intercom-webhook-unauthenticated-cross-org-write` — **FIXED** on `feat/integration-auth-tenancy-hardening` (2026-07-29)
 > Shipped as `integration-auth-tenancy-hardening`. Both halves closed, plus more than was
@@ -640,11 +644,12 @@ comments, added 2026-07-29). Five of the seven needed no build work and are reco
 
 ### Found while doing the copilot-suggested-actions dig (2026-09-06)
 
-Recorded so they are not re-discovered. **None of these is fixed** — the branch
+Recorded so they are not re-discovered. **One of these six is now fixed** (the stale plan
+gate, closed 2026-10-21, #46); the other **five remain open**. The branch
 `feat/copilot-suggested-actions` was planning + a test-only contract guard when this was
 recorded; the feature shipped 2026-09-09 (action-registry, deterministic-proposer,
-frontend-actions-ui, docs-tracking all merged) and these six defects remain unfixed.
-All six were verified against the code during the dig, not inferred from docs.
+frontend-actions-ui, docs-tracking all merged). All six were verified against the code during
+the dig, not inferred from docs.
 
 - [ ] **`copilot.py:5` advertises an endpoint that does not exist.** The module docstring lists
       `POST /api/v1/conversations/suggestions`; no such route is registered. A reader auditing
@@ -657,9 +662,12 @@ All six were verified against the code during the dig, not inferred from docs.
       `tokens_in`/`tokens_out`/`cost_cents` to `0/0/0.0` and never assigns them, so the final
       WS frame always reports zero usage. The AI Settings token-budget bars are therefore
       reading a constant, not a measurement.
-- [ ] **Stale plan gate in `RunPlaybookDropdown.tsx:26,47`** — gates on
-      `user?.plan === 'business'`. Harmless today (`/auth/me` reports `enterprise` under
-      `SELF_HOSTED`), but it is exactly the pre-pivot drift that broke ~40 tests before 1.0.0.
+- ~~**Stale plan gate in `RunPlaybookDropdown.tsx:26,47`** — gates on `user?.plan === 'business'`.~~
+      **CLOSED 2026-10-21 (#46)** — the file has no `plan`/`business` reference left; it gates on
+      `useRole().isAdminOrOwner` (and the same for the unknown-probability early return), which
+      is the post-pivot rule. The original entry said this was harmless today
+      (`/auth/me` reports `enterprise` under `SELF_HOSTED`) but was exactly the pre-pivot drift
+      that broke ~40 tests before 1.0.0.
 - [ ] **Inconsistent error transport on the report branch.** `copilot_ws.py:471-478` sends its
       error with a raw `websocket.send_json` and no `message_id`; every other error path goes
       through `manager.send`. A client correlating errors to turns silently loses this one.
@@ -1062,7 +1070,11 @@ was left by a branch that shipped the fix and did not update the row.
 - [ ] IP whitelisting
 
 ### Enterprise Features
-- [ ] Custom AI models (train on your data)
+- [x] Custom AI models (train on your data) — **delivered by M4.2 + M5.2** (#46, 2026-10-21):
+  custom taxonomies + per-org health-score weights (M4.2), and the per-org TF-IDF +
+  logistic-regression corrections classifiers for sentiment/category/urgency, trained on the
+  org's own feedback + corrections, with A/B accuracy + versioning/rollback (M5.2). See
+  `AI-TRACKING.md` M4.2/M5.2. Not LLM fine-tuning; that was never the shipped design.
 - [ ] White-labeling (custom domain, branding)
 - [ ] Custom data retention policies
 - [ ] SLA guarantees (99.99% uptime)
@@ -1114,12 +1126,18 @@ was left by a branch that shipped the fix and did not update the row.
 - [x] **In-app status-sync toggle + status-mapping editor — shipped 2026-07-18** (`feat/status-sync-realtime-mapping`): the Zendesk tile gained a status-sync toggle and the shared `StatusMappingEditor` over the same `status_mapping` the API already exposed (`PATCH /status-sync` unchanged). See `docs/planning/status-sync-realtime-mapping/`.
 - [ ] **Deferred (v2):** OAuth flow, per-comment ingestion, historical backfill, status/tag/view filters, multiple subdomains per org, outbound `feedback.status_changed` webhook on a Zendesk-driven change
 
-### M3.5 — HubSpot CRM Integration (3 weeks)
-- [ ] HubSpot OAuth flow
-- [ ] Sync contacts: company, deal stage, ARR, renewal date
-- [ ] Match by email: link HubSpot contacts to Rereflect customers
-- [ ] Customer 360 enrichment: CRM data on customer profile
-- [ ] Plan gate: Business+
+### M3.5 — HubSpot CRM Integration (3 weeks) — **COMPLETE** (shipped as `hubspot-crm-enrichment`; closed 2026-10-21, #46)
+> No single merge commit to cite — the feature landed as the `feat/hubspot-crm-enrichment`
+> commit series, 2026-06-30 (connect/sync, e.g. `071842cc`) → 2026-07-03 (health-score writeback,
+> `10f4640c`), pre-1.0.0 (`c33fc2d6`). Post-merge cleanup `e0e813fa` (2026-07-27, closes #4).
+> Plan + reports: `docs/planning/hubspot-crm-enrichment/`. Cross-ref: `AI-TRACKING.md` M3.1.
+- [x] **Connect/disconnect — shipped as a private-app access token (BYOK), not OAuth.** The
+      OAuth marketplace flow was deliberately not built (awkward for a self-hoster); the
+      original "HubSpot OAuth flow" wording was wrong about the mechanism, not about the need.
+- [x] Sync contacts: company, deal stage, ARR, renewal date (+ lifecycle stage)
+- [x] Match by email: link HubSpot contacts to Rereflect customers (`customer_email`)
+- [x] Customer 360 enrichment: CRM data on the customer profile (`CrmCompanyCard`)
+- [x] ~~Plan gate: Business+~~ — **void** post-OSS pivot: all features unlocked
 
 ### M3.6 — SSO — OIDC + SAML shipped (`feat/oidc-sso`, `feat/saml-sso`)
 - [x] **OIDC authorization-code login** (PKCE, state+nonce, RS256 ID-token validation) — the shipped OIDC slice
@@ -1142,7 +1160,9 @@ was left by a branch that shipped the fix and did not update the row.
 - [x] Settings > Preferences: Export/Delete buttons with shadcn Dialog
 - [x] Landing page: GDPR badge, Privacy Policy update, 2 FAQ entries, Bento card
 - [x] 7 backend tests
-- [ ] Plan gate: Enterprise (RBAC), all plans (GDPR)
+- ~~Plan gate: Enterprise (RBAC), all plans (GDPR)~~ — **void** post-OSS pivot (#46,
+  2026-10-21): every feature is unlocked; RBAC is role-based (`member`/`admin`/`owner`), never
+  plan-based. Custom roles remain open above.
 
 ### Predictive Analytics — COMPLETE
 - [x] Improved churn prediction (9-factor: sentiment, urgency, churn keywords, frustration keywords, sentiment trend, feedback frequency, resolution time, pain severity, feature request density)
