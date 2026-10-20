@@ -453,3 +453,188 @@ class TestCopilotUsage:
     def test_get_usage_requires_auth(self, client: TestClient):
         response = client.get("/api/v1/copilot/usage")
         assert response.status_code == 403
+
+
+# =============================================================================
+# USAGE METADATA TESTS (#37)
+# =============================================================================
+
+
+def _usage_chunk(prompt_tokens: int, completion_tokens: int):
+    """Final OpenAI stream chunk: empty choices, provider-reported usage."""
+    usage = MagicMock()
+    usage.prompt_tokens = prompt_tokens
+    usage.completion_tokens = completion_tokens
+    return MagicMock(choices=[], usage=usage)
+
+
+class TestUsageMetadata:
+    """
+    The final stream frame must report the token counts the provider actually
+    returned (stream_options={"include_usage": True}), never hardcoded zeros.
+    """
+
+    def _cfg(self):
+        from src.services.copilot.llm_resolver import LLMConfig
+        return LLMConfig(
+            provider="openai",
+            model="gpt-4o-mini",
+            api_key="sk-test-byok-key-for-tests",
+            base_url=None,
+            is_configured=True,
+        )
+
+    def _collect_until_done(self, ws) -> list:
+        messages = []
+        while True:
+            msg = ws.receive_json()
+            messages.append(msg)
+            if msg.get("type") == "stream" and msg.get("done"):
+                return messages
+
+    def test_final_frame_reports_provider_usage_and_cost(
+        self, client: TestClient, valid_token: str, conversation_id: str, db: Session
+    ):
+        from src.models.llm_model_price import LLMModelPrice
+
+        db.add(LLMModelPrice(
+            provider="openai",
+            model_id="gpt-4o-mini",
+            display_name="GPT-4o mini",
+            input_price_per_1m_tokens=0.15,
+            output_price_per_1m_tokens=0.60,
+            tier="cheap",
+            min_plan="free",
+            is_available=True,
+            is_deprecated=False,
+        ))
+        db.commit()
+
+        chunks = [
+            MagicMock(choices=[MagicMock(delta=MagicMock(content="Hello"))]),
+            _usage_chunk(42, 7),
+        ]
+
+        with patch(
+            "src.api.routes.copilot_ws.resolve_generation_llm",
+            return_value=self._cfg(),
+        ), patch(
+            "src.api.routes.copilot_ws.IntentClassifier.classify",
+            return_value={"intent": "general", "confidence": 0.9, "parameters": {}},
+        ), patch(
+            "src.api.routes.copilot_ws.call_llm_stream",
+            side_effect=lambda **kwargs: _async_generator(chunks),
+        ):
+            with client.websocket_connect(f"/ws/copilot?token={valid_token}") as ws:
+                ws.send_json({
+                    "type": "query",
+                    "conversation_id": conversation_id,
+                    "content": "How many feedbacks do we have?",
+                    "context_scope": "all_data",
+                    "message_id": "usage-test-1",
+                })
+                messages = self._collect_until_done(ws)
+
+        meta = [m for m in messages if m.get("done")][-1]["metadata"]
+        assert meta["tokens_in"] == 42, f"tokens_in not taken from usage: {meta}"
+        assert meta["tokens_out"] == 7, f"tokens_out not taken from usage: {meta}"
+
+        expected_cents = round((42 * 0.15 + 7 * 0.60) / 1_000_000 * 100, 4)
+        assert meta["cost_cents"] == pytest.approx(expected_cents), (
+            f"cost_cents must come from the price table: {meta}"
+        )
+
+        # The usage bars sum persisted message columns — they must be real too.
+        from src.models.conversation import Conversation
+        from src.models.conversation_message import ConversationMessage
+
+        db.expire_all()
+        conv = db.query(Conversation).filter_by(public_id=conversation_id).first()
+        ai_msg = (
+            db.query(ConversationMessage)
+            .filter_by(conversation_id=conv.id, role="assistant")
+            .order_by(ConversationMessage.id.desc())
+            .first()
+        )
+        assert ai_msg.tokens_in == 42
+        assert ai_msg.tokens_out == 7
+
+    def test_cost_is_null_when_model_has_no_price_row(
+        self, client: TestClient, valid_token: str, conversation_id: str
+    ):
+        """Unlisted/local models: report unknown cost, not a fake 0.0."""
+        chunks = [_usage_chunk(11, 3)]
+
+        with patch(
+            "src.api.routes.copilot_ws.resolve_generation_llm",
+            return_value=self._cfg(),
+        ), patch(
+            "src.api.routes.copilot_ws.IntentClassifier.classify",
+            return_value={"intent": "general", "confidence": 0.9, "parameters": {}},
+        ), patch(
+            "src.api.routes.copilot_ws.call_llm_stream",
+            side_effect=lambda **kwargs: _async_generator(chunks),
+        ):
+            with client.websocket_connect(f"/ws/copilot?token={valid_token}") as ws:
+                ws.send_json({
+                    "type": "query",
+                    "conversation_id": conversation_id,
+                    "content": "Summarize feedbacks",
+                    "context_scope": "all_data",
+                    "message_id": "usage-test-2",
+                })
+                messages = self._collect_until_done(ws)
+
+        meta = [m for m in messages if m.get("done")][-1]["metadata"]
+        assert meta["tokens_in"] == 11
+        assert meta["tokens_out"] == 3
+        assert meta["cost_cents"] is None
+
+    @pytest.mark.asyncio
+    async def test_call_llm_stream_requests_usage(self):
+        """The provider must be asked to include usage in the stream."""
+        from src.api.routes.copilot_ws import call_llm_stream
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            return_value=_async_generator([])
+        )
+
+        with patch(
+            "src.api.routes.copilot_ws.openai.AsyncOpenAI",
+            return_value=client,
+        ):
+            async for _ in call_llm_stream(
+                messages=[], provider="openai", model="gpt-4o-mini",
+                api_key="sk-test",
+            ):
+                pass
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["stream_options"] == {"include_usage": True}
+
+    @pytest.mark.asyncio
+    async def test_call_llm_stream_retries_without_stream_options(self):
+        """Servers that reject stream_options still stream, just without usage."""
+        from src.api.routes.copilot_ws import call_llm_stream
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=[
+                TypeError("unexpected keyword argument 'stream_options'"),
+                _async_generator([]),
+            ]
+        )
+
+        with patch(
+            "src.api.routes.copilot_ws.openai.AsyncOpenAI",
+            return_value=client,
+        ):
+            async for _ in call_llm_stream(
+                messages=[], provider="openai_compatible", model="llama3",
+                base_url="http://localhost:11434/v1",
+            ):
+                pass
+
+        second_kwargs = client.chat.completions.create.call_args_list[-1].kwargs
+        assert "stream_options" not in second_kwargs

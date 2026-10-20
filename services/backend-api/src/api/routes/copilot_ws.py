@@ -52,6 +52,7 @@ from src.services.copilot.response_formatter import format_response
 from src.services.copilot.report_generator import ReportGenerator
 from src.models.subscription import Subscription
 from src.models.report import Report
+from src.models.llm_model_price import LLMModelPrice
 from src.config.plans import has_feature
 from src.services.embeddings import resolve_embedding_provider
 from src.services.copilot.llm_resolver import resolve_generation_llm, LLMConfig
@@ -111,13 +112,21 @@ async def call_llm_stream(
         client = openai.AsyncOpenAI(api_key=key, timeout=60.0)
 
     try:
-        stream = await client.chat.completions.create(
+        create_kwargs = dict(
             model=model,
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
             max_tokens=1000,
             temperature=0.7,
         )
+        try:
+            stream = await client.chat.completions.create(**create_kwargs)
+        except (TypeError, openai.BadRequestError):
+            # Some OpenAI-compatible servers reject stream_options; degrade to
+            # a stream without usage instead of failing the whole turn.
+            create_kwargs.pop("stream_options")
+            stream = await client.chat.completions.create(**create_kwargs)
         logger.info("call_llm_stream: stream created, iterating chunks...")
         async for chunk in stream:
             yield chunk
@@ -125,6 +134,28 @@ async def call_llm_stream(
     except Exception as e:
         logger.error(f"call_llm_stream error: {type(e).__name__}: {e}")
         raise
+
+
+def _estimate_cost_cents(
+    db: Session, provider: str, model: str, tokens_in: int, tokens_out: int
+) -> Optional[float]:
+    """Cost in cents from the model price table; None when the model is unpriced."""
+    try:
+        price = db.query(LLMModelPrice).filter_by(
+            provider=provider, model_id=model, is_available=True
+        ).first()
+        if not price:
+            return None
+        return round(
+            (
+                tokens_in * float(price.input_price_per_1m_tokens)
+                + tokens_out * float(price.output_price_per_1m_tokens)
+            ) / 1_000_000 * 100,
+            4,
+        )
+    except Exception as e:
+        logger.debug(f"Cost estimate skipped: {e}")
+        return None
 
 
 # -- Authentication -----------------------------------------------------------
@@ -729,9 +760,8 @@ async def _handle_query(
 
         # 9. Stream LLM response
         full_content = ""
-        tokens_in = 0
-        tokens_out = 0
-        cost_cents = 0.0
+        tokens_in = None
+        tokens_out = None
 
         await manager.send(websocket, {
             "type": "status",
@@ -747,6 +777,11 @@ async def _handle_query(
             api_key=api_key,
             base_url=base_url,
         ):
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                tokens_in = int(getattr(usage, "prompt_tokens", 0) or 0)
+                tokens_out = int(getattr(usage, "completion_tokens", 0) or 0)
+
             delta = ""
             if hasattr(chunk, "choices") and chunk.choices:
                 delta_obj = chunk.choices[0].delta
@@ -768,6 +803,10 @@ async def _handle_query(
             f"_handle_query: stream done, {chunk_count} chunks, "
             f"{len(full_content)} chars, {latency_ms}ms"
         )
+
+        cost_cents = None
+        if tokens_in is not None and tokens_out is not None:
+            cost_cents = _estimate_cost_cents(db, provider, model, tokens_in, tokens_out)
 
         # 10. Final stream message with metadata
         await manager.send(websocket, {
@@ -817,8 +856,9 @@ async def _handle_query(
             sql_generated=sql_generated,
             llm_provider=provider,
             llm_model=model,
-            tokens_in=tokens_in or None,
-            tokens_out=tokens_out or None,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_cents=cost_cents,
             latency_ms=latency_ms,
             created_at=datetime.utcnow(),
         )
