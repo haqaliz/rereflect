@@ -24,6 +24,7 @@ from src.api.routes import response_templates, response_settings, feedback_respo
 from src.api.routes import feedback_issue_draft as feedback_issue_draft_router  # noqa: E402 — ai-drafted-issue-content
 from src.api.routes import webhooks as webhooks_router
 from src.api.routes import health as health_routes
+from src.api.routes import internal as internal_router  # noqa: E402 — worker health recompute (#3)
 from src.api.routes import reports as reports_router
 from src.api.routes import report_schedules as report_schedules_router  # noqa: E402 — scheduled-ai-reports
 from src.api.routes import account as account_router
@@ -417,6 +418,7 @@ app.include_router(feedback_issue_draft_router.router)
 # Custom Webhooks (M3.1)
 app.include_router(webhooks_router.router)
 app.include_router(health_routes.router)
+app.include_router(internal_router.router)
 # On-Demand AI Reports (M2.4)
 app.include_router(reports_router.router)
 app.include_router(report_schedules_router.router)

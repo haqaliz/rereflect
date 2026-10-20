@@ -249,6 +249,8 @@ EXCLUDED_MODULES = {
     "linear_webhook": "Inbound Linear webhook receiver, signature-verified, no JWT",
     "email_webhooks": "Inbound email (Resend) webhook receiver, "
     "signature-verified, no JWT",
+    "internal": "Service-to-service endpoints authenticated by the shared "
+    "INTERNAL_API_SECRET header, not by a user JWT, so there is no user role",
 }
 
 # Single handlers that are pre-auth or token-authenticated.
