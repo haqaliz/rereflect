@@ -1,6 +1,6 @@
 ---
 name: rereflect-end
-description: Use when finishing local work on a Rereflect GitHub issue after the PR is merged and you also need a completion report on Desktop. Triggers on "rereflect-end", "re", "re bug 42", "re feat 123", "end full".
+description: Use when finishing local work on a Rereflect GitHub issue after the PR is merged and you also need a completion report in Projects Brain. Triggers on "rereflect-end", "re", "re bug 42", "re feat 123", "end full".
 arguments: "type id"
 ---
 
@@ -33,9 +33,9 @@ The type vocabulary maps straight through — no translation needed:
 | `feat` | `feature` |
 | `feature` | `feature` |
 
-Example: `re bug 42` → invoke `rereflect-report` with `bug` + `42` → writes `/Users/aliz/Desktop/bug-42-completion.md`.
+Example: `re bug 42` → invoke `rereflect-report` with `bug` + `42` → writes `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/bug-42/bug-42-completion.md`.
 
-`rereflect-report` fetches the issue via `gh` and produces the standard template. If it asks for a screenshot/video, provide one (or hand it to the user to attach), then confirm the file landed on Desktop.
+`rereflect-report` fetches the issue via `gh` and produces the standard template. If it asks for a screenshot/video, provide one (or hand it to the user to attach), then confirm the file landed in Projects Brain.
 
 ### Phase 4 — Post a solution comment on the issue (optional)
 

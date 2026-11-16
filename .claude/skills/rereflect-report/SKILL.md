@@ -1,6 +1,6 @@
 ---
 name: rereflect-report
-description: Use when a Rereflect GitHub issue (bug, task, chore, or feature) is done and you want a brief, friendly, non-technical completion note saved on Desktop to share with the team.
+description: Use when a Rereflect GitHub issue (bug, task, chore, or feature) is done and you want a brief, friendly, non-technical completion note saved in the Projects Brain vault to share with the team.
 allowed-tools: Read, Grep, Glob, Bash, Write
 arguments: "type id"
 ---
@@ -23,13 +23,15 @@ Usage: `/rereflect-report bug 42` or `/rereflect-report feature 123`.
 
 ## Output
 
-Markdown file saved to `/Users/aliz/Desktop/{type}-{ISSUE_ID}-completion.md`.
+Markdown file saved to `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/{type}-{ISSUE_ID}/{type}-{ISSUE_ID}-completion.md`.
+
+Vault rule: `mkdir -p` the card folder, add frontmatter (`project: rereflect`, `kind: completion`, `type`, `id`, `date`, `tags`) and `Part of [[rereflect]]`. Quote the path (it has a space).
 
 Examples:
-- `/Users/aliz/Desktop/bug-42-completion.md`
-- `/Users/aliz/Desktop/task-50-completion.md`
-- `/Users/aliz/Desktop/chore-61-completion.md`
-- `/Users/aliz/Desktop/feature-123-completion.md`
+- `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/bug-42/bug-42-completion.md`
+- `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/task-50/task-50-completion.md`
+- `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/chore-61/chore-61-completion.md`
+- `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/feature-123/feature-123-completion.md`
 
 ## The template
 
@@ -75,7 +77,7 @@ Verb per type:
    ```
 2. **Distill** the change into one or two plain sentences. Resist the urge to add detail.
 3. **Ask the user for a screenshot or short video** if one isn't already on hand.
-4. **Write** the note to `/Users/aliz/Desktop/{type}-{ID}-completion.md` and tell the user it's ready.
+4. **Write** the note to `/Users/aliz/Documents/Projects Brain/at/rereflect/Cards/{type}-{ID}/{type}-{ID}-completion.md` and tell the user it's ready.
 
 ## Optional: cross-page check
 
